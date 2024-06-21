@@ -1,0 +1,28 @@
+PrivilegedEAM_CL
+| where TimeGenerated > ago(1d)
+| summarize arg_max(TimeGenerated, *) by ObjectId,RoleSystem
+| project-away TenantId
+| extend Type = "EntraOps_CustomTable"
+| project-reorder 
+    TimeGenerated,
+    ObjectId,
+    ObjectType,
+    ObjectSubType,
+    ObjectDisplayName,
+    ObjectUserPrincipalName,
+    ObjectAdminTierLevel,
+    ObjectAdminTierLevelName,
+    OnPremSynchronized,
+    AssignedAdministrativeUnits,
+    RestrictedManagementByRAG,
+    RestrictedManagementByAadRole,
+    RestrictedManagementByRMAU,
+    RoleSystem,
+    Classification,
+    RoleAssignments,
+    Owners,
+    OwnedObjects,
+    OwnedDevices,
+    AssociatedWorkAccount,
+    AssociatedPawDevice,
+    Type

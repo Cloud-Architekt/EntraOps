@@ -1,0 +1,81 @@
+[
+    {
+        "EAMTierLevelName": "ControlPlane",
+        "EAMTierLevelTagValue": "0",
+        "TierLevelDefinition": [
+            {
+                "Category": "Microsoft.Azure",
+                "Service": "Privileged RBAC Management",
+                "RoleAssignmentScopeName": [
+                    "/",
+                    "/providers/Microsoft.Management/managementGroups/<CorpRootGroup>",
+                    "/providers/Microsoft.Management/managementGroups/<IdentityManagementGroup>"
+                ],
+                "RoleDefinitionActions": [
+                    "Microsoft.Authorization/*",
+                    "*"
+                ]
+            },         
+            {
+                "Category": "Microsoft.Azure",
+                "Service": "Active Directory Domain Services",
+                "RoleAssignmentScopeName": [
+                    "/subscriptions/<AdDsSubscriptionId>/resourceGroups/<AdDsResourceGroupName>"
+                ],
+                "RoleDefinitionActions": [
+                    "Microsoft.Security/locations/jitNetworkAccessPolicies/initiate/action",
+                    "Microsoft.Compute/virtualMachines/*"
+                ]
+            }                
+        ]
+    },
+    {
+        "EAMTierLevelName": "ManagementPlane",
+        "EAMTierLevelTagValue": "1",
+        "TierLevelDefinition": [
+            {
+                "Category": "Microsoft.Azure",
+                "Service": "Management",
+                "RoleAssignmentScopeName": [
+                    "/subscriptions/4d3e5b65-8a52-4b2f-b5cd-1670c700136b/resourceGroups/lab-mgmt"
+                ],
+                "RoleDefinitionActions": [""]
+            },
+            {
+                "Category": "Microsoft.Azure",
+                "Service": "Management",
+                "RoleAssignmentScopeName": [
+                    "/",
+                    "/providers/Microsoft.Management/managementGroups/<CorpManagementGroup>",
+                    "/providers/Microsoft.Management/managementGroups/<PlatformManagementGroup>"
+                ],
+                "RoleDefinitionActions": [
+                    "Microsoft.Authorization/*/read",
+                    "*/read"
+                ]
+            },             
+            {
+                "Category": "Microsoft.Azure",
+                "Service": "SecOps",
+                "RoleAssignmentScopeName": [
+                    "/subscriptions/<SecuritySubscriptionId>/resourceGroups/<SentinelResourceGroupName>"
+                ],
+                "RoleDefinitionActions": [""]
+            }
+        ]
+    },
+    {
+        "EAMTierLevelName": "WorkloadPlane",
+        "EAMTierLevelTagValue": "1",
+        "TierLevelDefinition": [
+            {
+                "Category": "Microsoft.Azure",
+                "Service": "BusinessApplication",
+                "RoleAssignmentScopeName": [
+                    "/subscriptions/<LandingZoneSubscriptionId>/*"
+                ],
+                "RoleDefinitionActions": [""]
+            }
+        ]
+    }
+]

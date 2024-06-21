@@ -1,0 +1,24 @@
+[
+    {
+        "TagDefinition": [
+            {
+            "AdminTierLevelTagName": "AdminTierLevel",
+            "ServiceTagName": "Service"
+            }
+        ],
+        "TierLevel": [
+            {
+            "EAMTierLevelName": "ControlPlane",
+            "EAMTierLevelTagValue": "0"
+            },
+            {
+            "EAMTierLevelName": "ManagementPlane",
+            "EAMTierLevelTagValue": "1"
+            },         
+            {
+            "EAMTierLevelName": "UserAccess",
+            "EAMTierLevelTagValue": "2"
+            }             
+        ]
+    }
+]

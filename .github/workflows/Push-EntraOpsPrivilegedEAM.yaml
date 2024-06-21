@@ -1,0 +1,65 @@
+name: Push-EntraOpsPrivilegedEAM
+
+env:
+  ClientId: YourClientId
+  TenantId: YourTenantId
+  TenantName: YourTenantName
+  ConfigFile: ./EntraOpsConfig.json
+  IngestToWatchLists: false
+  IngestToLogAnalytics: false
+
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  # Allows to run this workflow automatically after the completion of pull pipeline
+  workflow_run:
+    workflows: [Pull-EntraOpsPrivilegedEAM]
+    types:
+      - completed
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  Push-EntraOpsPrivilegedEAM:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Connect Azure OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{env.ClientId}}
+          tenant-id: ${{env.TenantId}}
+          allow-no-subscriptions: true
+          enable-AzPSSession: true
+
+      - name: Upload Data to Log Analytics via Logs ingestion API
+        if: env.IngestToLogAnalytics == 'true'
+        uses: azure/powershell@v2
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName ${env:TenantName} -ConfigFile ${env:ConfigFile}
+            $LogAnalyticsParam = $EntraOpsConfig.LogAnalytics
+            Save-EntraOpsPrivilegedEAMInsightsCustomTable @LogAnalyticsParam
+          azPSVersion: latest
+
+      - name: Upload Data to WatchList
+        if: env.IngestToWatchLists == 'true'
+        uses: azure/powershell@v2
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName ${env:TenantName} -ConfigFile ${env:ConfigFile}
+            $SentinelWatchListsParams = $EntraOpsConfig.SentinelWatchLists
+            Save-EntraOpsPrivilegedEAMWatchLists @SentinelWatchListsParams
+          azPSVersion: "latest"
+      - name: Disconnect EntraOps
+        uses: azure/powershell@v2
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Disconnect-EntraOps
+          azPSVersion: latest

@@ -1,0 +1,42 @@
+name: Update-EntraOps
+env:
+  ClientId: YourClientId
+  TenantId: YourTenantId
+  TenantName: YourTenantName
+  ConfigFile: ./EntraOpsConfig.json
+  ApplyAutomatedEntraOpsUpdate: true
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  # Allows you to run this workflow automatically on a schedule
+  schedule:
+    - cron: YourCronSchedule
+permissions:
+  id-token: write
+  contents: write
+jobs:
+  Update-EntraOps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Connect Azure OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{env.ClientId}}
+          tenant-id: ${{env.TenantId}}
+          allow-no-subscriptions: true
+          enable-AzPSSession: true
+      - name: Update EntraOps module and workflows
+        if: env.ApplyAutomatedEntraOpsUpdate == 'true'
+        uses: azure/powershell@v2
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Update-EntraOps -ConfigFile ${env:ConfigFile} -TargetUpdateFolders @("./EntraOps","./Queries","./Parsers","./Samples","./Workbooks")
+            Disconnect-EntraOps
+          azPSVersion: latest
+      - name: Git - Commit and Push to repository
+        uses: ./.github/actions/Git-Push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,20 @@
+[
+    {
+        "EAMTierLevelName": "ControlPlane",
+        "EAMTierLevelTagValue": "0",
+        "TierLevelDefinition": [
+            {
+                "Category": "Microsoft.IdentityGovernance",
+                "Service": "Entitlement Management",
+                "RoleAssignmentScopeName": [
+                    "/AccessPackageCatalog/*"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.entitlementManagement/allEntities/allTasks",
+                    "microsoft.entitlementManagement/AccessPackageCatalog/AccessPackage/allTasks",
+                    "microsoft.entitlementManagement/AccessPackageCatalog/AccessPackage/GrantRequests/allTasks"
+                ]
+            }
+        ]
+    }
+]

@@ -1,0 +1,53 @@
+name: "Git - Commit and Pull Request"
+
+on:
+  workflow_call:
+
+runs:
+  using: "composite"
+  steps:
+    - name: "Configure GitUser"
+      shell: bash
+      run: |
+        git config --global user.email "EntraOpsGHActions@ghActions.com"
+        git config --global user.name "$GITHUB_ACTOR"
+
+    - name: Git - Status for changed files
+      id: status
+      shell: bash
+      run: |
+        STATUS=$(git status --short)
+        echo $STATUS
+        if [ -z "$STATUS" ]
+        then
+          echo "state=stop" >> $GITHUB_OUTPUT
+        else
+          echo "state=continue" >> $GITHUB_OUTPUT
+          fi
+
+    - name: Git - Add file content to index
+      if: steps.status.outputs.state == 'continue'
+      run: |
+        git add "./${{ env.folder }}"
+      shell: bash
+
+    - name: Git - Commit changes to the repository
+      if: steps.status.outputs.state == 'continue'
+      shell: bash
+      run: |
+        git commit -m "${{ env.commit_message }}"
+
+    - name: Git - Push Update remote refs along with associated objects
+      if: steps.status.outputs.state == 'continue'
+      shell: bash
+      run: |
+        git push origin ${{ env.branch }} -f
+
+    - name: Git Merge - Automatically merge the head branch into base
+      if: steps.status.outputs.state == 'continue'
+      shell: bash
+      run: |
+        gh pr create --title "${{ env.pull_request }}" --body "-" --base 'main' --head ${{ env.branch }}
+        gh pr merge "${{ env.branch }}" --squash --delete-branch
+      env:
+        GITHUB_TOKEN: ${{ env.TOKEN }}

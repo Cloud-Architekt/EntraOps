@@ -1,0 +1,63 @@
+name: Pull-EntraOpsPrivilegedEAM
+env:
+  ClientId: YourClientId
+  TenantId: YourTenantId
+  TenantName: YourTenantName
+  ConfigFile: ./EntraOpsConfig.json
+  ApplyAutomatedClassificationUpdate: false
+  ApplyAutomatedControlPlaneScopeUpdate: false
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  # Allows you to run this workflow automatically on a schedule
+  schedule:
+    - cron: YourCronSchedule
+permissions:
+  id-token: write
+  contents: write
+jobs:
+  Pull-EntraOpsPrivilegedEAM:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Connect Azure OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{env.ClientId}}
+          tenant-id: ${{env.TenantId}}
+          allow-no-subscriptions: true
+          enable-AzPSSession: true
+      - name: Get updated definition files for classification
+        if: env.ApplyAutomatedClassificationUpdate == 'true'
+        uses: azure/powershell@v2
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName ${env:TenantName} -ConfigFile ${env:ConfigFile}
+            $ClassificationUpdateParams = $EntraOpsConfig.AutomatedClassificationUpdate
+            Update-EntraOpsClassificationFiles @ClassificationUpdateParams
+          azPSVersion: latest
+      - name: Get updated scope for definition of Control Plane in Entra ID
+        if: env.ApplyAutomatedControlPlaneScopeUpdate == 'true'
+        uses: azure/powershell@v2
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName ${env:TenantName} -ConfigFile ${env:ConfigFile}
+            $CpUpdateParams = $EntraOpsConfig.AutomatedControlPlaneScopeUpdate
+            Update-EntraOpsClassificationControlPlaneScope @CpUpdateParams
+          azPSVersion: latest
+      - name: Run Save-EntraOpsPrivilegedEAMJson
+        uses: azure/powershell@v2
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName ${env:TenantName} -ConfigFile ${env:ConfigFile}
+            Save-EntraOpsPrivilegedEAMJson -RbacSystems $($EntraOpsConfig.RbacSystems)
+            Disconnect-EntraOps
+          azPSVersion: latest
+      - name: Git - Commit and Push to repository
+        uses: ./.github/actions/Git-Push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

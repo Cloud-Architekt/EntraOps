@@ -1,0 +1,47 @@
+_GetWatchlist('EntraOps_Principals')
+| join kind=inner ( _GetWatchlist('EntraOps_RoleAssignments')
+| extend RoleAssignment = bag_pack_columns(
+    Classification,
+    ObjectId,
+    ObjectType,
+    PIMAssignmentType,
+    PIMManagedRole,
+    RoleAssignmentId,
+    RoleAssignmentScopeId,
+    RoleAssignmentScopeName,
+    RoleAssignmentType,
+    RoleDefinitionId,
+    RoleDefinitionName,
+    RoleIsPrivileged,
+    RoleType,
+    TransitiveByObjectDisplayName,
+    TransitiveByObjectId
+    )
+| summarize RoleAssignments = make_set(RoleAssignment) by ObjectId, RoleSystem
+) on ObjectId, RoleSystem
+| extend Type = "EntraOps_WatchLists"
+| project-rename TimeGenerated = LastUpdatedTimeUTC
+| project-away _DTItemId, SearchKey, ObjectId1, RoleSystem1, Tags, UniqueId
+| project-reorder 
+    TimeGenerated,
+    ObjectId,
+    ObjectType,
+    ObjectSubType,
+    ObjectDisplayName,
+    ObjectUserPrincipalName,
+    ObjectAdminTierLevel,
+    ObjectAdminTierLevelName,
+    OnPremSynchronized,
+    AssignedAdministrativeUnits,
+    RestrictedManagementByRAG,
+    RestrictedManagementByAadRole,
+    RestrictedManagementByRMAU,
+    RoleSystem,
+    Classification,
+    RoleAssignments,
+    Owners,
+    OwnedObjects,
+    OwnedDevices,
+    AssociatedWorkAccount,
+    AssociatedPawDevice,
+    Type

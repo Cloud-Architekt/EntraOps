@@ -1,0 +1,20 @@
+name: "Git - Push"
+
+on:
+  workflow_call:
+
+runs:
+  using: "composite"
+  steps:
+    - name: Push output to repository
+      shell: bash
+      run: |
+        git config --global user.email "EntraOpsGHActions@ghActions.com"
+        git config --global user.name "$GITHUB_ACTOR"      
+        git config pull.rebase false
+        git add --all
+        git add -A
+        git diff-index --quiet HEAD || git commit -m "$GITHUB_WORKFLOW $GITHUB_JOB"
+        git push
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}

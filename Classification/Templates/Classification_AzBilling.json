@@ -1,0 +1,109 @@
+[
+    {
+        "EAMTierLevelName": "ControlPlane",
+        "EAMTierLevelTagValue": "0",
+        "TierLevelDefinition": [
+            {
+            "Category": "Microsoft.Billing",
+            "Service": "Azure Enrollment Management",
+            "RoleAssignmentScopeName": [
+                "/providers/Microsoft.Billing/billingAccounts",
+                "/providers/Microsoft.Billing/billingAccounts/12345678"
+                ],
+            "RoleDefinitionActions": [
+                "Microsoft.Billing/billingAccounts/write",
+                "Microsoft.Billing/billingAccounts/action",
+                "Microsoft.Billing/billingAccounts/enrollmentPolicies/write",
+                "Microsoft.Billing/billingAccounts/enrollmentPolicies/action",
+                "Microsoft.Billing/billingAccounts/enrollmentNotificationContacts/write",
+                "Microsoft.Billing/billingAccounts/enrollmentNotificationContacts/action",
+                "Microsoft.Billing/billingAccounts/departments/write",
+                "Microsoft.Billing/billingAccounts/departments/action",
+                "Microsoft.Billing/billingAccounts/enrollmentAccounts/write",
+                "Microsoft.Billing/billingAccounts/enrollmentAccounts/action",
+                "Microsoft.Billing/billingAccounts/enrollmentAccounts/delete",
+                "Microsoft.Billing/billingAccounts/enrollmentAccounts/billingSubscriptions/write",
+                "Microsoft.Billing/billingAccounts/enrollmentAccounts/billingSubscriptions/action",
+                "Microsoft.Billing/billingAccounts/purchase/action"              
+                ]
+            }
+        ]
+    },
+    {
+        "EAMTierLevelName": "ManagementPlane",
+        "EAMTierLevelTagValue": "1",
+        "TierLevelDefinition": [
+            {
+            "Category": "Microsoft.Billing",
+            "Service": "Azure Subscription Management",
+            "RoleAssignmentScopeName": [
+                "/providers/Microsoft.Billing/billingAccounts/12345678/enrollmentAccounts/1701"
+                ],
+            "RoleDefinitionActions": [
+                "Microsoft.Billing/billingAccounts/write",
+                "Microsoft.Billing/billingAccounts/action",
+                "Microsoft.Billing/billingAccounts/enrollmentPolicies/write",
+                "Microsoft.Billing/billingAccounts/enrollmentPolicies/action",
+                "Microsoft.Billing/billingAccounts/enrollmentNotificationContacts/write",
+                "Microsoft.Billing/billingAccounts/enrollmentNotificationContacts/action",
+                "Microsoft.Billing/billingAccounts/departments/write",
+                "Microsoft.Billing/billingAccounts/departments/action",
+                "Microsoft.Billing/billingAccounts/enrollmentAccounts/write",
+                "Microsoft.Billing/billingAccounts/enrollmentAccounts/action",
+                "Microsoft.Billing/billingAccounts/enrollmentAccounts/delete",
+                "Microsoft.Billing/billingAccounts/enrollmentAccounts/billingSubscriptions/write",
+                "Microsoft.Billing/billingAccounts/enrollmentAccounts/billingSubscriptions/action",
+                "Microsoft.Billing/billingAccounts/purchase/action"              
+                ]
+            }
+        ]
+    },    
+    {
+        "EAMTierLevelName": "ManagementPlane",
+        "EAMTierLevelTagValue": "1",
+        "TierLevelDefinition": [
+            {
+            "Category": "Microsoft.Billing",
+            "Service": "Billing and Subscription Management",            
+            "RoleAssignmentScopeName": [
+                "/providers/Microsoft.Billing/billingAccounts/12345678/departments/1701/"
+                ],
+            "RoleDefinitionActions": [
+                "Microsoft.Billing/billingAccounts/purchase/action"
+                ]
+            }
+        ]
+    },
+    {
+        "EAMTierLevelName": "ManagementPlane",
+        "EAMTierLevelTagValue": "1",
+        "TierLevelDefinition": [
+            {
+            "Category": "Microsoft.Billing",
+            "Service": "Azure Cost Management",            
+            "RoleAssignmentScopeName": [
+                "/providers/Microsoft.Billing/billingAccounts/12345678"
+                ],
+            "RoleDefinitionActions": [
+                "Microsoft.Billing/billingAccounts/read"
+                ]
+            }
+        ]
+    },
+    {
+        "EAMTierLevelName": "ManagementPlane",
+        "EAMTierLevelTagValue": "1",
+        "TierLevelDefinition": [
+            {
+            "Category": "Microsoft.Billing",
+            "Service": "Azure Subscription Management",            
+            "RoleAssignmentScopeName": [
+                "/providers/Microsoft.Billing/billingAccounts/12345678/departments/1701/"
+                ],
+            "RoleDefinitionActions": [
+                "Microsoft.Billing/billingAccounts/purchase/action"
+                ]
+            }
+        ]
+    }      
+]
