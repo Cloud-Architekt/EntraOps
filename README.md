@@ -134,14 +134,14 @@ Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us
 
     _Recommendation: There is a limitation of 10 KB for a single WatchList entry. This limit can be exceeded in the case of a high number of property items (e.g., classification or owner properties). Therefore, I can strongly recommend to choosing "Custom tables" in a large environment. If you are choosing WatchList as ingestion option, keep an eye on the deployment logs for any warnings of this limitation. Entries will not be added if the limit has been exceeded._
 
-1. Review and customize the EntraOps.config file based on your requirements.
+6. Review and customize the EntraOps.config file based on your requirements.
    * `TenantId` and `TenantName` should be already updated based on the provided parameters to create the config file. `ClientId` will be automatically updated by running the cmdlet `New-EntraOpsWorkloadIdentity`.
    * The default scheduled time for running the pull workflow will be a also enabled (`PullScheduledTrigger`) and defined (`PullScheduledCron`) in the config file. By default, the workflow to ingest data will be triggered right after the pull has been completed (by default value of `PushAfterPullWorkflowTrigger`).
    * Automated updates for classification templates from AzurePrivilegedIAM repository (`AutomatedClassificationUpdate`) or Control Plane scope (`ApplyAutomatedControlPlaneScopeUpdate`) can be also enabled by parameters. Customization of classification updates or data source to identify Control Plane assets is also available from here.
    * Review the settings in the section `AutomatedEntraOpsUpdate` to configure an automated update of the EntraOps PowerShell module on demand or scheduled basis.
    * Enable and update the following parameters if you want to ingest classification data to Custom Tables in Microsoft Sentinel/Log Analytics Workspace (`IngestToLogAnalytics`) or Microsoft Sentinel WatchLists (`IngestToWatchLists`). You need to add the required parameters of the workspace and/or data collection endpoints.
 
-7. Create an application registration with required permissions (Global Admin role required)
+7. Create an application registration with required permissions (Global Admin role required). All necessary permissions on Microsoft Graph API permissions but also Azure RBAC roles for ingestion (if configured in `EntraOps.config`) will be added.
 ```powershell
 New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential -GitHubOrg "<YourGitHubUser/Org>" -GitHubRepo "EntraOps-<TenantName>" -FederatedEntityType "Branch" -FederatedEntityName "main"
 ```
