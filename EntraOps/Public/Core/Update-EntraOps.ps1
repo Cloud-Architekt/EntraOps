@@ -24,7 +24,7 @@ function Update-EntraOps {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("./.github", "./EntraOps", "./Parsers", "./Queries", "./Samples", "./Workbooks")]
-        [Object]$TargetUpdateFolders = @("./.github", "./EntraOps", "./Parsers", "./Queries", "./Samples" "./Workbooks")
+        [Object]$TargetUpdateFolders = @("./.github", "./EntraOps", "./Parsers", "./Queries", "./Samples", "./Workbooks")
         ,
         [Parameter(Mandatory = $False)]
         [System.String]$TemporaryUpdateFolder = "../latest-version"
