@@ -7,12 +7,13 @@
   - [Executing EntraOps interactively](#executing-entraops-interactively)
     - [Examples of using cmdlets and filter classification data](#examples-of-using-cmdlets-and-filter-classification-data)
   - [Using EntraOps with GitHub](#using-entraops-with-github)
+  - [EntraOps Integration in Microsoft Sentinel](#entraops-integration-in-microsoft-sentinel)
     - [Parser for Custom Tables and WatchLists](#parser-for-custom-tables-and-watchlists)
     - [Examples to use EntraOps data in Unified SecOps Platform (Sentinel and XDR)](#examples-to-use-entraops-data-in-unified-secops-platform-sentinel-and-xdr)
-    - [Classify privileged objects for target Enterprise Access Level and relation to user/device](#classify-privileged-objects-for-target-enterprise-access-level-and-relation-to-userdevice)
     - [Workbook for visualization of EntraOps classification data](#workbook-for-visualization-of-entraops-classification-data)
-    - [Update EntraOps PowerShell Module and CI/CD (GitHub Actions)](#update-entraops-powershell-module-and-cicd-github-actions)
-    - [Disclaimer and License](#disclaimer-and-license)
+  - [Classify privileged objects by Custom Security Attributes](#classify-privileged-objects-by-custom-security-attributes)
+  - [Update EntraOps PowerShell Module and CI/CD (GitHub Actions)](#update-entraops-powershell-module-and-cicd-github-actions)
+  - [Disclaimer and License](#disclaimer-and-license)
 
 ## Introduction
 
@@ -150,6 +151,7 @@ New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential
 Update-EntraOpsRequiredWorkflowParameters
 ```
 
+## EntraOps Integration in Microsoft Sentinel
 ### Parser for Custom Tables and WatchLists
 I have built a parser which ensures a standardized schema for EntraOps data across the various ingestion options.
 This allows you to use the same queries and workbooks, regardless of whether you have used WatchLists or Custom Table.
@@ -223,8 +225,18 @@ ClassifiedTier0Assets
 | project Type2, SourceNodeName, SourceNodeLabel, SourceNodeCategories, EdgeLabel, TargetNodeId, TargetNodeLabel, TargetNodeCategories, Classification, RoleAssignments, Categories
 ```
 
-### Classify privileged objects for target Enterprise Access Level and relation to user/device
-By default, the following custom security attributes will be used to identify what is the purposed tiered level of the user or workload identity.
+### Workbook for visualization of EntraOps classification data
+The following Workbook can be used to check users, workload identities, groups, and their classified role assignments by EntraOps. It allows you also to filter for hybrid/cloud users and/or specific tiered administration level from by the classification of object or role assignments.
+
+_Pre-requisite: EntraOps data has been ingested to WatchList or Custom Table and the associated Parser has been deployed._
+
+* **EntraOps Privileged EAM - Overview**
+  
+  [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Overview.json)
+
+
+## Classify privileged objects by Custom Security Attributes
+You might want to classify privileged users on the target Enterprise Access Level and relation to user/device. By default, the following custom security attributes will be used to identify what is the purposed tiered level of the user or workload identity.
 
 - privilegedUser
 - privilegedWorkloadIdentitiy
@@ -240,24 +252,14 @@ In addition, custom security attributes will be also used to build a correlation
 - associatedSecureAdminWorkstation
 - associatedWorkAccount
 
-### Workbook for visualization of EntraOps classification data
-The following Workbook can be used to check users, workload identities, groups, and their classified role assignments by EntraOps. It allows you also to filter for hybrid/cloud users and/or specific tiered administration level from by the classification of object or role assignments.
-
-_Pre-requisite: EntraOps data has been ingested to WatchList or Custom Table and the associated Parser has been deployed._
-
-* **EntraOps Privileged EAM - Overview**
-  
-  [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Overview.json)
-
-
-### Update EntraOps PowerShell Module and CI/CD (GitHub Actions)
+## Update EntraOps PowerShell Module and CI/CD (GitHub Actions)
 EntraOps can be updated without losing classification definition and files by using the cmdlet `Update-EntraOps`.
 The cmdlet can be executed interactively, and changes must be pushed to your repository. This command updates the PowerShell module, workflow files and parameters in workflows based on "EntraOps.config" file.
 
 Currently, there is also a workflow named "Update-EntraOps" which can be executed on demand or run on scheduled basis (defined in EntraOps.config) and updates the PowerShell module only.
 I am working on a way to integrate the update process for the workflow files to the pipeline. There are some restrictions to update workflows by another workflow which needs to be handled.
 
-### Disclaimer and License
+## Disclaimer and License
 This tool is provided as-is, with no warranties.
 Code or documentation contributions, issue reports and feature requests are always welcome! 
 Please use GitHub issue to review existing or create new issues.
