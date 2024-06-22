@@ -213,10 +213,82 @@
           "showBorder": false
         }
       },
-      "customWidth": "50",
+      "customWidth": "25",
       "name": "Synchronized Privileged Accounts",
       "styleSettings": {
-        "maxWidth": "50",
+        "maxWidth": "25",
+        "showBorder": true
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "PrivilegedEAM\r\n| where OnPremSynchronized == iff('{SyncSource}' == \"Cloud-Only\",false,true) or '{SyncSource}' == '*' or '{SyncSource}' == 'All Privileged Identities'\r\n| where RoleSystem in ({RoleSystem}) or '*' in ({RoleSystem})\r\n| extend Roles = parse_json(RoleAssignments)\r\n| extend Classification = parse_json(Classification)\r\n| mv-expand Classification\r\n| where Classification.AdminTierLevelName in ({AdminTierLevelName}) or '*' in ({AdminTierLevelName})\r\n| where Classification.Service in ({Service}) or '*' in ({Service})\r\n| where ObjectType in ({ObjectType}) or '*' in ({ObjectType})\r\n| where ObjectDisplayName contains '{PrincipalDisplayName}' or '{PrincipalDisplayName}' == \"\"\r\n| extend RestrictedManagement = iff(RestrictedManagementByAadRole == true or RestrictedManagementByRAG == true or RestrictedManagementByRMAU == true,\"Protected\",\"Unprotected\")\r\n| extend RestrictedManagement = iff((ObjectType != \"serviceprincipal\"), tostring(RestrictedManagement), \"Non applicable\")\r\n| distinct ObjectId, RestrictedManagement\r\n| summarize Count = count() by RestrictedManagement\r\n\r\n",
+        "size": 4,
+        "title": "Restricted management of privileged identities",
+        "timeContext": {
+          "durationMs": 604800000
+        },
+        "exportFieldName": "AssignmentType",
+        "exportParameterName": "RestrictedManagement",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{SelectLogAnalytics}"
+        ],
+        "visualization": "piechart",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "OnPremSynchronized",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Count",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            },
+            "numberFormat": {
+              "unit": 17,
+              "options": {
+                "maximumSignificantDigits": 3,
+                "maximumFractionDigits": 2
+              }
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Trend",
+            "formatter": 9,
+            "formatOptions": {
+              "palette": "blue"
+            }
+          },
+          "showBorder": false
+        },
+        "graphSettings": {
+          "type": 0,
+          "topContent": {
+            "columnMatch": "RestrictedManagement",
+            "formatter": 1
+          },
+          "centerContent": {
+            "columnMatch": "Count",
+            "formatter": 1,
+            "numberFormat": {
+              "unit": 17,
+              "options": {
+                "maximumSignificantDigits": 3,
+                "maximumFractionDigits": 2
+              }
+            }
+          }
+        }
+      },
+      "customWidth": "25",
+      "name": "Restricted Management",
+      "styleSettings": {
+        "maxWidth": "25",
         "showBorder": true
       }
     },
@@ -442,7 +514,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "PrivilegedEAM\r\n| where RoleSystem in ({RoleSystem}) or '*' in ({RoleSystem})\r\n| extend Roles = parse_json(RoleAssignments)\r\n| extend Classification = parse_json(Classification)\r\n| where ObjectDisplayName contains '{PrincipalDisplayName}' or '{PrincipalDisplayName}' == \"\"\r\n| where Classification contains ({AdminTierLevelName}) or '*' in ({AdminTierLevelName})\r\n| where Classification contains ({Service}) or '*' in ({Service})\r\n| where ObjectType in ({ObjectType}) or '*' in ({ObjectType})\r\n| where OnPremSynchronized == iff('{SyncSource}' == \"Cloud-Only\",False,True) or '{SyncSource}' == '*' or '{SyncSource}' == 'All Privileged Identities'\r\n| extend OnPremSynchronized = iff(OnPremSynchronized == \"False\",\"Cloud-Only\",\"Hybrid\")\r\n| where ObjectAdminTierLevelName == '{ObjectAdminTierLevelName}' or '*' == '{ObjectAdminTierLevelName}'\r\n| where parse_json(Classification) contains '{RoleClassificationAdminTierLevelName}' or '*' == '{RoleClassificationAdminTierLevelName}'\r\n| extend RestrictedManagement = bag_pack_columns(RestrictedManagementByAadRole, RestrictedManagementByRAG, RestrictedManagementByRMAU)\r\n| summarize RoleSystem = make_set(RoleSystem) by ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, OnPremSynchronized, AssignedAdministrativeUnits, tostring(RestrictedManagement)\r\n| sort by ObjectDisplayName",
+        "query": "PrivilegedEAM\r\n| where RoleSystem in ({RoleSystem}) or '*' in ({RoleSystem})\r\n| extend Roles = parse_json(RoleAssignments)\r\n| extend Classification = parse_json(Classification)\r\n| where ObjectDisplayName contains '{PrincipalDisplayName}' or '{PrincipalDisplayName}' == \"\"\r\n| where Classification contains ({AdminTierLevelName}) or '*' in ({AdminTierLevelName})\r\n| where Classification contains ({Service}) or '*' in ({Service})\r\n| where ObjectType in ({ObjectType}) or '*' in ({ObjectType})\r\n| where OnPremSynchronized == iff('{SyncSource}' == \"Cloud-Only\",False,True) or '{SyncSource}' == '*' or '{SyncSource}' == 'All Privileged Identities'\r\n| extend OnPremSynchronized = iff(OnPremSynchronized == \"False\",\"Cloud-Only\",\"Hybrid\")\r\n| where ObjectAdminTierLevelName == '{ObjectAdminTierLevelName}' or '*' == '{ObjectAdminTierLevelName}'\r\n| where parse_json(Classification) contains '{RoleClassificationAdminTierLevelName}' or '*' == '{RoleClassificationAdminTierLevelName}'\r\n| extend RestrictedManagement = bag_pack_columns(RestrictedManagementByAadRole, RestrictedManagementByRAG, RestrictedManagementByRMAU)\r\n| summarize RoleSystem = make_set(RoleSystem) by ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectAdminTierLevelName, OnPremSynchronized, AssignedAdministrativeUnits, tostring(RestrictedManagement)\r\n| sort by ObjectDisplayName",
         "size": 0,
         "title": "List of Privileged Accounts ",
         "timeContext": {
