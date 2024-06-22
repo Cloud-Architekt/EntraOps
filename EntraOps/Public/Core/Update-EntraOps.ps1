@@ -15,17 +15,17 @@ function Update-EntraOps {
     param (
         [Parameter(Mandatory = $False)]
         [System.String]$Branch = "main"
-        ,        
+        ,
         [Parameter(Mandatory = $False)]
         [System.String]$PersonalAccessToken
         ,
         [Parameter(Mandatory = $False)]
         [System.String]$ConfigFile = "./EntraOpsConfig.json"
-        ,        
+        ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet('./.github', './EntraOps', './Parsers', './Workbooks')]
-        [Object]$TargetUpdateFolders = @("./.github", "./EntraOps", "./Parsers", "./Workbooks")
-        ,        
+        [ValidateSet("./.github", "./EntraOps", "./Parsers", "./Queries", "./Samples", "./Workbooks")]
+        [Object]$TargetUpdateFolders = @("./.github", "./EntraOps", "./Parsers", "./Queries", "./Samples" "./Workbooks")
+        ,
         [Parameter(Mandatory = $False)]
         [System.String]$TemporaryUpdateFolder = "../latest-version"
     )
@@ -38,7 +38,7 @@ function Update-EntraOps {
     else {
         git clone -b $Branch https://github.com/Cloud-Architekt/EntraOps.git $TemporaryUpdateFolder
     }
-    
+
     foreach ($TargetUpdateFolder in $TargetUpdateFolders) {
 
         if (Test-Path -Path $TargetUpdateFolder) {
@@ -70,7 +70,7 @@ function Update-EntraOps {
     }
 
     Write-Output "Importing updated EntraOps module..."
-    try {      
+    try {
         Import-Module ./EntraOps -Force
     }
     catch {

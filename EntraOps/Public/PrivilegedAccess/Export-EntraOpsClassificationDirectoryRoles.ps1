@@ -53,7 +53,7 @@ function Export-EntraOpsClassificationDirectoryRoles {
     }
     else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
-    }    
+    }
     $Classification = Get-Content -Path $(AadClassificationFilePath) | ConvertFrom-Json -Depth 10
 
     # Single Classification (highest tier level only)

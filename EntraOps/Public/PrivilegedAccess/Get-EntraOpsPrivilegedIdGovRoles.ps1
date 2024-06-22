@@ -15,7 +15,7 @@
     Expand group members for transitive role assignments. Default is $true.
 
 .PARAMETER SampleMode
-    Use sample data for testing or offline mode. Default is $False.  
+    Use sample data for testing or offline mode. Default is $False.
 
 .EXAMPLE
     Get a list of delegated administrator assignment in Identity Governance access packages and catalogs.
@@ -111,7 +111,7 @@ function Get-EntraOpsPrivilegedIdGovRoles {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
-            if ($RbacAssignmentByNestedGroupMembers.Count -gt "0") { 
+            if ($RbacAssignmentByNestedGroupMembers.Count -gt "0") {
                 $RbacAssignmentByNestedGroupMembers | foreach-object {
                     [pscustomobject]@{
                         RoleAssignmentId              = $RbacAssignmentByGroup.RoleAssignmentId
@@ -134,7 +134,7 @@ function Get-EntraOpsPrivilegedIdGovRoles {
             }
             else {
                 Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId) - $($GroupObjectDisplayName)"
-            } 
+            }
         }
     }
     $AllElmRbacAssignments = @()

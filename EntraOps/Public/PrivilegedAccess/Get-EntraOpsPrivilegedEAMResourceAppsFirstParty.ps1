@@ -16,7 +16,7 @@
 .PARAMETER SentinelWorkspaceSubscriptionId
     Subscription ID of the Microsoft Sentinel workspace.
 
-.PARAMETER Source  
+.PARAMETER Source
     Source of the data. Default is MsGraphActivity. Possible values are MsGraphActivity, AuditLogActivity, UnknownIdentityType.
 
 .EXAMPLE
@@ -129,7 +129,7 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                     'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
                     'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
                     'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
-                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits                    
+                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
                     'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
                     'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
                     'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU

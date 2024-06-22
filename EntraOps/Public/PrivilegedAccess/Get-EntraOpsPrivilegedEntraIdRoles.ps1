@@ -15,7 +15,7 @@
     Expand group members for transitive role assignments. Default is $true.
 
 .PARAMETER SampleMode
-    Use sample data for testing or offline mode. Default is $False.  
+    Use sample data for testing or offline mode. Default is $False.
 
 .EXAMPLE
     Get a list of assignment of Entra ID directory roles.
@@ -105,7 +105,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                     catch {
                         Write-Warning "Can't found scope name of $($AadPrincipalRoleAssignment.directoryScopeId) for $($Principal)"
                         $RoleAssignmentScopeName = "Unknown name"
-                    }                    
+                    }
                 }
                 else {
                     $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
@@ -227,7 +227,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     $AadRoleAssignmentsByPim = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/roleManagement/directory/roleAssignmentScheduleInstances" -OutputType PSObject
     $AadActiveRoleAssignments = $AadRoleAssignmentsByPim | Where-Object { $_.assignmentType -eq 'Activated' }
     $AadTimeBoundedRoleAssignments = $AadRoleAssignmentsByPim | Where-Object { $_.assignmentType -eq 'Assigned' -and $null -ne $_.endDateTime }
-    
+
     $AadPermanentRoleAssignmentsWithEnrichment = foreach ($AadRbacActiveAndPermanentAssignment in $AadRbacActiveAndPermanentAssignments) {
         if (($AadRbacActiveAndPermanentAssignment.RoleAssignmentId -in $AadActiveRoleAssignments.id) -and ($AadRbacActiveAndPermanentAssignment.RoleAssignmentId -in $AadActiveRoleAssignments.RoleAssignmentOriginId)) {
             $AadRbacActiveAndPermanentAssignment.RoleAssignmentPIMRelated = $True
@@ -249,7 +249,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     # Summarize results with direct permanent (excl. activated roles) and eligible role assignments
     $AllAadRbacAssignments = @()
     $AllAadRbacAssignments += $AadPermanentRoleAssignments
-    $AllAadRbacAssignments += $AadEligibleUserRoleAssignments    
+    $AllAadRbacAssignments += $AadEligibleUserRoleAssignments
 
     #region Collect transitive assignments by group members of Role-Assignable Groups
     if ($ExpandGroupMembers -eq $True) {
@@ -267,7 +267,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
-            if ($RbacAssignmentByNestedGroupMembers.Count -gt "0") { 
+            if ($RbacAssignmentByNestedGroupMembers.Count -gt "0") {
                 $RbacAssignmentByNestedGroupMembers | foreach-object {
                     [pscustomobject]@{
                         RoleAssignmentId                = $RbacAssignmentByGroup.RoleAssignmentId
@@ -292,7 +292,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             else {
                 Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
             }
-            
+
         }
     }
     #endregion
@@ -300,7 +300,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     #region Filtering export if needed
     $AllAadRbacAssignments += $AadRbacTransitiveAssignments
     $AllAadRbacAssignments = $AllAadRbacAssignments | where-object { $_.ObjectType -in $PrincipalTypeFilter }
-    $AllAadRbacAssignments = $AllAadRbacAssignments | select-object -Unique * 
+    $AllAadRbacAssignments = $AllAadRbacAssignments | select-object -Unique *
     $AllAadRbacAssignments | Sort-Object RoleAssignmentId, RoleAssignmentType, ObjectId
     #endregion
 }

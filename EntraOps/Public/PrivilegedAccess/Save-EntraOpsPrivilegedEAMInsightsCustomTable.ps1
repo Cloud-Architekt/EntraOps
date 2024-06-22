@@ -40,9 +40,9 @@
 #>
 
 function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
-    
+
     [CmdletBinding()]
-    param (    
+    param (
         [Parameter(Mandatory = $False)]
         [System.String]$ImportPath = $DefaultFolderClassifiedEam
         ,
@@ -54,13 +54,13 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
         ,
         [Parameter(Mandatory = $false)]
         [System.String]$DataCollectionRuleSubscriptionId = (Get-AzContext).Subscription.Id
-        ,      
+        ,
         [Parameter(Mandatory = $false)]
         [System.String]$TenantId = (Get-AzContext).Tenant.Id
-        ,           
+        ,
         [Parameter(Mandatory = $False)]
         [System.String]$TableName = "PrivilegedEAM_CL"
-        ,    
+        ,
         [Parameter(Mandatory = $false)]
         [object]$PrincipalTypeFilter = ("User", "Group", "ServicePrincipal").toLower()
         ,
@@ -85,10 +85,10 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
                 Write-Host "Upload classification data for object type: $($ObjectType)"
                 $EamSummary = @()
                 $EamSummary += $EamFiles | ForEach-Object {
-                    Get-Content $_ | ConvertFrom-Json -Depth 10        
+                    Get-Content $_ | ConvertFrom-Json -Depth 10
                 }
                 $Json = $EamSummary | ConvertTo-Json -Depth 10
-                Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId   
+                Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId
             }
         }
     }

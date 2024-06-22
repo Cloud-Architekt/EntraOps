@@ -1,4 +1,4 @@
-<#    
+<#
 .SYNOPSIS
     Get information of service principals to create content for the WatchList "ManagedIdentityAssignedResources", "MdcAttackPaths", "WorkloadIdentityInfo" and "WorkloadIdentityRecommendations".
 
@@ -21,7 +21,7 @@
 .PARAMETER SentinelWorkspaceName
     Name of the Microsoft Sentinel workspace.
 
-.EXAMPLE 
+.EXAMPLE
     Create all watchlists for Workload Identity Enrichment
     Save-EntaOpsWorkloadIdentityEnrichmentWatchLists -SentinelResourceGroupName "SentinelRG" -SentinelSubscriptionId "SentinelSubId" -SentinelWorkspaceName "SentinelWorkspace"
 #>
@@ -71,10 +71,10 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
             [PSCustomObject]@{
                 'ResourceId'       = $_.id
                 'ResourceName'     = $_.name
-                'ResourceType'     = $_.type              
+                'ResourceType'     = $_.type
                 'ResourceTags'     = $_.tags | ConvertTo-Json -Depth 10 -Compress -AsArray
                 'ResourceTenantId' = $_.tenantId
-                'Identity'         = $_.identity | ConvertTo-Json -Depth 10 -Compress -AsArray               
+                'Identity'         = $_.identity | ConvertTo-Json -Depth 10 -Compress -AsArray
             }
         }
         return $AssignedManagedIdentity
@@ -130,7 +130,7 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
         $WatchListParameters.NewWatchlistItems = $WorkloadIdentityAttackPaths
         Edit-GkSeAzSentinelWatchlist @WatchListParameters
     }
-    #endregion    
+    #endregion
 
     #region WorkloadIdentityInfo
     $WatchlistName = "WorkloadIdentityInfo"

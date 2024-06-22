@@ -36,15 +36,15 @@ $ModuleVersion = $($ModuleManifest.ModuleVersion)
 $host.ui.RawUI.WindowTitle = "EntraOps "
 
 $Splash = @"
- ______       _              ____            
-|  ____|     | |            / __ \           
-| |__   _ __ | |_ _ __ __ _| |  | |_ __  ___ 
+ ______       _              ____
+|  ____|     | |            / __ \
+| |__   _ __ | |_ _ __ __ _| |  | |_ __  ___
 |  __| | '_ \| __| '__/ _`  | |  | | '_ \/ __|
 | |____| | | | |_| | | (_| | |__| | |_) \__ \
 |______|_| |_|\__|_|  \__,_|\____/| .__/|___/
-                                  | |        
-                                  |_|        
-  
+                                  | |
+                                  |_|
+
 Version $($ModuleVersion) on $($PSEnvironment)
 PoC Project by Thomas Naunheim - www.cloud-architekt.net
 "@

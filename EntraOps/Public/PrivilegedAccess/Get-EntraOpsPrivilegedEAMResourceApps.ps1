@@ -45,7 +45,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     }
     else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
-    }    
+    }
 
     Write-Host "Getting App Roles from Entra ID Service Principals..."
 

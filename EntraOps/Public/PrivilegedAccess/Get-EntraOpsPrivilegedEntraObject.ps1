@@ -75,7 +75,7 @@ function Get-EntraOpsPrivilegedEntraObject {
     #region Default empty arrays
     $WorkAccount = @()
     $PawDevice = @()
-    $DeviceOwner = @()    
+    $DeviceOwner = @()
 
     switch ( $ObjectDetails.'@odata.type' ) {
         #region User object details
@@ -106,7 +106,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique adminTierLevelName).AdminTierLevelName
 
             # Administrative Unit Assignments
-            $RestrictedManagementByRAG = $ObjectMemberships.isAssignableToRole -contains $true    
+            $RestrictedManagementByRAG = $ObjectMemberships.isAssignableToRole -contains $true
             $AuMemberships = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName)
 
             # No owners for user objects
@@ -152,13 +152,13 @@ function Get-EntraOpsPrivilegedEntraObject {
 
             # Owners
             $Owners = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/groups/$AadObjectId/owners") -OutputType PSObject).id
-            
+
             # No support for custom security attributes
             $AdminTierLevel = ""
             $AdminTierLevelName = ""
 
             # Administrative Unit Assignments
-            $AuMemberships = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/groups/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName) 
+            $AuMemberships = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/groups/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName)
         }
         #endregion
 
@@ -169,7 +169,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             $ObjectType = 'servicePrincipal'
             $ObjectSubType = $SPObject.ServicePrincipalType
 
-            # Owners  
+            # Owners
             $Owners = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$AadObjectId/owners") -OutputType PSObject).id
 
             # Administrative Units and Restricted Management does not apply to service principals
@@ -206,7 +206,7 @@ function Get-EntraOpsPrivilegedEntraObject {
     if ($null -eq $AuMemberships -or $null -eq $AuMemberships.id) { $AuMemberships = @() }
     if ($null -eq $ObjectOwner -or $ObjectOwner -eq "") { $ObjectOwner = @() }
     if ($null -eq $Owners) { $Owners = @() }
-    if ($null -eq $ObjectDetails.passwordPolicies) { $PasswordPolicies = @() } else { $PasswordPolicies = $ObjectDetails.passwordPolicies } 
+    if ($null -eq $ObjectDetails.passwordPolicies) { $PasswordPolicies = @() } else { $PasswordPolicies = $ObjectDetails.passwordPolicies }
     if ($null -eq $ObjectSignInName) { $ObjectSignInName = "" }
 
     if ($null -ne $ObjectDetails) {

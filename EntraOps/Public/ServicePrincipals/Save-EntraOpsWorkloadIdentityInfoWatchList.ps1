@@ -1,31 +1,31 @@
-<#    
+<#
 .SYNOPSIS
     Get information of service principals and application in Microsoft Entra ID for creating content for the WatchList "WorkloadIdentityInfo".
 
 .DESCRIPTION
     Get information of service principals and application in Microsoft Entra ID for creating content for the WatchList "WorkloadIdentityInfo".
 
-.EXAMPLE 
+.EXAMPLE
     Using System-assigned Managed Identity to get Service Principal of Schaengel Tenant from Azure KeyVault (Multi-Tenant Use Case) in CloudLab Tenant
     Connect-EntraOps -AuthenticationType "ServicePrincipal" -TenantName "schaengel.onmicrosoft.com" -KeyVaultTenantName "cloudlab.onmicrosoft.com" -KeyVaultName "identityops-kva" -PrefixSecretName "CA-CAAsCode-"
 #>
 function Save-EntraOpsWorkloadIdentityInfo {
 
     [CmdletBinding()]
-    param (    
+    param (
         [Parameter(Mandatory = $false)]
         [string]$WatchListName = "WorkloadIdentityInfo"
         ,
         [Parameter(Mandatory = $true)]
         [System.String]$SentinelSubscriptionId
-        ,        
+        ,
         [Parameter(Mandatory = $true)]
         [System.String]$SentinelResourceGroupName
         ,
         [Parameter(Mandatory = $true)]
         [System.String]$SentinelWorkspaceName
     )
-    
+
     # Global Variables
     $ErrorActionPreference = "Stop"
 
@@ -87,7 +87,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
     #endregion
 
     #region Gathering details for each Workload Identity and add to Array List
-    Write-Verbose "Get details for enrichment of service principals"   
+    Write-Verbose "Get details for enrichment of service principals"
     $NewWatchlistItems = [System.Collections.Concurrent.ConcurrentBag[psobject]]::new()
 
     $ServicePrincipals | ForEach-Object -Parallel {
@@ -143,7 +143,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
                 $TransitiveRoleAssignments = New-Object System.Collections.ArrayList
                 $HeaderParams = @{
                     'ConsistencyLevel' = "eventual"
-                }                
+                }
                 $TransitiveRoleAssignments = (Invoke-MgGraphRequest -Method Get -Headers $HeaderParams -Uri "https://graph.microsoft.com/beta/roleManagement/directory/transitiveRoleAssignments?`$count=true&`$filter=principalId eq '$($ServicePrincipal.Id)'")['value']
                 $TransitiveRoleAssignments = foreach ($TransitiveRoleAssignment in $TransitiveRoleAssignments) {
                     $RoleDefinition = $using:DirectoryRoleDefinitions | where-object { $_.templateid -eq $TransitiveRoleAssignment.roleDefinitionId }
@@ -171,7 +171,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
             }
 
             if ( $null -ne $ServicePrincipal.appId) {
-                $CurrentItem = [PSCustomObject]@{          
+                $CurrentItem = [PSCustomObject]@{
                     "ServicePrincipalObjectId"   = $ServicePrincipal.Id
                     "AppObjectId"                = $Application.Id
                     "AppId"                      = $ServicePrincipal.AppId
@@ -188,7 +188,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
                     "AssignedAppRoles"           = $AssignedAppRoles
                     "GroupMembership"            = $GroupMemberships
                     "AssignedRoles"              = $AssignedRoles
-                    "Tags"                       = @("Entra ID", "Automated Enrichment")                    
+                    "Tags"                       = @("Entra ID", "Automated Enrichment")
                 }
                 ($using:NewWatchlistItems).Add( $CurrentItem ) | Out-Null
             }
@@ -218,5 +218,5 @@ function Save-EntraOpsWorkloadIdentityInfo {
         }
         New-GkSeAzSentinelWatchlist @Param2
     }
-    #endregion    
+    #endregion
 }

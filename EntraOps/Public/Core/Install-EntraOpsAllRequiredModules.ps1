@@ -19,7 +19,7 @@
 function Install-EntraOpsAllRequiredModules {
 
     $ErrorActionPreference = "Stop"
-    
+
     $RequiredModules = @(
         @{
             ModuleName    = 'Az.Accounts'

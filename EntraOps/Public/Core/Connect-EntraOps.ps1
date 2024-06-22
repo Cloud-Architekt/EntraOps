@@ -72,7 +72,7 @@ function Connect-EntraOps {
         }
         else {
             New-Variable -Name UseAzPwshOnly -Value $False -Scope Global -Force
-            
+
             $RequiredCoreModules = @{
                 ModuleName    = 'Microsoft.Graph.Authentication'
                 ModuleVersion = '2.0.0'

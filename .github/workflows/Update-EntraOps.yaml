@@ -33,7 +33,13 @@ jobs:
         with:
           inlineScript: |
             Import-Module ./EntraOps
-            Update-EntraOps -ConfigFile ${env:ConfigFile} -TargetUpdateFolders @("./EntraOps","./Queries","./Parsers","./Samples","./Workbooks")
+            Update-EntraOps -ConfigFile ${env:ConfigFile} -TargetUpdateFolders @(
+              "./EntraOps",
+              "./Parsers",
+              "./Queries",
+              "./Samples",
+              "./Workbooks"
+            )
             Disconnect-EntraOps
           azPSVersion: latest
       - name: Git - Commit and Push to repository

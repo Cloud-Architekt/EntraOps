@@ -39,7 +39,7 @@ function Export-EntraOpsClassificationAppRoles {
     }
     else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
-    }    
+    }
     $Classification = Get-Content -Path $(AppRolesClassificationFilePath) | ConvertFrom-Json -Depth 10
 
     # Get Graph API actions

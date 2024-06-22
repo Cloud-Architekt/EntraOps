@@ -59,7 +59,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
     }
     else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
-    }    
+    }
 
     # Get all role assignments and global exclusions
     Write-Host "Getting Microsoft Entra ID Governance information..."

@@ -1,4 +1,4 @@
-<#    
+<#
 .SYNOPSIS
     Ingest EntraOps data to Log Analytics workspace using Ingest API.
 
@@ -33,18 +33,18 @@
 .EXAMPLE
     Get schema to update data collection transformation rule
     Push-EntraOpsLogIngestionAPI -JsonContent <VariableWithPlainJson> -SampleDataOnly $true -DataCollectionRuleName "entraops-dcr" -DataCollectionResourceGroupName "entraops-rg" -DataCollectionRuleSubscriptionId "00000000-0000-0000-0000-000000000000"
- #>    
+ #>
 
 function Push-EntraOpsLogsIngestionAPI {
-    
+
     [CmdletBinding()]
-    param (    
+    param (
         [Parameter(Mandatory = $True)]
         [object]$JsonContent
         ,
         [Parameter(Mandatory = $true)]
         [string]$DataCollectionRuleName
-        ,        
+        ,
         [Parameter(Mandatory = $false)]
         [System.String]$DataCollectionResourceGroupName = "aadops-rg"
         ,
@@ -58,7 +58,7 @@ function Push-EntraOpsLogsIngestionAPI {
         [System.Boolean]$SampleDataOnly = $false
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$ApiVersion = "2022-06-01"     
+        [System.String]$ApiVersion = "2022-06-01"
     )
 
     $ErrorActionPreference = "Stop"
@@ -74,7 +74,7 @@ function Push-EntraOpsLogsIngestionAPI {
 
     # Authentication
     $AccessToken = (Get-AzAccessToken -ResourceUrl "https://monitor.azure.com/").Token
-    $headers = @{"Authorization" = "Bearer $AccessToken"; "Content-Type" = "application/json" }             
+    $headers = @{"Authorization" = "Bearer $AccessToken"; "Content-Type" = "application/json" }
 
     # Add Timestamp to JSON data
     try {
@@ -82,7 +82,7 @@ function Push-EntraOpsLogsIngestionAPI {
         $json | ForEach-Object {
             $_ | Add-Member -NotePropertyName TimeGenerated -NotePropertyValue (Get-Date).ToUniversalTime().ToString("o") -Force
         }
-        $json = $json | ConvertTo-Json -Depth 10    
+        $json = $json | ConvertTo-Json -Depth 10
     }
     catch {
         Write-Error "Cannot convert JSON content to JSON object"

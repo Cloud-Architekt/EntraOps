@@ -51,9 +51,9 @@ function Update-EntraOpsRequiredWorkflowParameters {
             $WorkflowContent.env.TenantName = $Config.TenantName
             $WorkflowContent.env.ConfigFile = $ConfigFile
             $UpdatedWorkflowContent = $WorkflowContent | ConvertTo-Yaml
-    
+
             # Workaround for powershell-yaml which adds quotes to on/off values
-            $UpdatedWorkflowContent.Replace('"on"', "on") | Set-Content -Path $workflow.FullName            
+            $UpdatedWorkflowContent.Replace('"on"', "on") | Set-Content -Path $workflow.FullName
         }
         catch {
             Write-Error "Failed to update workflow $($workflow.FullName). Error: $_"

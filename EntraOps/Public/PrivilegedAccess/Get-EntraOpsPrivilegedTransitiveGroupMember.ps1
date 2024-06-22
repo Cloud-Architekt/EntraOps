@@ -36,14 +36,14 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
     # Check if group is synchronized from on-premises AD and otherwise check if group has member assignments in PIM for Groups
     if ($GroupDetails.onPremisesSyncEnabled -ne $true) {
         try {
-            Write-Verbose "Try to get identify if $($GroupDetails.displayName) has eligible or active users in PIM for Groups"        
+            Write-Verbose "Try to get identify if $($GroupDetails.displayName) has eligible or active users in PIM for Groups"
             $PimForGroupMembersUri = "/beta/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq `'$($GroupObjectId)`'&`$expand=principal"
             $PimForGroupMembers = (Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $PimForGroupMembersUri -OutputType PSObject)
-        } 
+        }
         catch {
             Write-Error $_
             throw "Validation of Group object with ID $($GroupObjectId) on eligible or active assignment has been failed"
-        }    
+        }
     }
     else {
         Write-Verbose "Group $($GroupDetails.displayName) is synchronized from on-premises AD and can not be managed by PIM for Groups"
@@ -62,7 +62,7 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
         Write-Verbose "- Permanent membership"
         $PermanentMembers = ($PimForGroupsMembers | Where-Object { $_.assignmentType -eq "assigned" }).principal | Where-Object { $null -ne $_.Id } | select-object DisplayName, Id, '@odata.type'
         $PermanentMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Permanent member" -Force
-        
+
         #Active Members in PIM-managed Group
         $ActiveMembers = ($PimForGroupsMembers | Where-Object { $_.assignmentType -eq "active" }).principal | Where-Object { $null -ne $_.Id } | select-object DisplayName, Id, '@odata.type'
         $ActiveMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Active member" -Force
@@ -85,18 +85,18 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
         # Summarize all eligible and transitive eligible members of direct or direct nested groups
         $AllGroupMembers = @()
         $AllGroupMembers += $PermanentMembers
-        $AllGroupMembers += $EligibleMembers 
+        $AllGroupMembers += $EligibleMembers
         $AllGroupMembers += $EligibleNestedPermanentMembers
 
         #region Check if Eligible Member group has eligible member
         Write-Verbose "- Eligible member group has eligible members"
 
-        $NestedMemberGroups = $AllGroupMembers | Where-Object { $_.'@odata.type' -eq "#microsoft.graph.group" } 
+        $NestedMemberGroups = $AllGroupMembers | Where-Object { $_.'@odata.type' -eq "#microsoft.graph.group" }
         $TransitiveNestedEligibleMembers = @()
         foreach ($NestedMemberGroup in $NestedMemberGroups) {
             do {
                 Write-Verbose "- Expand nesting for $($NestedMemberGroup.id)"
-                $NestedEligibleMembers = $($NestedMemberGroup) | foreach-object { 
+                $NestedEligibleMembers = $($NestedMemberGroup) | foreach-object {
                     $NestedEligibleMember = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $_.id
                     $NestedEligibleMember | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Nested Eligible group member" -Force
 
@@ -104,12 +104,12 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
                     $NestedEligibleMember = $NestedEligibleMember | Where-Object { $_.Id -notin $TransitiveNestedEligibleMembers.Id }
                     return $NestedEligibleMember
                 }
-                    
+
                 $TransitiveNestedEligibleMembers += $NestedEligibleMembers
-                $EligibleNestedMemberGroup = $NestedEligibleMembers | Where-Object { $_.'@odata.type' -eq "#microsoft.graph.group" } 
-            } until ($EligibleNestedMemberGroup.'@odata.type' -notcontains "#microsoft.graph.group" -or $null -eq $EligibleNestedMemberGroup) 
+                $EligibleNestedMemberGroup = $NestedEligibleMembers | Where-Object { $_.'@odata.type' -eq "#microsoft.graph.group" }
+            } until ($EligibleNestedMemberGroup.'@odata.type' -notcontains "#microsoft.graph.group" -or $null -eq $EligibleNestedMemberGroup)
         }
-        #endregion        
+        #endregion
 
         $AllGroupMembers += $TransitiveNestedEligibleMembers | Where-Object { $_.id -notin $AllGroupMembers.id }
 
