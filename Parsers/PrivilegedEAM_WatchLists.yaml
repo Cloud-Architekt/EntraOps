@@ -1,0 +1,60 @@
+Parser:
+  Title: PrivilegedEAM (WatchLists)
+  Version: 0.1
+  LastUpdated: 2024-06-21
+Product:
+  Name: EntraOps
+References:
+  - Title: EntraOps Repository
+    Link: https://github.com/Cloud-Architekt/EntraOps
+Description: |
+  This parser is used to have a standarized schema of EntraOps classification of Privileged EAM.
+ParserName: PrivilegedEAM
+ParserQuery: |
+  _GetWatchlist('EntraOps_Principals')
+  | join kind=inner ( _GetWatchlist('EntraOps_RoleAssignments')
+  | extend RoleAssignment = bag_pack_columns(
+      Classification,
+      ObjectId,
+      ObjectType,
+      PIMAssignmentType,
+      PIMManagedRole,
+      RoleAssignmentId,
+      RoleAssignmentScopeId,
+      RoleAssignmentScopeName,
+      RoleAssignmentType,
+      RoleDefinitionId,
+      RoleDefinitionName,
+      RoleIsPrivileged,
+      RoleType,
+      TransitiveByObjectDisplayName,
+      TransitiveByObjectId
+      )
+  | summarize RoleAssignments = make_set(RoleAssignment) by ObjectId, RoleSystem
+  ) on ObjectId, RoleSystem
+  | extend Type = "EntraOps_WatchLists"
+  | project-rename TimeGenerated = LastUpdatedTimeUTC
+  | project-away _DTItemId, SearchKey, ObjectId1, RoleSystem1, Tags, UniqueId
+  | project-reorder 
+      TimeGenerated,
+      ObjectId,
+      ObjectType,
+      ObjectSubType,
+      ObjectDisplayName,
+      ObjectUserPrincipalName,
+      ObjectAdminTierLevel,
+      ObjectAdminTierLevelName,
+      OnPremSynchronized,
+      AssignedAdministrativeUnits,
+      RestrictedManagementByRAG,
+      RestrictedManagementByAadRole,
+      RestrictedManagementByRMAU,
+      RoleSystem,
+      Classification,
+      RoleAssignments,
+      Owners,
+      OwnedObjects,
+      OwnedDevices,
+      AssociatedWorkAccount,
+      AssociatedPawDevice,
+      Type

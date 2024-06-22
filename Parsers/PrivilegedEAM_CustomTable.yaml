@@ -1,0 +1,41 @@
+Parser:
+  Title: PrivilegedEAM (Custom Table)
+  Version: 0.1
+  LastUpdated: 2024-06-21
+Product:
+  Name: EntraOps
+References:
+  - Title: EntraOps Repository
+    Link: https://github.com/Cloud-Architekt/EntraOps
+Description: |
+  This parser is used to have a standarized schema of EntraOps classification of Privileged EAM.
+ParserName: PrivilegedEAM
+ParserQuery: |
+  PrivilegedEAM_CL
+  | where TimeGenerated > ago(1d)
+  | summarize arg_max(TimeGenerated, *) by ObjectId,RoleSystem
+  | project-away TenantId
+  | extend Type = "EntraOps_CustomTable"
+  | project-reorder 
+      TimeGenerated,
+      ObjectId,
+      ObjectType,
+      ObjectSubType,
+      ObjectDisplayName,
+      ObjectUserPrincipalName,
+      ObjectAdminTierLevel,
+      ObjectAdminTierLevelName,
+      OnPremSynchronized,
+      AssignedAdministrativeUnits,
+      RestrictedManagementByRAG,
+      RestrictedManagementByAadRole,
+      RestrictedManagementByRMAU,
+      RoleSystem,
+      Classification,
+      RoleAssignments,
+      Owners,
+      OwnedObjects,
+      OwnedDevices,
+      AssociatedWorkAccount,
+      AssociatedPawDevice,
+      Type

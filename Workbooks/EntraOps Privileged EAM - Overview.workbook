@@ -224,15 +224,14 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "PrivilegedEAM\r\n| where OnPremSynchronized == iff('{SyncSource}' == \"Cloud-Only\",False,True) or '{SyncSource}' == '*' or '{SyncSource}' == 'All Privileged Identities'\r\n| where RoleSystem in ({RoleSystem}) or '*' in ({RoleSystem})\r\n| extend Roles = parse_json(RoleAssignments)\r\n| extend Classification = parse_json(Classification)\r\n| mv-expand Classification\r\n| where Classification.AdminTierLevelName in ({AdminTierLevelName}) or '*' in ({AdminTierLevelName})\r\n| where Classification.Service in ({Service}) or '*' in ({Service})\r\n| where ObjectType in ({ObjectType}) or '*' in ({ObjectType})\r\n| where ObjectDisplayName contains '{PrincipalDisplayName}' or '{PrincipalDisplayName}' == \"\"\r\n| where ObjectType == \"user\"\r\n| extend RestrictedManagement = iff(RestrictedManagementByAadRole == true or RestrictedManagementByRAG == true or RestrictedManagementByRMAU == true,\"Protected\",\"Unprotected\")\r\n| distinct ObjectId, RestrictedManagement\r\n| summarize Count = count() by RestrictedManagement",
+        "query": "PrivilegedEAM\r\n| where OnPremSynchronized == iff('{SyncSource}' == \"Cloud-Only\",false,true) or '{SyncSource}' == '*' or '{SyncSource}' == 'All Privileged Identities'\r\n| where RoleSystem in ({RoleSystem}) or '*' in ({RoleSystem})\r\n| where Classification contains ({AdminTierLevelName}) or '*' in ({AdminTierLevelName})\r\n| where Classification contains ({Service}) or '*' in ({Service})\r\n| where ObjectType in ({ObjectType}) or '*' in ({ObjectType})\r\n| mv-expand parse_json(RoleAssignments)\r\n| extend AssignmentType =  strcat(RoleAssignments.RoleAssignmentType, \" \", RoleAssignments.PIMAssignmentType)\r\n| summarize count() by AssignmentType\r\n| sort by count_",
         "size": 4,
-        "title": "Restricted management of privileged identities",
+        "title": "Assignments of privileged roles",
         "timeContext": {
           "durationMs": 604800000
         },
-        "exportFieldName": "RestrictedManagement",
-        "exportParameterName": "RestrictedManagement",
-        "exportDefaultValue": "*",
+        "exportFieldName": "AssignmentType",
+        "exportParameterName": "AssignmentType",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
         "crossComponentResources": [
@@ -287,7 +286,7 @@
         }
       },
       "customWidth": "50",
-      "name": "Synchronized Privileged Accounts - Copy",
+      "name": "Role Assignments",
       "styleSettings": {
         "maxWidth": "50",
         "showBorder": true
@@ -443,26 +442,15 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "PrivilegedEAM\r\n| where RoleSystem in ({RoleSystem}) or '*' in ({RoleSystem})\r\n| extend Roles = parse_json(RoleAssignments)\r\n| extend Classification = parse_json(Classification)\r\n| where ObjectDisplayName contains '{PrincipalDisplayName}' or '{PrincipalDisplayName}' == \"\"\r\n| where Classification contains ({AdminTierLevelName}) or '*' in ({AdminTierLevelName})\r\n| where Classification contains ({Service}) or '*' in ({Service})\r\n| where ObjectType in ({ObjectType}) or '*' in ({ObjectType})\r\n| where OnPremSynchronized == iff('{SyncSource}' == \"Cloud-Only\",False,True) or '{SyncSource}' == '*' or '{SyncSource}' == 'All Privileged Identities'\r\n| extend OnPremSynchronized = iff(OnPremSynchronized == \"false\",\"Cloud-Only\",\"Hybrid\")\r\n| where ObjectAdminTierLevelName == '{ObjectAdminTierLevelName}' or '*' == '{ObjectAdminTierLevelName}'\r\n| where parse_json(Classification) contains '{RoleClassificationAdminTierLevelName}' or '*' == '{RoleClassificationAdminTierLevelName}'\r\n| project-away TimeGenerated, Type\r\n| sort by ObjectDisplayName",
+        "query": "PrivilegedEAM\r\n| where RoleSystem in ({RoleSystem}) or '*' in ({RoleSystem})\r\n| extend Roles = parse_json(RoleAssignments)\r\n| extend Classification = parse_json(Classification)\r\n| where ObjectDisplayName contains '{PrincipalDisplayName}' or '{PrincipalDisplayName}' == \"\"\r\n| where Classification contains ({AdminTierLevelName}) or '*' in ({AdminTierLevelName})\r\n| where Classification contains ({Service}) or '*' in ({Service})\r\n| where ObjectType in ({ObjectType}) or '*' in ({ObjectType})\r\n| where OnPremSynchronized == iff('{SyncSource}' == \"Cloud-Only\",False,True) or '{SyncSource}' == '*' or '{SyncSource}' == 'All Privileged Identities'\r\n| extend OnPremSynchronized = iff(OnPremSynchronized == \"False\",\"Cloud-Only\",\"Hybrid\")\r\n| where ObjectAdminTierLevelName == '{ObjectAdminTierLevelName}' or '*' == '{ObjectAdminTierLevelName}'\r\n| where parse_json(Classification) contains '{RoleClassificationAdminTierLevelName}' or '*' == '{RoleClassificationAdminTierLevelName}'\r\n| extend RestrictedManagement = bag_pack_columns(RestrictedManagementByAadRole, RestrictedManagementByRAG, RestrictedManagementByRMAU)\r\n| summarize RoleSystem = make_set(RoleSystem) by ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, OnPremSynchronized, AssignedAdministrativeUnits, tostring(RestrictedManagement)\r\n| sort by ObjectDisplayName",
         "size": 0,
         "title": "List of Privileged Accounts ",
         "timeContext": {
           "durationMs": 604800000
         },
-        "exportedParameters": [
-          {
-            "fieldName": "ObjectId",
-            "parameterName": "ObjectId",
-            "parameterType": 1,
-            "defaultValue": "*"
-          },
-          {
-            "fieldName": "RoleSystem",
-            "parameterName": "RoleSystem",
-            "parameterType": 1,
-            "defaultValue": "*"
-          }
-        ],
+        "exportFieldName": "ObjectId",
+        "exportParameterName": "ObjectId",
+        "exportDefaultValue": "*",
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
         "crossComponentResources": [
@@ -517,14 +505,14 @@
           ],
           "sortBy": [
             {
-              "itemKey": "$gen_number_ObjectDisplayName_4",
+              "itemKey": "ObjectId",
               "sortOrder": 1
             }
           ]
         },
         "sortBy": [
           {
-            "itemKey": "$gen_number_ObjectDisplayName_4",
+            "itemKey": "ObjectId",
             "sortOrder": 1
           }
         ]
@@ -535,7 +523,7 @@
       "type": 3,
       "content": {
         "version": "KqlItem/1.0",
-        "query": "PrivilegedEAM\r\n| where RoleSystem == '{RoleSystem}' or '{RoleSystem}' == '*'\r\n| where ObjectId == '{ObjectId}' or '{ObjectId}' == '*'\r\n| extend Roles = parse_json(RoleAssignments)\r\n| extend Classification = parse_json(Classification)\r\n| where ObjectDisplayName contains '{PrincipalDisplayName}' or '{PrincipalDisplayName}' == \"\"\r\n| where Classification contains ({AdminTierLevelName}) or '*' in ({AdminTierLevelName})\r\n| where Classification contains ({Service}) or '*' in ({Service})\r\n| where ObjectType in ({ObjectType}) or '*' in ({ObjectType})\r\n| where OnPremSynchronized == iff('{SyncSource}' == \"Cloud-Only\",False,true) or '{SyncSource}' == '*' or '{SyncSource}' == 'All Privileged Identities'\r\n| extend OnPremSynchronized = iff(OnPremSynchronized == \"False\",\"Cloud-Only\",\"Hybrid\")\r\n| where ObjectAdminTierLevelName == '{ObjectAdminTierLevelName}' or '*' == '{ObjectAdminTierLevelName}'\r\n| where parse_json(Classification) contains '{RoleClassificationAdminTierLevelName}' or '*' == '{RoleClassificationAdminTierLevelName}'\r\n| mv-expand RoleAssignments\r\n| project RoleAssignments, RoleSystem\r\n| evaluate bag_unpack(RoleAssignments)\r\n| extend Classification = column_ifexists(\"Classification\",\"\")\r\n| mv-expand todynamic(Classification)\r\n| extend AdminTierLevel = iff(tostring(Classification.AdminTierLevelName) != \"\",Classification.AdminTierLevelName,\"Unclassified\")\r\n| extend Service = iff(tostring(Classification.Service) != \"\",Classification.Service,\"Unclassified\")\r\n| extend TaggedBy = iff(tostring(Classification.TaggedBy) != \"\",Classification.TaggedBy,\"Unclassified\")\r\n| where Service contains ({Service}) or  '*' in ({Service})\r\n| extend TransitiveBy = column_ifexists(\"TransitiveByObjectDisplayName\",\"\")\r\n| project RoleSystem, AdminTierLevel, Service, RoleAssignmentId, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentScopeName, PIMManagedRole, PIMAssignmentType, RoleAssignmentType, TransitiveBy, TaggedBy\r\n| sort by AdminTierLevel, Service",
+        "query": "PrivilegedEAM\r\n| where ObjectId == '{ObjectId}' or '{ObjectId}' == '*'\r\n| where RoleSystem contains ({RoleSystem}) or '*' in ({RoleSystem})\r\n| extend Roles = parse_json(RoleAssignments)\r\n| extend Classification = parse_json(Classification)\r\n| where ObjectDisplayName contains '{PrincipalDisplayName}' or '{PrincipalDisplayName}' == \"\"\r\n| where Classification contains ({AdminTierLevelName}) or '*' in ({AdminTierLevelName})\r\n| where Classification contains ({Service}) or '*' in ({Service})\r\n| where ObjectType in ({ObjectType}) or '*' in ({ObjectType})\r\n| where OnPremSynchronized == iff('{SyncSource}' == \"Cloud-Only\",False,true) or '{SyncSource}' == '*' or '{SyncSource}' == 'All Privileged Identities'\r\n| extend OnPremSynchronized = iff(OnPremSynchronized == \"False\",\"Cloud-Only\",\"Hybrid\")\r\n| where ObjectAdminTierLevelName == '{ObjectAdminTierLevelName}' or '*' == '{ObjectAdminTierLevelName}'\r\n| where parse_json(Classification) contains '{RoleClassificationAdminTierLevelName}' or '*' == '{RoleClassificationAdminTierLevelName}'\r\n| mv-expand RoleAssignments\r\n| project RoleAssignments, RoleSystem\r\n| evaluate bag_unpack(RoleAssignments)\r\n| extend Classification = column_ifexists(\"Classification\",\"\")\r\n| mv-expand parse_json(Classification)\r\n| extend AdminTierLevel = Classification.AdminTierLevelName\r\n| extend Service = Classification.Service\r\n| extend TaggedBy = Classification.TaggedBy\r\n| where Service contains ('*') or '*' in ('*')\r\n| extend TransitiveBy = column_ifexists(\"TransitiveByObjectDisplayName\", \"\")\r\n| summarize AdminTierLevels = make_set(AdminTierLevel), Service = make_set(Service) by\r\n    RoleSystem,\r\n    tostring(RoleAssignmentId),\r\n    RoleDefinitionName,\r\n    tostring(RoleAssignmentScopeId),\r\n    RoleAssignmentScopeName,\r\n    PIMManagedRole,\r\n    PIMAssignmentType,\r\n    RoleAssignmentType,\r\n    TransitiveBy,\r\n    tostring(TaggedBy)\r\n| extend AdminTierLevel = iff(isnotempty(AdminTierLevels[0]), AdminTierLevels[0], \"Unclassified\")\r\n| sort by tostring(AdminTierLevel) asc, tostring(RoleAssignmentScopeId) asc, RoleDefinitionName asc\r\n| project-reorder RoleSystem, AdminTierLevel, RoleDefinitionName, RoleAssignmentScopeName, PIMAssignmentType, RoleAssignmentType, TransitiveBy, PIMManagedRole, Service",
         "size": 0,
         "title": "Related privileged role assignments",
         "timeContext": {
@@ -565,15 +553,15 @@
           ],
           "sortBy": [
             {
-              "itemKey": "AdminTierLevel",
-              "sortOrder": 2
+              "itemKey": "RoleSystem",
+              "sortOrder": 1
             }
           ]
         },
         "sortBy": [
           {
-            "itemKey": "AdminTierLevel",
-            "sortOrder": 2
+            "itemKey": "RoleSystem",
+            "sortOrder": 1
           }
         ]
       },
@@ -581,7 +569,7 @@
     }
   ],
   "fallbackResourceIds": [
-    "{SelectLogAnalytics}"
+    "azure active directory"
   ],
   "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
 }
