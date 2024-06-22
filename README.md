@@ -30,7 +30,7 @@ EntraOps is a personal research project to show capabilities for automated manag
 
 - 🔬 Ingest classification data with all details as enrichment to custom table in Microsoft Sentinel/Log Analytics Workspace or WatchLists
 
-- 📊 Build reports or queries on your classified privileges to identify "tier breach" on Microsoft's Enterprise Access Model or privilege escalation paths. Workbook templates to visualize classification data are in development.
+- 📊 Build reports or queries on your classified privileges to identify "tier breach" on Microsoft's Enterprise Access Model or privilege escalation paths. Workbook template to visualize classification data of role assignments (identified by EntraOps) and objects (by using custom security attributes)
 
 - 🛡️ Automated coverage of privileged assets in Conditional Access and Restricted Management Administrative Units (in development) to protect high-privileged assets from lower privileges and apply strong Zero Trust policies.
 
@@ -80,9 +80,9 @@ Connect-EntraOps -TenantName $TenantName -AuthenticationType "AlreadyAuthenticat
 
 
 ### Examples of using cmdlets and filter classification data
-- Export all classification of privileged objects from all supported RBAC systems in EntraOps
+- Export all classification of privileged objects with assignments to Entra ID directory roles and Microsoft Graph API permissions in EntraOps
 ```powershell
-Export-EntraOpsPrivilegedEAMJson -RBACSystems @("EntraID", "ResourceApps")
+Save-EntraOpsPrivilegedEAMJson -RBACSystems @("EntraID", "ResourceApps")
 ```
 
 - Save all Privileged Identities in Entra ID in a variable
@@ -105,7 +105,7 @@ Get-EntraOpsPrivilegedEamEntraId | Where-Object { $_.ObjectSubType -ne "Member" 
 Get-EntraOpsPrivilegedEamEntraId | Where-Object { $_.OnPremSynchronized -eq $true -and $_.RoleAssignments.Classification.AdminTierLevelName -contains "ControlPlane" }
 ```
 
-- Display all Privileged Resource Apps
+- Display all privileged workload identities with Graph API permissions
 ```powershell
 Get-EntraOpsPrivilegedEAMResourceApps
 ```
