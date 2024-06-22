@@ -131,7 +131,7 @@ New-EntraOpsConfigFile -TenantName <TenantName>
 5. Optional: Create data collection rule and endpoint if you want to ingest data to custom table in Log Analytics or Microsoft Sentinel workspace.
 Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-portal#create-data-collection-endpoint) to configure a data collection endpoint, custom table and transformation rule.
 
-    _Recommendation: There's a limitation of 10 KB for a single WatchList entry. This limit can be exceeded in case of a high number of property items (e.g., classification or owner properties). Therefore, I can strongly recommended to choose Custom tables in large environment. If you are choosing WatchList as ingestion option, keep an eye on the deployment logs for any warnings of this limitation. Entries will not be added if the limit has been exceeded._
+    _Recommendation: There is a limitation of 10 KB for a single WatchList entry. This limit can be exceeded in the case of a high number of property items (e.g., classification or owner properties). Therefore, I can strongly recommend to choosing "Custom tables" in a large environment. If you are choosing WatchList as ingestion option, keep an eye on the deployment logs for any warnings of this limitation. Entries will not be added if the limit has been exceeded._
 
 1. Review and customize the EntraOps.config file based on your requirements.
    * `TenantId` and `TenantName` should be already updated based on the provided parameters to create the config file. `ClientId` will be automatically updated by running the cmdlet `New-EntraOpsWorkloadIdentity`.
@@ -151,8 +151,8 @@ Update-EntraOpsRequiredWorkflowParameters
 ```
 
 ### Parser for Custom Tables and WatchLists
-I've built a parser which ensure a standardized schema for EntraOps data across the various ingestion options.
-This allows you to use the same queries and workbooks, regardless if you have used WatchLists or Custom Table.
+I have built a parser which ensures a standardized schema for EntraOps data across the various ingestion options.
+This allows you to use the same queries and workbooks, regardless of whether you have used WatchLists or Custom Table.
 
 Deploy the according parser for your ingestion option.
 _Recommendation: Choose the parser for "Custom table" if you have enabled ingestion to both targets._
@@ -170,8 +170,7 @@ _Recommendation: Choose the parser for "Custom table" if you have enabled ingest
 
 **Devices in Exposure Management with authentication from Control Plane users**
 ```kusto
-let ClassifiedTier0User = PrivilegedEAM_CL 
-                | where TimeGenerated > ago(14d)
+let ClassifiedTier0User = PrivilegedEAM
                 | where Classification contains "ControlPlane"
                 | where ObjectType == "user"
                 | summarize arg_max(TimeGenerated, *) by ObjectId
@@ -205,9 +204,8 @@ ExposureGraphEdges
 **Resources with access or authentication to classified privileges in EntraOps**
 ```kusto
 let SensitiveRelation = dynamic(["can authenticate as","has credentials of","affecting", "can authenticate as", "frequently logged in by"]);
-let ClassifiedTier0Assets = PrivilegedEAM_CL 
-                | where TimeGenerated > ago(14d)
-                | summarize arg_max(TimeGenerated, *) by ObjectId;
+let ClassifiedTier0Assets = PrivilegedEAM
+                | summarize arg_max(TimeGenerated, *) by tostring(ObjectId);
 let Tier0Nodes = ExposureGraphNodes
                 | mv-expand parse_json(EntityIds)
                 | where parse_json(EntityIds).type == "AadObjectId"
@@ -243,7 +241,7 @@ In addition, custom security attributes will be also used to build a correlation
 - associatedWorkAccount
 
 ### Workbook for visualization of EntraOps classification data
-The following Workbook can be use to check users, workload identities, groups and their classified role assignments by EntraOps. It allows you also to filter for hybrid/cloud users and/or specific tiered administration level from by the classification of object or role assignments.
+The following Workbook can be used to check users, workload identities, groups, and their classified role assignments by EntraOps. It allows you also to filter for hybrid/cloud users and/or specific tiered administration level from by the classification of object or role assignments.
 
 _Pre-requisite: EntraOps data has been ingested to WatchList or Custom Table and the associated Parser has been deployed._
 
@@ -257,7 +255,7 @@ EntraOps can be updated without losing classification definition and files by us
 The cmdlet can be executed interactively, and changes must be pushed to your repository. This command updates the PowerShell module, workflow files and parameters in workflows based on "EntraOps.config" file.
 
 Currently, there is also a workflow named "Update-EntraOps" which can be executed on demand or run on scheduled basis (defined in EntraOps.config) and updates the PowerShell module only.
-I'm working on a way to integrate the update process for the workflow files to the pipeline. There are some restrictions to update workflows by another workflow which needs to be handled.
+I am working on a way to integrate the update process for the workflow files to the pipeline. There are some restrictions to update workflows by another workflow which needs to be handled.
 
 ### Disclaimer and License
 This tool is provided as-is, with no warranties.
