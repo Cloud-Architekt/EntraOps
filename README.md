@@ -7,6 +7,7 @@
   - [Executing EntraOps interactively](#executing-entraops-interactively)
     - [Examples of using cmdlets and filter classification data](#examples-of-using-cmdlets-and-filter-classification-data)
   - [Using EntraOps with GitHub](#using-entraops-with-github)
+    - [Parser for Custom Tables and WatchLists](#parser-for-custom-tables-and-watchlists)
     - [Examples to use EntraOps data in Unified SecOps Platform (Sentinel and XDR)](#examples-to-use-entraops-data-in-unified-secops-platform-sentinel-and-xdr)
     - [Classify privileged objects for target Enterprise Access Level and relation to user/device](#classify-privileged-objects-for-target-enterprise-access-level-and-relation-to-userdevice)
     - [Workbook for visualization of EntraOps classification data](#workbook-for-visualization-of-entraops-classification-data)
@@ -127,8 +128,10 @@ _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-Ent
 New-EntraOpsConfigFile -TenantName <TenantName>
 ```
 
-5. Optional: Create data collection rule and endpoint if you want to ingest data to custom table in Log Analytics/Microsoft Sentinel workspace.
+5. Optional: Create data collection rule and endpoint if you want to ingest data to custom table in Log Analytics or Microsoft Sentinel workspace.
 Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-portal#create-data-collection-endpoint) to configure a data collection endpoint, custom table and transformation rule.
+
+    _Recommendation: There's a limitation of 10 KB for a single WatchList entry. This limit can be exceeded in case of a high number of property items (e.g., classification or owner properties). Therefore, I can strongly recommended to choose Custom tables in large environment. If you are choosing WatchList as ingestion option, keep an eye on the deployment logs for any warnings of this limitation. Entries will not be added if the limit has been exceeded._
 
 1. Review and customize the EntraOps.config file based on your requirements.
    * `TenantId` and `TenantName` should be already updated based on the provided parameters to create the config file. `ClientId` will be automatically updated by running the cmdlet `New-EntraOpsWorkloadIdentity`.
@@ -146,6 +149,22 @@ New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential
 ```powershell 
 Update-EntraOpsRequiredWorkflowParameters
 ```
+
+### Parser for Custom Tables and WatchLists
+I've built a parser which ensure a standardized schema for EntraOps data across the various ingestion options.
+This allows you to use the same queries and workbooks, regardless if you have used WatchLists or Custom Table.
+
+Deploy the according parser for your ingestion option.
+_Recommendation: Choose the parser for "Custom table" if you have enabled ingestion to both targets._
+
+* **Parser for Custom Table (Microsoft Log Analytics/Sentinel Workspace)**
+
+    [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FParser%2FPrivilegedEAM_CustomTable.json)
+    
+* **Parser for Custom Table (Microsoft Sentinel Watchlists)**
+  
+    [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FParser%2FPrivilegedEAM_WatchLists.json)
+
 
 ### Examples to use EntraOps data in Unified SecOps Platform (Sentinel and XDR)
 
@@ -226,10 +245,11 @@ In addition, custom security attributes will be also used to build a correlation
 ### Workbook for visualization of EntraOps classification data
 The following Workbook can be use to check users, workload identities, groups and their classified role assignments by EntraOps. It allows you also to filter for hybrid/cloud users and/or specific tiered administration level from by the classification of object or role assignments.
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Overview.json.json)
-
 _Pre-requisite: EntraOps data has been ingested to WatchList or Custom Table and the associated Parser has been deployed._
 
+* **EntraOps Privileged EAM - Overview**
+  
+  [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Overview.json)
 
 
 ### Update EntraOps PowerShell Module and CI/CD (GitHub Actions)

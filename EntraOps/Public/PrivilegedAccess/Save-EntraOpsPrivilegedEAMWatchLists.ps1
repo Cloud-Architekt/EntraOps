@@ -66,10 +66,10 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
     )
 
     Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment
-
+    $NewPrincipalsWatchlistItems = New-Object System.Collections.ArrayList
+    $NewRoleAssignmentsWatchlistItems = New-Object System.Collections.ArrayList
     foreach ($Rbac in $RbacSystems) {
-        $NewPrincipalsWatchlistItems = New-Object System.Collections.ArrayList
-        $NewRoleAssignmentsWatchlistItems = New-Object System.Collections.ArrayList
+   
         try {
             $Privileges = Get-Content -Path "$($ImportPath)/$($Rbac)/$($Rbac).json" -ErrorAction Stop | ConvertFrom-Json -Depth 10
         }
@@ -88,31 +88,31 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     "ObjectAdminTierLevel"          = $Privilege.ObjectAdminTierLevel
                     "ObjectAdminTierLevelName"      = $Privilege.ObjectAdminTierLevelName
                     "OnPremSynchronized"            = $Privilege.OnPremSynchronized
-                    "AssignedAdministrativeUnits"   = $Privilege.AssignedAdministrativeUnits | ConvertTo-Json -Depth 10 -Compress
+                    "AssignedAdministrativeUnits"   = $Privilege.AssignedAdministrativeUnits | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "RestrictedManagementByRAG"     = $Privilege.RestrictedManagementByRAG -eq $true
                     "RestrictedManagementByAadRole" = $Privilege.RestrictedManagementByAadRole -eq $true
                     "RestrictedManagementByRMAU"    = $Privilege.RestrictedManagementByRMAU -eq $True
                     "RoleSystem"                    = $Rbac
-                    "Classification"                = $Privilege.Classification | ConvertTo-Json -Depth 10 -Compress
-                    "Owners"                        = $Privilege.Owners | ConvertTo-Json -Depth 10 -Compress
-                    "OwnedObjects"                  = $Privilege.OwnedObjects | ConvertTo-Json -Depth 10 -Compress
-                    "OwnedDevices"                  = $Privilege.OwnedDevices | ConvertTo-Json -Depth 10 -Compress
-                    "AssociatedWorkAccount"         = $Privilege.AssociatedWorkAccount | ConvertTo-Json -Depth 10 -Compress
-                    "AssociatedPawDevice"           = $Privilege.AssociatedPawDevice | ConvertTo-Json -Depth 10 -Compress
+                    "Classification"                = $Privilege.Classification | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    "Owners"                        = $Privilege.Owners | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    "OwnedObjects"                  = $Privilege.OwnedObjects | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    "OwnedDevices"                  = $Privilege.OwnedDevices | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    "AssociatedWorkAccount"         = $Privilege.AssociatedWorkAccount | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    "AssociatedPawDevice"           = $Privilege.AssociatedPawDevice | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "Tags"                          = @("$($Rbac)", "Privileged Principal", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress
                     "UniqueId"                      = "$($Privilege.ObjectId)-$($Rbac)"
                 }
                 $NewPrincipalsWatchlistItems.Add( $CurrentPrincipalItem ) | Out-Null
 
                 foreach ( $RoleAssignment in $Privilege.RoleAssignments) {
-                    $RoleAssignment | Add-Member -MemberType NoteProperty -Name "Classification" -Value "$($RoleAssignment.Classification | ConvertTo-Json -Depth 10 -Compress)" -Force
+                    $RoleAssignment | Add-Member -MemberType NoteProperty -Name "Classification" -Value "$($RoleAssignment.Classification | ConvertTo-Json -Depth 10 -Compress -AsArray)" -Force
                     if ($null -eq $RoleAssignment.TransitiveByObjectId ) {
                         $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)" -Force
                     }
                     else {
                         $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)_$($RoleAssignment.TransitiveByObjectId)" -Force
                     }
-                    $TagValue = @("$($Rbac)", "Classification", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress
+                    $TagValue = @("$($Rbac)", "Classification", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress -AsArray
                     $RoleAssignment | Add-Member -MemberType NoteProperty -Name "RoleSystem" -Value $Rbac -Force
                     $RoleAssignment | Add-Member -MemberType NoteProperty -Name "Tags" -Value $TagValue -Force
                     $NewRoleAssignmentsWatchlistItems.Add( $RoleAssignment ) | Out-Null

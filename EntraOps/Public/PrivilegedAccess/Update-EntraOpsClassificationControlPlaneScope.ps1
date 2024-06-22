@@ -130,7 +130,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
         else {
             $EntraOpsPrivilegedObjects = $EntraOpsAllPrivilegedObjects | Where-Object { $_.ObjectAdminTierLevelName -eq "ControlPlane" -or $_.Classification.AdminTierLevelName -contains "ControlPlane" } `
             | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices
-    
+
             $PrivilegedObjects += $EntraOpsPrivilegedObjects
         }
     }
@@ -164,7 +164,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
             try {
                 if ($null -ne (Get-AzADServicePrincipal -ObjectId $_.principalId -ErrorAction Stop | Out-Null)) {
                     Get-EntraOpsPrivilegedEntraObject -AadObjectId $_.principalId | Where-Object { $_.ObjectType -ne "unknown" }`
-                    | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectSignInName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices    
+                    | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectSignInName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices
                 }
             }
             catch {
@@ -325,9 +325,9 @@ function Update-EntraOpsClassificationControlPlaneScope {
         $ScopeNamePrivilegedServicePrincipalsJSON = $ScopeNamePrivilegedServicePrincipals | Sort-Object | Select-Object -Unique | ConvertTo-Json
         $ScopeNamePrivilegedServicePrincipalsJSON = $ScopeNamePrivilegedServicePrincipalsJSON.Replace('[', '').Replace(']', '')
         $ScopeNamePrivilegedServicePrincipalsJSON = $ScopeNamePrivilegedServicePrincipalsJSON -creplace '\s+', ' '
-    }        
+    }
     $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedServicePrincipals>', $ScopeNamePrivilegedServicePrincipalsJSON)
-    
+
     #endregion
 
     $EntraIdRoleClassification = $EntraIdRoleClassification | ConvertFrom-Json -Depth 10 | ConvertTo-Json -Depth 10 | Out-File -FilePath $EntraIdCustomizedClassificationFile -Force

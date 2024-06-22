@@ -18,7 +18,7 @@
     Use global exclusion list for classification. Default is $true. Global exclusion list is stored in "./Classification/Global.json".
 #>
 
-function Get-EntraOpsPrivilegedEamEntraId {   
+function Get-EntraOpsPrivilegedEamEntraId {
 
     [cmdletbinding()]
     param (
@@ -37,7 +37,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
 
     Write-Host "Get Entra ID role assignments..."
 
-    # Check if classification file custom and/or template file exists, choose custom template for tenant if available
+    #region Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_AadResources.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
         $AadClassificationFilePath = "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)"
@@ -48,8 +48,9 @@ function Get-EntraOpsPrivilegedEamEntraId {
     else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
     }
+    #endregion
 
-    # Get all role assignments and global exclusions
+    #region Get all role assignments and global exclusions
     if ($SampleMode -eq $True) {
         $AadRbacAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementAssignments.json" | ConvertFrom-Json -Depth 10
     }
@@ -92,7 +93,6 @@ function Get-EntraOpsPrivilegedEamEntraId {
 
     Write-Host "Checking if RBAC role action and scope is defined in JSON classification..."
     $AadResourcesByClassificationJSON = Expand-EntraOpsPrivilegedEAMJsonFile -FilePath "$($AadClassificationFilePath)" | select-object EAMTierLevelName, EAMTierLevelTagValue, Category, Service, RoleAssignmentScopeName, ExcludedRoleAssignmentScopeName, RoleDefinitionActions, ExcludedRoleDefinitionActions
-    #endregion
 
     # Get all role actions for Entra ID roles, role actions are defined tenant wide
     if ($SampleMode -eq $True) {
@@ -101,8 +101,9 @@ function Get-EntraOpsPrivilegedEamEntraId {
     else {
         $AllAadRoleActions = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions" -OutputType PSObject)
     }
+    #endregion
 
-    # Apply classification for all role definitions
+    #region Apply classification for all role definitions
     $AadRbacClassification = foreach ($CurrentAadRbacClassification in $AadRbacClassifications) {
         $CurrentRoleDefinitionName = $CurrentAadRbacClassification.RoleDefinitionName
         $AadRoleScope = $CurrentAadRbacClassification.RoleAssignmentScopeId
@@ -128,21 +129,23 @@ function Get-EntraOpsPrivilegedEamEntraId {
             foreach ($AadRoleAction in $AadRoleActions.rolePermissions.allowedResourceActions) {
                 $ClassifiedAadRbacRoleWithActions += $AadRoleActionsInJsonDefinition | Where-Object { $AadRoleAction -in $_.RoleDefinitionActions }
             }
-            $ClassifiedAadRbacRoleWithActions = $ClassifiedAadRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
-            $CurrentAadRbacClassification.Classification = @()
+            $ClassifiedAadRbacRoleWithActions = $ClassifiedAadRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service | Sort-Object EAMTierLevelTagValue, Service
+            $CurrentAadRbacClassification.Classification = New-Object System.Collections.ArrayList
             $ClassifiedAadRbacRoleWithActions | ForEach-Object {
-                $CurrentAadRbacClassification.Classification +=
-                [PSCustomObject]@{
+                $ClassifiedRoleAction = [PSCustomObject]@{
                     'AdminTierLevel'     = $_.EAMTierLevelTagValue
                     'AdminTierLevelName' = $_.EAMTierLevelName
                     'Service'            = $_.Service
                     'TaggedBy'           = "JSONwithAction"
                 }
+                $CurrentAadRbacClassification.Classification.Add( $ClassifiedRoleAction ) | Out-Null
             }
         }
-        $CurrentAadRbacClassification
+        $CurrentAadRbacClassification | sort-object AdminTierLevel, AdminTierLevelName, Service
     }
+    #endregion
 
+    #region Apply classification on all principals
     Write-Host "Classifiying of all assigned privileged users and groups to Entra ID roles..."
     $AadRbacClassifiedObjects = $AadRbacClassification | select-object -Unique ObjectId, ObjectType | ForEach-Object {
         if ($null -ne $_.ObjectId) {
@@ -192,6 +195,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
             }
         }
     }
+    #endregion
     $EamEntraId = $AadRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
     $EamEntraId | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 }
