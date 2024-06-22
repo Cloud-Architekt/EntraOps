@@ -27,7 +27,7 @@ function Update-EntraOps {
         [Object]$TargetUpdateFolders = @("./.github", "./EntraOps", "./Parsers", "./Queries", "./Samples", "./Workbooks")
         ,
         [Parameter(Mandatory = $False)]
-        [System.String]$TemporaryUpdateFolder = "../latest-version"
+        [System.String]$TemporaryUpdateFolder = "TmpUpdate"
     )
 
     $ErrorActionPreference = "Stop"
@@ -48,15 +48,6 @@ function Update-EntraOps {
             }
             catch {
                 Write-Error "Failed to remove folder $($TargetUpdateFolder). Error: $_"
-            }
-        }
-        else {
-            Write-Output "Creating folder $TargetUpdateFolder..."
-            try {
-                New-Item -Path $TargetUpdateFolder -ItemType Directory
-            }
-            catch {
-                Write-Error "Failed to create folder $($TargetUpdateFolder). Error: $_"
             }
         }
 
