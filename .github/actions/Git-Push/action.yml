@@ -14,7 +14,7 @@ runs:
         git config pull.rebase false
         git add --all
         git add -A
-        git diff-index --quiet HEAD || git commit -m "$GITHUB_WORKFLOW $GITHUB_JOB"
+        git diff-index --quiet HEAD || git commit -m "$GITHUB_WORKFLOW $GITHUB_RUN_NUMBER GITHUB_EVENT_NAME"
         git push
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
