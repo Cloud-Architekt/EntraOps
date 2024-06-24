@@ -143,7 +143,7 @@ Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us
 
 7. Create an application registration with required permissions (Global Admin role required). All necessary permissions on Microsoft Graph API permissions but also Azure RBAC roles for ingestion (if configured in `EntraOps.config`) will be added.
 ```powershell
-New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential -GitHubOrg "<YourGitHubUser/Org>" -GitHubRepo "EntraOps-<TenantName>" -FederatedEntityType "Branch" -FederatedEntityName "main"
+New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential -GitHubOrg "<YourGitHubUser/Org>" -GitHubRepo "<YourRepoName (e.g., EntraOps-Contoso)> -FederatedEntityType "Branch" -FederatedEntityName "main"
 ```
 
 8. Update GitHub workflow definition based on the definitions in EntraOps.config
@@ -159,11 +159,11 @@ This allows you to use the same queries and workbooks, regardless of whether you
 Deploy the according parser for your ingestion option.
 _Recommendation: Choose the parser for "Custom table" if you have enabled ingestion to both targets._
 
-* **Parser for Custom Table (Microsoft Log Analytics/Sentinel Workspace)**
+* **Parser for Custom Table (Log Analytics/Sentinel Workspace)**
 
     [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FParsers%2FPrivilegedEAM_CustomTable.json)
     
-* **Parser for Custom Table (Microsoft Sentinel Watchlists)**
+* **Parser for Microsoft Sentinel Watchlists**
   
     [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FParsers%2FPrivilegedEAM_WatchLists.json)
 
