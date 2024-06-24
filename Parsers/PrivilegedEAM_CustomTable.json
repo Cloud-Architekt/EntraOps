@@ -5,7 +5,7 @@
         "Workspace": {
             "type": "string",
             "metadata": {
-                "description": "The Microsoft Sentinel workspace into which the function will be deployed. Has to be in the selected Resource Group."
+                "description": "The Microsoft Sentinel workspace name into which the function will be deployed. Has to be in the selected Resource Group."
             }
         },
         "WorkspaceRegion": {
