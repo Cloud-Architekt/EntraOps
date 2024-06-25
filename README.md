@@ -110,19 +110,23 @@ Get-EntraOpsPrivilegedEamEntraId | Where-Object { $_.OnPremSynchronized -eq $tru
 Get-EntraOpsPrivilegedEAMResourceApps
 ```
 
-
 ## Using EntraOps with GitHub
+<a href="https://github.com/Cloud-Architekt/cloud-architekt.github.io/blob/master/assets/images/entraops/setup_1-ghconfig.gif" target="_blank"><img src="https://github.com/Cloud-Architekt/cloud-architekt.github.io/blob/master/assets/images/entraops/setup_1-ghconfig.gif" width="1000" /></a>
+
+_ All steps to use automated setup for configuring GitHub and Microsoft Entra Workload ID for EntraOps_
+<br>
+
 1. Create repository from this template
 Choose private repository to keep data internal
 
-2. Clone your new EntraOps repository to your client or use GitHub Codespace. Devcontainer is available to load the required dependencies.
+1. Clone your new EntraOps repository to your client or use GitHub Codespace. Devcontainer is available to load the required dependencies.
 
-3. Import EntraOps PowerShell Module in PowerShell Core
+2. Import EntraOps PowerShell Module in PowerShell Core
 ```powershell
 Import-Module ./EntraOps
 ```
 
-4. Create a new EntraOps.config File and update the settings based on your parameters and use case
+1. Create a new EntraOps.config File and update the settings based on your parameters and use case
 _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-EntraOpsConfigFile` if you are using GitHub Codespaces or Cloud Shell to perform Device Authentication._
 
 ```powershell
