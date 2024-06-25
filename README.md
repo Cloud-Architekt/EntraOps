@@ -96,17 +96,20 @@ $PrivIdentities = Get-EntraOpsPrivilegedEamEntraId
 
 - All Identities in Entra ID with Control Plane Permissions
 ```powershell
-Get-EntraOpsPrivilegedEamEntraId | Where-Object { $_.RoleAssignments.Classification.AdminTierLevelName -contains "ControlPlane" } | ft
+Get-EntraOpsPrivilegedEamEntraId `
+| Where-Object { $_.RoleAssignments.Classification.AdminTierLevelName -contains "ControlPlane" } | ft
 ```
 
 - Get a list of all privileged guests and applications
 ```powershell
-Get-EntraOpsPrivilegedEamEntraId | Where-Object { $_.ObjectSubType -ne "Member" -and $_.ObjectType -ne "Group" } | ft
+Get-EntraOpsPrivilegedEamEntraId `
+| Where-Object { $_.ObjectSubType -ne "Member" -and $_.ObjectType -ne "Group" } | ft
 ```
 
 - List of all privileged hybrid identities
 ```powershell
-Get-EntraOpsPrivilegedEamEntraId | Where-Object { $_.OnPremSynchronized -eq $true -and $_.RoleAssignments.Classification.AdminTierLevelName -contains "ControlPlane" }
+Get-EntraOpsPrivilegedEamEntraId `
+| Where-Object { $_.OnPremSynchronized -eq $true -and $_.RoleAssignments.Classification.AdminTierLevelName -contains "ControlPlane" }
 ```
 
 - Display all privileged workload identities with Graph API permissions
@@ -266,52 +269,52 @@ EntraOps offers an optional feature (`ApplyAutomatedControlPlaneScopeUpdate`) to
 ### Azure Resource Graph
 Included "PrivilegedRolesFromAzGraph" in the property "PrivilegedObjectClassificationSource" of the EntraOps.config file allows to gather privileged role assignments from the Azure Resource Graph. The property "AzureHighPrivilegedRoles" and "AzureHighPrivilegedScopes" allows you to define which Azure RBAC Roles and Scope will be considered as Control Plane scope. Every delegation with a scoped role assignment in Entra ID to the principal (Azure RBAC role member) will be identified as Control Plane. For example, Group Administrator of the Entra ID security group which has been assigned to the "Owner" role on the Tenant Root Group. The following Resource Graph query will be used (parameter "%AzureHighPrivilegedRoles%" and the Scope will be replaced by the value in the EntraOps.config file)
 
-    ```kusto
-    AuthorizationResources
-    | where type =~ "microsoft.authorization/roleassignments"
-    | extend principalType = tostring(properties["principalType"])
-    | extend principalId = tostring(properties["principalId"])
-    | extend roleDefinitionId = tolower(tostring(properties["roleDefinitionId"]))
-    | extend scope = tolower(tostring(properties["scope"]))
-    | where isnotempty(scope)
-    | join kind=inner ( AuthorizationResources
-    | where type =~ "microsoft.authorization/roledefinitions"
-    | extend roleDefinitionId = tolower(id)
-    | extend Scope = tolower(properties.assignableScopes)
-    | extend RoleName = (properties.roleName)
-    | where RoleName in (%AzureHighPrivilegedRoles%)
-    ) on roleDefinitionId
-    | distinct principalId, principalType
-    ```        
+```kusto
+AuthorizationResources
+| where type =~ "microsoft.authorization/roleassignments"
+| extend principalType = tostring(properties["principalType"])
+| extend principalId = tostring(properties["principalId"])
+| extend roleDefinitionId = tolower(tostring(properties["roleDefinitionId"]))
+| extend scope = tolower(tostring(properties["scope"]))
+| where isnotempty(scope)
+| join kind=inner ( AuthorizationResources
+| where type =~ "microsoft.authorization/roledefinitions"
+| extend roleDefinitionId = tolower(id)
+| extend Scope = tolower(properties.assignableScopes)
+| extend RoleName = (properties.roleName)
+| where RoleName in (%AzureHighPrivilegedRoles%)
+) on roleDefinitionId
+| distinct principalId, principalType
+```
 
 ### Microsoft Security Exposure Management
 Critical assets defined in Microsoft Security Exposure Management (XSPM) can be integrated by using the value "PrivilegedEdgesFromExposureManagement" in the property "PrivilegedObjectClassificationSource". You can also filter by using "ExposureCriticalityLevel" which "tier" classification in the XSPM critical asset management will be included. The following hunting query will be used to identify high-privileged nodes (parameter "%CriticalLevel%" will be replaced by the value in the EntraOps.config file):
 
-    ```kusto
-    let Tier0CloudResources = ExposureGraphNodes
-        | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeProperties.rawData.environmentName == "Azure");
-    let Tier0EntraObjects = ExposureGraphNodes
-        | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeProperties.rawData.primaryProvider == "AzureActiveDirectory");
-    let Tier0Devices = ExposureGraphNodes
-        | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeLabel == "device") and (NodeProperties.rawData.isAzureADJoined == true);
-    let Tier0Assets = union Tier0EntraObjects, Tier0Devices, Tier0CloudResources | project NodeId;
-    let SensitiveRelation = dynamic(["has permissions to","can authenticate as","has role on","has credentials of","affecting", "can authenticate as", "Member of", "frequently logged in by"]);
-    // Devices are not supported yet, no AadObject Id available in ExposureGraphNodes, DeviceInfo shows only AadDeviceId
-    let FilteredNodes = dynamic(["user","group","serviceprincipal","managedidentity","device"]);
-    ExposureGraphEdges
-    | where EdgeLabel in (SensitiveRelation) and (TargetNodeId in (Tier0Assets) or SourceNodeId in (Tier0Assets)) and SourceNodeLabel in (FilteredNodes)
-    | join kind=leftouter ( ExposureGraphNodes
-        | mv-expand parse_json(EntityIds)
-        | where parse_json(EntityIds).type == "AadObjectId"
-        | extend AadObjectId = tostring(parse_json(EntityIds).id)
-        | extend TenantId = extract("tenantid=([\\w-]+)", 1, AadObjectId)
-        | extend ObjectId = extract("objectid=([\\w-]+)", 1, AadObjectId)
-        | project ObjectDisplayName = NodeName, ObjectType = NodeLabel, ObjectId, NodeId) on $left.SourceNodeId == $right.NodeId
-    | where isnotempty(ObjectId)
-    | summarize make_set(EdgeLabel), make_set(TargetNodeName) by ObjectDisplayName, SourceNodeName, ObjectType, ObjectId, NodeId
-    ```
+```kusto
+let Tier0CloudResources = ExposureGraphNodes
+    | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeProperties.rawData.environmentName == "Azure");
+let Tier0EntraObjects = ExposureGraphNodes
+    | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeProperties.rawData.primaryProvider == "AzureActiveDirectory");
+let Tier0Devices = ExposureGraphNodes
+    | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeLabel == "device") and (NodeProperties.rawData.isAzureADJoined == true);
+let Tier0Assets = union Tier0EntraObjects, Tier0Devices, Tier0CloudResources | project NodeId;
+let SensitiveRelation = dynamic(["has permissions to","can authenticate as","has role on","has credentials of","affecting", "can authenticate as", "Member of", "frequently logged in by"]);
+// Devices are not supported yet, no AadObject Id available in ExposureGraphNodes, DeviceInfo shows only AadDeviceId
+let FilteredNodes = dynamic(["user","group","serviceprincipal","managedidentity","device"]);
+ExposureGraphEdges
+| where EdgeLabel in (SensitiveRelation) and (TargetNodeId in (Tier0Assets) or SourceNodeId in (Tier0Assets)) and SourceNodeLabel in (FilteredNodes)
+| join kind=leftouter ( ExposureGraphNodes
+    | mv-expand parse_json(EntityIds)
+    | where parse_json(EntityIds).type == "AadObjectId"
+    | extend AadObjectId = tostring(parse_json(EntityIds).id)
+    | extend TenantId = extract("tenantid=([\\w-]+)", 1, AadObjectId)
+    | extend ObjectId = extract("objectid=([\\w-]+)", 1, AadObjectId)
+    | project ObjectDisplayName = NodeName, ObjectType = NodeLabel, ObjectId, NodeId) on $left.SourceNodeId == $right.NodeId
+| where isnotempty(ObjectId)
+| summarize make_set(EdgeLabel), make_set(TargetNodeName) by ObjectDisplayName, SourceNodeName, ObjectType, ObjectId, NodeId
+```
 
-    As already described, any Entra ID role assignment on scope of the critical assets in XSPM will be classified as Control Plane.
+As already described, any Entra ID role assignment on scope of the critical assets in XSPM will be classified as Control Plane.
 
 ### Adjusted Control Plane Scope by using Restricted Management and Role Assignments
 There are a couple of integrated protection capabilities for privileged assets in Entra ID to avoid management from lower privileged roles.
