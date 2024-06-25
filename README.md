@@ -113,25 +113,25 @@ Get-EntraOpsPrivilegedEAMResourceApps
 ## Using EntraOps with GitHub
 <a href="https://github.com/Cloud-Architekt/cloud-architekt.github.io/blob/master/assets/images/entraops/setup_1-ghconfig.gif" target="_blank"><img src="https://github.com/Cloud-Architekt/cloud-architekt.github.io/blob/master/assets/images/entraops/setup_1-ghconfig.gif" width="1000" /></a>
 
-_ All steps to use automated setup for configuring GitHub and Microsoft Entra Workload ID for EntraOps_
+_All steps to use automated setup for configuring GitHub and Microsoft Entra Workload ID for EntraOps_
 <br>
 
 1. Create repository from this template
 Choose private repository to keep data internal
 
-1. Clone your new EntraOps repository to your client or use GitHub Codespace. Devcontainer is available to load the required dependencies.
+2. Clone your new EntraOps repository to your client or use GitHub Codespace. Devcontainer is available to load the required dependencies.
 
-2. Import EntraOps PowerShell Module in PowerShell Core
-```powershell
-Import-Module ./EntraOps
-```
+3. Import EntraOps PowerShell Module in PowerShell Core
+    ```powershell
+    Import-Module ./EntraOps
+    ```
 
-1. Create a new EntraOps.config File and update the settings based on your parameters and use case
+4. Create a new EntraOps.config File and update the settings based on your parameters and use case
 _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-EntraOpsConfigFile` if you are using GitHub Codespaces or Cloud Shell to perform Device Authentication._
 
-```powershell
-New-EntraOpsConfigFile -TenantName <TenantName>
-```
+    ```powershell
+    New-EntraOpsConfigFile -TenantName <TenantName>
+    ```
 
 5. Optional: Create data collection rule and endpoint if you want to ingest data to custom table in Log Analytics or Microsoft Sentinel workspace.
 Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-portal#create-data-collection-endpoint) to configure a data collection endpoint, custom table and transformation rule.
@@ -146,14 +146,14 @@ Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us
    * Enable and update the following parameters if you want to ingest classification data to Custom Tables in Microsoft Sentinel/Log Analytics Workspace (`IngestToLogAnalytics`) or Microsoft Sentinel WatchLists (`IngestToWatchLists`). You need to add the required parameters of the workspace and/or data collection endpoints.
 
 7. Create an application registration with required permissions (Global Admin role required). All necessary permissions on Microsoft Graph API permissions but also Azure RBAC roles for ingestion (if configured in `EntraOps.config`) will be added.
-```powershell
-New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential -GitHubOrg "<YourGitHubUser/Org>" -GitHubRepo "<YourRepoName (e.g., EntraOps-Contoso)> -FederatedEntityType "Branch" -FederatedEntityName "main"
-```
+    ```powershell
+    New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential -GitHubOrg "<YourGitHubUser/Org>" -GitHubRepo "<YourRepoName (e.g., EntraOps-Contoso)> -FederatedEntityType "Branch" -FederatedEntityName "main"
+    ```
 
 8. Update GitHub workflow definition based on the definitions in EntraOps.config
-```powershell 
-Update-EntraOpsRequiredWorkflowParameters
-```
+    ```powershell 
+    Update-EntraOpsRequiredWorkflowParameters
+    ```
 
 ## EntraOps Integration in Microsoft Sentinel
 ### Parser for Custom Tables and WatchLists
@@ -258,10 +258,10 @@ In addition, custom security attributes will be also used to build a correlation
 
 ## Update EntraOps PowerShell Module and CI/CD (GitHub Actions)
 EntraOps can be updated without losing classification definition and files by using the cmdlet `Update-EntraOps`.
-The cmdlet can be executed interactively, and changes must be pushed to your repository. This command updates the PowerShell module, workflow files and parameters in workflows based on "EntraOps.config" file.
+The cmdlet can be executed interactively, and changes must be pushed to your repository. This command updates the PowerShell module, workflow files, repository resources (incl. workbooks and parsers) and parameters in workflows based on "EntraOps.config" file.
 
 Currently, there is also a workflow named "Update-EntraOps" which can be executed on demand or run on scheduled basis (defined in EntraOps.config) and updates the PowerShell module only.
-I am working on a way to integrate the update process for the workflow files to the pipeline. There are some restrictions to update workflows by another workflow which needs to be handled.
+There are some restrictions to update workflows by another workflow which makes it hard to update the actions automatically.
 
 ## Disclaimer and License
 This tool is provided as-is, with no warranties.
