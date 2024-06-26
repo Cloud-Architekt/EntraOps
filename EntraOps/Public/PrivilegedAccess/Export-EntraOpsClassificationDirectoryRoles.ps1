@@ -14,6 +14,9 @@
 .PARAMETER IncludeCustomRoles
     Include custom directory roles in the export. Default is $False.
 
+.PARAMETER ShowOnly
+    Show the output in the console instead of exporting it to a file.
+
 .PARAMETER ExportFile
     Path to the JSON file which should be exported.
 
@@ -40,6 +43,9 @@ function Export-EntraOpsClassificationDirectoryRoles {
         ,
         [Parameter(Mandatory = $false)]
         $Exportfile = ".\Classification\Classification_EntraIdDirectoryRoles.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [bool]$ShowOnly = $false           
     )
 
     # Get EntraOps Classification
@@ -54,7 +60,7 @@ function Export-EntraOpsClassificationDirectoryRoles {
     else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
     }
-    $Classification = Get-Content -Path $(AadClassificationFilePath) | ConvertFrom-Json -Depth 10
+    $Classification = Get-Content -Path $($AadClassificationFilePath) | ConvertFrom-Json -Depth 10
 
     # Single Classification (highest tier level only)
     Write-Output "Query directory role templates for mapping ID to name and further details"
@@ -117,5 +123,11 @@ function Export-EntraOpsClassificationDirectoryRoles {
     }
 
     $DirectoryRoles = $DirectoryRoles | sort-object RoleName
-    $DirectoryRoles | ConvertTo-Json -Depth 10 | Out-File $ExportFile -Force
+    
+    if ($ShowOnly -eq $true) {
+        $DirectoryRoles
+    }
+    else {
+        $DirectoryRoles | ConvertTo-Json -Depth 10 | Out-File $ExportFile -Force
+    }    
 }

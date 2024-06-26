@@ -8,17 +8,19 @@
     - [Import module and sign-in options](#import-module-and-sign-in-options)
     - [Export and collecting EntraOps data](#export-and-collecting-entraops-data)
     - [Filter on classification in EntraOps](#filter-on-classification-in-entraops)
-    - [Filter on classified objects in combination of object details](#filter-on-classified-objects-in-combination-of-object-details)
+    - [Filter on classified objects and object details](#filter-on-classified-objects-and-object-details)
   - [Using EntraOps with GitHub](#using-entraops-with-github)
   - [EntraOps Integration in Microsoft Sentinel](#entraops-integration-in-microsoft-sentinel)
     - [Parser for Custom Tables and WatchLists](#parser-for-custom-tables-and-watchlists)
     - [Examples to use EntraOps data in Unified SecOps Platform (Sentinel and XDR)](#examples-to-use-entraops-data-in-unified-secops-platform-sentinel-and-xdr)
     - [Workbook for visualization of EntraOps classification data](#workbook-for-visualization-of-entraops-classification-data)
   - [Classify privileged objects by Custom Security Attributes](#classify-privileged-objects-by-custom-security-attributes)
+  - [Classification of Identity Governance delegation and roles](#classification-of-identity-governance-delegation-and-roles)
   - [Automatic updated Control Plane Scope by EntraOps and other data sources](#automatic-updated-control-plane-scope-by-entraops-and-other-data-sources)
     - [Azure Resource Graph](#azure-resource-graph)
     - [Microsoft Security Exposure Management](#microsoft-security-exposure-management)
     - [Adjusted Control Plane Scope by using Restricted Management and Role Assignments](#adjusted-control-plane-scope-by-using-restricted-management-and-role-assignments)
+    - [Why were this classification chosen for the role?](#why-were-this-classification-chosen-for-the-role)
   - [Update EntraOps PowerShell Module and CI/CD (GitHub Actions)](#update-entraops-powershell-module-and-cicd-github-actions)
   - [Disclaimer and License](#disclaimer-and-license)
 
@@ -60,6 +62,7 @@ EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline 
 ## Quickstarts
 
 ## Executing EntraOps interactively
+A complete list of all existing PowerShell query templates are available as YAML file in the [Queries](./Queries/PowerShell/PrivilegedEAM.yaml) folder.
 
 ### Import module and sign-in options
 
@@ -125,7 +128,7 @@ $EntraOpsData | Where-Object {$_.RoleSystem -eq "EntraID"} `
 | Where-Object {$_.RoleType -eq "CustomRole" -and $_.Classification.AdminTierLevelName -contains "ControlPlane"}
 ```
 
-### Filter on classified objects in combination of object details
+### Filter on classified objects and object details
 Administrative Units with assigned privileged objects
 ```powershell
 $EntraIdRoles | Select-Object -ExpandProperty AssignedAdministrativeUnits `
@@ -137,7 +140,7 @@ External users with privileged role assignments
 $EntraOpsData | Where-Object { $_.ObjectSubType -eq "Guest"}
 ```
 
-Hybrid identities with privileges (exl. Directory Synchronization Service Account)
+Hybrid identities with privileges (excl. Directory Synchronization Service Account)
 ```powershell
 $EntraIdRoles | Where-Object { $_.OnPremSynchronized -eq $true `
   -and $_.RoleAssignments.RoleDefinitionName -notcontains "Directory Synchronization Accounts" }
@@ -195,15 +198,15 @@ _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-Ent
     New-EntraOpsConfigFile -TenantName <TenantName>
     ```
 
-5. Optional: Create data collection rule and endpoint if you want to ingest data to custom table in Log Analytics or Microsoft Sentinel workspace.
-Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-portal#create-data-collection-endpoint) to configure a data collection endpoint, custom table and transformation rule.
+5. Optional: Create a data collection rule and endpoint if you want to ingest data to custom table in Log Analytics or Microsoft Sentinel workspace.
+Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-portal#create-data-collection-endpoint) to configure a data collection endpoint, custom table, and transformation rule.
 
-    _Recommendation: There is a limitation of 10 KB for a single WatchList entry. This limit can be exceeded in the case of a high number of property items (e.g., classification or owner properties). Therefore, I can strongly recommend to choosing "Custom tables" in a large environment. If you are choosing WatchList as ingestion option, keep an eye on the deployment logs for any warnings of this limitation. Entries will not be added if the limit has been exceeded._
+    _Recommendation: There is a limitation of 10 KB for a single WatchList entry. This limit can be exceeded in the case of a high number of property items (e.g., classification or owner properties). Therefore, I can strongly recommend choosing "Custom tables" in a large environment. If you are choosing WatchList as ingestion option, keep an eye on the deployment logs for any warnings of this limitation. Entries will not be added if the limit has been exceeded._
 
 6. Review and customize the EntraOps.config file based on your requirements.
    * `TenantId` and `TenantName` should be already updated based on the provided parameters to create the config file. `ClientId` will be automatically updated by running the cmdlet `New-EntraOpsWorkloadIdentity`.
    * The default scheduled time for running the pull workflow will be a also enabled (`PullScheduledTrigger`) and defined (`PullScheduledCron`) in the config file. By default, the workflow to ingest data will be triggered right after the pull has been completed (by default value of `PushAfterPullWorkflowTrigger`).
-   * Automated updates for classification templates from AzurePrivilegedIAM repository (`AutomatedClassificationUpdate`) or Control Plane scope (`ApplyAutomatedControlPlaneScopeUpdate`) can be also enabled by parameters. Customization of classification updates or data source to identify Control Plane assets is also available from here.
+   * Automated updates for classification templates from AzurePrivilegedIAM repository (`AutomatedClassificationUpdate`) or Control Plane scope (`ApplyAutomatedControlPlaneScopeUpdate`) can also be enabled by parameters. Customization of classification updates or data source to identify Control Plane assets is also available from here.
    * Review the settings in the section `AutomatedEntraOpsUpdate` to configure an automated update of the EntraOps PowerShell module on demand or scheduled basis.
    * Enable and update the following parameters if you want to ingest classification data to Custom Tables in Microsoft Sentinel/Log Analytics Workspace (`IngestToLogAnalytics`) or Microsoft Sentinel WatchLists (`IngestToWatchLists`). You need to add the required parameters of the workspace and/or data collection endpoints.
 
@@ -318,6 +321,50 @@ In addition, custom security attributes will be also used to build a correlation
 - associatedSecureAdminWorkstation
 - associatedWorkAccount
 
+## Classification of Identity Governance delegation and roles
+Microsoft Entra Identity Governance allows to [delegate and grant roles](https://learn.microsoft.com/en-us/entra/id-governance/entitlement-management-delegate) on catalog-level. There are two methods of classification of those delegations in EntraOps.
+
+- TaggedBy "`JSONwithAction`": Define the classification by scope and role in the classification template file ["Classification_IdentityGovernance.json"]("./Classification/Templates/Classification_IdentityGovernance.json") manually. The schema is like the other classification templates and offers flexible tagging for your classification of Tiered Administration Level and Service.
+- TaggedBy "`AssignedCatalogObjects`": EntraOps is collecting the classification data of assigned resources in a catalog and applies the classification to the scope of the delegated role. This needs no further manual tagging and ensures that privileged or role-assignable groups will be identified in access packages and catalogs. Any delegation to this scope will get the `TierLevelDefinition` of the assigned resource.
+
+Example of Identity Governance role which has been classified by tagging of classification template file (JSON) and assigned objects:
+
+```json
+"RoleAssignments": [
+      {
+        "RoleAssignmentId": "58c673ff-dc05-4038-9a59-826e777289c2",
+        "RoleAssignmentScopeId": "/AccessPackageCatalog/5279fb65-7ccf-460b-8893-75087b855588",
+        "RoleAssignmentScopeName": "Privileged Access - Helpdesk Delegation to change passwords of admins",
+        "RoleAssignmentType": "Direct",
+        "RoleAssignmentSubType": "",
+        "PIMManagedRole": false,
+        "PIMAssignmentType": "Permanent",
+        "RoleDefinitionName": "Catalog owner",
+        "RoleDefinitionId": "ae79f266-94d4-4dab-b730-feca7e132178",
+        "RoleType": "BuiltIn",
+        "RoleIsPrivileged": null,
+        "ObjectId": "f742b7a6-d2b6-497d-9443-215505d5998a",
+        "ObjectType": "user",
+        "TransitiveByObjectId": "",
+        "TransitiveByObjectDisplayName": "",
+        "Classification": [
+          {
+            "AdminTierLevel": "0",
+            "AdminTierLevelName": "ControlPlane",
+            "Service": "Entitlement Management",
+            "TaggedBy": "JSONwithAction"
+          },
+          {
+            "AdminTierLevel": "0",
+            "AdminTierLevelName": "ControlPlane",
+            "Service": "Privileged User Management",
+            "TaggedBy": "AssignedCatalogObjects"
+          }
+        ]
+      }
+  ]
+```
+
 ## Automatic updated Control Plane Scope by EntraOps and other data sources
 EntraOps offers an optional feature (`ApplyAutomatedControlPlaneScopeUpdate`) to identify high-sensitive privileged assignments by other sources and adjustment of Control Plane scope based on using restricted management.
 
@@ -379,6 +426,11 @@ As already described, any Entra ID role assignment on scope of the critical asse
 There are a couple of integrated protection capabilities for privileged assets in Entra ID to avoid management from lower privileged roles.
 For example, Restricted Management AUs to protect sensitive security groups from membership changes by Group Administrators or reset passwords of users with Entra ID roles by Helpdesk administrators. EntraOps identifies if the objects are protected by these features or only scoped delegations (excluding privileged assets) have been assigned. In this case, the scope of Control Plane will be automatically updated and customized on your environment. For example: Group Administrator on directory level are not classified as "Control Plane" if all privileged groups with assignments on Control Plane privileges are protected by RMAU or using role-assignable groups.
 
+### Why were this classification chosen for the role?
+Do you like to know which role action is why "Global Reader" has been classified as "Control Plane"? What is the definition of Microsoft's `isPrivileged` classification on the related role action? [AzEntraIdRoleActionsAdvertizer](https://www.azadvertizer.net/azEntraIdRoleActionsAdvertizer.html) and [AzEntraApiPermissionsAdvertizer](https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html) allows to have a visualized view which role or API permission is assigned to a role and what is the specific Administration Tier Level in EntraOps.
+
+_Enter the role definition name in the "used by Roles" and choose the desired tier level in "EntraOps TierLevel" to filter for the associated role action. In this case, read BitLocker keys are classified as "Control Plane" in EntraOps and also flagged as "isPrivileged" by Microsoft._
+<a href="https://github.com/Cloud-Architekt/cloud-architekt.github.io/blob/master/assets/images/entraops/AzAdvertizer_IdentifyTierLevel.png" target="_blank"><img src="https://github.com/Cloud-Architekt/cloud-architekt.github.io/blob/master/assets/images/entraops/AzAdvertizer_IdentifyTierLevel.png" width="1000" /></a>
 
 ## Update EntraOps PowerShell Module and CI/CD (GitHub Actions)
 EntraOps can be updated without losing classification definition and files by using the cmdlet `Update-EntraOps`.

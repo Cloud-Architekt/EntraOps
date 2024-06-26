@@ -11,6 +11,9 @@
 .PARAMETER ExportFile
     Path to the JSON file which should be exported.
 
+.PARAMETER ShowOnly
+    Show the output in the console instead of exporting it to a file.
+
 .EXAMPLE
     Export all classified App Roles with list of authorized Graph API calls to the path "Classification\Classification_AppRoles.json"
     Export-EntraOpsClassificationAppRoles -IncludeAuthorizedApiCalls $true
@@ -26,6 +29,9 @@ function Export-EntraOpsClassificationAppRoles {
         ,
         [Parameter(Mandatory = $false)]
         $ExportFile = ".\Classification\Classification_AppRoles.json"
+        ,
+        [Parameter(Mandatory = $false)]
+        [bool]$ShowOnly = $false       
     )
 
     # Get EntraOps Classification
@@ -40,7 +46,7 @@ function Export-EntraOpsClassificationAppRoles {
     else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
     }
-    $Classification = Get-Content -Path $(AppRolesClassificationFilePath) | ConvertFrom-Json -Depth 10
+    $Classification = Get-Content -Path $($AppRolesClassificationFilePath) | ConvertFrom-Json -Depth 10
 
     # Get Graph API actions
     if ($IncludeAuthorizedApiCalls -eq $true) {
@@ -107,5 +113,11 @@ function Export-EntraOpsClassificationAppRoles {
     }
 
     $AppRoles = $AppRoles | sort-object AppRoleDisplayName
-    $AppRoles | ConvertTo-Json -Depth 10 | Out-File $ExportFile -Force
+    
+    if ($ShowOnly -eq $true) {
+        $AppRoles
+    }
+    else {
+        $AppRoles | ConvertTo-Json -Depth 10 | Out-File $ExportFile -Force
+    }
 }
