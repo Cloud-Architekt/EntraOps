@@ -1,0 +1,54 @@
+- Name: All privileged objects
+  Category: General
+  Query: |
+    $EntraOpsData = Get-EntraOpsPrivilegedEAM -RbacSystem ("EntraID", "IdentityGovernance","ResourceApps")
+- Name: All privileged objects with Control Plane permissions
+  Category: General
+  Query: |
+    $EntraOpsData | Where-Object { $_.RoleAssignments.Classification.AdminTierLevelName -contains "ControlPlane" }
+- Name: All privileged objects with permissions with related permissions to "Conditional Access"
+  Category: General
+  Query: |
+    $EntraOpsData | Where-Object { $_.RoleAssignments.Classification.Service -contains "Conditional Access" }
+- Name: All Entra ID Custom Roles with role actions which has been classified as "Control Plane"
+  Category: General
+  Query: |
+    $EntraOpsData | Where-Object { $_.RoleAssignments.Classification.Service -contains "Conditional Access" }
+- Name: Administrative Units with assigned privileged objects
+  Category: General
+  Query: |
+    $EntraIdRoles | Select-Object -ExpandProperty AssignedAdministrativeUnits `
+      | Select-Object -Unique displayName | Sort-Object displayName
+- Name: External users with privileged role assignments
+  Category: General
+  Query: |
+    $EntraOpsData | Where-Object { $_.ObjectSubType -eq "Guest"}
+- Name: Hybrid identities with privileges (exl. Directory Synchronization Service Account)
+  Category: General
+  Query: |
+    $EntraIdRoles | Where-Object { $_.OnPremSynchronized -eq $true `
+      -and $_.RoleAssignments.RoleDefinitionName -notcontains "Directory Synchronization Accounts" }
+- Name: Privileged objects (e.g., groups or service principals) with privileges and delegations by ownership
+  Category: General
+  Query: |
+    $EntraOpsData | Where-Object { $_.Owners -ne $null}
+- Name: Privileged objects without restricted management by assigning role-assignable group membership, Entra ID role or RMAU membership
+  Category: General
+  Query: |
+    $EntraOpsData `
+      | Where-Object {$_.RestrictedManagementByRAG -ne $True `
+        -and $_.RestrictedManagementByAadRole -ne $True `
+        -and $_.RestrictedManagementByRMAU -ne $True `
+        -and $_.ObjectType -ne "serviceprincipal"}
+- Name: Role Assignments by using eligible membership in "PIM for Groups" or nested group membership
+  Category: General
+  Query: |
+    $EntraOpsData | Select-Object -ExpandProperty RoleAssignments `
+    | Where-Object {$_.RoleAssignmentSubType -eq "Eligible member" -or $_.RoleAssignmentSubType -like "*Nested*"} `
+    | sort-object RoleAssignmentSubType `
+    | ft RoleAssignmentId, RoleAssignmentScopeName, RoleSystem, RoleAssignmentType, RoleAssignmentSubType, PIMAssignmentType, Transitive*
+- Name: Role Assignments of privileges without using PIM capabilities (excluded service principals)
+  Category: General
+  Query: |
+    $EntraOpsData | select-Object -ExpandProperty RoleAssignments `
+    | Where-Object {$_.ObjectType -ne "serviceprincipal" -and $_.PIMAssignmentType -ne "Eligible"}

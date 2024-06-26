@@ -5,7 +5,10 @@
   - [Videos and demos of EntraOps Privileged EAM](#videos-and-demos-of-entraops-privileged-eam)
   - [Quickstarts](#quickstarts)
   - [Executing EntraOps interactively](#executing-entraops-interactively)
-    - [Examples of using cmdlets and filter classification data](#examples-of-using-cmdlets-and-filter-classification-data)
+    - [Import module and sign-in options](#import-module-and-sign-in-options)
+    - [Export and collecting EntraOps data](#export-and-collecting-entraops-data)
+    - [Filter on classification in EntraOps](#filter-on-classification-in-entraops)
+    - [Filter on classified objects in combination of object details](#filter-on-classified-objects-in-combination-of-object-details)
   - [Using EntraOps with GitHub](#using-entraops-with-github)
   - [EntraOps Integration in Microsoft Sentinel](#entraops-integration-in-microsoft-sentinel)
     - [Parser for Custom Tables and WatchLists](#parser-for-custom-tables-and-watchlists)
@@ -58,63 +61,115 @@ EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline 
 
 ## Executing EntraOps interactively
 
-- Import PowerShell module
+### Import module and sign-in options
+
+Import PowerShell module (by default, required modules will be installed automatically)
 ```powershell
 Import-Module ./EntraOps
 ```
-- Choose option to connect EntraOps with Microsoft Graph and Azure Resource Manager API:
   
-*User Interactive with consented Microsoft Graph PowerShell*
+User Interactive with consented Microsoft Graph PowerShell
 ```powershell
 Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName <TenantName>
 ```
 
-*User Interactive in GitHub Codespaces with consented Microsoft Graph PowerShell*
+User Interactive in GitHub Codespaces with consented Microsoft Graph PowerShell
 ```powershell
 Connect-EntraOps -AuthenticationType "DeviceAuthentication" -TenantName <TenantName>
 ```
 
-*Service Principal with ClientSecret*
+User-Assigned Managed Identity
+```powershell
+Connect-EntraOps -AuthenticationType "UserAssignedMSI" -TenantName <TenantName>`
+-AccountId <UserAssignedMSIObjectId>
+```
+
+Service Principal with ClientSecret
 ```powershell
 $ServicePrincipalCredentials = Get-Credential
 Connect-AzAccount -Credential $ServicePrincipalCredentials -ServicePrincipal -Tenant $TenantName
 Connect-EntraOps -TenantName $TenantName -AuthenticationType "AlreadyAuthenticated" -TenantName
 ```
 
+Workload with already authenticated Azure PowerShell
+```powershell
+Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "cloudlab.onmicrosoft.com"
+```
 
-
-### Examples of using cmdlets and filter classification data
-- Export all classification of privileged objects with assignments to Entra ID directory roles and Microsoft Graph API permissions in EntraOps
+### Export and collecting EntraOps data
+Export all classification of privileged objects with assignments to Entra ID directory roles and Microsoft Graph API permissions in EntraOps
 ```powershell
 Save-EntraOpsPrivilegedEAMJson -RBACSystems @("EntraID", "ResourceApps")
 ```
 
-- Save all Privileged Identities in Entra ID in a variable
+Save all Privileged Identities in Entra ID, Identity Governance and Resource Apps in a variable
 ```powershell
-$PrivIdentities = Get-EntraOpsPrivilegedEamEntraId
+$EntraOpsData = Get-EntraOpsPrivilegedEAM -RbacSystem ("EntraID", "IdentityGovernance","ResourceApps")
 ```
 
-- All Identities in Entra ID with Control Plane Permissions
+### Filter on classification in EntraOps
+All privileged objects with Control Plane Permissions
 ```powershell
-Get-EntraOpsPrivilegedEamEntraId `
-| Where-Object { $_.RoleAssignments.Classification.AdminTierLevelName -contains "ControlPlane" } | ft
+$EntraOpsData | Where-Object { $_.RoleAssignments.Classification.AdminTierLevelName -contains "ControlPlane" }
 ```
 
-- Get a list of all privileged guests and applications
+All privileged objects with permissions with related permissions to "Conditional Access"
 ```powershell
-Get-EntraOpsPrivilegedEamEntraId `
-| Where-Object { $_.ObjectSubType -ne "Member" -and $_.ObjectType -ne "Group" } | ft
+$EntraOpsData | Where-Object { $_.RoleAssignments.Classification.Service -contains "Conditional Access" }
 ```
 
-- List of all privileged hybrid identities
+Entra ID Custom Roles with role actions which has been classified as "Control Plane"
 ```powershell
-Get-EntraOpsPrivilegedEamEntraId `
-| Where-Object { $_.OnPremSynchronized -eq $true -and $_.RoleAssignments.Classification.AdminTierLevelName -contains "ControlPlane" }
+$EntraOpsData | Where-Object {$_.RoleSystem -eq "EntraID"} `
+| select-Object -ExpandProperty RoleAssignments `
+| Where-Object {$_.RoleType -eq "CustomRole" -and $_.Classification.AdminTierLevelName -contains "ControlPlane"}
 ```
 
-- Display all privileged workload identities with Graph API permissions
+### Filter on classified objects in combination of object details
+Administrative Units with assigned privileged objects
 ```powershell
-Get-EntraOpsPrivilegedEAMResourceApps
+$EntraIdRoles | Select-Object -ExpandProperty AssignedAdministrativeUnits `
+| Select-Object -Unique displayName | Sort-Object displayName
+```
+
+External users with privileged role assignments
+```powershell
+$EntraOpsData | Where-Object { $_.ObjectSubType -eq "Guest"}
+```
+
+Hybrid identities with privileges (exl. Directory Synchronization Service Account)
+```powershell
+$EntraIdRoles | Where-Object { $_.OnPremSynchronized -eq $true `
+  -and $_.RoleAssignments.RoleDefinitionName -notcontains "Directory Synchronization Accounts" }
+```
+
+Privileged objects (e.g., groups or service principals) with privileges and delegations by ownership
+```powershell
+$EntraOpsData | Where-Object { $_.Owners -ne $null}
+```
+
+Privileged objects without restricted management by assigning role-assignable group membership, Entra ID role or RMAU membership
+(excluding service principal which are not protected by those features)
+```powershell
+$EntraOpsData `
+  | Where-Object {$_.RestrictedManagementByRAG -ne $True `
+    -and $_.RestrictedManagementByAadRole -ne $True `
+    -and $_.RestrictedManagementByRMAU -ne $True `
+    -and $_.ObjectType -ne "serviceprincipal"}
+```
+
+Role Assignments by using eligible membership in "PIM for Groups" or nested group membership
+```powershell
+$EntraOpsData | Select-Object -ExpandProperty RoleAssignments `
+ | Where-Object {$_.RoleAssignmentSubType -eq "Eligible member" -or $_.RoleAssignmentSubType -like "*Nested*"} `
+ | sort-object RoleAssignmentSubType `
+ | ft RoleAssignmentId, RoleAssignmentScopeName, RoleSystem, RoleAssignmentType, RoleAssignmentSubType, PIMAssignmentType, Transitive*
+ ```
+
+Role Assignments of privileges without using PIM capabilities (excluded service principals)
+```powershell
+$EntraOpsData | select-Object -ExpandProperty RoleAssignments `
+ | Where-Object {$_.ObjectType -ne "serviceprincipal" -and $_.PIMAssignmentType -ne "Eligible"}
 ```
 
 ## Using EntraOps with GitHub

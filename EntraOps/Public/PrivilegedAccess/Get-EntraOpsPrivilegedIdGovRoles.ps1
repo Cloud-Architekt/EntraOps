@@ -84,7 +84,7 @@ function Get-EntraOpsPrivilegedIdGovRoles {
                 PIMAssignmentType             = "Permanent"
                 RoleDefinitionName            = $Role.displayName
                 RoleDefinitionId              = $ElmPrincipalRoleAssignment.roleDefinitionId
-                RoleType                      = "Built-in"
+                RoleType                      = "BuiltInRole"
                 RoleIsPrivileged              = $Role.isPrivileged
                 ObjectId                      = $Principal
                 ObjectType                    = $ObjectType.toLower()

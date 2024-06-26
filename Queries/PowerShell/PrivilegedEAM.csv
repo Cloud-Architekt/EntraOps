@@ -1,3 +1,0 @@
-"Name", "Query"
-"Save all Privileged Identities in Entra ID in a variable", "$EntraOpsData = Get-EntraOpsPrivilegedEamEntraId"
-"List of all privileged hybrid identities", "$EntraOpsData | Where-Object { $_.OnPremSynchronized -eq $true -and $_.RoleAssignments.Classification.AdminTierLevelName -contains "ControlPlane" }"

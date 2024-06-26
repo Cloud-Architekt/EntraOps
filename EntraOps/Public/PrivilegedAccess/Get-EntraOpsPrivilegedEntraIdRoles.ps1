@@ -72,7 +72,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         foreach ($AadPrincipalRoleAssignment in $AllPrinicpalAadRoleAssignments) {
             $Role = ($AadRoleDefinitions | where-object { $_.id -eq $AadPrincipalRoleAssignment.roleDefinitionId })
             if ($Role.isBuiltIn -eq $True) {
-                $RoleType = "BuiltinRole"
+                $RoleType = "BuiltInRole"
                 $RoleIsPrivileged = $Role.isPrivileged
                 $RoleDefinitionName = $Role.displayName
             }
@@ -85,7 +85,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 $RoleDefinitionName = $OriginalRoleDefinition.displayName
                 $RoleIsPrivileged = $OriginalRoleDefinition.isPrivileged
                 if ($OriginalRoleDefinition.isBuiltIn -eq "true") {
-                    $RoleType = "BuiltinRole"
+                    $RoleType = "BuiltInRole"
                 }
                 else {
                     $RoleType = "CustomRole"
@@ -159,7 +159,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
 
             $Role = ($AadRoleDefinitions | where-object { $_.id -eq $EligiblePrincipalRoleAssignment.roleDefinitionId })
             if ($Role.isBuiltIn -eq $True) {
-                $RoleType = "BuiltinRole"
+                $RoleType = "BuiltInRole"
                 $RoleDefinitionName = $Role.displayName
                 $RoleIsPrivileged = $Role.IsPrivileged
                 # Deprecated role definition are just visible by direct RoleDefinition requests
@@ -177,7 +177,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 $RoleDefinitionName = $OriginalRoleDefinition.displayName
                 $RoleIsPrivileged = $OriginalRoleDefinition.isPrivileged
                 if ($OriginalRoleDefinition.isBuiltIn -eq "true") {
-                    $RoleType = "BuiltinRole"
+                    $RoleType = "BuiltInRole"
                 }
                 else {
                     $RoleType = "CustomRole"
