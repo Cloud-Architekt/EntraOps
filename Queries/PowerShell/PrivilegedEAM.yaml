@@ -47,6 +47,49 @@
     | Where-Object {$_.RoleAssignmentSubType -eq "Eligible member" -or $_.RoleAssignmentSubType -like "*Nested*"} `
     | sort-object RoleAssignmentSubType `
     | ft RoleAssignmentId, RoleAssignmentScopeName, RoleSystem, RoleAssignmentType, RoleAssignmentSubType, PIMAssignmentType, Transitive*
+- Name: Permanent Role Assignments in Azure RBAC with High Privileged Roles on Tenant Root or Management Group without Restricted Management
+  Category: General
+  Query: |
+    $AzPrivilegedRolesQuery = 'AuthorizationResources
+    | where type =~ "microsoft.authorization/roleassignments"
+    | extend ObjectType = tostring(properties["principalType"])
+    | extend ObjectId = tostring(properties["principalId"])
+    | extend roleDefinitionId = tolower(tostring(properties["roleDefinitionId"]))
+    | extend Scope = tolower(tostring(properties["scope"]))
+    | mv-expand parse_json(Scope)
+    | join kind=inner ( AuthorizationResources
+    | where type =~ "microsoft.authorization/roledefinitions"
+    | extend roleDefinitionId = tolower(id)
+    | extend Scope = tolower(properties.assignableScopes)
+    | extend RoleName = (properties.roleName)
+    | where RoleName in ("Owner",
+          "Access Review Operator Service Role",
+          "Contributor",
+          "Role Based Access Control Administrator",
+          "User Access Administrator")
+    ) on roleDefinitionId
+    | where Scope in (
+        "/"
+        )
+        or Scope startswith (
+        "/providers/microsoft.management/managementgroups/"
+        )
+    | project ObjectId, ObjectType, RoleName, Scope'
+    $AzPrivilegedRoles = Invoke-EntraOpsAzGraphQuery -KqlQuery $AzPrivilegedRolesQuery
+    $AzPrivilegedPrincipals = $AzPrivilegedRoles | Select-Object -unique ObjectId
+    $UnprotectedAzureAdmins = foreach ($AzPrivilegedPrincipal in $AzPrivilegedPrincipals) {
+            $UnprotectedAzureAdmin = Get-EntraOpsPrivilegedEntraObject -AadObjectId $AzPrivilegedPrincipal.ObjectId `
+                    | Where-Object {$_.RestrictedManagementByRMAU -ne $True -and $_.ObjectType -ne "serviceprincipal" `
+                            -and $_.RestrictedManagementByAadRole -ne $True `
+                            -and $_.RestrictedManagementByRAG -ne $True
+                            }
+            if($UnprotectedAzureAdmin) {
+                    $RoleAssignments = $AzPrivilegedRoles | Where-Object {$_.ObjectId -eq $AzPrivilegedPrincipal.ObjectId} | Select-Object RoleName, Scope
+                    $UnprotectedAzureAdmin | Add-Member -MemberType NoteProperty -Name "RoleAssignments" -Value $RoleAssignments -Force
+                    $UnprotectedAzureAdmin
+            }
+    }
+    $UnprotectedAzureAdmins
 - Name: Role Assignments of privileges without using PIM capabilities (excluded service principals)
   Category: General
   Query: |
