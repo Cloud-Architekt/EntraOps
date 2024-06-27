@@ -16,6 +16,7 @@
     - [Workbook for visualization of EntraOps classification data](#workbook-for-visualization-of-entraops-classification-data)
   - [Classify privileged objects by Custom Security Attributes](#classify-privileged-objects-by-custom-security-attributes)
   - [Classification of Identity Governance delegation and roles](#classification-of-identity-governance-delegation-and-roles)
+    - [Identify delegated management with different classifications](#identify-delegated-management-with-different-classifications)
   - [Automatic updated Control Plane Scope by EntraOps and other data sources](#automatic-updated-control-plane-scope-by-entraops-and-other-data-sources)
     - [Azure Resource Graph](#azure-resource-graph)
     - [Microsoft Security Exposure Management](#microsoft-security-exposure-management)
@@ -364,6 +365,64 @@ Example of Identity Governance role which has been classified by tagging of clas
         ]
       }
   ]
+```
+
+### Identify delegated management with different classifications
+The following PowerShell query helps to identify delegated roles on catalogs to an user which owns not the same classification as the assigned resources. For example, regular user has access as "Catalog owner" which includes resources of role-assignable groups with Entra ID role assignments.
+
+```powershell
+    $ElmCatalogAssignments = $EntraOpsData | where-object {$_.RoleSystem -eq "IdentityGovernance"} `
+                                | Select-Object -ExpandProperty RoleAssignments `
+                                | Where-Object {$_.Classification.TaggedBy -contains "AssignedCatalogObjects"}
+    foreach($ElmCatalogAssignment in $ElmCatalogAssignments){
+        $PrincipalClassification = $EntraOpsData | Where-Object {$_.ObjectId -eq $ElmCatalogAssignment.ObjectId} `
+                                    | Where-Object {$_.RoleSystem -ne "IdentityGovernance"} `
+                                    | Select-Object -ExpandProperty RoleAssignments `
+                                    | Select-Object -ExpandProperty Classification `
+                                    | Select-Object -Unique AdminTierLevelName, Service `
+                                    | Sort-Object -Property AdminTierLevelName, Service
+        if ($null -eq $PrincipalClassification) {
+            Write-Warning "No Principal Classification found for $($ElmCatalogAssignment.ObjectId)"
+            $PrincipalClassification = @(
+                [PSCustomObject]@{
+                    AdminTierLevelName = "User Access"
+                    Service = "No Classification"
+                }
+            )
+        }
+        $ElmCatalogClassification = $ElmCatalogAssignment | Select-Object -ExpandProperty Classification `
+                                    | Where-Object {$_.TaggedBy -eq "AssignedCatalogObjects"} `
+                                    | Select-Object -Unique AdminTierLevelName, Service `
+                                    | Sort-Object -Property AdminTierLevelName, Service                              
+
+        $Differences = Compare-Object -ReferenceObject ($ElmCatalogClassification) `
+        -DifferenceObject ($PrincipalClassification) -Property AdminTierLevelName, Service `
+        | Where-Object {$_.SideIndicator -eq "<="} | Select-Object * -ExcludeProperty SideIndicator
+        if ($null -ne $Differences) {
+            try {
+                $Principal = Get-EntraOpsEntraObject -AadObjectId $ElmCatalogAssignment.ObjectId    
+            }
+            catch {
+                $Principal = [PSCustomObject]@{
+                    ObjectDisplayName = "Unknown"
+                    ObjectType = "Unknown"
+                }
+            }
+        }
+        if ($Differences) {
+            $Differences | ForEach-Object {
+                    [PSCustomObject]@{
+                        "PrincipalName" = $Principal.ObjectDisplayName
+                        "PrincipalType" = $Principal.ObjectType
+                        "RoleAssignmentId" = $ElmCatalogAssignment.RoleAssignmentId
+                        "RoleAssignmentScopeId"  = $ElmCatalogAssignment.RoleAssignmentScopeId
+                        "RoleAssignmentScopeName"  = $ElmCatalogAssignment.RoleAssignmentScopeName
+                        "AdminTierLevelName" = $_.AdminTierLevelName
+                        "Service" = $_.Service
+                    }
+            }
+        }
+    }
 ```
 
 ## Automatic updated Control Plane Scope by EntraOps and other data sources
