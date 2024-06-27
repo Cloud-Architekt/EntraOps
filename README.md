@@ -3,7 +3,7 @@
   - [Introduction](#introduction)
   - [Key features](#key-features)
   - [Videos and demos of EntraOps Privileged EAM](#videos-and-demos-of-entraops-privileged-eam)
-  - [Quickstarts](#quickstarts)
+  - [Quick starts](#quick-starts)
   - [Executing EntraOps interactively](#executing-entraops-interactively)
     - [Import module and sign-in options](#import-module-and-sign-in-options)
     - [Export and collecting EntraOps data](#export-and-collecting-entraops-data)
@@ -29,15 +29,16 @@
 EntraOps is a personal research project to show capabilities for automated management of Microsoft Entra ID tenant at scale by using DevOps-approach. At this time, a PowerShell module and GitHub repository template is available to analyze privileges and use a (customizable) classification model to identify the sensitive of access (based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA)). The solution can be used on any platform which supports PowerShell Core. Therefore, you have the option to run EntraOps in DevOps, serverless or local environments.
 
 ## Key features
-- 🚀 Automation to configure and execute EntraOps in GitHub. Providing templates to execute EntraOps in Automation Accounts and Azure Functions are already planned.
+- 🚀 Automation for deployment in GitHub, support local execution or any platform which supports PowerShell Core
 
 - ☑️ Track changes and history of privileged principals and their assignments "as code"
 
-- 🆕 Automation to update classification templates
+- 🆕 Automation to update classification templates, PowerShell module and other resources from repository
 
-- 👑 Automation to identify Control Plane scope by critical assets in Microsoft Security Exposure Management, high-privileges roles/scope in Microsoft Azure RBAC and privileged objects in Microsoft Entra (by EntraOps)
+- 👑 Identify privileged assets based on automated and full customizable classification of Enterprise Access “tiering” model.
+Integration to customize Control Plane scope automatically by critical assets in Microsoft Security Exposure Management, high-privileges roles/scope in Microsoft Azure RBAC and privileged objects in Microsoft Entra (by EntraOps).
 
-- 🔬 Ingest classification data with all details as enrichment to custom table in Microsoft Sentinel/Log Analytics Workspace or WatchLists
+- 🔬 Ingest classification data with all details to custom table in Microsoft Sentinel/Log Analytics Workspace or WatchLists for hunting and enrichment
 
 - 📊 Build reports or queries on your classified privileges to identify "tier breach" on Microsoft's Enterprise Access Model or privilege escalation paths. Workbook template to visualize classification data of role assignments (identified by EntraOps) and objects (by using custom security attributes)
 
@@ -59,10 +60,10 @@ EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline 
 - [TEC Talk: Protecting Privileged User and Workload Identities in Entra ID](https://www.quest.com/webcast-ondemand/tec-talk-protecting-privileged-user-and-workload-identities-in-entra-id/)
 - [SpecterOps Webinar: Defining the Undefined: What is Tier Zero Part III](https://youtu.be/ykrse1rsvy4?si=f7fLcf1rAN0MGlti&t=1223)
 
-## Quickstarts
+## Quick starts
 
 ## Executing EntraOps interactively
-A complete list of all existing PowerShell query templates are available as YAML file in the [Queries](./Queries/PowerShell/PrivilegedEAM.yaml) folder.
+A complete list of all existing PowerShell query templates is available as YAML file in the [Queries](./Queries/PowerShell/PrivilegedEAM.yaml) folder.
 
 ### Import module and sign-in options
 
@@ -430,6 +431,7 @@ For example, Restricted Management AUs to protect sensitive security groups from
 Do you like to know which role action is why "Global Reader" has been classified as "Control Plane"? What is the definition of Microsoft's `isPrivileged` classification on the related role action? [AzEntraIdRoleActionsAdvertizer](https://www.azadvertizer.net/azEntraIdRoleActionsAdvertizer.html) and [AzEntraApiPermissionsAdvertizer](https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html) allows to have a visualized view which role or API permission is assigned to a role and what is the specific Administration Tier Level in EntraOps.
 
 _Enter the role definition name in the "used by Roles" and choose the desired tier level in "EntraOps TierLevel" to filter for the associated role action. In this case, read BitLocker keys are classified as "Control Plane" in EntraOps and also flagged as "isPrivileged" by Microsoft._
+<br>
 <a href="https://github.com/Cloud-Architekt/cloud-architekt.github.io/blob/master/assets/images/entraops/AzAdvertizer_IdentifyTierLevel.png" target="_blank"><img src="https://github.com/Cloud-Architekt/cloud-architekt.github.io/blob/master/assets/images/entraops/AzAdvertizer_IdentifyTierLevel.png" width="1000" /></a>
 <br>
 
