@@ -201,7 +201,7 @@ _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-Ent
     ```
 
 5. Optional: Create a data collection rule and endpoint if you want to ingest data to custom table in Log Analytics or Microsoft Sentinel workspace.
-Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-portal#create-data-collection-endpoint) to configure a data collection endpoint, custom table, and transformation rule.
+Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-portal#create-data-collection-endpoint) to configure a data collection endpoint, custom table, and transformation rule. Use as table name "PrivilegedEAM_CL" to make sure the parser will works on your created custom table. Execute EntraOps interactively and execute "Save-EntraOpsPrivilegedEAMJson" to create a JSON file which can be used as sample data.
 
     _Recommendation: There is a limitation of 10 KB for a single WatchList entry. This limit can be exceeded in the case of a high number of property items (e.g., classification or owner properties). Therefore, I can strongly recommend choosing "Custom tables" in a large environment. If you are choosing WatchList as ingestion option, keep an eye on the deployment logs for any warnings of this limitation. Entries will not be added if the limit has been exceeded._
 
