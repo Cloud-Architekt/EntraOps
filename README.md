@@ -371,58 +371,58 @@ Example of Identity Governance role which has been classified by tagging of clas
 The following PowerShell query helps to identify delegated roles on catalogs to an user which owns not the same classification as the assigned resources. For example, regular user has access as "Catalog owner" which includes resources of role-assignable groups with Entra ID role assignments.
 
 ```powershell
-    $ElmCatalogAssignments = $EntraOpsData | where-object {$_.RoleSystem -eq "IdentityGovernance"} `
+$ElmCatalogAssignments = $EntraOpsData | where-object {$_.RoleSystem -eq "IdentityGovernance"} `
+                            | Select-Object -ExpandProperty RoleAssignments `
+                            | Where-Object {$_.Classification.TaggedBy -contains "AssignedCatalogObjects"}
+foreach($ElmCatalogAssignment in $ElmCatalogAssignments){
+    $PrincipalClassification = $EntraOpsData | Where-Object {$_.ObjectId -eq $ElmCatalogAssignment.ObjectId} `
+                                | Where-Object {$_.RoleSystem -ne "IdentityGovernance"} `
                                 | Select-Object -ExpandProperty RoleAssignments `
-                                | Where-Object {$_.Classification.TaggedBy -contains "AssignedCatalogObjects"}
-    foreach($ElmCatalogAssignment in $ElmCatalogAssignments){
-        $PrincipalClassification = $EntraOpsData | Where-Object {$_.ObjectId -eq $ElmCatalogAssignment.ObjectId} `
-                                    | Where-Object {$_.RoleSystem -ne "IdentityGovernance"} `
-                                    | Select-Object -ExpandProperty RoleAssignments `
-                                    | Select-Object -ExpandProperty Classification `
-                                    | Select-Object -Unique AdminTierLevelName, Service `
-                                    | Sort-Object -Property AdminTierLevelName, Service
-        if ($null -eq $PrincipalClassification) {
-            Write-Warning "No Principal Classification found for $($ElmCatalogAssignment.ObjectId)"
-            $PrincipalClassification = @(
-                [PSCustomObject]@{
-                    AdminTierLevelName = "User Access"
-                    Service = "No Classification"
-                }
-            )
-        }
-        $ElmCatalogClassification = $ElmCatalogAssignment | Select-Object -ExpandProperty Classification `
-                                    | Where-Object {$_.TaggedBy -eq "AssignedCatalogObjects"} `
-                                    | Select-Object -Unique AdminTierLevelName, Service `
-                                    | Sort-Object -Property AdminTierLevelName, Service                              
+                                | Select-Object -ExpandProperty Classification `
+                                | Select-Object -Unique AdminTierLevelName, Service `
+                                | Sort-Object -Property AdminTierLevelName, Service
+    if ($null -eq $PrincipalClassification) {
+        Write-Warning "No Principal Classification found for $($ElmCatalogAssignment.ObjectId)"
+        $PrincipalClassification = @(
+            [PSCustomObject]@{
+                AdminTierLevelName = "User Access"
+                Service = "No Classification"
+            }
+        )
+    }
+    $ElmCatalogClassification = $ElmCatalogAssignment | Select-Object -ExpandProperty Classification `
+                                | Where-Object {$_.TaggedBy -eq "AssignedCatalogObjects"} `
+                                | Select-Object -Unique AdminTierLevelName, Service `
+                                | Sort-Object -Property AdminTierLevelName, Service                              
 
-        $Differences = Compare-Object -ReferenceObject ($ElmCatalogClassification) `
-        -DifferenceObject ($PrincipalClassification) -Property AdminTierLevelName, Service `
-        | Where-Object {$_.SideIndicator -eq "<="} | Select-Object * -ExcludeProperty SideIndicator
-        if ($null -ne $Differences) {
-            try {
-                $Principal = Get-EntraOpsEntraObject -AadObjectId $ElmCatalogAssignment.ObjectId    
-            }
-            catch {
-                $Principal = [PSCustomObject]@{
-                    ObjectDisplayName = "Unknown"
-                    ObjectType = "Unknown"
-                }
-            }
+    $Differences = Compare-Object -ReferenceObject ($ElmCatalogClassification) `
+    -DifferenceObject ($PrincipalClassification) -Property AdminTierLevelName, Service `
+    | Where-Object {$_.SideIndicator -eq "<="} | Select-Object * -ExcludeProperty SideIndicator
+    if ($null -ne $Differences) {
+        try {
+            $Principal = Get-EntraOpsEntraObject -AadObjectId $ElmCatalogAssignment.ObjectId    
         }
-        if ($Differences) {
-            $Differences | ForEach-Object {
-                    [PSCustomObject]@{
-                        "PrincipalName" = $Principal.ObjectDisplayName
-                        "PrincipalType" = $Principal.ObjectType
-                        "RoleAssignmentId" = $ElmCatalogAssignment.RoleAssignmentId
-                        "RoleAssignmentScopeId"  = $ElmCatalogAssignment.RoleAssignmentScopeId
-                        "RoleAssignmentScopeName"  = $ElmCatalogAssignment.RoleAssignmentScopeName
-                        "AdminTierLevelName" = $_.AdminTierLevelName
-                        "Service" = $_.Service
-                    }
+        catch {
+            $Principal = [PSCustomObject]@{
+                ObjectDisplayName = "Unknown"
+                ObjectType = "Unknown"
             }
         }
     }
+    if ($Differences) {
+        $Differences | ForEach-Object {
+                [PSCustomObject]@{
+                    "PrincipalName" = $Principal.ObjectDisplayName
+                    "PrincipalType" = $Principal.ObjectType
+                    "RoleAssignmentId" = $ElmCatalogAssignment.RoleAssignmentId
+                    "RoleAssignmentScopeId"  = $ElmCatalogAssignment.RoleAssignmentScopeId
+                    "RoleAssignmentScopeName"  = $ElmCatalogAssignment.RoleAssignmentScopeName
+                    "AdminTierLevelName" = $_.AdminTierLevelName
+                    "Service" = $_.Service
+                }
+        }
+    }
+}
 ```
 
 ## Automatic updated Control Plane Scope by EntraOps and other data sources
