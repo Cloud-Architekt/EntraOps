@@ -42,7 +42,7 @@ function Save-EntraOpsPrivilegedEAMJson {
         else {
             New-Item "$($ExportFolder)" -ItemType Directory -Force
         }
-        $EamAzure = Get-EntraOpsPrivilegedEamAzure
+        $EamAzure = Get-EntraOpsPrivilegedEamEntraId
         $EamAzure = $EamAzure | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
         $EamAzure | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/Azure.json"
         foreach ($PrivilegedObject in $EamAzure) {
