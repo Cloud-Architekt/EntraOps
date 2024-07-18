@@ -170,7 +170,7 @@ function Connect-EntraOps {
                     throw "Federated environment is not already authenticated"
                 }
                 try {
-                    $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph").Token | ConvertTo-SecureString -AsPlainText -Force
+                    $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
                     Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
                 }
                 catch {
@@ -191,7 +191,7 @@ function Connect-EntraOps {
                 }
                 elseif ($Null -ne (Get-AzContext).Tenant.Id) {
                     try {
-                        $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph").Token | ConvertTo-SecureString -AsPlainText -Force
+                        $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token 
                         Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
                     }
                     catch {

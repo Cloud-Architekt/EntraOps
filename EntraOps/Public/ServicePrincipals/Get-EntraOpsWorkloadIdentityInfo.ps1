@@ -125,8 +125,8 @@ function Get-EntraOpsWorkloadIdentityInfo {
             $QueryResult = @()
 
             if ($UseAzPwshOnly -eq $True) {
-                $AccessToken = (Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com").Token
-                $HeaderParams.Add('Authorization', "Bearer $($AccessToken)")
+                $AccessToken = (Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -AsSecureString).Token
+                $HeaderParams.Add('Authorization', "Bearer $($AccessToken | ConvertFrom-SecureString -AsPlainText)")
 
                 # Run the initial query to Graph API
                 if ($Method -eq 'GET') {
