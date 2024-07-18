@@ -5,13 +5,6 @@
 .DESCRIPTION
     Get information from EntraOps about classification based on Enterprise Access Model and save it as WatchList in Microsoft Sentinel.
 
-<#
-.SYNOPSIS
-    Wrapper function to save data of EntraOps Privileged EAM insights to custom table in Log Analytics or Sentinel Workspace.
-
-.DESCRIPTION
-    Wrapper function to save data of EntraOps Privileged EAM insights to custom table in Log Analytics or Sentinel Workspace.
-
 .PARAMETER ImportPath
     Folder where the classification files should be stored. Default is ./PrivilegedEAM.
 
@@ -63,6 +56,10 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         [Parameter(Mandatory = $false)]
         [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
         [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
+        ,
+        [Parameter(Mandatory = $False)]
+        [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
+        [object]$AddToWatchListTemplates = "All"        
     )
 
     Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment
@@ -156,5 +153,17 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                 New-GkSeAzSentinelWatchlist @Parameters
             }
         }
+    }
+
+    if ($AddToWatchListTemplates -ne "None") {
+        $Parameters = @{
+            SentinelSubscriptionId    = $SentinelSubscriptionId
+            SentinelResourceGroupName = $SentinelResourceGroupName
+            SentinelWorkspaceName     = $SentinelWorkspaceName
+            AddToWatchListTemplates   = $AddToWatchListTemplates
+            RbacSystems               = $RbacSystems 
+
+        }
+        Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists @Parameters
     }
 }
