@@ -24,62 +24,12 @@ function Save-EntraOpsPrivilegedEAMJson {
         [System.String]$ExportFolder = $DefaultFolderClassifiedEam
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [Array]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
+        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
     )
 
     Write-Output "Clearing cache before analyzing RBAC and classification data"
     Clear-EntraOpsCache
-
-    #region Azure
-    if ($RbacSystems -contains "Azure") {
-        $ExportFolder = "$($DefaultFolderClassifiedEam)/Azure"
-
-        if ((Test-Path -path "$($ExportFolder)")) {
-            Remove-Item "$($ExportFolder)" -Force -Recurse
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
-        }
-        else {
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
-        }
-        $EamAzure = Get-EntraOpsPrivilegedEamAzure
-        $EamAzure = $EamAzure | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
-        $EamAzure | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/Azure.json"
-        foreach ($PrivilegedObject in $EamAzure) {
-            $ObjectType = $PrivilegedObject.ObjectType
-            $SingleJSONExportPath = "$($ExportFolder)/$ObjectType"
-            If (!(test-path $SingleJSONExportPath)) {
-                New-Item -ItemType Directory -Force -Path $SingleJSONExportPath
-            }
-            $PrivilegedObject | Convertto-Json -Depth 10 | Out-File -Path "$SingleJSONExportPath/$($PrivilegedObject.ObjectId).json" -Force
-        }
-    }
-    #endregion
-
-    #region Azure Billing
-    if ($RbacSystems -contains "AzureBilling") {
-        $ExportFolder = "$($DefaultFolderClassifiedEam)/AzureBilling"
-
-        if ((Test-Path -path "$($ExportFolder)")) {
-            Remove-Item "$($ExportFolder)" -Force -Recurse
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
-        }
-        else {
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
-        }
-        $EamAzureBilling = Get-EntraOpsPrivilegedEamAzureBilling -SampleMode $true -GlobalExclusion $false
-        $EamAzureBilling = $EamAzureBilling | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
-        $EamAzureBilling | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/AzureBilling.json" -Force
-        foreach ($PrivilegedObject in $EamAzureBilling) {
-            $ObjectType = $PrivilegedObject.ObjectType
-            $SingleJSONExportPath = "$($ExportFolder)/$ObjectType"
-            If (!(test-path $SingleJSONExportPath)) {
-                New-Item -ItemType Directory -Force -Path $SingleJSONExportPath
-            }
-            $PrivilegedObject | Convertto-Json -Depth 10 | Out-File -Path "$SingleJSONExportPath/$($PrivilegedObject.ObjectId).json" -Force
-        }
-    }
-    #endregion
 
     #region Entra ID
     if ($RbacSystems -contains "EntraID") {
