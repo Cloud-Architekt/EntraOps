@@ -28,15 +28,12 @@
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to WatchList in Microsoft Sentinel Workspace for correlation between work and privileged accounts.
-    Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists -AddtoWatchListTemplates "IdentityCorrelation" -SentinelSubscriptionId "3f72a077-c32a-423c-8503-41b93d3b0737" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
+    Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists -WatchListTemplates "IdentityCorrelation" -SentinelSubscriptionId "3f72a077-c32a-423c-8503-41b93d3b0737" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
 #>
 function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
 
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory = $false)]
-        [System.String]$TenantId = $TenantIdContext
-        ,
         [Parameter(Mandatory = $false)]
         [ValidateSet("Object", "RoleClassification")]
         [System.String]$UserClassificationSource = "RoleClassification"
@@ -59,10 +56,8 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
-        [object]$AddToWatchListTemplates = "All"
+        [object]$WatchListTemplates = "All"
     )
-
-    Set-AzContext -SubscriptionId $SentinelSubscriptionId -TenantId $TenantNameContext | Out-Null
 
     try {
         Import-Module "SentinelEnrichment" -ErrorAction Stop

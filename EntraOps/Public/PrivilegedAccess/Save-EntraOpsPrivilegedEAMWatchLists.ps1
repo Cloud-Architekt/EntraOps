@@ -59,7 +59,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
-        [object]$AddToWatchListTemplates = "All"        
+        [object]$WatchListTemplates = "All"        
     )
 
     Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment
@@ -155,12 +155,12 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         }
     }
 
-    if ($AddToWatchListTemplates -ne "None") {
+    if ($WatchListTemplates -ne "None") {
         $Parameters = @{
             SentinelSubscriptionId    = $SentinelSubscriptionId
             SentinelResourceGroupName = $SentinelResourceGroupName
             SentinelWorkspaceName     = $SentinelWorkspaceName
-            AddToWatchListTemplates   = $AddToWatchListTemplates
+            WatchListTemplates        = $WatchListTemplates
             RbacSystems               = $RbacSystems 
 
         }

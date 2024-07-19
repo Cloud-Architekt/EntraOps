@@ -144,7 +144,7 @@ function New-EntraOpsConfigFile {
         }
         SentinelWatchLists               = [ordered]@{
             IngestToWatchLists        = $IngestToWatchLists
-            AddToWatchListTemplates   = "None"
+            WatchListTemplates        = "None"
             SentinelWorkspaceName     = "Enter Log Analytics Workspace Name and run New-EntraOpsWorkloadIdentity to assign permissions"
             SentinelSubscriptionId    = "Enter Subscription Id of Log Analytics Workspace and run New-EntraOpsWorkloadIdentity to assign permissions"
             SentinelResourceGroupName = "Enter Resource Group of Log Analytics Workspace and run New-EntraOpsWorkloadIdentity to assign permissions"

@@ -211,7 +211,7 @@ Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us
    * Automated updates for classification templates from AzurePrivilegedIAM repository (`AutomatedClassificationUpdate`) or Control Plane scope (`ApplyAutomatedControlPlaneScopeUpdate`) can also be enabled by parameters. Customization of classification updates or data source to identify Control Plane assets is also available from here.
    * Review the settings in the section `AutomatedEntraOpsUpdate` to configure an automated update of the EntraOps PowerShell module on demand or scheduled basis.
    * Enable and update the following parameters if you want to ingest classification data to Custom Tables in Microsoft Sentinel/Log Analytics Workspace (`IngestToLogAnalytics`) or Microsoft Sentinel WatchLists (`IngestToWatchLists`). You need to add the required parameters of the workspace and/or data collection endpoints.
-   * Optional: Use parameter `AddToWatchListTemplates` to define which Microsoft Sentinel WatchList templates should be updated (VIP Users, High Value Assets or Identity Correlation) and automatically added which entities based on EntraOps data.
+   * Optional: Use parameter `WatchListTemplates` to define which Microsoft Sentinel WatchList templates should be updated (VIP Users, High Value Assets or Identity Correlation) and automatically added which entities based on EntraOps data.
 
 7. Create an application registration with required permissions (Global Admin role required). All necessary permissions on Microsoft Graph API permissions but also Azure RBAC roles for ingestion (if configured in `EntraOps.config`) will be added.
     ```powershell
