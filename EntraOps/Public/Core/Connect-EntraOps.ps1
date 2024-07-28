@@ -234,11 +234,14 @@ function Connect-EntraOps {
             catch {
                 Write-Error "Issue to import config file $($ConfigFilePath)! Check if the file exists and is in JSON format."
             }
-            # Remove Ingest parameters from config file and show configuration
+            # Remove Ingest or Apply* parameters from config file and show configuration
             $EntraOpsConfig.AutomatedClassificationUpdate.Remove("ApplyAutomatedClassificationUpdate")
             $EntraOpsConfig.AutomatedControlPlaneScopeUpdate.Remove("ApplyAutomatedControlPlaneScopeUpdate")
             $EntraOpsConfig.LogAnalytics.Remove("IngestToLogAnalytics")
             $EntraOpsConfig.SentinelWatchLists.Remove("IngestToWatchLists")
+            $EntraOpsConfig.AutomatedAdministrativeUnitManagement.Remove("ApplyAdministrativeUnitAssignments")
+            $EntraOpsConfig.AutomatedConditionalAccessTargetGroups.Remove("ApplyConditionalAccessTargetGroups")
+            $EntraOpsConfig.AutomatedRmauAssignmentsForUnprotectedObjects.Remove("ApplyRmauAssignmentsForUnprotectedObjects")
 
             New-Variable -Name EntraOpsConfig -Value $EntraOpsConfig -Scope Global -Force
             Write-Verbose -Message "Config file $($ConfigFilePath) imported"

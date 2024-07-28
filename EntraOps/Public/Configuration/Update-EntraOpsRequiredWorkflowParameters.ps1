@@ -77,6 +77,21 @@ function Update-EntraOpsRequiredWorkflowParameters {
         $PushWorkflowObject.env.IngestToWatchLists = $Config.SentinelWatchLists.IngestToWatchLists
     }
 
+    if ($Config.AutomatedAdministrativeUnitManagement.ApplyAdministrativeUnitAssignments) {
+        # Set ApplyAdministrativeUnitAssignments Parameter
+        $PushWorkflowObject.env.ApplyAdministrativeUnitAssignments = $Config.AutomatedAdministrativeUnitManagement.ApplyAdministrativeUnitAssignments
+    }
+
+    if ($Config.AutomatedRmauAssignmentsForUnprotectedObjects.ApplyRmauAssignmentsForUnprotectedObjects) {
+        # Set ApplyRmauAssignmentsForUnprotectedObjects Parameter
+        $PushWorkflowObject.env.ApplyRmauAssignmentsForUnprotectedObjects = $Config.AutomatedRmauAssignmentsForUnprotectedObjects.ApplyRmauAssignmentsForUnprotectedObjects
+    }
+    
+    if ($Config.AutomatedConditionalAccessTargetGroups.ApplyConditionalAccessTargetGroups) {
+        # Set ApplyConditionalAccessTargetGroups Parameter
+        $PushWorkflowObject.env.ApplyConditionalAccessTargetGroups = $Config.AutomatedConditionalAccessTargetGroups.ApplyConditionalAccessTargetGroups
+    }    
+
     # Remove workflow_run trigger if not configured in config file
     if ($config.WorkflowTrigger.PushAfterPullWorkflowTrigger -eq $false -and $PushWorkflowObject.on.'workflow_run'.workflows -eq 'Pull-EntraOpsPrivilegedEAM') {
         $PushWorkflowObject.on.Remove('workflow_run')
@@ -98,14 +113,16 @@ function Update-EntraOpsRequiredWorkflowParameters {
     if ($Config.AutomatedControlPlaneScopeUpdate.ApplyAutomatedControlPlaneScopeUpdate) {
         # Set ApplyAutomatedControlPlaneScopeUpdate Parameter
         $PullWorkflowObject.env.ApplyAutomatedControlPlaneScopeUpdate = $Config.AutomatedControlPlaneScopeUpdate.ApplyAutomatedControlPlaneScopeUpdate
-    } else {
+    }
+    else {
         $PullWorkflowObject.env.ApplyAutomatedControlPlaneScopeUpdate = $false
     }
 
     if ($Config.AutomatedClassificationUpdate.ApplyAutomatedClassificationUpdate) {
         # Set ApplyAutomatedClassificationUpdate Parameter
         $PullWorkflowObject.env.ApplyAutomatedClassificationUpdate = $Config.AutomatedClassificationUpdate.ApplyAutomatedClassificationUpdate
-    } else {
+    }
+    else {
         $PullWorkflowObject.env.ApplyAutomatedClassificationUpdate = $false
     }
 
@@ -139,7 +156,8 @@ function Update-EntraOpsRequiredWorkflowParameters {
     if ($Config.AutomatedEntraOpsUpdate.ApplyAutomatedEntraOpsUpdate) {
         # Set ApplyAutomatedEntraOpsUpdate Parameter
         $UpdateWorkflowObject.env.ApplyAutomatedEntraOpsUpdate = $Config.AutomatedEntraOpsUpdate.ApplyAutomatedEntraOpsUpdate
-    } else {
+    }
+    else {
         $UpdateWorkflowObject.env.ApplyAutomatedEntraOpsUpdate = $false
     }
 

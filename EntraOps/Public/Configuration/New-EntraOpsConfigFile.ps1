@@ -72,8 +72,25 @@ function New-EntraOpsConfigFile {
         [boolean]$ApplyAutomatedEntraOpsUpdate = $true,
 
         [Parameter(Mandatory = $false)]
+        [boolean]$ApplyConditionalAccessTargetGroups = $true,
+
+        [Parameter(Mandatory = $false)]
+        [boolean]$ApplyAdministrativeUnitAssignments = $true,
+
+        [Parameter(Mandatory = $false)]
+        [boolean]$ApplyRmauAssignmentsForUnprotectedObjects = $true,
+
+        [Parameter(Mandatory = $false)]
         [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps")
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps"),
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
+        [Array]$WatchListTemplates = "None",
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("ManagedIdentityAssignedResourceId", "All", "WorkloadIdentityAttackPaths", "WorkloadIdentityInfo", "WorkloadIdentityRecommendations")]
+        [Array]$WatchListWorkloadIdentity = "None"
     )
 
     $ErrorActionPreference = "Stop"
@@ -107,18 +124,18 @@ function New-EntraOpsConfigFile {
 
     #region Create configuration file schema with default values
     $EnvConfigSchema = [ordered]@{
-        TenantId                         = $($TenantId)
-        TenantName                       = $($TenantDetails.Domains[0])
-        AuthenticationType               = $($AuthenticationType)
-        ClientId                         = "Use New-EntraOpsWorkloadIdentity to create a new App Registration or enter here manually"
-        DevOpsPlatform                   = $($DevOpsPlatform)
-        RbacSystems                      = ("EntraID", "IdentityGovernance", "ResourceApps")
-        WorkflowTrigger                  = [ordered]@{
+        TenantId                                      = $($TenantId)
+        TenantName                                    = $($TenantDetails.Domains[0])
+        AuthenticationType                            = $($AuthenticationType)
+        ClientId                                      = "Use New-EntraOpsWorkloadIdentity to create a new App Registration or enter here manually"
+        DevOpsPlatform                                = $($DevOpsPlatform)
+        RbacSystems                                   = ("EntraID", "IdentityGovernance", "ResourceApps")
+        WorkflowTrigger                               = [ordered]@{
             PullScheduledTrigger         = $true
             PullScheduledCron            = "30 9 * * *"
             PushAfterPullWorkflowTrigger = $true
         }
-        AutomatedControlPlaneScopeUpdate = [ordered]@{
+        AutomatedControlPlaneScopeUpdate              = [ordered]@{
             ApplyAutomatedControlPlaneScopeUpdate = $ApplyAutomatedControlPlaneScopeUpdate
             PrivilegedObjectClassificationSource  = ("EntraOps", "PrivilegedRolesFromAzGraph", "PrivilegedEdgesFromExposureManagement")
             EntraOpsScopes                        = ("EntraID", "IdentityGovernance", "ResourceApps")
@@ -126,29 +143,51 @@ function New-EntraOpsConfigFile {
             AzureHighPrivilegedScopes             = ("/")
             ExposureCriticalityLevel              = "<1"
         }
-        AutomatedClassificationUpdate    = [ordered]@{
+        AutomatedClassificationUpdate                 = [ordered]@{
             ApplyAutomatedClassificationUpdate = $ApplyAutomatedClassificationUpdate
             Classifications                    = ("AadResources", "AadResources.Param", "AppRoles")
         }
-        AutomatedEntraOpsUpdate          = [ordered]@{
+        AutomatedEntraOpsUpdate                       = [ordered]@{
             ApplyAutomatedEntraOpsUpdate = $ApplyAutomatedEntraOpsUpdate
             UpdateScheduledTrigger       = $true
             UpdateScheduledCron          = "0 9 * * 3"
         }
-        LogAnalytics                     = [ordered]@{
+        LogAnalytics                                  = [ordered]@{
             IngestToLogAnalytics             = $IngestToLogAnalytics
             DataCollectionRuleName           = "Enter Data Collection Rule Name and run New-EntraOpsWorkloadIdentity to assign permissions"
             DataCollectionRuleSubscriptionId = "Enter Subscription Id of Data Collection Rule and run New-EntraOpsWorkloadIdentity to assign permissions"
             DataCollectionResourceGroupName  = "Enter Resource Group Name of Data Collection Rule and run New-EntraOpsWorkloadIdentity to assign permissions"
             TableName                        = "PrivilegedEAM_CL"
         }
-        SentinelWatchLists               = [ordered]@{
+        SentinelWatchLists                            = [ordered]@{
             IngestToWatchLists        = $IngestToWatchLists
-            WatchListTemplates        = "None"
+            WatchListTemplates        = $WatchListTemplates
+            WatchListWorkloadIdentity = $WatchListWorkloadIdentity
             SentinelWorkspaceName     = "Enter Log Analytics Workspace Name and run New-EntraOpsWorkloadIdentity to assign permissions"
             SentinelSubscriptionId    = "Enter Subscription Id of Log Analytics Workspace and run New-EntraOpsWorkloadIdentity to assign permissions"
             SentinelResourceGroupName = "Enter Resource Group of Log Analytics Workspace and run New-EntraOpsWorkloadIdentity to assign permissions"
             WatchListPrefix           = "EntraOps_"
+        }        
+        AutomatedAdministrativeUnitManagement         = [ordered]@{
+            ApplyAdministrativeUnitAssignments = $ApplyAdministrativeUnitAssignments
+            ApplyToAccessTierLevel             = ("ControlPlane", "ManagementPlane")
+            FilterObjectType                   = ("User", "Group")
+            RbacSystems                        = ("EntraID", "IdentityGovernance")
+            RestrictedAuMode                   = "selected"
+        }
+        AutomatedConditionalAccessTargetGroups        = [ordered]@{
+            ApplyConditionalAccessTargetGroups = $ApplyConditionalAccessTargetGroups
+            AdminUnitName                      = "Tier0-ControlPlane.ConditionalAccess"
+            ApplyToAccessTierLevel             = ("ControlPlane", "ManagementPlane")
+            FilterObjectType                   = ("User", "Group")
+            GroupPrefix                        = "sug_Entra.CA.IncludeUsers.PrivilegedAccounts."
+            RbacSystems                        = ("EntraID", "IdentityGovernance")
+        }
+        AutomatedRmauAssignmentsForUnprotectedObjects = [ordered]@{
+            ApplyRmauAssignmentsForUnprotectedObjects = $ApplyRmauAssignmentsForUnprotectedObjects
+            ApplyToAccessTierLevel                    = ("ControlPlane", "ManagementPlane")
+            FilterObjectType                          = ("User", "Group")
+            RbacSystems                               = ("EntraID", "IdentityGovernance")
         }
     }
     #endregion

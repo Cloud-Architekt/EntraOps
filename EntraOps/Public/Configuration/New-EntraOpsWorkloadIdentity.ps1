@@ -132,7 +132,7 @@ function New-EntraOpsWorkloadIdentity {
         #endregion
     }
 
-    #region Add required Microsoft Graph API Permissions
+    #region Add required Microsoft Graph API Permissions for Pull (Read) Operations
 
     # Get Graph API App Roles to map required App Role Names to App Role IDs
     Write-Verbose "Get Microsoft Graph API App Roles..."
@@ -159,18 +159,6 @@ function New-EntraOpsWorkloadIdentity {
         "User.Read.All"
     )
 
-    <# Required for future version
-    # Graph API permissions for Advanced Pull operations (e.g., including automatic AU creation and managing CA coverage)
-    $AdvancedPushPermissionsToAdd = @(
-        "AdministrativeUnit.ReadWrite.All",
-        "Directory.Write.Restricted",
-        "DirectoryRecommendations.Read.All",
-        "RoleManagement.Read.All",
-        "ThreatHunting.Read.All",
-        "User.Read.All"
-    )
-    #>
-
     Write-Output "Adding Pull permissions..."
     $GraphApiPermissions = $MsGraph.AppRoles | Where-Object { $_.Value -in $PullPermissionsToAdd }
     foreach ($GraphApiPermission in $GraphApiPermissions) {
@@ -182,6 +170,92 @@ function New-EntraOpsWorkloadIdentity {
             Write-Error "Failed to add API Permission $($GraphApiPermission.Value) to $AppDisplayName. Error: $_"
         }
     }
+    #endregion
+
+    #region Add required Microsoft Graph API Permissions for Push (Change) Operations
+
+    # Graph API permissions for Push operations
+    if ($Config.AutomatedAdministrativeUnitManagement.ApplyAdministrativeUnitAssignments -eq $true -and $Config.AutomatedRmauAssignmentsForUnprotectedObjects.ApplyRmauAssignmentsForUnprotectedObjects -eq $true) {
+        $PushPermissionsToAdd = @(
+            "AdministrativeUnit.ReadWrite.All"
+        )
+    
+        Write-Output "Adding Push permissions..."
+        $GraphApiPermissions = $MsGraph.AppRoles | Where-Object { $_.Value -in $PushPermissionsToAdd }
+        foreach ($GraphApiPermission in $GraphApiPermissions) {
+            Write-Host "- Adding $($GraphApiPermission.Origin) API Permission $($GraphApiPermission.Value)"
+            try {
+                New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $SPObject.Id -PrincipalId $SPObject.Id -ResourceId $MsGraph.Id -AppRoleId $GraphApiPermission.Id | Out-Null
+            }
+            catch {
+                Write-Error "Failed to add API Permission $($GraphApiPermission.Value) to $AppDisplayName. Error: $_"
+            }
+        }        
+    }
+    else {
+        Write-Output "Skipping Push permissions... (ApplyAdministrativeUnitAssignments and/or ApplyRmauAssignmentsForUnprotectedObjects is set to false)"
+    }
+
+    #endregion
+
+
+    #region Add required Microsoft Entra ID (scoped) directory role for managing Conditional Access Target Groups
+    if ($Config.AutomatedConditionalAccessTargetGroups.ApplyConditionalAccessTargetGroups -eq $true) {
+        $AdminUnitName = $Config.AutomatedConditionalAccessTargetGroups.AdminUnitName
+        $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($AdminUnitName)'" -OutputType PSObject -DisableCache).id
+        #region Create Administrative Unit if it does not exist
+        if (-not $AdminUnitId) {
+            Write-Host "Creating Administrative Unit $($Name)"
+
+            $AuParams = @{
+                DisplayName                  = $AdminUnitName
+                Description                  = "This administrative unit contains groups for Conditional Access Targeting"
+                isMemberManagementRestricted = $true
+            }
+
+            $Body = $AuParams | ConvertTo-Json -Depth 10
+            try {
+                $NewAdminUnitId = (Invoke-MgGraphRequest -Method "POST" -Body $Body -Uri "https://graph.microsoft.com/beta/administrativeUnits").id
+            }
+            catch {
+                Write-Warning "Can not create Administrative Unit $($AdminUnitName)! Error: $_"
+            }
+
+            # Check if AU has been created successfully, wait for delay and retry if not available yet
+            Try {
+                Do { Start-Sleep -Seconds 1 }
+                Until ($AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits/$($NewAdminUnitId)" -DisableCache))
+                Write-Host "$($AdminUnitName) - $($AdminUnitId) has been created successfully" -f Green
+            }
+            Catch {
+                Write-Warning "$($AdminUnitName) not available yet"
+            }
+        }
+        else {
+            Write-Host "Administrative Unit $($AdminUnitName) - $($AdminUnitId) already exists"
+        }
+
+        # Add scoped permissions as Group Administrator to the Administrative Unit
+        $ScopedGroupAdminRoleParams = @{
+            '@odata.type'    = "#microsoft.graph.unifiedRoleAssignment"
+            principalId      = $($SpObject.Id)
+            roleDefinitionId = "fdd7a751-b60b-444a-984c-02652fe8fa1c" # Group Administrator
+            directoryScopeId = "/administrativeUnits/$($AdminUnitId)"
+        }
+
+        try {
+            $Body = $ScopedGroupAdminRoleParams | ConvertTo-Json -Depth 10
+            $DirectoryRoleAssignmentId = (Invoke-MgGraphRequest -Method "POST" -Body $Body -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleAssignments").id
+            Write-Host "Assigned permissions to Administrative Unit $($AdminUnitName) for $($SpObject.Id) - $($DirectoryRoleAssignmentId)" -f Green
+        }
+        catch {
+            Write-Warning "Can not assign permissions to Administrative Unit $($AdminUnitName) for $($SpObject.Id)! Error: $_"
+        }
+
+    }
+    else {
+        Write-Output "Skipping permissions to manage Conditional Access Groups... (ApplyConditionalAccessTargetGroups is set to false)"
+    }    
     #endregion
 
     #region Add required role assignments in Azure RBAC
@@ -206,7 +280,6 @@ function New-EntraOpsWorkloadIdentity {
             }
         }
     }
-
     Start-Sleep 5 # Wait for adding permission to new created Service Principal
 
     if ($Config.LogAnalytics.IngestToLogAnalytics -eq $true) {
@@ -225,7 +298,15 @@ function New-EntraOpsWorkloadIdentity {
     else {
         Write-Output "Skipping WatchList permissions... (IngestToWatchLists is set to false)"
     }
-    #endregion
+
+    # Add required permissions to Reader Permission on Tenant Root group if AutomatedControlPlaneScopeUpdate is using Resource Graph to get sensitive Privileged Roles in Azure Tenant
+    # or any WatchList requires information from Azure Resource Graph (e.g., High Value Assets, Workload Identity Attack Paths or Managed Identity Assigned Resource Id)
+    if (($Config.AutomatedControlPlaneScopeUpdate.ApplyAutomatedControlPlaneScopeUpdate -eq $true -and $Config.AutomatedControlPlaneScopeUpdate.PrivilegedObjectClassificationSource -contains "PrivilegedRolesFromAzGraph") `
+            -or ($Config.SentinelWatchLists.WatchListTemplates -contains "HighValueAssets") -or ($Config.SentinelWatchLists.WatchListWorkloadIdentity -contains "WorkloadIdentityAttackPaths") -or ($Config.SentinelWatchLists.WatchListWorkloadIdentity -contains "ManagedIdentityAssignedResourceId")) {
+        Write-Output "Adding permissions as Reader on Tenant Root Group for analyzing RBAC and/or Managed Identity resources..."
+        New-AzRoleAssignment -RoleDefinitionName "Reader" -Scope "/providers/Microsoft.Management/managementGroups/$($Config.TenantId)" -ObjectId $SpObject.Id
+    }
+    #endregion    
 
     #region Add ClientId to environment file
     Write-Output "Write $AppDisplayName AppId to environment file $($ConfigFile)..."

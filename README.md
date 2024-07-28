@@ -39,11 +39,13 @@ EntraOps is a personal research project to show capabilities for automated manag
 - 👑 Identify privileged assets based on automated and full customizable classification of Enterprise Access “tiering” model.
 Integration to customize Control Plane scope automatically by critical assets in Microsoft Security Exposure Management, high-privileges roles/scope in Microsoft Azure RBAC and privileged objects in Microsoft Entra (by EntraOps).
 
-- 🔬 Ingest classification data with all details to custom table in Microsoft Sentinel/Log Analytics Workspace or WatchLists for hunting and enrichment
+- 🔬 Ingest classification data with all details to custom table in Microsoft Sentinel/Log Analytics Workspace or WatchLists for hunting and enrichment. Including support for Sentinel WatchList templates (High Value Assets, VIP Users and Identity Correlation)
+
+- 🤖 Advanced WatchLists to get insights (relation between managed identities and Azure Resources) and information about security posture of Workload Identities by Microsoft Entra Recommendations and Microsoft Defender for Cloud CSPM.
 
 - 📊 Build reports or queries on your classified privileges to identify "tier breach" on Microsoft's Enterprise Access Model or privilege escalation paths. Workbook template to visualize classification data of role assignments (identified by EntraOps) and objects (by using custom security attributes)
 
-- 🛡️ Automated coverage of privileged assets in Conditional Access and Restricted Management Administrative Units (in development) to protect high-privileged assets from lower privileges and apply strong Zero Trust policies.
+- 🛡️ Automated assignment of privileged assets in Conditional Access Groups and Restricted Management Administrative Units to protect high-privileged assets from lower privileges and apply strong Zero Trust policies.
 
 Currently the following RBAC systems are supported:
 - 🔑 Microsoft Entra roles
@@ -211,9 +213,17 @@ Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us
    * Automated updates for classification templates from AzurePrivilegedIAM repository (`AutomatedClassificationUpdate`) or Control Plane scope (`ApplyAutomatedControlPlaneScopeUpdate`) can also be enabled by parameters. Customization of classification updates or data source to identify Control Plane assets is also available from here.
    * Review the settings in the section `AutomatedEntraOpsUpdate` to configure an automated update of the EntraOps PowerShell module on demand or scheduled basis.
    * Enable and update the following parameters if you want to ingest classification data to Custom Tables in Microsoft Sentinel/Log Analytics Workspace (`IngestToLogAnalytics`) or Microsoft Sentinel WatchLists (`IngestToWatchLists`). You need to add the required parameters of the workspace and/or data collection endpoints.
-   * Optional: Use parameter `WatchListTemplates` to define which Microsoft Sentinel WatchList templates should be updated (VIP Users, High Value Assets or Identity Correlation) and automatically added which entities based on EntraOps data.
-
-7. Create an application registration with required permissions (Global Admin role required). All necessary permissions on Microsoft Graph API permissions but also Azure RBAC roles for ingestion (if configured in `EntraOps.config`) will be added.
+     * Optional: Use parameter `WatchListTemplates` to define Microsoft Sentinel WatchList templates which should be updated based on EntraOps data. Use the value `All` to update VIP Users, High Value Assets and Identity Correlation watchlists.
+     * Optional: Use parameter `WatchListWorkloadIdentity` to create and update WatchList Templates for Workload Identities which are required for EntraOps workbooks and enhanced enrichment in combination with EntraOps data. Use the value `All` to create the following watchlists:
+        - "ManagedIdentityAssignedResourceId" - List of resources with assigned Managed Identity
+        - "WorkloadIdentityAttackPaths" - List of attack paths in Microsoft Defender for Cloud for service principals and managed identities
+        - "WorkloadIdentityInfo" - List of service principals with detailed information for Workload Identity
+        - "WorkloadIdentityRecommendations" - List of recommendations for Workload Identity in Microsoft Entra ID
+   * Enable and configure `AutomatedConditionalAccessTargetGroups` if you like to create Security Groups for Conditional Access Policies automatically. Name of the Administrative Unit and scope can be customized by the properties in this section.
+   * Creation and Management of Administrative Unit based on the selected EntraOps Tiering can be automated by using `AutomatedAdministrativeUnitManagement`. All supported objects (Users and groups) will be added to the Administrative Unit. `RestrictedAuMode` allows to control if a RMAU will be created for RBAC Systems outside of Microsoft Entra which are not using role-assignable group usually.
+   * All privileged users outside of protection by role-assignable group, existing (Restricted) Management Administrative Unit (RMAU) or role-assignable groups will be covered by the setting `AutomatedRmauAssignmentsForUnprotectedObjects`. All users or groups without protection will be added automatically to an RMAU for protection.
+  
+7. Create an application registration with required permissions (Global Admin role required and User Access Administrator). All necessary permissions on Microsoft Graph API permissions but also Azure RBAC roles for data collection and/or ingestion (if configured in `EntraOps.config`) will be added. Administrative Unit, based on the defined name in the config file (`AdminUnitName`) for Conditional Access Groups will be created to scoped delegation on Group Administrator if `ApplyConditionalAccessTargetGroups` has been enabled.
     ```powershell
     New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential -GitHubOrg "<YourGitHubUser/Org>" -GitHubRepo "<YourRepoName (e.g., EntraOps-Contoso)> -FederatedEntityType "Branch" -FederatedEntityName "main"
     ```
