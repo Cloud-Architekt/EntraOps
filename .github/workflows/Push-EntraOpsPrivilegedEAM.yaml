@@ -89,7 +89,6 @@ jobs:
             Import-Module ./EntraOps
             Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName ${env:TenantName} -ConfigFile ${env:ConfigFile}
             $CaTargetingGroupParams = $EntraOpsConfig.AutomatedConditionalAccessTargetGroups
-            Save-EntraOpsPrivilegedEAMWatchLists @CaTargetingGroupParams
             New-EntraOpsPrivilegedConditionalAccessGroup @CaTargetingGroupParams
             Update-EntraOpsPrivilegedConditionalAccessGroup @CaTargetingGroupParams            
           azPSVersion: latest
