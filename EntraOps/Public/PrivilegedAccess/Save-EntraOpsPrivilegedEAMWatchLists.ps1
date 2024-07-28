@@ -59,14 +59,18 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
-        [object]$WatchListTemplates = "All"        
+        [object]$WatchListTemplates = "All"
+        ,
+        [Parameter(Mandatory = $False)]
+        [ValidateSet("None", "ManagedIdentityAssignedResourceId", "All", "WorkloadIdentityAttackPaths", "WorkloadIdentityInfo", "WorkloadIdentityRecommendations")]
+        [object]$WatchListWorkloadIdentity = "All"
     )
 
     Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment
     $NewPrincipalsWatchlistItems = New-Object System.Collections.ArrayList
     $NewRoleAssignmentsWatchlistItems = New-Object System.Collections.ArrayList
     foreach ($Rbac in $RbacSystems) {
-   
+
         try {
             $Privileges = Get-Content -Path "$($ImportPath)/$($Rbac)/$($Rbac).json" -ErrorAction Stop | ConvertFrom-Json -Depth 10
         }
@@ -74,7 +78,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
             Write-Warning "No information found for $Rbac in file $($ImportPath)/$($Rbac)/$($Rbac).json"
             continue
         }
-        if ($null -ne $Privileges) {
+        if ( ![string]::IsNullOrEmpty($Privileges) ) {
             foreach ( $Privilege in $Privileges) {
                 $CurrentPrincipalItem = [PSCustomObject]@{
                     "ObjectId"                      = $Privilege.ObjectId
@@ -132,11 +136,13 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     ReplaceExistingWatchlist = $true
                 }
                 New-GkSeAzSentinelWatchlist @Parameters
+                Remove-Item -Path $WatchListPath -Force
             }
 
             $WatchListName = "$($WatchListPrefix)RoleAssignments"
             Write-Output "Write information to watchlist: $WatchListName"
-            if ( $null -ne $NewRoleAssignmentsWatchlistItems ) {
+
+            if ( ![string]::IsNullOrEmpty($NewRoleAssignmentsWatchlistItems) ) {
 
                 $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
                 $NewRoleAssignmentsWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
@@ -151,19 +157,31 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     ReplaceExistingWatchlist = $true
                 }
                 New-GkSeAzSentinelWatchlist @Parameters
+                Remove-Item -Path $WatchListPath -Force
             }
         }
     }
 
-    if ($WatchListTemplates -ne "None") {
+    if ($WatchListTemplates -notcontains "None") {
         $Parameters = @{
             SentinelSubscriptionId    = $SentinelSubscriptionId
             SentinelResourceGroupName = $SentinelResourceGroupName
             SentinelWorkspaceName     = $SentinelWorkspaceName
             WatchListTemplates        = $WatchListTemplates
-            RbacSystems               = $RbacSystems 
+            RbacSystems               = $RbacSystems
 
         }
         Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists @Parameters
     }
+
+    if ($WatchListWorkloadIdentity -notcontains "None") {
+        $Parameters = @{
+            SentinelSubscriptionId    = $SentinelSubscriptionId
+            SentinelResourceGroupName = $SentinelResourceGroupName
+            SentinelWorkspaceName     = $SentinelWorkspaceName
+            WatchLists                = $WatchListWorkloadIdentity
+
+        }
+        Save-EntraOpsWorkloadIdentityEnrichmentWatchLists @Parameters
+    }    
 }

@@ -23,12 +23,12 @@
 .PARAMETER RbacSystems
     Array of RBAC systems to be processed. Default is Azure, AzureBilling, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
 
-.PARAMETER AddToWatchListTemplates
+.PARAMETER WatchListTemplates
     Define scope of WatchList templates which should be updated. Default is "All". Supported templates are "VIPUsers", "HighValueAssets", "IdentityCorrelation".
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to WatchList in Microsoft Sentinel Workspace for correlation between work and privileged accounts.
-    Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists -WatchListTemplates "IdentityCorrelation" -SentinelSubscriptionId "3f72a077-c32a-423c-8503-41b93d3b0737" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
+    Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists WatchListTemplates "IdentityCorrelation" -SentinelSubscriptionId "3f72a077-c32a-423c-8503-41b93d3b0737" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
 #>
 function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
 
@@ -166,12 +166,12 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
 
                     if ($UserClassificationSource -eq "Object") {
                         # Get classification by custom security attribute of the privileged user
-                        $Classification = ($Privileges | Where-Object { $_.ObjectId -eq $AssociatedPrivilegedUser.ObjectId } | Select-Object -Unique ObjectAdminTierLevelName)[0]
+                        $Classification = ($Privileges | Where-Object { $_.ObjectId -eq $PrivilegedUser.ObjectId } | Select-Object -Unique ObjectAdminTierLevelName)[0]
                         $Tags.Add($($Classification.AdminTierLevelName)) | Out-Null
                     }
                     else {
                         # Get highest classification by assigned roles
-                        $Classification = ($Privileges | Where-Object { $_.ObjectId -eq $AssociatedPrivilegedUser.ObjectId } | Select-Object -ExpandProperty Classification | Sort-Object AdminTierLevel | Select-Object AdminTierLevelName)[0]
+                        $Classification = ($Privileges | Where-Object { $_.ObjectId -eq $PrivilegedUser.ObjectId } | Select-Object -ExpandProperty Classification | Sort-Object AdminTierLevel | Select-Object AdminTierLevelName)[0]
                         $Tags.Add($($Classification.AdminTierLevelName)) | Out-Null
                     }
 
