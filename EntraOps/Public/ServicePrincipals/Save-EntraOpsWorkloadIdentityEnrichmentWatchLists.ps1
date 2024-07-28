@@ -56,8 +56,10 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
 
     #region Workload Identity Assignments
     if ($WatchLists -eq "All" -or $WatchLists -contains "ManagedIdentityAssignedResourceId") {
+        Write-Host "Collecting data for ManagedIdentityAssignedResourceId"
         $WatchListName = "ManagedIdentityAssignedResourceId"
         $WatchListAlias = "ManagedIdentityAssignedResourceId"
+        $SearchKey = "ObjectId"
 
         $MiAssignedResourceIds = Get-EntraOpsManagedIdentityAssignments
         $MiAssignedResourceIdWatchlistItems = New-Object System.Collections.ArrayList
@@ -73,25 +75,27 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
         }
 
         if ( $null -ne $MiAssignedResourceIdWatchlistItems ) {
-            $SearchKey = "ObjectId"
+
+            $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
+            $MiAssignedResourceIdWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
             $Parameters = @{
-                SearchKey         = $SearchKey
-                DisplayName       = $WatchListName
-                WatchListAlias    = $WatchListAlias
-                NewWatchlistItems = $MiAssignedResourceIdWatchlistItems
-                SubscriptionId    = $SentinelSubscriptionId
-                ResourceGroupName = $SentinelResourceGroupName
-                WorkspaceName     = $SentinelWorkspaceName
-                Identifiers       = $TagValue
+                WatchListFilePath        = $WatchListPath
+                DisplayName              = $WatchListName
+                itemsSearchKey           = $SearchKey
+                SubscriptionId           = $SentinelSubscriptionId
+                ResourceGroupName        = $SentinelResourceGroupName
+                WorkspaceName            = $SentinelWorkspaceName
+                DefaultDuration          = "P14D"
+                ReplaceExistingWatchlist = $true
             }
-            Edit-GkSeAzSentinelWatchlist -Verbose @Parameters
+            New-GkSeAzSentinelWatchlist @Parameters
+            Remove-Item -Path $WatchListPath -Force
         }
     }
     #endregion
 
     #region WorkloadIdentityAttackPaths
     if ($WatchLists -eq "All" -or $WatchLists -contains "WorkloadIdentityAttackPaths") {
-
         $WatchListName = "WorkloadIdentityAttackPaths"
         $WatchListAlias = "WorkloadIdentityAttackPaths"
         $SearchKey = "AttackPathId"
@@ -101,7 +105,7 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
 
         foreach ($WorkloadIdentityAttackPath in $WorkloadIdentityAttackPaths) {
             $TagValue = @("EntraOps", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress -AsArray
-            $WorkloadIdentity | Add-Member -MemberType NoteProperty -Name "Tags" -Value $TagValue -Force
+            $WorkloadIdentityAttackPath | Add-Member -MemberType NoteProperty -Name "Tags" -Value $TagValue -Force
             $WorkloadIdentityAttackPathsWatchlistItems.Add( $WorkloadIdentityAttackPath ) | Out-Null
         }
 
@@ -109,7 +113,7 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
         if ( ![string]::IsNullOrEmpty($WorkloadIdentityAttackPathsWatchlistItems) ) {
 
             $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
-            $WorkloadIdentityRecommendationsWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
+            $WorkloadIdentityAttackPathsWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
             $Parameters = @{
                 WatchListFilePath        = $WatchListPath
                 DisplayName              = $WatchListName
@@ -162,11 +166,11 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
     }
     #endregion
 
-    #region WorkloadIdentityRecommendation
+    #region WorkloadIdentityRecommendations
     if ($WatchLists -eq "All" -or $WatchLists -contains "WorkloadIdentityRecommendations") {
 
-        $WatchListName = "WorkloadIdentityRecommendation"
-        $WatchListAlias = "WorkloadIdentityRecommendation"
+        $WatchListName = "WorkloadIdentityRecommendations"
+        $WatchListAlias = "WorkloadIdentityRecommendations"
         $SearchKey = "ImpactedResourceIdentifier"
 
         $WorkloadIdentityRecommendations = Get-EntraOpsWorkloadIdentityRecommendations

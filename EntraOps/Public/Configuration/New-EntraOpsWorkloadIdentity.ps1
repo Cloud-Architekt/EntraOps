@@ -224,7 +224,7 @@ function New-EntraOpsWorkloadIdentity {
             # Check if AU has been created successfully, wait for delay and retry if not available yet
             Try {
                 Do { Start-Sleep -Seconds 1 }
-                Until ($AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits/$($NewAdminUnitId)" -DisableCache))
+                Until ($AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits/$($NewAdminUnitId)" -DisableCache).Id)
                 Write-Host "$($AdminUnitName) - $($AdminUnitId) has been created successfully" -f Green
             }
             Catch {
