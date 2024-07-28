@@ -35,6 +35,11 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
         [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
         [Array]$RbacSystems = ("EntraID", "IdentityGovernance")
+        ,
+        [Parameter(Mandatory = $False)]
+        [ValidateSet("None", "Selected", "All")]
+        [string]$RestrictedAuMode = "Selected" #Default value will not create RMAU for Tier0 and EntraID and Identity Governance RBACs
+
     )
 
     foreach ($RbacSystem in $RbacSystems) {

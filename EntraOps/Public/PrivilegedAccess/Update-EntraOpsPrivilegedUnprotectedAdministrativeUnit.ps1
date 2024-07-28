@@ -75,7 +75,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
 
                 $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($_.ObjectId)" -OutputType PSObject -DisableCache
                 $AdminUnitMemberObjectType = $AdminUnitMember.'@odata.type'.Replace('#microsoft.graph.', '')
-                Write-Host "Adding $($AdminUnitMemberObjectType) $($AdminUnitMember.displayName) to $($AdminUnitName)"
+                Write-Verbose "Adding $($AdminUnitMemberObjectType) $($AdminUnitMember.displayName) to $($AdminUnitName)"
 
                 $OdataBody = @{
                     '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($_.ObjectId)"
@@ -113,7 +113,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                 if ($_.SideIndicator -eq "=>") {
 
                     $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/directoryObjects/$($_.InputObject)" -OutputType PSObject
-                    Write-Host "Removing $($AdminUnitMember.displayName) from $($AdminUnitName)"
+                    Write-Verbose "Removing $($AdminUnitMember.displayName) from $($AdminUnitName)"
                     try {
                         Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($_.InputObject)/`$ref" -OutputType PSObject
                     }
@@ -125,7 +125,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                 elseif ($_.SideIndicator -eq "<=") {
                     try {
                         $AdminUnitMember = (Get-MgDirectoryObject -DirectoryObjectId $_.InputObject)
-                        Write-Host "Adding $($AdminUnitMember.displayName) to $($AdminUnitName)"
+                        Write-Verbose "Adding $($AdminUnitMember.displayName) to $($AdminUnitName)"
 
                         $OdataBody = @{
                             '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($_.InputObject)"

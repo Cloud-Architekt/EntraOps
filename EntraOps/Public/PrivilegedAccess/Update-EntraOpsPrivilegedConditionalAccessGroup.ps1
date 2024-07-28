@@ -42,6 +42,9 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
         [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
         [Array]$RbacSystems = ("EntraID", "IdentityGovernance")
+        ,
+        [Parameter(Mandatory = $false)]
+        [String]$AdminUnitName        
     )
 
     foreach ($RbacSystem in $RbacSystems) {

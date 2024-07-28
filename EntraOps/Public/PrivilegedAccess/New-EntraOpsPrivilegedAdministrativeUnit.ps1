@@ -29,6 +29,10 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
         [Array]$ApplyToAccessTierLevel = ("ControlPlane", "ManagementPlane")
         ,
         [Parameter(Mandatory = $False)]
+        [ValidateSet("User", "Group")]
+        [Array]$FilterObjectType = ("User", "Group")
+        ,        
+        [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
         [Array]$RbacSystems = ("EntraID", "IdentityGovernance")
         ,

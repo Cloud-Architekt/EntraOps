@@ -45,8 +45,8 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
         [Array]$RbacSystems = ("EntraID", "IdentityGovernance")
         ,
-        [Parameter(Mandatory = $False)]
-        [String]$AdminUnitName = $null
+        [Parameter(Mandatory = $true)]
+        [String]$AdminUnitName
     )
 
     foreach ($RbacSystem in $RbacSystems) {
@@ -92,7 +92,7 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
                 if ($AdminUnitName) {
                     try {
                         $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($AdminUnitName)'" -DisableCache).id
-                        $CreatedGroupObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $GroupParams -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/"
+                        $CreatedGroupObject = Invoke-MgGraphRequest -Method "POST" -Body $GroupParams -Uri "https://graph.microsoft.com/beta/administrativeUnits/$($AdminUnitId)/members/" -ErrorAction Stop
                     }
                     catch {
                         Write-Error "Can not create Group $($GroupParams.Name)! Error: $_"
