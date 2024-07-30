@@ -47,28 +47,26 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
         [String]$AdminUnitName        
     )
 
+    
+    # Get all unique AdminTierLevels which needs to be iterated for assigning objects to Conditional Access Target Groups
+    $PrivilegedEamTierLevels = Get-ChildItem -Path "$($DefaultFolderClassification)/Templates" -File -Recurse -Exclude *.Param.json | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
+    $SelectedPrivilegedEamTierLevels = $PrivilegedEamTierLevels | where-object { $_.EAMTierLevelName -in $ApplyToAccessTierLevel } | select-object -unique @{Name = 'AdminTierLevel'; Expression = 'EAMTierLevelTagValue' }, @{Name = 'AdminTierLevelName'; Expression = 'EAMTierLevelName' }
+    #endregion
+
     foreach ($RbacSystem in $RbacSystems) {
 
-        $Classification = "$DefaultFolderClassifiedEam/$RbacSystem/$($RbacSystem).json"
+        $ClassificationEamFile = "$DefaultFolderClassifiedEam/$RbacSystem/$($RbacSystem).json"
 
         #region Get principals from EAM classification files and filter out objects without classification and objects not related to the RBAC system or object type filter
         $PrivilegedEam = @()
-        $PrivilegedEam += Get-ChildItem -Path $Classification | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
+        $PrivilegedEam += Get-ChildItem -Path $ClassificationEamFile | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
         $PrivilegedEam = $PrivilegedEam | Where-Object { $_.ObjectType -in $FilterObjectType }
-        $PrivilegedEamCount = ($PrivilegedEam | Where-Object { $null -eq $_.Classification }).count
+        $PrivilegedEamCount = ($PrivilegedEam | Where-Object { $null -eq $_.ClassificationEamFile }).count
         if ($PrivilegedEamCount -gt 0) { Write-Warning "Numbers of objects without classification: $PrivilegedEamCount" }
         $PrivilegedEamClassifiedObjects = $PrivilegedEam | where-object { $_.Classification.AdminTierLevel -notcontains $null -and $_.RoleSystem -eq $RbacSystem }
 
-        # Get all unique AdminTierLevels which needs to be iterated for assigning objects to Conditional Access Target Groups
-        $PrivilegedEamClassificationTierLevels = $PrivilegedEamClassifiedObjects | ForEach-Object {
-            $Classification = $_.Classification
-            $Classification | where-object { $_.AdminTierLevelName -in $ApplyToAccessTierLevel } | select-object -unique AdminTierLevel, AdminTierLevelName
-        }
-        $PrivilegedEamClassificationTierLevels = $PrivilegedEamClassificationTierLevels | select-object -unique AdminTierLevel, AdminTierLevelName
-        #endregion
-
         #region Assign all principals in Privileged EAM to Conditional Access Target Groups
-        foreach ($TierLevel in $PrivilegedEamClassificationTierLevels) {
+        foreach ($TierLevel in $SelectedPrivilegedEamTierLevels) {
             $GroupName = "$GroupPrefix" + $TierLevel.AdminTierLevelName + "." + $($RbacSystem)
             $GroupId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/v1.0/groups?`$filter=DisplayName eq '$GroupName'" -OutputType PSObject -DisableCache).id
             $PrivilegedObjects = @()
@@ -95,7 +93,7 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                 }
             }
             else {
-                Compare-Object $PrivilegedEamClassifiedObjects.ObjectId $CurrentGroupMembers.Id | ForEach-Object {
+                Compare-Object $PrivilegedObjects.ObjectId $CurrentGroupMembers.Id | ForEach-Object {
                     if ($_.SideIndicator -eq "=>") {
                         Write-Warning "$($_.InputObject) will be removed from $($GroupName)!"
                         Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/groups/$($GroupId)/members/$($_.InputObject)/`$ref" -OutputType PSObject

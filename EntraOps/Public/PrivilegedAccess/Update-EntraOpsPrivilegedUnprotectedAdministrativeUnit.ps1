@@ -45,15 +45,15 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
     # Get all privileged EAM objects without any restricted management and their tier levels
     $UnprotectedPrivilegedUser = $PrivilegedEamObjects | Where-Object { $_.RestrictedManagementByRAG -ne $True -and $_.RestrictedManagementByAadRole -ne $True -and $_.RestrictedManagementByRMAU -ne $True -and $_.ObjectType -in $FilterObjectType }
 
+
     # Get all unique AdminTierLevels which needs to be iterated for assigning objects to Conditional Access Target Groups
-    $PrivilegedEamClassificationTierLevels = $UnprotectedPrivilegedUser | ForEach-Object {
-        $Classification = $_.Classification
-        $Classification | where-object { $_.AdminTierLevelName -in $ApplyToAccessTierLevel } | select-object -unique AdminTierLevel, AdminTierLevelName
-    }
-    $PrivilegedEamTierLevels = $PrivilegedEamClassificationTierLevels | select-object -unique AdminTierLevel, AdminTierLevelName
+    $PrivilegedEamTierLevels = Get-ChildItem -Path "$($DefaultFolderClassification)/Templates" -File -Recurse -Exclude *.Param.json | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
+    $SelectedPrivilegedEamTierLevels = $PrivilegedEamTierLevels | where-object { $_.EAMTierLevelName -in $ApplyToAccessTierLevel } | select-object -unique @{Name = 'AdminTierLevel'; Expression = 'EAMTierLevelTagValue' }, @{Name = 'AdminTierLevelName'; Expression = 'EAMTierLevelName' }
+    #endregion
+    
 
     #region Assign all unprotected principals in Privileged EAM to restricted AUs or remove from RMAU if no longer privileged
-    foreach ($TierLevel in $PrivilegedEamTierLevels) {
+    foreach ($TierLevel in $SelectedPrivilegedEamTierLevels) {
 
         # Get Administrative Unit Id for related tier level
         $AdminUnitId = $null

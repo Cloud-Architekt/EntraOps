@@ -44,10 +44,14 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
         $UnprotectedPrivilegedUser = $PrivilegedEamObjects | Where-Object { $_.RestrictedManagementByRAG -ne $True -and $_.RestrictedManagementByAadRole -ne $True -and $_.RestrictedManagementByRMAU -ne $True -and $_.ObjectType -in $FilterObjectType }
         $UnprotectedPrivilegedUser.Classification | select-object -unique AdminTierLevelName, AdminTierLevel
     }
-    $PrivilegedEamTierLevels = $PrivilegedEamTierLevels | Where-Object { $_.AdminTierLevelName -in $ApplyToAccessTierLevel } | select-object -unique AdminTierLevelName, AdminTierLevel
+
+    # Get all unique AdminTierLevels which needs to be iterated for assigning objects to Conditional Access Target Groups
+    $PrivilegedEamTierLevels = Get-ChildItem -Path "$($DefaultFolderClassification)/Templates" -File -Recurse -Exclude *.Param.json | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
+    $SelectedPrivilegedEamTierLevels = $PrivilegedEamTierLevels | where-object { $_.EAMTierLevelName -in $ApplyToAccessTierLevel } | select-object -unique @{Name = 'AdminTierLevel'; Expression = 'EAMTierLevelTagValue' }, @{Name = 'AdminTierLevelName'; Expression = 'EAMTierLevelName' }
+    #endregion
 
     # Create Administrative Units for each Tier Level
-    foreach ($TierLevel in $PrivilegedEamTierLevels) {
+    foreach ($TierLevel in $SelectedPrivilegedEamTierLevels) {
         $Name = "Tier" + $TierLevel.AdminTierLevel + "-" + $TierLevel.AdminTierLevelName + ".UnprotectedAccounts"
         $AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$Name'" -OutputType PSObject -DisableCache)
 

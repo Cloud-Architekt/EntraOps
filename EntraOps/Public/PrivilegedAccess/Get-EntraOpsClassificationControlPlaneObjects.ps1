@@ -184,7 +184,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                 if ($null -ne (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($HighPrivilegedObjectId.PrincipalId)" )) {
                     $HighPrivilegedRoles = $HighPrivilegedObjectIdsFromAzGraph | Where-Object { $_.PrincipalId -eq $HighPrivilegedObjectId.PrincipalId -and $_.PrincipalType -eq $HighPrivilegedObjectId.PrincipalType } | Select-Object -Unique RoleScope, RoleName
                     $PrivilegedObject = Get-EntraOpsPrivilegedEntraObject -AadObjectId $HighPrivilegedObjectId.PrincipalId | Where-Object { $_.ObjectType -ne "unknown" }`
-                    | Select-Object ObjectId, tolower(ObjectType), ObjectSubType, ObjectDisplayName, ObjectSignInName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices
+                    | Select-Object ObjectId, @{Name = 'ObjectType'; Expression = { $_.'ObjectType'.tolower() } }, ObjectSubType, ObjectDisplayName, ObjectSignInName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices
                     $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value $HighPrivilegedRoles -Force | Out-Null
                     $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "Azure Resource Graph" -Force | Out-Null
                     return $PrivilegedObject

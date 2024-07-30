@@ -137,6 +137,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
                 SubscriptionId    = $SentinelSubscriptionId
                 ResourceGroupName = $SentinelResourceGroupName
                 WorkspaceName     = $SentinelWorkspaceName
+                OverrideTags      = $true
                 Identifiers       = @("EntraOps", "Automated Enrichment")
             }
             Edit-GkSeAzSentinelWatchlist -Verbose @Parameters
@@ -206,6 +207,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
                 ResourceGroupName = $SentinelResourceGroupName
                 WorkspaceName     = $SentinelWorkspaceName
                 Identifiers       = @("EntraOps", "Automated Enrichment")
+                OverrideTags      = $true
             }
             Edit-GkSeAzSentinelWatchlist -Verbose @Parameters
         }
@@ -302,6 +304,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
                 ResourceGroupName = $SentinelResourceGroupName
                 WorkspaceName     = $SentinelWorkspaceName
                 Identifiers       = @("EntraOps", "Automated Enrichment")
+                OverrideTags      = $true
             }
             Edit-GkSeAzSentinelWatchlist -Verbose @Parameters
         }
