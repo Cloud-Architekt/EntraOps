@@ -72,13 +72,13 @@ function New-EntraOpsConfigFile {
         [boolean]$ApplyAutomatedEntraOpsUpdate = $true,
 
         [Parameter(Mandatory = $false)]
-        [boolean]$ApplyConditionalAccessTargetGroups = $true,
+        [boolean]$ApplyConditionalAccessTargetGroups = $false,
 
         [Parameter(Mandatory = $false)]
-        [boolean]$ApplyAdministrativeUnitAssignments = $true,
+        [boolean]$ApplyAdministrativeUnitAssignments = $false,
 
         [Parameter(Mandatory = $false)]
-        [boolean]$ApplyRmauAssignmentsForUnprotectedObjects = $true,
+        [boolean]$ApplyRmauAssignmentsForUnprotectedObjects = $false,
 
         [Parameter(Mandatory = $false)]
         [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
