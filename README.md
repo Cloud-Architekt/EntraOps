@@ -521,7 +521,7 @@ Use `New-EntraOpsWorkloadIdentity` in combination of the parameter `-ExistingSpO
 I recommend to remove and create a service principal but also re-create the EntraOps.config file if there should be any issues by updating EntraOps.
 
 ## Changelog
-Added features, changes or bug fixes can be found in the (GitHub issues)[https://github.com/Cloud-Architekt/EntraOps/issues] of the repository or in the (changelog)[./CHANGELOG.md].
+Added features, changes or bug fixes can be found in the [GitHub issues](https://github.com/Cloud-Architekt/EntraOps/issues) of the repository or in the [changelog](./CHANGELOG.md).
 
 ## Disclaimer and License
 This tool is provided as-is, with no warranties.
