@@ -7,6 +7,9 @@ env:
   ConfigFile: ./EntraOpsConfig.json
   IngestToWatchLists: false
   IngestToLogAnalytics: false
+  ApplyAdministrativeUnitAssignments: false
+  ApplyRmauAssignmentsForUnprotectedObjects: false
+  ApplyConditionalAccessTargetGroups: false  
 
 on:
   # Allows you to run this workflow manually from the Actions tab
@@ -56,6 +59,40 @@ jobs:
             $SentinelWatchListsParams = $EntraOpsConfig.SentinelWatchLists
             Save-EntraOpsPrivilegedEAMWatchLists @SentinelWatchListsParams
           azPSVersion: "latest"
+      - name: Apply Assignment for Privileged Users and Groups to (Restricted) Administrative Units
+        if: env.ApplyAdministrativeUnitAssignments == 'true'
+        uses: azure/powershell@v2
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName ${env:TenantName} -ConfigFile ${env:ConfigFile}
+            $AutomatedAuParams = $EntraOpsConfig.AutomatedAdministrativeUnitManagement
+            New-EntraOpsPrivilegedAdministrativeUnit @AutomatedAuParams
+            Update-EntraOpsPrivilegedAdministrativeUnit @AutomatedAuParams
+          azPSVersion: latest
+      - name: Apply Assignment for unprotected assets to (Restricted) Administrative Unit
+        if: env.ApplyRmauAssignmentsForUnprotectedObjects == 'true'
+        uses: azure/powershell@v2
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName ${env:TenantName} -ConfigFile ${env:ConfigFile}
+            $AutomatedUnprotectedRmauParams = $EntraOpsConfig.AutomatedRmauAssignmentsForUnprotectedObjects
+            New-EntraOpsPrivilegedUnprotectedAdministrativeUnit @AutomatedUnprotectedRmauParams
+            Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit @AutomatedUnprotectedRmauParams
+          azPSVersion: latest
+      - name: Apply Group Assignment for Conditional Access Policies
+        if: env.ApplyConditionalAccessTargetGroups == 'true'
+        uses: azure/powershell@v2
+        with:
+          inlineScript: |
+            Import-Module ./EntraOps
+            Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName ${env:TenantName} -ConfigFile ${env:ConfigFile}
+            $CaTargetingGroupParams = $EntraOpsConfig.AutomatedConditionalAccessTargetGroups
+            New-EntraOpsPrivilegedConditionalAccessGroup @CaTargetingGroupParams
+            Update-EntraOpsPrivilegedConditionalAccessGroup @CaTargetingGroupParams            
+          azPSVersion: latest
+
       - name: Disconnect EntraOps
         uses: azure/powershell@v2
         with:

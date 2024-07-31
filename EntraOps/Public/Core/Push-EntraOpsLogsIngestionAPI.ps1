@@ -73,8 +73,8 @@ function Push-EntraOpsLogsIngestionAPI {
     Write-Verbose " ThrottleLimitMonitor: '$($ThrottleLimitMonitor)'"
 
     # Authentication
-    $AccessToken = (Get-AzAccessToken -ResourceUrl "https://monitor.azure.com/").Token
-    $headers = @{"Authorization" = "Bearer $AccessToken"; "Content-Type" = "application/json" }
+    $AccessToken = (Get-AzAccessToken -ResourceUrl "https://monitor.azure.com/" -AsSecureString).Token
+    $headers = @{"Authorization" = "Bearer $($AccessToken | ConvertFrom-SecureString -AsPlainText)"; "Content-Type" = "application/json" }
 
     # Add Timestamp to JSON data
     try {

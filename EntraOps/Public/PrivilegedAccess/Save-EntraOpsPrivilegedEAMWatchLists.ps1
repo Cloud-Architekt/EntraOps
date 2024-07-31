@@ -5,13 +5,6 @@
 .DESCRIPTION
     Get information from EntraOps about classification based on Enterprise Access Model and save it as WatchList in Microsoft Sentinel.
 
-<#
-.SYNOPSIS
-    Wrapper function to save data of EntraOps Privileged EAM insights to custom table in Log Analytics or Sentinel Workspace.
-
-.DESCRIPTION
-    Wrapper function to save data of EntraOps Privileged EAM insights to custom table in Log Analytics or Sentinel Workspace.
-
 .PARAMETER ImportPath
     Folder where the classification files should be stored. Default is ./PrivilegedEAM.
 
@@ -26,6 +19,12 @@
 
 .PARAMETER WatchListPrefix
     Prefix for all WatchLists wihich will be created by this cmldet. Default is EntraOps_.
+
+.PARAMETER WatchListTemplates
+    Type of WatchLists to be created. Default is None. Possible values are All, VIPUsers, HighValueAssets, IdentityCorrelation.
+
+.PARAMETER WatchListWorkloadIdentity
+    Type of WatchLists to be created. Default is None. Possible values are All, ManagedIdentityAssignedResourceId, WorkloadIdentityAttackPaths, WorkloadIdentityInfo, WorkloadIdentityRecommendations.
 
 .PARAMETER RbacSystems
     Array of RBAC systems to be processed. Default is Azure, AzureBilling, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
@@ -63,21 +62,28 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         [Parameter(Mandatory = $false)]
         [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
         [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
+        ,
+        [Parameter(Mandatory = $False)]
+        [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
+        [object]$WatchListTemplates = "None"
+        ,
+        [Parameter(Mandatory = $False)]
+        [ValidateSet("None", "ManagedIdentityAssignedResourceId", "All", "WorkloadIdentityAttackPaths", "WorkloadIdentityInfo", "WorkloadIdentityRecommendations")]
+        [object]$WatchListWorkloadIdentity = "None"
     )
 
     Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment
     $NewPrincipalsWatchlistItems = New-Object System.Collections.ArrayList
     $NewRoleAssignmentsWatchlistItems = New-Object System.Collections.ArrayList
     foreach ($Rbac in $RbacSystems) {
-   
+
         try {
             $Privileges = Get-Content -Path "$($ImportPath)/$($Rbac)/$($Rbac).json" -ErrorAction Stop | ConvertFrom-Json -Depth 10
-        }
-        catch {
+        } catch {
             Write-Warning "No information found for $Rbac in file $($ImportPath)/$($Rbac)/$($Rbac).json"
             continue
         }
-        if ($null -ne $Privileges) {
+        if ( ![string]::IsNullOrEmpty($Privileges) ) {
             foreach ( $Privilege in $Privileges) {
                 $CurrentPrincipalItem = [PSCustomObject]@{
                     "ObjectId"                      = $Privilege.ObjectId
@@ -108,8 +114,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     $RoleAssignment | Add-Member -MemberType NoteProperty -Name "Classification" -Value "$($RoleAssignment.Classification | ConvertTo-Json -Depth 10 -Compress -AsArray)" -Force
                     if ($null -eq $RoleAssignment.TransitiveByObjectId ) {
                         $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)" -Force
-                    }
-                    else {
+                    } else {
                         $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)_$($RoleAssignment.TransitiveByObjectId)" -Force
                     }
                     $TagValue = @("$($Rbac)", "Classification", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress -AsArray
@@ -135,11 +140,13 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     ReplaceExistingWatchlist = $true
                 }
                 New-GkSeAzSentinelWatchlist @Parameters
+                Remove-Item -Path $WatchListPath -Force
             }
 
             $WatchListName = "$($WatchListPrefix)RoleAssignments"
             Write-Output "Write information to watchlist: $WatchListName"
-            if ( $null -ne $NewRoleAssignmentsWatchlistItems ) {
+
+            if ( ![string]::IsNullOrEmpty($NewRoleAssignmentsWatchlistItems) ) {
 
                 $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
                 $NewRoleAssignmentsWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
@@ -154,7 +161,31 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     ReplaceExistingWatchlist = $true
                 }
                 New-GkSeAzSentinelWatchlist @Parameters
+                Remove-Item -Path $WatchListPath -Force
             }
         }
+    }
+
+    if ($WatchListTemplates -notcontains "None") {
+        $Parameters = @{
+            SentinelSubscriptionId    = $SentinelSubscriptionId
+            SentinelResourceGroupName = $SentinelResourceGroupName
+            SentinelWorkspaceName     = $SentinelWorkspaceName
+            WatchListTemplates        = $WatchListTemplates
+            RbacSystems               = $RbacSystems
+
+        }
+        Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists @Parameters
+    }
+
+    if ($WatchListWorkloadIdentity -notcontains "None") {
+        $Parameters = @{
+            SentinelSubscriptionId    = $SentinelSubscriptionId
+            SentinelResourceGroupName = $SentinelResourceGroupName
+            SentinelWorkspaceName     = $SentinelWorkspaceName
+            WatchLists                = $WatchListWorkloadIdentity
+
+        }
+        Save-EntraOpsWorkloadIdentityEnrichmentWatchLists @Parameters
     }
 }

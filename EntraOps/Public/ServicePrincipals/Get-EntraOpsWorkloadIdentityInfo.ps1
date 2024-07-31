@@ -24,20 +24,21 @@ function Get-EntraOpsWorkloadIdentityInfo {
     $ErrorActionPreference = "Stop"
 
     #region New watchlist items
-    $NewWatchlistItems = New-Object System.Collections.ArrayList
+    $NewWatchlistItems = [System.Collections.Concurrent.ConcurrentBag[psobject]]::new()
     Write-Verbose "Query tenant service principals - https://graph.microsoft.com/v1.0/serviceprincipals"
-    $ServicePrincipals = Invoke-EntraOpsMsGraphQuery -Uri "/v1.0/serviceprincipals"
+    $ServicePrincipals = Invoke-GkSeMgGraphRequest -Uri "https://graph.microsoft.com/v1.0/serviceprincipals"
 
     Write-Verbose "Query tenant applications - https://graph.microsoft.com/v1.0/applications"
-    $Applications = Invoke-EntraOpsMsGraphQuery -Uri "/v1.0/applications"
+    $Applications = Invoke-GkSeMgGraphRequest -Uri "https://graph.microsoft.com/v1.0/applications"
 
     Write-Verbose "Query directory role templates for mapping ID to name and further details"
-    $DirectoryRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions" | select-object displayName, templateId, isPrivileged, isBuiltin
+    $DirectoryRoleDefinitions = Invoke-GkSeMgGraphRequest -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions" | Select-Object displayName, templateId, isPrivileged, isBuiltin
 
     Write-Verbose "Query app roles for mapping ID to name"
-    $SPObjectWithAppRoles = $ServicePrincipals | where-object { $_.AppRoles -ne $null }
+    $SPObjectWithAppRoles = $ServicePrincipals | Where-Object { $_.AppRoles -ne $null }
     $AppRoles = foreach ($SPObjectWithAppRole in $SPObjectWithAppRoles) {
-        $SPObjectWithAppRole.AppRoles | foreach-object {
+
+        $SPObjectWithAppRole.AppRoles | ForEach-Object {
 
             [PSCustomObject]@{
                 "AppId"                    = $SPObjectWithAppRole.appId
@@ -58,138 +59,10 @@ function Get-EntraOpsWorkloadIdentityInfo {
     }
 
     Write-Verbose "Get details for enrichment of service principals"
-    #endregion
-
     $ServicePrincipals | ForEach-Object -Parallel {
         $ServicePrincipal = $_
 
-        #region Copy of Graph Request because of parallel processing, import-module does not work yet
-        <#
-        .SYNOPSIS
-            Executing Query on Microsoft Graph API.
-
-        .DESCRIPTION
-            Wrapper to call Microsoft Graph API with pagination support to fetch all data and set default values.
-
-        .EXAMPLE
-            Get list of all transitive role assignments for a principal in Microsoft Entra ID by principalId and using ConsistencyLevel.
-            Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$Principal'" -ConsistencyLevel "eventual"
-
-        .EXAMPLE
-            Get list of all role definitions in Microsoft Entra ID.
-            Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions"
-        #>
-
-        function Invoke-EntraOpsMsGraphQuery {
-
-            param (
-                [parameter(Mandatory = $false)]
-                [string]$Method = 'GET',
-
-                [parameter(Mandatory = $true)]
-                [string]$Uri,
-
-                [parameter(Mandatory = $false)]
-                [string]$Body,
-
-                [parameter(Mandatory = $false)]
-                [string]$ConsistencyLevel,
-
-                [parameter(Mandatory = $false)]
-                [ValidateSet("HashTable", "PSObject", "HttpResponseMessage", "Json")]
-                [string]$OutputType = "HashTable"
-            )
-
-            # Format headers.
-            $HeaderParams = @{
-            }
-
-
-            # Check if the Uri is valid.
-            if ($Uri -like "/beta/*" -or $Uri -like "/v1.0/*") {
-                $Uri = "https://graph.microsoft.com$Uri"
-            }
-            elseif ($Uri -like "https://graph.microsoft.com/*") {
-            }
-            else {
-                throw "Invalid Graph URI: $($Uri)!"
-            }
-
-            # Add ConsistencyLevel if provided in parameter
-            if ($null -ne $ConsistencyLevel) {
-                $HeaderParams.Add('ConsistencyLevel', "$ConsistencyLevel")
-            }
-
-            # Create empty arrays to store the results
-            $QueryRequest = @()
-            $QueryResult = @()
-
-            if ($UseAzPwshOnly -eq $True) {
-                $AccessToken = (Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com").Token
-                $HeaderParams.Add('Authorization', "Bearer $($AccessToken)")
-
-                # Run the initial query to Graph API
-                if ($Method -eq 'GET') {
-                    $QueryRequest = Invoke-RestMethod -Headers $HeaderParams -Uri $Uri -Method $Method -ContentType "application/json" -ResponseHeadersVariable $ResponseMessage
-                }
-                else {
-                    $QueryRequest = Invoke-RestMethod -Headers $HeaderParams -Uri $Uri -Method $Method -ContentType "application/json" -Body $Body -ResponseHeadersVariable $ResponseMessage
-                }
-
-                # Add the initial query result to the result array
-                if ($QueryRequest.value) {
-                    $QueryResult += $QueryRequest.value
-                }
-                else {
-                    $QueryResult += $QueryRequest
-                }
-
-                # Run another query to fetch data until there are no pages left
-                if ($Uri -notlike "*`$top*") {
-                    while ($QueryRequest.'@odata.nextLink') {
-                        $QueryRequest = Invoke-RestMethod -Headers $HeaderParams -Uri $QueryRequest.'@odata.nextLink' -Method $Method -ContentType "application/json" -ResponseHeadersVariable $ResponseMessage
-                        $QueryResult += $QueryRequest.value
-                    }
-                }
-
-                switch ($OutputType) {
-                    HashTable { $QueryResult = $QueryResult | ConvertTo-Json -Depth 10 | ConvertFrom-Json -Depth 10 -AsHashtable }
-                    JSON { $QueryResult = $QueryResult | ConvertTo-Json -Depth 10 }
-                    PSObject { $QueryResult = $QueryResult }
-                    HttpResponseMessage { $QueryResult = $ResponseMessage }
-                }
-                $QueryResult
-
-            }
-            else {
-                # Run the initial query to Graph API
-                if ($Method -eq 'GET') {
-                    $QueryRequest = Invoke-EntraOpsMsGraphQuery -Headers $HeaderParams -Uri $Uri -Method $Method -ContentType "application/json" -OutputType $OutputType
-                }
-                else {
-                    $QueryRequest = Invoke-EntraOpsMsGraphQuery -Headers $HeaderParams -Uri $Uri -Method $Method -ContentType "application/json" -Body $Body -OutputType $OutputType
-                }
-
-                # Add the initial query result to the result array
-                if ($QueryRequest.value) {
-                    $QueryResult += $QueryRequest.value
-                }
-                else {
-                    $QueryResult += $QueryRequest
-                }
-
-                # Run another query to fetch data until there are no pages left
-                if ($Uri -notlike "*`$top*") {
-                    while ($QueryRequest.'@odata.nextLink') {
-                        $QueryRequest = Invoke-EntraOpsMsGraphQuery -Headers $HeaderParams -Uri $QueryRequest.'@odata.nextLink' -Method $Method -ContentType "application/json" -OutputType $OutputType
-                        $QueryResult += $QueryRequest.value
-                    }
-                }
-                $QueryResult
-            }
-        }
-        #endregion
-
+        #region Function to get tenant information
         function Get-AADTenantInformation {
             [CmdletBinding()]
             param (
@@ -228,12 +101,13 @@ function Get-EntraOpsWorkloadIdentityInfo {
             }
             $Tenant
         }
+        #endregion        
 
         try {
             Write-Verbose "Collecting data for $($ServicePrincipal.displayName)"
 
             # Custom Security Attributes
-            $ObjectCustomSec = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$($ServicePrincipal.Id)" + '?$select=customSecurityAttributes') -OutputType PSObject).customSecurityAttributes.$($CustomSecurityServicePrincipalAttribute)
+            $ObjectCustomSec = (Invoke-MgGraphRequest -Method Get -Uri ("https://graph.microsoft.com/beta/servicePrincipals/$($ServicePrincipal.Id)" + '?$select=customSecurityAttributes') -OutputType PSObject).customSecurityAttributes.$($CustomSecurityServicePrincipalAttribute)
             if ($Null -eq $ObjectCustomSec) {
                 $adminTier = "Unclassified"
                 $adminTierLevelName = "Unclassified"
@@ -258,18 +132,8 @@ function Get-EntraOpsWorkloadIdentityInfo {
             }
             else {
                 $AppOwnerTenant = Get-AADTenantInformation -AppTenantId $ServicePrincipal.AppOwnerOrganizationId
-            }
+            }           
 
-            # Associated Managed Identities
-            if ($ServicePrincipal.servicePrincipalType -eq "ManagedIdentity") {
-                $AppOwnerTenant = Get-AADTenantInformation -AppTenantId $TenantId
-                $Query = "resources | where (identity has 'SystemAssigned' or identity has 'UserAssigned') and (name == '$($Sp.displayName)' or identity contains '$($Sp.displayName)') | project id"
-                $AzGraphResult = Invoke-EntraOpsAzGraphQuery -KqlQuery $Query
-                $associatedWorkload = @()
-                $associatedWorkload += $AzGraphResult.id
-            }
-
-            # Service Princpal Details
             Write-Verbose "Query Application of ServicePrincipal `"$($ServicePrincipal.displayName)`""
             try {
                 $Application = $using:Applications | Where-Object appId -eq $ServicePrincipal.AppId
@@ -280,9 +144,10 @@ function Get-EntraOpsWorkloadIdentityInfo {
 
             Write-Verbose "Query Application Permissions of ServicePrincipal `"$($ServicePrincipal.displayName)`""
             try {
-                $SPRoleAssignments = (Invoke-EntraOpsMsGraphQuery -Uri "/v1.0/servicePrincipals/$($ServicePrincipal.id)/appRoleAssignments")
+                $AssignedAppRoles = New-Object System.Collections.ArrayList
+                $SPRoleAssignments = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($ServicePrincipal.id)/appRoleAssignments" -Verbose:$False)['value']
                 $SPRoleAssignments = foreach ($SPRoleAssignment in $SPRoleAssignments) {
-                    $AppRole = $using:AppRoles | where-object { $_.appRoleId -eq $SPRoleAssignment.appRoleId -and $_.ServicePrincipalObjectId -eq $SPRoleAssignment.resourceId }
+                    $AppRole = $using:AppRoles | Where-Object { $_.appRoleId -eq $SPRoleAssignment.appRoleId -and $_.ServicePrincipalObjectId -eq $SPRoleAssignment.resourceId }
 
                     [PSCustomObject]@{
                         "ResourceAppId"       = $AppRole.AppId
@@ -298,10 +163,44 @@ function Get-EntraOpsWorkloadIdentityInfo {
                 throw $_.Exception
             }
 
+            Write-Verbose "Query Ownership of ServicePrincipal `"$($ServicePrincipal.displayName)`""
+            try {
+                $ServicePrincipalOwnerships = New-Object System.Collections.ArrayList
+                $SpOwners = Invoke-GkSeMgGraphRequest -Uri "https://graph.microsoft.com/v1.0/serviceprincipals/$($ServicePrincipal.id)/owners" | Select-Object id
+                foreach ($SpOwner in $SpOwners) {
+                    $ServicePrincipalOwnerships.Add($SpOwner.id) | Out-Null
+                }
+                $ServicePrincipalOwnerships = $ServicePrincipalOwnerships | ConvertTo-Json -Compress -AsArray
+            }
+            catch {
+                Write-Error -Message $_.Exception
+                throw $_.Exception
+            }
+
+            if ($null -ne $Application.id) {
+                Write-Verbose "Query Ownership of Application `"$($ServicePrincipal.displayName)`""
+                try {
+                    $AppOwnerships = New-Object System.Collections.ArrayList
+                    $AppOwners = Invoke-GkSeMgGraphRequest -Uri "https://graph.microsoft.com/v1.0/applications/$($Application.Id)/owners" | Select-Object id
+                    foreach ($AppOwner in $AppOwners) {
+                        $AppOwnerships.Add($AppOwner.id) | Out-Null
+                    }
+                    $AppOwnerships = $AppOwnerships | ConvertTo-Json -Compress -AsArray
+                }
+                catch {
+                    Write-Error -Message $_.Exception
+                    throw $_.Exception
+                }
+            }
+
             Write-Verbose "Query Group Memberships of ServicePrincipal `"$($ServicePrincipal.displayName)`""
             try {
-                $TransitiveMemberOf = Invoke-EntraOpsMsGraphQuery -Uri "/v1.0/serviceprincipals/$($ServicePrincipal.id)/transitiveMemberOf" | Select-Object id, displayName, isAssignableToRole
-                $GroupMemberships = $TransitiveMemberOf | ConvertTo-Json -Compress -AsArray
+                $GroupMemberships = New-Object System.Collections.ArrayList
+                $TransitiveMemberOf = Invoke-GkSeMgGraphRequest -Uri "https://graph.microsoft.com/v1.0/serviceprincipals/$($ServicePrincipal.id)/transitiveMemberOf" | Select-Object id, displayName, isAssignableToRole
+                foreach ($GroupMembership in $TransitiveMemberOf) {
+                    $GroupMemberships.Add($GroupMembership) | Out-Null
+                }
+                $GroupMemberships = $GroupMemberships | ConvertTo-Json -Compress -AsArray
             }
             catch {
                 Write-Error -Message $_.Exception
@@ -310,9 +209,14 @@ function Get-EntraOpsWorkloadIdentityInfo {
 
             Write-Verbose "Query Directory Roles of ServicePrincipal `"$($ServicePrincipal.displayName)`""
             try {
-                $TransitiveRoleAssignments = (Invoke-EntraOpsMsGraphQuery -Method Get -ConsistencyLevel "eventual" -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?`$count=true&`$filter=principalId eq '$($ServicePrincipal.Id)'")
+                $TransitiveRoleAssignments = New-Object System.Collections.ArrayList
+
+                $HeaderParams = @{
+                    'ConsistencyLevel' = "eventual"
+                }
+                $TransitiveRoleAssignments = (Invoke-MgGraphRequest -Method Get -Headers $HeaderParams -Uri "https://graph.microsoft.com/beta/roleManagement/directory/transitiveRoleAssignments?`$count=true&`$filter=principalId eq '$($ServicePrincipal.Id)'")['value']
                 $TransitiveRoleAssignments = foreach ($TransitiveRoleAssignment in $TransitiveRoleAssignments) {
-                    $RoleDefinition = $using:DirectoryRoleDefinitions | where-object { $_.templateid -eq $TransitiveRoleAssignment.roleDefinitionId }
+                    $RoleDefinition = $using:DirectoryRoleDefinitions | Where-Object { $_.templateid -eq $TransitiveRoleAssignment.roleDefinitionId }
 
                     [PSCustomObject]@{
                         "RoleDefinitionName" = $RoleDefinition.displayName
@@ -345,30 +249,33 @@ function Get-EntraOpsWorkloadIdentityInfo {
                     "CreatedDateTime"            = $ServicePrincipal.createdDateTime
                     "IsAccountEnabled"           = $ServicePrincipal.accountEnabled
                     "DisabledByMicrosoft"        = $ServicePrincipal.DisabledByMicrosoftStatus
-                    "AppOwnerTenantName"         = $AppOwnerTenant.TenantName
                     "VerifiedPublisher"          = $ServicePrincipal.VerifiedPublisher.DisplayName
-                    "PublisherName"              = $ServicePrincipal.PublisherName
+                    "PublisherName"              = $ServicePrincipal.PublisherName                    
+                    "AppOwnerTenantName"         = $AppOwnerTenant.TenantName                    
+                    "AppOwnerTenantId"           = $ServicePrincipal.AppOwnerOrganizationId
                     "IsFirstPartyApp"            = $IsFirstPartyApp
                     "ServicePrincipalType"       = $ServicePrincipal.servicePrincipalType
                     "SignInAudience"             = $ServicePrincipal.SignInAudience
                     "UserAssignmentRequired"     = $ServicePrincipal.appRoleAssignmentRequired
                     "ServiceManagementReference" = $ServicePrincipal.serviceManagementReference
+                    "ServicePrincipalOwners"     = $ServicePrincipalOwnerships
+                    "AppOwners"                  = $AppOwnerships
                     "AssignedAppRoles"           = $AssignedAppRoles
                     "GroupMembership"            = $GroupMemberships
                     "AssignedRoles"              = $AssignedRoles
                     "ObjectAdminTierLevel"       = $adminTier
-                    "ObjectAdminTierLevelName"   = $adminTierLevelName
-                    "AssociatedWorkload"         = $AssociatedWorkload | ConvertTo-Json -Compress
-                    "AssociatedService"          = $AssociatedService | ConvertTo-Json -Compress
-                    "Tags"                       = @("Entra ID", "Automated Enrichment") | ConvertTo-Json -Compress
+                    "ObjectAdminTierLevelName"   = $adminTierLevelName            
+                    "Tags"                       = @("Entra ID", "Automated Enrichment") | ConvertTo-Json -Compress -AsArray
                 }
                 ($using:NewWatchlistItems).Add( $CurrentItem ) | Out-Null
             }
         }
         catch {
+            Write-Warning "Could not add $($ServicePrincipal.displayName) - Error $($_.Exception)"
             Continue
         }
     }
+
     #endregion
-    return $NewWatchlistItems
+    return $NewWatchlistItems    
 }

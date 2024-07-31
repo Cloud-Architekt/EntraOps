@@ -19,15 +19,19 @@ function Get-EntraOpsWorkloadIdentityRecommendations {
         [Parameter(Mandatory = $false)]
         [ValidateSet("All", "active", "postponed", "dismissed", "completedByUser", "completedBySystem")]
         [string]$StatusFilter = "All"
+        ,
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("PSCustomObject", "WatchList")]
+        [string]$OutputType = "PSCustomObject"        
     )
 
     $RecommendationItems = New-Object System.Collections.ArrayList
 
     Write-Verbose "Collecting data for Entra Recommendations"
-    $Recommendations = (Invoke-EntraOpsMsGraphQuery -Uri "https://graph.microsoft.com/beta/directory/recommendations?`$filter=impactType eq 'apps'" -OutputType PSObject) | select-object id, displayName, priority, insights, benefits
+    $Recommendations = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/directory/recommendations?`$filter=impactType eq 'apps'" -OutputType PSObject).value | select-object id, displayName, priority, insights, benefits
 
     foreach ($Recommendation in $Recommendations) {
-        $Resources = (Invoke-EntraOpsMsGraphQuery -Uri "https://graph.microsoft.com/beta/directory/recommendations/$($Recommendation.id)/impactedResources" -OutputType PSObject)
+        $Resources = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/directory/recommendations/$($Recommendation.id)/impactedResources" -OutputType PSObject).value
         $Resources | ForEach-Object {
             $CurrentItem = @{
                 'RecommendationId'           = $_.recommendationId
@@ -48,8 +52,7 @@ function Get-EntraOpsWorkloadIdentityRecommendations {
     if ($StatusFilter -ne "All") {
         $FilteredRecommendationItems = $RecommendationItems | where-object { $_.Status -eq $StatusFilter }
         return $FilteredRecommendationItems
-    }
-    else {
+    } else {
         return $RecommendationItems
     }
 }

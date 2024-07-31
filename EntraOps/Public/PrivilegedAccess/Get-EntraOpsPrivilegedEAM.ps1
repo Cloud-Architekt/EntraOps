@@ -18,7 +18,7 @@ function Get-EntraOpsPrivilegedEAM {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $False)]
-        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
+        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
         [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps")
         ,
         [Parameter(Mandatory = $False)]
@@ -29,21 +29,6 @@ function Get-EntraOpsPrivilegedEAM {
         Write-Host "Clearing cache before analyzing RBAC and classification data"
         Clear-EntraOpsCache
     }
-
-    #region Azure
-    if ($RbacSystems -contains "Azure") {
-        $EamAzure = Get-EntraOpsPrivilegedEamAzure
-        $EamAzure = $EamAzure | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
-        $EamAzure
-    }
-    #endregion
-
-    #region Azure Billing
-    if ($RbacSystems -contains "AzureBilling") {
-        $EamAzureBilling = Get-EntraOpsPrivilegedEamAzureBilling -GlobalExclusion $false
-        $EamAzureBilling = $EamAzureBilling | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
-    }
-    #endregion
 
     #region Entra ID
     if ($RbacSystems -contains "EntraID") {

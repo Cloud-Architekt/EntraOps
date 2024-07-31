@@ -69,8 +69,7 @@ function Connect-EntraOps {
         #region Switch between Microsoft Graph SDK (Invoke-MgGraphRequest) and Azure PowerShell only in combination with Invoke-RestMethod
         if ($UseAzPwshOnly -eq $true) {
             New-Variable -Name UseAzPwshOnly -Value $True -Scope Global -Force
-        }
-        else {
+        } else {
             New-Variable -Name UseAzPwshOnly -Value $False -Scope Global -Force
 
             $RequiredCoreModules = @{
@@ -114,8 +113,7 @@ function Connect-EntraOps {
                     Write-Output "Logging in to Microsoft Graph..."
                     Connect-MgGraph -TenantId $TenantId -NoWelcome -ErrorAction Stop -Scopes $Scopes
                     Write-Output "Succesfully logged in to Microsoft Graph"
-                }
-                catch {
+                } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
                 }
@@ -131,8 +129,7 @@ function Connect-EntraOps {
                     Write-Output "Logging in to Microsoft Graph..."
                     Connect-MgGraph -TenantId $TenantId -NoWelcome -ErrorAction Stop -Scopes $Scopes -UseDeviceAuthentication
                     Write-Output "Succesfully logged in to Microsoft Graph"
-                }
-                catch {
+                } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
                 }
@@ -145,8 +142,7 @@ function Connect-EntraOps {
                     Write-Output "Logging in to Microsoft Graph..."
                     Connect-MgGraph -Identity -ErrorAction Stop -NoWelcome
                     Write-Output "Succesfully logged in to Microsoft Graph"
-                }
-                catch {
+                } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
                 }
@@ -159,8 +155,7 @@ function Connect-EntraOps {
                     Write-Output "Logging in to Microsoft Graph..."
                     Connect-MgGraph -Identity -ClientId $AccountId -NoWelcome -ErrorAction Stop
                     Write-Output "Succesfully logged in to Microsoft Graph"
-                }
-                catch {
+                } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
                 }
@@ -170,10 +165,9 @@ function Connect-EntraOps {
                     throw "Federated environment is not already authenticated"
                 }
                 try {
-                    $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph").Token | ConvertTo-SecureString -AsPlainText -Force
+                    $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
                     Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
-                }
-                catch {
+                } catch {
                     throw $_.Exception
                 }
             }
@@ -183,22 +177,18 @@ function Connect-EntraOps {
 
                     if ($UseAzPwshOnly -eq $true) {
                         New-Variable -Name MsGraphAccessToken -Value $MsGraphAccessToken -Scope Script -Force
-                    }
-                    else {
+                    } else {
                         $SecureMsGraphAccessToken = $MsGraphAccessToken | ConvertTo-SecureString -AsPlainText -Force
                         Connect-MgGraph -AccessToken $SecureMsGraphAccessToken -NoWelcome
                     }
-                }
-                elseif ($Null -ne (Get-AzContext).Tenant.Id) {
+                } elseif ($Null -ne (Get-AzContext).Tenant.Id) {
                     try {
-                        $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph").Token | ConvertTo-SecureString -AsPlainText -Force
+                        $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
                         Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
-                    }
-                    catch {
+                    } catch {
                         throw $_.Exception
                     }
-                }
-                else {
+                } else {
                     Write-Error -Message 'User or workload is not already authenticated. This authentication method is the default for EntraOps. Check "Get-Help Connect-EntraOps" to review the various options. Authenticated Azure PowerShell session is required for using "AlreadyAuthenticated" mode.'
                 }
             }
@@ -210,8 +200,7 @@ function Connect-EntraOps {
             Write-Verbose -Message "Connected to Azure Management"
             $AzContext = Get-AzContext | Select-Object Account, Tenant, TokenCache
             Write-Verbose $($AzContext)
-        }
-        else {
+        } else {
             Write-Verbose -Message "Connected to Azure Management"
             $AzContext = Get-AzContext | Select-Object Account, Tenant, TokenCache
             Write-Verbose $($AzContext)
@@ -230,15 +219,17 @@ function Connect-EntraOps {
         if ($ConfigFilePath) {
             try {
                 $EntraOpsConfig = Get-Content -Path $ConfigFilePath | ConvertFrom-Json -Depth 10 -AsHashtable
-            }
-            catch {
+            } catch {
                 Write-Error "Issue to import config file $($ConfigFilePath)! Check if the file exists and is in JSON format."
             }
-            # Remove Ingest parameters from config file and show configuration
+            # Remove Ingest or Apply* parameters from config file and show configuration
             $EntraOpsConfig.AutomatedClassificationUpdate.Remove("ApplyAutomatedClassificationUpdate")
             $EntraOpsConfig.AutomatedControlPlaneScopeUpdate.Remove("ApplyAutomatedControlPlaneScopeUpdate")
-            $EntraOpsConfig.LogAnalytics.Remove("IngestToLogAnalytics")
-            $EntraOpsConfig.SentinelWatchLists.Remove("IngestToWatchLists")
+            if ($EntraOpsConfig.LogAnalytics) { $EntraOpsConfig.LogAnalytics.Remove("IngestToLogAnalytics") }
+            if ($EntraOpsConfig.SentinelWatchLists) { $EntraOpsConfig.SentinelWatchLists.Remove("IngestToWatchLists") }
+            if ($EntraOpsConfig.AutomatedAdministrativeUnitManagement) { $EntraOpsConfig.AutomatedAdministrativeUnitManagement.Remove("ApplyAdministrativeUnitAssignments") }
+            if ($EntraOpsConfig.AutomatedConditionalAccessTargetGroups) { $EntraOpsConfig.AutomatedConditionalAccessTargetGroups.Remove("ApplyConditionalAccessTargetGroups") }
+            if ($EntraOpsConfig.AutomatedRmauAssignmentsForUnprotectedObjects) { $EntraOpsConfig.AutomatedRmauAssignmentsForUnprotectedObjects.Remove("ApplyRmauAssignmentsForUnprotectedObjects") }
 
             New-Variable -Name EntraOpsConfig -Value $EntraOpsConfig -Scope Global -Force
             Write-Verbose -Message "Config file $($ConfigFilePath) imported"
@@ -252,8 +243,7 @@ function Connect-EntraOps {
             New-Variable -Name DefaultFolderClassification -Value "$EntraOpsBaseFolder/Classification/$($TenantName)/" -Scope Global -Force
             New-Variable -Name DefaultFolderClassifiedEam -Value "$EntraOpsBaseFolder/PrivilegedEAM/$($TenantName)/" -Scope Global -Force
             Write-Verbose -Message "Multi Tenant in Repository"
-        }
-        else {
+        } else {
             New-Variable -Name DefaultFolderClassification -Value "$EntraOpsBaseFolder/Classification/" -Scope Global -Force
             New-Variable -Name DefaultFolderClassifiedEam -Value "$EntraOpsBaseFolder/PrivilegedEAM/" -Scope Global -Force
             Write-Verbose -Message "Single Tenant in Repository"

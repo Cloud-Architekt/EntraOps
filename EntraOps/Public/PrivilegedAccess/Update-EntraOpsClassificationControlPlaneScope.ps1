@@ -98,120 +98,19 @@ function Update-EntraOpsClassificationControlPlaneScope {
         [object]$PrivilegedObjectIds
     )
 
-    $PrivilegedObjects = @()
-
-    # Check if classification file custom and/or template file exists, choose custom template for tenant if available
-    if (!(Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext))")) {
-        try {
-            New-Item -Path "$($DefaultFolderClassification)/$($TenantNameContext)" -ItemType Directory -Force
-        }
-        catch {
-            Write-Error "Failed to create folder $($EntraIdCustomizedClassificationFile)! $_.Exception.Message"
-        }
-
+    $Parameters = @{
+        PrivilegedObjectClassificationSource = $PrivilegedObjectClassificationSource
+        EntraIdClassificationParameterFile   = $EntraIdClassificationParameterFile
+        EntraIdCustomizedClassificationFile  = $EntraIdCustomizedClassificationFile
+        EntraOpsEamFolder                    = $EntraOpsEamFolder
+        EntraOpsScopes                       = $EntraOpsScopes 
+        AzureHighPrivilegedRoles             = $AzureHighPrivilegedRoles
+        AzureHighPrivilegedScopes            = $AzureHighPrivilegedScopes
+        ExposureCriticalityLevel             = $ExposureCriticalityLevel
+        PrivilegedObjectIds                  = $PrivilegedObjectIds
     }
 
-    #region Get privileged objects from the defined sources in parameter
-    if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "EntraOps") {
-        Write-Output "Get privileged objects from EntraOps..."
-        # Get list of all privileged objects in Entra with classification on Control Plane by Custom Security Attribute or EntraOps Classification
-        $EntraOpsAllPrivilegedObjects = foreach ($EntraOpsScope in $EntraOpsScopes) {
-            try {
-                Get-Content -Path $EntraOpsEamFolder\$($EntraOpsScope)\$($EntraOpsScope).json -ErrorAction Stop | ConvertFrom-Json -Depth 10
-            }
-            catch {
-                Write-Warning "No privileged objects found for $($EntraOpsScope) in EntraOps! $_.Exception.Message"
-            }
-        }
-
-        if ($null -eq $EntraOpsAllPrivilegedObjects) {
-            Write-Warning "No privileged objects found in EntraOps!"
-        }
-        else {
-            $EntraOpsPrivilegedObjects = $EntraOpsAllPrivilegedObjects | Where-Object { $_.ObjectAdminTierLevelName -eq "ControlPlane" -or $_.Classification.AdminTierLevelName -contains "ControlPlane" } `
-            | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices
-
-            $PrivilegedObjects += $EntraOpsPrivilegedObjects
-        }
-    }
-    if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "AzResourceGraph") {
-        Write-Output "Get privileged objects from Azure Resource Graph..."
-        # Query template and update them with parameter value of high privileged Azure roles and scopes
-        $Query = 'AuthorizationResources
-        | where type =~ "microsoft.authorization/roleassignments"
-        | extend principalType = tostring(properties["principalType"])
-        | extend principalId = tostring(properties["principalId"])
-        | extend roleDefinitionId = tolower(tostring(properties["roleDefinitionId"]))
-        | extend scope = tolower(tostring(properties["scope"]))
-        | where isnotempty(scope)
-        | join kind=inner ( AuthorizationResources
-        | where type =~ "microsoft.authorization/roledefinitions"
-        | extend roleDefinitionId = tolower(id)
-        | extend Scope = tolower(properties.assignableScopes)
-        | extend RoleName = (properties.roleName)
-        | where RoleName in (%AzureHighPrivilegedRoles%)
-        ) on roleDefinitionId
-        | distinct principalId, principalType'
-        $Query = $Query.Replace("%AzureHighPrivilegedRoles%", "'$($AzureHighPrivilegedRoles -join "', '")'")
-        if ($null -ne $AzureHighPrivilegedScopes -and $AzureHighPrivilegedScopes -ne "*") {
-            $Scopes = "'$($AzureHighPrivilegedScopes -join "', '")'"
-            $Query = $Query.Replace("isnotempty(scope)", "scope in ($($Scopes))")
-        }
-        $HighPrivilegedObjectIdsFromAzGraph = (Invoke-EntraOpsAzGraphQuery -KqlQuery $Query)
-
-        # Get details of high privileged objects
-        $HighPrivilegedObjectsFromAzGraph += $HighPrivilegedObjectIdsFromAzGraph | ForEach-Object {
-            try {
-                if ($null -ne (Get-AzADServicePrincipal -ObjectId $_.principalId -ErrorAction Stop | Out-Null)) {
-                    Get-EntraOpsPrivilegedEntraObject -AadObjectId $_.principalId | Where-Object { $_.ObjectType -ne "unknown" }`
-                    | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectSignInName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices
-                }
-            }
-            catch {
-                Write-Warning "High privileged object with id $_.principalId not found! $_"
-            }
-        }
-        $PrivilegedObjects += $HighPrivilegedObjectsFromAzGraph
-    }
-    if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "PrivilegedEdgesFromExposureManagement") {
-        Write-Output "Get privileged objects from exposure graph edges and nodes in Exposure Management..."
-        $Query = 'let Tier0CloudResources = ExposureGraphNodes
-            | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeProperties.rawData.environmentName == "Azure");
-        let Tier0EntraObjects = ExposureGraphNodes
-            | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeProperties.rawData.primaryProvider == "AzureActiveDirectory");
-        let Tier0Devices = ExposureGraphNodes
-            | where isnotnull(NodeProperties.rawData.criticalityLevel) and (NodeProperties.rawData.criticalityLevel.criticalityLevel %CriticalLevel%) and (NodeLabel == "device") and (NodeProperties.rawData.isAzureADJoined == true);
-        let Tier0Assets = union Tier0EntraObjects, Tier0Devices, Tier0CloudResources | project NodeId;
-        let SensitiveRelation = dynamic(["has permissions to","can authenticate as","has role on","has credentials of","affecting", "can authenticate as", "Member of", "frequently logged in by"]);
-        // Devices are not supported yet, no AadObject Id available in ExposureGraphNodes, DeviceInfo shows only AadDeviceId
-        let FilteredNodes = dynamic(["user","group","serviceprincipal","managedidentity","device"]);
-        ExposureGraphEdges
-        | where EdgeLabel in (SensitiveRelation) and (TargetNodeId in (Tier0Assets) or SourceNodeId in (Tier0Assets)) and SourceNodeLabel in (FilteredNodes)
-        | join kind=leftouter ( ExposureGraphNodes
-            | mv-expand parse_json(EntityIds)
-            | where parse_json(EntityIds).type == "AadObjectId"
-            | extend AadObjectId = tostring(parse_json(EntityIds).id)
-            | extend TenantId = extract("tenantid=([\\w-]+)", 1, AadObjectId)
-            | extend ObjectId = extract("objectid=([\\w-]+)", 1, AadObjectId)
-            | project ObjectDisplayName = NodeName, ObjectType = NodeLabel, ObjectId, NodeId) on $left.SourceNodeId == $right.NodeId
-        | where isnotempty(ObjectId)
-        | summarize make_set(EdgeLabel), make_set(TargetNodeName) by ObjectDisplayName, SourceNodeName, ObjectType, ObjectId, NodeId'
-        $Query = $Query.Replace("%CriticalLevel%", $ExposureCriticalityLevel)
-        $Body = @{
-            "Query" = $Query;
-        } | ConvertTo-Json
-        $PrivilegedObjectsGraphEdges = (Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/security/runHuntingQuery" -Body $Body).results
-        if ($null -ne $PrivilegedObjectsGraphEdges) {
-            $PrivilegedObjects += $PrivilegedObjectsGraphEdges | ForEach-Object { Get-EntraOpsPrivilegedEntraObject -AadObjectId $_.ObjectId | Where-Object { $_.ObjectType -ne "unknown" }`
-                | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectSignInName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices
-            }
-        }
-    }
-    if ($PrivilegedObjectClassificationSource -contains "PrivilegedObjectIds" -and $null -ne $PrivilegedObjectIds) {
-        Write-Output "Get privileged objects from manual list of object ids..."
-        $PrivilegedObjects = $PrivilegedObjectIds | ForEach-Object { Get-EntraOpsPrivilegedEntraObject -AadObjectId $_ }
-    }
-    #endregion
+    $PrivilegedObjects = Get-EntraOpsClassificationControlPlaneObjects @Parameters
 
     #region Get classification file and filter for unique privileged objects
     $DirectoryLevelAssignmentScope = @("/")
@@ -219,9 +118,10 @@ function Update-EntraOpsClassificationControlPlaneScope {
     $PrivilegedObjects = $PrivilegedObjects | sort-object ObjectType, ObjectDisplayName | Select-Object -Unique *
     Write-Output "Identified privileged objects:"
     $PrivilegedObjects | ForEach-Object {
-        Write-Output "$($ObjectType) - $($_.ObjectId) - $($_.ObjectDisplayName)"
+        Write-Output "$($_.ObjectType) - $($_.ObjectId) - $($_.ObjectDisplayName)"
     }
-    #endregion
+    #endregion   
+
 
     #region Privileged User
     Write-Output "Identify directory role scope of privileged users..."
