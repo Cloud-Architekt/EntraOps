@@ -20,6 +20,12 @@
 .PARAMETER WatchListPrefix
     Prefix for all WatchLists wihich will be created by this cmldet. Default is EntraOps_.
 
+.PARAMETER WatchListTemplates
+    Type of WatchLists to be created. Default is None. Possible values are All, VIPUsers, HighValueAssets, IdentityCorrelation.
+
+.PARAMETER WatchListWorkloadIdentity
+    Type of WatchLists to be created. Default is None. Possible values are All, ManagedIdentityAssignedResourceId, WorkloadIdentityAttackPaths, WorkloadIdentityInfo, WorkloadIdentityRecommendations.
+
 .PARAMETER RbacSystems
     Array of RBAC systems to be processed. Default is Azure, AzureBilling, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
 
@@ -59,11 +65,11 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
-        [object]$WatchListTemplates = "All"
+        [object]$WatchListTemplates = "None"
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "ManagedIdentityAssignedResourceId", "All", "WorkloadIdentityAttackPaths", "WorkloadIdentityInfo", "WorkloadIdentityRecommendations")]
-        [object]$WatchListWorkloadIdentity = "All"
+        [object]$WatchListWorkloadIdentity = "None"
     )
 
     Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment
@@ -73,8 +79,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
 
         try {
             $Privileges = Get-Content -Path "$($ImportPath)/$($Rbac)/$($Rbac).json" -ErrorAction Stop | ConvertFrom-Json -Depth 10
-        }
-        catch {
+        } catch {
             Write-Warning "No information found for $Rbac in file $($ImportPath)/$($Rbac)/$($Rbac).json"
             continue
         }
@@ -109,8 +114,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     $RoleAssignment | Add-Member -MemberType NoteProperty -Name "Classification" -Value "$($RoleAssignment.Classification | ConvertTo-Json -Depth 10 -Compress -AsArray)" -Force
                     if ($null -eq $RoleAssignment.TransitiveByObjectId ) {
                         $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)" -Force
-                    }
-                    else {
+                    } else {
                         $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)_$($RoleAssignment.TransitiveByObjectId)" -Force
                     }
                     $TagValue = @("$($Rbac)", "Classification", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress -AsArray
@@ -183,5 +187,5 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
 
         }
         Save-EntraOpsWorkloadIdentityEnrichmentWatchLists @Parameters
-    }    
+    }
 }

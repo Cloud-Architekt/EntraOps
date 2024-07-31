@@ -44,13 +44,12 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("ManagedIdentityAssignedResourceId", "All", "WorkloadIdentityAttackPaths", "WorkloadIdentityInfo", "WorkloadIdentityRecommendations")]
-        [object]$WatchLists = "All"
+        [object]$WatchLists = "None"
     )
 
     try {
         Import-Module "SentinelEnrichment" -ErrorAction Stop
-    }
-    catch {
+    } catch {
         throw "Issue to import SentinelEnrichment modul!"
     }
 
@@ -74,7 +73,7 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
             $MiAssignedResourceIdWatchlistItems.Add( $MiAssignedResourceId ) | Out-Null
         }
 
-        if ( $null -ne $MiAssignedResourceIdWatchlistItems ) {
+        if ( ![string]::IsNullOrEmpty($MiAssignedResourceIdWatchlistItems) ) {
 
             $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
             $MiAssignedResourceIdWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
@@ -201,4 +200,8 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
         }
     }
     #endregion
+
+    if ($WatchLists -eq "None") {
+        Write-Warning 'No WatchList scope defined. Please define the target WatchLists by using "-WatchLists" parameter and choose between the following values/options: "All", "ManagedIdentityAssignedResourceId", "WorkloadIdentityAttackPaths", "WorkloadIdentityInfo", "WorkloadIdentityRecommendations"'
+    }
 }
