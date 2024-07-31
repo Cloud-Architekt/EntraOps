@@ -46,7 +46,7 @@ Integration to customize Control Plane scope automatically by critical assets in
 
 - 📊 Build reports or queries on your classified privileges to identify "tier breach" on Microsoft's Enterprise Access Model or privilege escalation paths. Workbook template to visualize classification data of role assignments (identified by EntraOps) and objects (by using custom security attributes)
 
-- 🛡️ Automated assignment of privileged assets in Conditional Access Groups and Restricted Management Administrative Units (RMAU) to protect high-privileged assets from lower privileges and apply strong Zero Trust policies. Privileged users and groups without existing restricted management by assignment to Administrative Unit (AU), role-assignable group or Entra ID role will be automatically covered by assignmend to a RMAU (named "UnprotectedAssets").
+- 🛡️ Automated assignment of privileged assets in Conditional Access Groups and Restricted Management Administrative Units (RMAU) to protect high-privileged assets from lower privileges and apply strong Zero Trust policies. Privileged users and groups without existing restricted management by assignment to Administrative Unit (AU), role-assignable group or Entra ID role will be automatically covered by assignmend to a RMAU (named "UnprotectedObjects").
 
 Currently the following RBAC systems are supported:
 - 🔑 Microsoft Entra roles

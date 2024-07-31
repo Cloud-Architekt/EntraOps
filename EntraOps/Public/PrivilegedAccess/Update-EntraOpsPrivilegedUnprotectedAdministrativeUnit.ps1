@@ -57,7 +57,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
 
         # Get Administrative Unit Id for related tier level
         $AdminUnitId = $null
-        $AdminUnitName = "Tier" + $TierLevel.AdminTierLevel + "-" + $TierLevel.AdminTierLevelName + ".UnprotectedAccounts"
+        $AdminUnitName = "Tier" + $TierLevel.AdminTierLevel + "-" + $TierLevel.AdminTierLevelName + ".UnprotectedObjects"
         $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$AdminUnitName'" -DisableCache -OutputType PSObject).id
 
         if ($null -eq $AdminUnitId) {

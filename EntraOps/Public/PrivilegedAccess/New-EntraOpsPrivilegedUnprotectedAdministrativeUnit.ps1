@@ -52,7 +52,7 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
 
     # Create Administrative Units for each Tier Level
     foreach ($TierLevel in $SelectedPrivilegedEamTierLevels) {
-        $Name = "Tier" + $TierLevel.AdminTierLevel + "-" + $TierLevel.AdminTierLevelName + ".UnprotectedAccounts"
+        $Name = "Tier" + $TierLevel.AdminTierLevel + "-" + $TierLevel.AdminTierLevelName + ".UnprotectedObjects"
         $AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$Name'" -OutputType PSObject -DisableCache)
 
         if (-not $AdministrativeUnit.id) {
