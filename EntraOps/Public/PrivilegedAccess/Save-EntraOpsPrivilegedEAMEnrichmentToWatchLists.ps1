@@ -140,7 +140,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
                 OverrideTags      = $true
                 Identifiers       = @("EntraOps", "Automated Enrichment")
             }
-            Edit-GkSeAzSentinelWatchlist -Verbose @Parameters
+            Edit-GkSeAzSentinelWatchlist @Parameters
         }
     }
     #endregion
@@ -209,7 +209,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
                 Identifiers       = @("EntraOps", "Automated Enrichment")
                 OverrideTags      = $true
             }
-            Edit-GkSeAzSentinelWatchlist -Verbose @Parameters
+            Edit-GkSeAzSentinelWatchlist @Parameters
         }
     }
     #endregion
@@ -306,7 +306,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
                 Identifiers       = @("EntraOps", "Automated Enrichment")
                 OverrideTags      = $true
             }
-            Edit-GkSeAzSentinelWatchlist -Verbose @Parameters
+            Edit-GkSeAzSentinelWatchlist @Parameters
         }
     }
     #endregion
