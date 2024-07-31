@@ -84,6 +84,7 @@ function New-EntraOpsWorkloadIdentity {
     # Connect to Graph
     Write-Host "Connect to Microsoft Graph..."
     $GraphScopes = @(
+        "AdministrativeUnit.ReadWrite.All",
         "Application.ReadWrite.All",
         "AppRoleAssignment.ReadWrite.All",
         "RoleManagement.ReadWrite.Directory"

@@ -515,8 +515,8 @@ The cmdlet can be executed interactively, and changes must be pushed to your rep
 Currently, there is also a workflow named "Update-EntraOps" which can be executed on demand or run on scheduled basis (defined in EntraOps.config) and updates the PowerShell module only.
 There are some restrictions to update workflows by another workflow which makes it hard to update the actions automatically.
 
-Regardless of the way to update EntraOps files, it could be required to update the service principals of EntraOps.
-Use `New-EntraOpsWorkloadIdentity` in combination of the parameter `-ExistingSpObjectId` and the object ID of the EntraOps service principal (Example: `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps-CloudLab" -ExistingSpObjectId eca9154b-0d2a-4609-aa41-064eb317bfb3´). Ignore errors regarding existing API permissions or conflicts with existing roles.
+Regardless of the way to update EntraOps files, it could be required to update the EntraOps.config file and service principals of EntraOps to take benefit of new features. Create a new EntraOps.config file or add manually the named properties in the description of the feature. Use `New-EntraOpsWorkloadIdentity` in combination of the parameter `-ExistingSpObjectId` and the object ID of the EntraOps service principal (Example: `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps-CloudLab" -ExistingSpObjectId eca9154b-0d2a-4609-aa41-064eb317bfb3`). Ignore errors regarding existing API permissions or conflicts with existing roles.
+
 Don't forget to update your workflow files by using the cmdlet `Update-EntraOpsRequiredWorkflowParameters`.
 
 I recommend to remove and create a service principal but also re-create the EntraOps.config file if there should be any issues by updating EntraOps.
