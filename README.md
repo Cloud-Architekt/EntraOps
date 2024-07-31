@@ -515,11 +515,13 @@ The cmdlet can be executed interactively, and changes must be pushed to your rep
 Currently, there is also a workflow named "Update-EntraOps" which can be executed on demand or run on scheduled basis (defined in EntraOps.config) and updates the PowerShell module only.
 There are some restrictions to update workflows by another workflow which makes it hard to update the actions automatically.
 
+Regardless of the way to update EntraOps files, it could be required to update the service principals of EntraOps.
+Use `New-EntraOpsWorkloadIdentity` in combination of the parameter `-ExistingSpObjectId` and the object ID of the EntraOps service principal (Example: `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps-CloudLab" -ExistingSpObjectId eca9154b-0d2a-4609-aa41-064eb317bfb3´). Ignore errors regarding existing API permissions or conflicts with existing roles.
+
+I recommend to remove and create a service principal but also re-create the EntraOps.config file if there should be any issues by updating EntraOps.
+
 ## Changelog
-
-Version 0.1
-
-Version 0.2
+Added features, changes or bug fixes can be found in the (GitHub issues)[https://github.com/Cloud-Architekt/EntraOps/issues] of the repository or in the (changelog)[./CHANGELOG.md].
 
 ## Disclaimer and License
 This tool is provided as-is, with no warranties.

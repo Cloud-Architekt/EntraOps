@@ -167,7 +167,7 @@ function New-EntraOpsWorkloadIdentity {
             New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $SPObject.Id -PrincipalId $SPObject.Id -ResourceId $MsGraph.Id -AppRoleId $GraphApiPermission.Id | Out-Null
         }
         catch {
-            Write-Error "Failed to add API Permission $($GraphApiPermission.Value) to $AppDisplayName. Error: $_"
+            Write-Warning "Failed to add API Permission $($GraphApiPermission.Value) to $AppDisplayName. Error: $_"
         }
     }
     #endregion
@@ -175,7 +175,7 @@ function New-EntraOpsWorkloadIdentity {
     #region Add required Microsoft Graph API Permissions for Push (Change) Operations
 
     # Graph API permissions for Push operations
-    if ($Config.AutomatedAdministrativeUnitManagement.ApplyAdministrativeUnitAssignments -eq $true -and $Config.AutomatedRmauAssignmentsForUnprotectedObjects.ApplyRmauAssignmentsForUnprotectedObjects -eq $true) {
+    if ($Config.AutomatedAdministrativeUnitManagement.ApplyAdministrativeUnitAssignments -eq $true -or $Config.AutomatedRmauAssignmentsForUnprotectedObjects.ApplyRmauAssignmentsForUnprotectedObjects -eq $true) {
         $PushPermissionsToAdd = @(
             "AdministrativeUnit.ReadWrite.All"
         )
@@ -283,17 +283,27 @@ function New-EntraOpsWorkloadIdentity {
     Start-Sleep 5 # Wait for adding permission to new created Service Principal
 
     if ($Config.LogAnalytics.IngestToLogAnalytics -eq $true) {
-        Write-Output "Adding permissions to Resource Group of Data Collection Rule on $($DataCollectionRuleResourceGroupId)..."
-        Add-AzureRolePermissions -RoleDefinitionName "Monitoring Metrics Publisher" -ResourceGroupName $Config.LogAnalytics.DataCollectionResourceGroupName -SubscriptionId $Config.LogAnalytics.DataCollectionRuleSubscriptionId
-        Add-AzureRolePermissions -RoleDefinitionName "Reader" -ResourceGroupName $Config.LogAnalytics.DataCollectionResourceGroupName -SubscriptionId $Config.LogAnalytics.DataCollectionRuleSubscriptionId
+        try {
+            Write-Output "Adding permissions to Resource Group of Data Collection Rule on $($DataCollectionRuleResourceGroupId)..."
+            Add-AzureRolePermissions -RoleDefinitionName "Monitoring Metrics Publisher" -ResourceGroupName $Config.LogAnalytics.DataCollectionResourceGroupName -SubscriptionId $Config.LogAnalytics.DataCollectionRuleSubscriptionId
+            Add-AzureRolePermissions -RoleDefinitionName "Reader" -ResourceGroupName $Config.LogAnalytics.DataCollectionResourceGroupName -SubscriptionId $Config.LogAnalytics.DataCollectionRuleSubscriptionId    
+        }
+        catch {
+            Write-Warning "Failed to assign roles on $($DataCollectionRuleResourceGroupId). Error: $_"
+        }
     }
     else {
         Write-Output "Skipping Data Collection Rule permissions... (IngestToLogAnalytics is set to false)"
     }
 
     if ($Config.SentinelWatchLists.IngestToWatchLists -eq $true) {
-        Write-Output "Adding permissions to Resource Group of Sentinel workspace on $($DataCollectionRuleResourceGroupId)..."
-        Add-AzureRolePermissions -RoleDefinitionName "Microsoft Sentinel Contributor" -ResourceGroupName $Config.SentinelWatchLists.SentinelResourceGroupName -SubscriptionId $Config.SentinelWatchLists.SentinelSubscriptionId
+        try {
+            Write-Output "Adding permissions to Resource Group of Sentinel workspace on $($DataCollectionRuleResourceGroupId)..."
+            Add-AzureRolePermissions -RoleDefinitionName "Microsoft Sentinel Contributor" -ResourceGroupName $Config.SentinelWatchLists.SentinelResourceGroupName -SubscriptionId $Config.SentinelWatchLists.SentinelSubscriptionId    
+        }
+        catch {
+            Write-Warning "Failed to assign roles on $($DataCollectionRuleResourceGroupId). Error: $_"
+        }
     }
     else {
         Write-Output "Skipping WatchList permissions... (IngestToWatchLists is set to false)"
