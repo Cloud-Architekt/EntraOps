@@ -9,9 +9,6 @@
                 "RoleAssignmentScopeName": [
                     "/"
                 ],
-                "ExcludedRoleAssignmentScopeName": [
-                    "f068c58c-f5d6-4171-be34-29cfae49d516"
-                ],
                 "RoleDefinitionActions": [
                     "Microsoft.Intune/Roles/Create",
                     "Microsoft.Intune/Roles/Update",
@@ -45,6 +42,10 @@
                     "Microsoft.Intune/EnrollmentProgramToken/Create",
                     "Microsoft.Intune/EnrollmentProgramToken/Delete",
                     "Microsoft.Intune/EnrollmentProgramToken/Update",
+                    "Microsoft.Intune/EpmPolicy/Create",
+                    "Microsoft.Intune/EpmPolicy/Update",
+                    "Microsoft.Intune/EpmPolicy/Delete",
+                    "Microsoft.Intune/EpmPolicy/Assign",
                     "Microsoft.Intune/ManagedApps/Assign",
                     "Microsoft.Intune/ManagedApps/Create",
                     "Microsoft.Intune/ManagedApps/Delete",
@@ -58,6 +59,12 @@
                     "Microsoft.Intune/Organization/Delete",
                     "Microsoft.Intune/Organization/Update",
                     "Microsoft.Intune/PolicySets/Delete",
+                    "Microsoft.Intune/RemoteTasks/RequestRemoteAssistance",
+                    "Microsoft.Intune/RemoteAssistanceApp/ViewScreen",
+                    "Microsoft.Intune/RemoteAssistanceApp/TakeFullControl",
+                    "Microsoft.Intune/RemoteAssistanceApp/Elevation",
+                    "Microsoft.Intune/RemoteAssistanceApp/Unattended",
+                    "Microsoft.Intune/RemoteTasks/CleanPC",
                     "Microsoft.Intune/SecurityTasks/Update"
                 ]
             },
@@ -65,7 +72,8 @@
                 "Category": "Microsoft.DeviceManagement",
                 "Service": "PAW Endpoint Management",
                 "RoleAssignmentScopeName": [
-                    "76d5d44b-022e-4656-b698-b3f57be7c2ae"
+                    "<Tier0PAWScopeTagId>",
+                    "<Tier1PAWScopeTagId>"
                 ],
                 "ExcludedRoleAssignmentScopeName": [],
                 "RoleDefinitionActions": [
@@ -105,10 +113,9 @@
             },
             {
                 "Category": "Microsoft.DeviceManagement",
-                "Service": "PAW Device Management - Tier0",
+                "Service": "PAW Endpoint Management - Tier0",
                 "RoleAssignmentScopeName": [
-                    "eb2e4591-19d1-4b3b-8751-d701c2d7c8e5",
-                    "0912a409-a233-4477-9a0f-1d9ac3d6f74c"
+                    "<Tier0PAWScopeTagId>"
                 ],
                 "ExcludedRoleAssignmentScopeName": [],
                 "RoleDefinitionActions": [
@@ -148,10 +155,9 @@
             },
             {
                 "Category": "Microsoft.DeviceManagement",
-                "Service": "PAW Device Management - Tier1",
+                "Service": "PAW Endpoint Management - Tier1",
                 "RoleAssignmentScopeName": [
-                    "205de7a7-c20c-4f7d-bad0-6f5f97d90594",
-                    "f70a2e17-1d96-4c01-987e-c4762d02d6ba"
+                    "<Tier1PAWScopeTagId>"
                 ],
                 "ExcludedRoleAssignmentScopeName": [],
                 "RoleDefinitionActions": [
@@ -192,15 +198,14 @@
         ]
     },
     {
-        "EAMTierLevelName": "ManagementPlane",
-        "EAMTierLevelTagValue": "1",
+        "EAMTierLevelName": "UserAccess",
+        "EAMTierLevelTagValue": "2",
         "TierLevelDefinition": [
             {
                 "Category": "Microsoft.DeviceManagement",
-                "Service": "Enterprise Device Management",
+                "Service": "Device Management",
                 "RoleAssignmentScopeName": [
-                    "f068c58c-f5d6-4171-be34-29cfae49d516",
-                    "7d2ae0fd-af63-4a7c-9a4e-7949eada6406"
+                    "<EnterpriseDeviceScopeId>"
                 ],
                 "RoleDefinitionActions": [
                     "Microsoft.Intune/AssignmentFilter/Create",
