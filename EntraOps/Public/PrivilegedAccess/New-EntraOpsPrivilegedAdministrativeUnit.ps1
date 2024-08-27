@@ -34,7 +34,7 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
         ,        
         [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance")
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "Selected", "All")]

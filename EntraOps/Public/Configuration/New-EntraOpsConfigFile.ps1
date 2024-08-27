@@ -172,7 +172,7 @@ function New-EntraOpsConfigFile {
             ApplyAdministrativeUnitAssignments = $ApplyAdministrativeUnitAssignments
             ApplyToAccessTierLevel             = ("ControlPlane", "ManagementPlane")
             FilterObjectType                   = ("User", "Group")
-            RbacSystems                        = ("EntraID", "IdentityGovernance")
+            RbacSystems                        = ("EntraID", "IdentityGovernance", "DeviceManagement")
             RestrictedAuMode                   = "selected"
         }
         AutomatedConditionalAccessTargetGroups        = [ordered]@{
@@ -181,13 +181,13 @@ function New-EntraOpsConfigFile {
             ApplyToAccessTierLevel             = ("ControlPlane", "ManagementPlane")
             FilterObjectType                   = ("User", "Group")
             GroupPrefix                        = "sug_Entra.CA.IncludeUsers.PrivilegedAccounts."
-            RbacSystems                        = ("EntraID", "IdentityGovernance")
+            RbacSystems                        = ("EntraID", "IdentityGovernance", "DeviceManagement")
         }
         AutomatedRmauAssignmentsForUnprotectedObjects = [ordered]@{
             ApplyRmauAssignmentsForUnprotectedObjects = $ApplyRmauAssignmentsForUnprotectedObjects
             ApplyToAccessTierLevel                    = ("ControlPlane", "ManagementPlane")
             FilterObjectType                          = ("User", "Group")
-            RbacSystems                               = ("EntraID", "IdentityGovernance")
+            RbacSystems                               = ("EntraID", "IdentityGovernance", "DeviceManagement")
         }
     }
     #endregion

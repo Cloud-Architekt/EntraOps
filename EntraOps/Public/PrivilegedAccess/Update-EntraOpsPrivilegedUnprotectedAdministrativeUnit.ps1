@@ -34,7 +34,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance")
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
     )
 
     # Get all privileged EAM objects
