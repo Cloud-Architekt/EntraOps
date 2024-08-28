@@ -45,7 +45,7 @@ function Get-EntraOpsPrivilegedEamIntune {
     )
 
     # Check if classification file custom and/or template file exists, choose custom template for tenant if available
-    $ClassificationFileName = "Classification_Intune.json"
+    $ClassificationFileName = "Classification_DeviceManagement.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
         $IntuneClassificationFilePath = "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)"
     }

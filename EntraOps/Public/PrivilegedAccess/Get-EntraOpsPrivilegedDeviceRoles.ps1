@@ -72,17 +72,20 @@ function Get-EntraOpsPrivilegedDeviceRoles {
             Write-Error "Issue to resolve directory object $Principal"
         }
 
-        #Troubleshooting
-        #$AllPrinicpalDeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/roleAssignments?$filter=principalId eq '$Principal'"
-
-        $AllPrinicpalDeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/RoleAssignments?$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual"
+        $AllPrinicpalDeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/RoleAssignments?$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual" -OutputType PSObject
 
         foreach ($DeviceMgmtPrincipalRoleAssignment in $AllPrinicpalDeviceMgmtRoleAssignments) {
 
             $Role = ($DeviceMgmtRoleDefinitions | where-object { $_.id -eq $DeviceMgmtPrincipalRoleAssignment.roleDefinitionId })
 
-            if ($null -eq $Role) { Write-Warning "Role is empty $(DeviceMgmtPrincipalRoleAssignment.id)" }
-            # Directory Scope is multi-value
+            if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DeviceMgmtPrincipalRoleAssignment.id)" }
+            
+            # Directory Scope Id is null if the role is assigned to all devices or all users, only scoping on both object types includes "/" as directoryScopeId
+            # No indicator to identify the scope type, so empty value is used for considering RBAC role without specific directoryScopeId
+            if ( [string]::IsNullOrEmpty($DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) ) {
+                $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds = ""
+            }
+
             foreach ($directoryScopeId in $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) {
 
                 # Get scope name from tags
