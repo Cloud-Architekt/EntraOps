@@ -10,10 +10,38 @@
                     "/"
                 ],
                 "RoleDefinitionActions": [
+                    "Microsoft.Intune/Roles/Assign",
                     "Microsoft.Intune/Roles/Create",
-                    "Microsoft.Intune/Roles/Update",
                     "Microsoft.Intune/Roles/Delete",
-                    "Microsoft.Intune/Roles/Assign"
+                    "Microsoft.Intune/Roles/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Global Application Management",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/ManagedApps/Assign",
+                    "Microsoft.Intune/ManagedApps/Create",
+                    "Microsoft.Intune/ManagedApps/Delete",
+                    "Microsoft.Intune/ManagedApps/Update",
+                    "Microsoft.Intune/ManagedApps/Wipe",
+                    "Microsoft.Intune/MicrosoftStoreForBusiness/Modify"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Global Certificate Management",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/CertificateConnector/Modify",
+                    "Microsoft.Intune/WindowsEnterpriseCertificate/Modify"
                 ]
             },
             {
@@ -27,9 +55,67 @@
                     "Microsoft.Intune/AssignmentFilter/Create",
                     "Microsoft.Intune/AssignmentFilter/Delete",
                     "Microsoft.Intune/AssignmentFilter/Update",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Create",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Delete",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Update",
+                    "Microsoft.Intune/CloudAttach/ApplicationActions",
+                    "Microsoft.Intune/CloudAttach/Applications",
+                    "Microsoft.Intune/CloudAttach/ClientDetails",
+                    "Microsoft.Intune/CloudAttach/CMPivot",
+                    "Microsoft.Intune/CloudAttach/Collections",
+                    "Microsoft.Intune/CloudAttach/EnrollNow",
+                    "Microsoft.Intune/CloudAttach/ResourceExplorer",
+                    "Microsoft.Intune/CloudAttach/ScriptActions",
+                    "Microsoft.Intune/CloudAttach/Scripts",
+                    "Microsoft.Intune/CloudAttach/SoftwareUpdates",
+                    "Microsoft.Intune/CloudAttach/Timeline",
+                    "Microsoft.Intune/EndpointAnalytics/Create",
+                    "Microsoft.Intune/EndpointAnalytics/Delete",
+                    "Microsoft.Intune/EndpointAnalytics/Update",
+                    "Microsoft.Intune/ManagedDevices/Delete",
+                    "Microsoft.Intune/ManagedDevices/SetPrimaryUser",
+                    "Microsoft.Intune/ManagedDevices/Update",
+                    "Microsoft.Intune/ManagedDevices/ViewReports",
+                    "Microsoft.Intune/OrganizationalMessages/Assign",
+                    "Microsoft.Intune/OrganizationalMessages/Create",
+                    "Microsoft.Intune/OrganizationalMessages/Delete",
+                    "Microsoft.Intune/OrganizationalMessages/Update",
+                    "Microsoft.Intune/OrganizationalMessages/UpdateControl",
+                    "Microsoft.Intune/PolicySets/Assign",
+                    "Microsoft.Intune/PolicySets/Create",
+                    "Microsoft.Intune/PolicySets/Delete",
+                    "Microsoft.Intune/PolicySets/Update",
+                    "Microsoft.Intune/QuietTimePolicies/Assign",
+                    "Microsoft.Intune/QuietTimePolicies/Create",
+                    "Microsoft.Intune/QuietTimePolicies/Delete",
+                    "Microsoft.Intune/QuietTimePolicies/Update",
+                    "Microsoft.Intune/WindowsOSRecovery/Assign",
+                    "Microsoft.Intune/WindowsOSRecovery/Create",
+                    "Microsoft.Intune/WindowsOSRecovery/Delete",
+                    "Microsoft.Intune/WindowsOSRecovery/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Global Endpoint Security Management",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/SecurityBaselines/Assign",
+                    "Microsoft.Intune/SecurityBaselines/Create",
+                    "Microsoft.Intune/SecurityBaselines/Delete",
+                    "Microsoft.Intune/SecurityBaselines/Update",
+                    "Microsoft.Intune/SecurityTasks/Update",
+                    "Microsoft.Intune/MobileThreatDefense/Modify"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Global Endpoint Policy Management",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
                     "Microsoft.Intune/DeviceCompliancePolices/Assign",
                     "Microsoft.Intune/DeviceCompliancePolices/Create",
                     "Microsoft.Intune/DeviceCompliancePolices/Delete",
@@ -37,52 +123,216 @@
                     "Microsoft.Intune/DeviceConfigurations/Assign",
                     "Microsoft.Intune/DeviceConfigurations/Create",
                     "Microsoft.Intune/DeviceConfigurations/Delete",
-                    "Microsoft.Intune/DeviceConfigurations/Update",
-                    "Microsoft.Intune/DeviceEnrollmentManagers/Update",
+                    "Microsoft.Intune/DeviceConfigurations/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Global Device Enrollment Management",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/AppleDeviceSerialNumbers/Create",
+                    "Microsoft.Intune/AppleDeviceSerialNumbers/Delete",
+                    "Microsoft.Intune/AppleDeviceSerialNumbers/Update",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Assign",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Create",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Delete",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Update",
+                    "Microsoft.Intune/CorporateDeviceIdentifiers/Create",
+                    "Microsoft.Intune/CorporateDeviceIdentifiers/Delete",
+                    "Microsoft.Intune/CorporateDeviceIdentifiers/Update",
+                    "Microsoft.Intune/EnrollmentProfiles/EnrollmentTimeMembershipAssign",
                     "Microsoft.Intune/EnrollmentProgramToken/Create",
                     "Microsoft.Intune/EnrollmentProgramToken/Delete",
-                    "Microsoft.Intune/EnrollmentProgramToken/Update",
-                    "Microsoft.Intune/EpmPolicy/Create",
-                    "Microsoft.Intune/EpmPolicy/Update",
-                    "Microsoft.Intune/EpmPolicy/Delete",
+                    "Microsoft.Intune/EnrollmentProgramToken/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Global Mobile Device Management",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/AndroidSync/UpdateApps",
+                    "Microsoft.Intune/AndroidSync/UpdateEnrollmentProfiles",
+                    "Microsoft.Intune/AndroidSync/UpdateOnboarding",
+                    "Microsoft.Intune/MobileApps/Assign",
+                    "Microsoft.Intune/MobileApps/Create",
+                    "Microsoft.Intune/MobileApps/Delete",
+                    "Microsoft.Intune/MobileApps/Relate",
+                    "Microsoft.Intune/MobileApps/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Global Privileged Endpoint Management",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
                     "Microsoft.Intune/EpmPolicy/Assign",
-                    "Microsoft.Intune/ManagedApps/Assign",
-                    "Microsoft.Intune/ManagedApps/Create",
-                    "Microsoft.Intune/ManagedApps/Delete",
-                    "Microsoft.Intune/ManagedApps/Update",
-                    "Microsoft.Intune/ManagedApps/Wipe",
-                    "Microsoft.Intune/ManagedDevices/Delete",
-                    "Microsoft.Intune/ManagedDevices/Read",
-                    "Microsoft.Intune/ManagedDevices/SetPrimaryUser",
-                    "Microsoft.Intune/ManagedDevices/Update",
-                    "Microsoft.Intune/Organization/Create",
-                    "Microsoft.Intune/Organization/Delete",
-                    "Microsoft.Intune/Organization/Update",
-                    "Microsoft.Intune/PolicySets/Delete",
-                    "Microsoft.Intune/RemoteTasks/RequestRemoteAssistance",
-                    "Microsoft.Intune/RemoteAssistanceApp/ViewScreen",
-                    "Microsoft.Intune/RemoteAssistanceApp/TakeFullControl",
+                    "Microsoft.Intune/EpmPolicy/Create",
+                    "Microsoft.Intune/EpmPolicy/Delete",
+                    "Microsoft.Intune/EpmPolicy/ModifyElevationRequests",
+                    "Microsoft.Intune/EpmPolicy/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Global Remote Assistance",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/RemoteAssistance/Update",
                     "Microsoft.Intune/RemoteAssistanceApp/Elevation",
+                    "Microsoft.Intune/RemoteAssistanceApp/TakeFullControl",
                     "Microsoft.Intune/RemoteAssistanceApp/Unattended",
+                    "Microsoft.Intune/RemoteAssistanceApp/ViewScreen",
+                    "Microsoft.Intune/RemoteTasks/ActivateDeviceEsim",
+                    "Microsoft.Intune/RemoteTasks/ChangeAssignments",
                     "Microsoft.Intune/RemoteTasks/CleanPC",
-                    "Microsoft.Intune/SecurityTasks/Update"
+                    "Microsoft.Intune/RemoteTasks/ConfigurationManagerAction",
+                    "Microsoft.Intune/RemoteTasks/CustomNotification",
+                    "Microsoft.Intune/RemoteTasks/DeviceLogs",
+                    "Microsoft.Intune/RemoteTasks/DisableLostMode",
+                    "Microsoft.Intune/RemoteTasks/EnableLostMode",
+                    "Microsoft.Intune/RemoteTasks/EnableWindowsIntuneAgent",
+                    "Microsoft.Intune/RemoteTasks/GetFileVaultKey",
+                    "Microsoft.Intune/RemoteTasks/InitiateDeviceAttestation",
+                    "Microsoft.Intune/RemoteTasks/InitiateMDMKeyRecovery",
+                    "Microsoft.Intune/RemoteTasks/LocateDevice",
+                    "Microsoft.Intune/RemoteTasks/ManageSharedDeviceUsers",
+                    "Microsoft.Intune/RemoteTasks/OnDemandProactiveRemediation",
+                    "Microsoft.Intune/RemoteTasks/PlayLostModeSound",
+                    "Microsoft.Intune/RemoteTasks/RebootNow",
+                    "Microsoft.Intune/RemoteTasks/RemoteLock",
+                    "Microsoft.Intune/RemoteTasks/RequestRemoteAssistance",
+                    "Microsoft.Intune/RemoteTasks/ResetPasscode",
+                    "Microsoft.Intune/RemoteTasks/Retire",
+                    "Microsoft.Intune/RemoteTasks/RevokeAppleVppLicenses",
+                    "Microsoft.Intune/RemoteTasks/RotateBitLockerKeys",
+                    "Microsoft.Intune/RemoteTasks/RotateFileVaultKey",
+                    "Microsoft.Intune/RemoteTasks/SetDeviceName",
+                    "Microsoft.Intune/RemoteTasks/ShutDown",
+                    "Microsoft.Intune/RemoteTasks/SyncDevice",
+                    "Microsoft.Intune/RemoteTasks/UpdateDeviceAccount",
+                    "Microsoft.Intune/RemoteTasks/WindowsDefender",
+                    "Microsoft.Intune/RemoteTasks/Wipe"
                 ]
             },
             {
                 "Category": "Microsoft.DeviceManagement",
-                "Service": "PAW Endpoint Management",
+                "Service": "Privileged Application Management",
                 "RoleAssignmentScopeName": [
-                    "<Tier0PAWScopeTagId>",
-                    "<Tier1PAWScopeTagId>"
+                    "<Tier0PrivilegedDeviceScopeTagId>",
+                    "<Tier1PrivilegedDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/ManagedApps/Assign",
+                    "Microsoft.Intune/ManagedApps/Create",
+                    "Microsoft.Intune/ManagedApps/Delete",
+                    "Microsoft.Intune/ManagedApps/Update",
+                    "Microsoft.Intune/ManagedApps/Wipe",
+                    "Microsoft.Intune/MicrosoftStoreForBusiness/Modify"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Privileged Certificate Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceScopeTagId>",
+                    "<Tier1PrivilegedDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/CertificateConnector/Modify",
+                    "Microsoft.Intune/WindowsEnterpriseCertificate/Modify"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Privileged Endpoint Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceScopeTagId>",
+                    "<Tier1PrivilegedDeviceScopeTagId>"
                 ],
                 "ExcludedRoleAssignmentScopeName": [],
                 "RoleDefinitionActions": [
                     "Microsoft.Intune/AssignmentFilter/Create",
                     "Microsoft.Intune/AssignmentFilter/Delete",
                     "Microsoft.Intune/AssignmentFilter/Update",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Create",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Delete",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Update",
+                    "Microsoft.Intune/CloudAttach/ApplicationActions",
+                    "Microsoft.Intune/CloudAttach/Applications",
+                    "Microsoft.Intune/CloudAttach/ClientDetails",
+                    "Microsoft.Intune/CloudAttach/CMPivot",
+                    "Microsoft.Intune/CloudAttach/Collections",
+                    "Microsoft.Intune/CloudAttach/EnrollNow",
+                    "Microsoft.Intune/CloudAttach/ResourceExplorer",
+                    "Microsoft.Intune/CloudAttach/ScriptActions",
+                    "Microsoft.Intune/CloudAttach/Scripts",
+                    "Microsoft.Intune/CloudAttach/SoftwareUpdates",
+                    "Microsoft.Intune/CloudAttach/Timeline",
+                    "Microsoft.Intune/EndpointAnalytics/Create",
+                    "Microsoft.Intune/EndpointAnalytics/Delete",
+                    "Microsoft.Intune/EndpointAnalytics/Update",
+                    "Microsoft.Intune/ManagedDevices/Delete",
+                    "Microsoft.Intune/ManagedDevices/SetPrimaryUser",
+                    "Microsoft.Intune/ManagedDevices/Update",
+                    "Microsoft.Intune/ManagedDevices/ViewReports",
+                    "Microsoft.Intune/OrganizationalMessages/Assign",
+                    "Microsoft.Intune/OrganizationalMessages/Create",
+                    "Microsoft.Intune/OrganizationalMessages/Delete",
+                    "Microsoft.Intune/OrganizationalMessages/Update",
+                    "Microsoft.Intune/OrganizationalMessages/UpdateControl",
+                    "Microsoft.Intune/PolicySets/Assign",
+                    "Microsoft.Intune/PolicySets/Create",
+                    "Microsoft.Intune/PolicySets/Delete",
+                    "Microsoft.Intune/PolicySets/Update",
+                    "Microsoft.Intune/QuietTimePolicies/Assign",
+                    "Microsoft.Intune/QuietTimePolicies/Create",
+                    "Microsoft.Intune/QuietTimePolicies/Delete",
+                    "Microsoft.Intune/QuietTimePolicies/Update",
+                    "Microsoft.Intune/WindowsOSRecovery/Assign",
+                    "Microsoft.Intune/WindowsOSRecovery/Create",
+                    "Microsoft.Intune/WindowsOSRecovery/Delete",
+                    "Microsoft.Intune/WindowsOSRecovery/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Privileged Endpoint Security Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceScopeTagId>",
+                    "<Tier1PrivilegedDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/SecurityBaselines/Assign",
+                    "Microsoft.Intune/SecurityBaselines/Create",
+                    "Microsoft.Intune/SecurityBaselines/Delete",
+                    "Microsoft.Intune/SecurityBaselines/Update",
+                    "Microsoft.Intune/SecurityTasks/Update",
+                    "Microsoft.Intune/MobileThreatDefense/Modify"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Privileged Endpoint Policy Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceScopeTagId>",
+                    "<Tier1PrivilegedDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
                     "Microsoft.Intune/DeviceCompliancePolices/Assign",
                     "Microsoft.Intune/DeviceCompliancePolices/Create",
                     "Microsoft.Intune/DeviceCompliancePolices/Delete",
@@ -90,41 +340,239 @@
                     "Microsoft.Intune/DeviceConfigurations/Assign",
                     "Microsoft.Intune/DeviceConfigurations/Create",
                     "Microsoft.Intune/DeviceConfigurations/Delete",
-                    "Microsoft.Intune/DeviceConfigurations/Update",
-                    "Microsoft.Intune/DeviceEnrollmentManagers/Update",
+                    "Microsoft.Intune/DeviceConfigurations/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Privileged Device Enrollment Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceScopeTagId>",
+                    "<Tier1PrivilegedDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/AppleDeviceSerialNumbers/Create",
+                    "Microsoft.Intune/AppleDeviceSerialNumbers/Delete",
+                    "Microsoft.Intune/AppleDeviceSerialNumbers/Update",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Assign",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Create",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Delete",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Update",
+                    "Microsoft.Intune/CorporateDeviceIdentifiers/Create",
+                    "Microsoft.Intune/CorporateDeviceIdentifiers/Delete",
+                    "Microsoft.Intune/CorporateDeviceIdentifiers/Update",
+                    "Microsoft.Intune/EnrollmentProfiles/EnrollmentTimeMembershipAssign",
                     "Microsoft.Intune/EnrollmentProgramToken/Create",
                     "Microsoft.Intune/EnrollmentProgramToken/Delete",
-                    "Microsoft.Intune/EnrollmentProgramToken/Update",
+                    "Microsoft.Intune/EnrollmentProgramToken/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Privileged Mobile Device Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceScopeTagId>",
+                    "<Tier1PrivilegedDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/AndroidSync/UpdateApps",
+                    "Microsoft.Intune/AndroidSync/UpdateEnrollmentProfiles",
+                    "Microsoft.Intune/AndroidSync/UpdateOnboarding",
+                    "Microsoft.Intune/MobileApps/Assign",
+                    "Microsoft.Intune/MobileApps/Create",
+                    "Microsoft.Intune/MobileApps/Delete",
+                    "Microsoft.Intune/MobileApps/Relate",
+                    "Microsoft.Intune/MobileApps/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Privileged Endpoint Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceScopeTagId>",
+                    "<Tier1PrivilegedDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/EpmPolicy/Assign",
+                    "Microsoft.Intune/EpmPolicy/Create",
+                    "Microsoft.Intune/EpmPolicy/Delete",
+                    "Microsoft.Intune/EpmPolicy/ModifyElevationRequests",
+                    "Microsoft.Intune/EpmPolicy/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Privileged Remote Assistance",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceScopeTagId>",
+                    "<Tier1PrivilegedDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/RemoteAssistance/Update",
+                    "Microsoft.Intune/RemoteAssistanceApp/Elevation",
+                    "Microsoft.Intune/RemoteAssistanceApp/TakeFullControl",
+                    "Microsoft.Intune/RemoteAssistanceApp/Unattended",
+                    "Microsoft.Intune/RemoteAssistanceApp/ViewScreen",
+                    "Microsoft.Intune/RemoteTasks/ActivateDeviceEsim",
+                    "Microsoft.Intune/RemoteTasks/ChangeAssignments",
+                    "Microsoft.Intune/RemoteTasks/CleanPC",
+                    "Microsoft.Intune/RemoteTasks/ConfigurationManagerAction",
+                    "Microsoft.Intune/RemoteTasks/CustomNotification",
+                    "Microsoft.Intune/RemoteTasks/DeviceLogs",
+                    "Microsoft.Intune/RemoteTasks/DisableLostMode",
+                    "Microsoft.Intune/RemoteTasks/EnableLostMode",
+                    "Microsoft.Intune/RemoteTasks/EnableWindowsIntuneAgent",
+                    "Microsoft.Intune/RemoteTasks/GetFileVaultKey",
+                    "Microsoft.Intune/RemoteTasks/InitiateDeviceAttestation",
+                    "Microsoft.Intune/RemoteTasks/InitiateMDMKeyRecovery",
+                    "Microsoft.Intune/RemoteTasks/LocateDevice",
+                    "Microsoft.Intune/RemoteTasks/ManageSharedDeviceUsers",
+                    "Microsoft.Intune/RemoteTasks/OnDemandProactiveRemediation",
+                    "Microsoft.Intune/RemoteTasks/PlayLostModeSound",
+                    "Microsoft.Intune/RemoteTasks/RebootNow",
+                    "Microsoft.Intune/RemoteTasks/RemoteLock",
+                    "Microsoft.Intune/RemoteTasks/RequestRemoteAssistance",
+                    "Microsoft.Intune/RemoteTasks/ResetPasscode",
+                    "Microsoft.Intune/RemoteTasks/Retire",
+                    "Microsoft.Intune/RemoteTasks/RevokeAppleVppLicenses",
+                    "Microsoft.Intune/RemoteTasks/RotateBitLockerKeys",
+                    "Microsoft.Intune/RemoteTasks/RotateFileVaultKey",
+                    "Microsoft.Intune/RemoteTasks/SetDeviceName",
+                    "Microsoft.Intune/RemoteTasks/ShutDown",
+                    "Microsoft.Intune/RemoteTasks/SyncDevice",
+                    "Microsoft.Intune/RemoteTasks/UpdateDeviceAccount",
+                    "Microsoft.Intune/RemoteTasks/WindowsDefender",
+                    "Microsoft.Intune/RemoteTasks/Wipe"
+                ]
+            }
+        ]
+    },
+    {
+        "EAMTierLevelName": "ManagementPlane",
+        "EAMTierLevelTagValue": "1",
+        "TierLevelDefinition": [
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "Endpoint Customization",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/Customization/Assign",
+                    "Microsoft.Intune/Customization/Create",
+                    "Microsoft.Intune/Customization/Delete",
+                    "Microsoft.Intune/Customization/Update",
+                    "Microsoft.Intune/TermsAndConditions/Assign",
+                    "Microsoft.Intune/TermsAndConditions/Create",
+                    "Microsoft.Intune/TermsAndConditions/Delete",
+                    "Microsoft.Intune/TermsAndConditions/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "User Application Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
                     "Microsoft.Intune/ManagedApps/Assign",
                     "Microsoft.Intune/ManagedApps/Create",
                     "Microsoft.Intune/ManagedApps/Delete",
                     "Microsoft.Intune/ManagedApps/Update",
                     "Microsoft.Intune/ManagedApps/Wipe",
-                    "Microsoft.Intune/ManagedDevices/Delete",
-                    "Microsoft.Intune/ManagedDevices/Read",
-                    "Microsoft.Intune/ManagedDevices/SetPrimaryUser",
-                    "Microsoft.Intune/ManagedDevices/Update",
-                    "Microsoft.Intune/Organization/Create",
-                    "Microsoft.Intune/Organization/Delete",
-                    "Microsoft.Intune/Organization/Update",
-                    "Microsoft.Intune/PolicySets/Delete",
-                    "Microsoft.Intune/SecurityTasks/Update"
+                    "Microsoft.Intune/MicrosoftStoreForBusiness/Modify"
                 ]
             },
             {
                 "Category": "Microsoft.DeviceManagement",
-                "Service": "PAW Endpoint Management - Tier0",
+                "Service": "User Certificate Management",
                 "RoleAssignmentScopeName": [
-                    "<Tier0PAWScopeTagId>"
+                    "<Tier2EnterpriseDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/CertificateConnector/Modify",
+                    "Microsoft.Intune/WindowsEnterpriseCertificate/Modify"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "User Endpoint Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceScopeTagId>"
                 ],
                 "ExcludedRoleAssignmentScopeName": [],
                 "RoleDefinitionActions": [
                     "Microsoft.Intune/AssignmentFilter/Create",
                     "Microsoft.Intune/AssignmentFilter/Delete",
                     "Microsoft.Intune/AssignmentFilter/Update",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Create",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Delete",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Update",
+                    "Microsoft.Intune/CloudAttach/ApplicationActions",
+                    "Microsoft.Intune/CloudAttach/Applications",
+                    "Microsoft.Intune/CloudAttach/ClientDetails",
+                    "Microsoft.Intune/CloudAttach/CMPivot",
+                    "Microsoft.Intune/CloudAttach/Collections",
+                    "Microsoft.Intune/CloudAttach/EnrollNow",
+                    "Microsoft.Intune/CloudAttach/ResourceExplorer",
+                    "Microsoft.Intune/CloudAttach/ScriptActions",
+                    "Microsoft.Intune/CloudAttach/Scripts",
+                    "Microsoft.Intune/CloudAttach/SoftwareUpdates",
+                    "Microsoft.Intune/CloudAttach/Timeline",
+                    "Microsoft.Intune/EndpointAnalytics/Create",
+                    "Microsoft.Intune/EndpointAnalytics/Delete",
+                    "Microsoft.Intune/EndpointAnalytics/Update",
+                    "Microsoft.Intune/ManagedDevices/Delete",
+                    "Microsoft.Intune/ManagedDevices/SetPrimaryUser",
+                    "Microsoft.Intune/ManagedDevices/Update",
+                    "Microsoft.Intune/ManagedDevices/ViewReports",
+                    "Microsoft.Intune/OrganizationalMessages/Assign",
+                    "Microsoft.Intune/OrganizationalMessages/Create",
+                    "Microsoft.Intune/OrganizationalMessages/Delete",
+                    "Microsoft.Intune/OrganizationalMessages/Update",
+                    "Microsoft.Intune/OrganizationalMessages/UpdateControl",
+                    "Microsoft.Intune/PolicySets/Assign",
+                    "Microsoft.Intune/PolicySets/Create",
+                    "Microsoft.Intune/PolicySets/Delete",
+                    "Microsoft.Intune/PolicySets/Update",
+                    "Microsoft.Intune/QuietTimePolicies/Assign",
+                    "Microsoft.Intune/QuietTimePolicies/Create",
+                    "Microsoft.Intune/QuietTimePolicies/Delete",
+                    "Microsoft.Intune/QuietTimePolicies/Update",
+                    "Microsoft.Intune/WindowsOSRecovery/Assign",
+                    "Microsoft.Intune/WindowsOSRecovery/Create",
+                    "Microsoft.Intune/WindowsOSRecovery/Delete",
+                    "Microsoft.Intune/WindowsOSRecovery/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "User Endpoint Security Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/SecurityBaselines/Assign",
+                    "Microsoft.Intune/SecurityBaselines/Create",
+                    "Microsoft.Intune/SecurityBaselines/Delete",
+                    "Microsoft.Intune/SecurityBaselines/Update",
+                    "Microsoft.Intune/SecurityTasks/Update",
+                    "Microsoft.Intune/MobileThreatDefense/Modify"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "User Endpoint Policy Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
                     "Microsoft.Intune/DeviceCompliancePolices/Assign",
                     "Microsoft.Intune/DeviceCompliancePolices/Create",
                     "Microsoft.Intune/DeviceCompliancePolices/Delete",
@@ -132,67 +580,120 @@
                     "Microsoft.Intune/DeviceConfigurations/Assign",
                     "Microsoft.Intune/DeviceConfigurations/Create",
                     "Microsoft.Intune/DeviceConfigurations/Delete",
-                    "Microsoft.Intune/DeviceConfigurations/Update",
-                    "Microsoft.Intune/DeviceEnrollmentManagers/Update",
-                    "Microsoft.Intune/EnrollmentProgramToken/Create",
-                    "Microsoft.Intune/EnrollmentProgramToken/Delete",
-                    "Microsoft.Intune/EnrollmentProgramToken/Update",
-                    "Microsoft.Intune/ManagedApps/Assign",
-                    "Microsoft.Intune/ManagedApps/Create",
-                    "Microsoft.Intune/ManagedApps/Delete",
-                    "Microsoft.Intune/ManagedApps/Update",
-                    "Microsoft.Intune/ManagedApps/Wipe",
-                    "Microsoft.Intune/ManagedDevices/Delete",
-                    "Microsoft.Intune/ManagedDevices/Read",
-                    "Microsoft.Intune/ManagedDevices/SetPrimaryUser",
-                    "Microsoft.Intune/ManagedDevices/Update",
-                    "Microsoft.Intune/Organization/Create",
-                    "Microsoft.Intune/Organization/Delete",
-                    "Microsoft.Intune/Organization/Update",
-                    "Microsoft.Intune/PolicySets/Delete",
-                    "Microsoft.Intune/SecurityTasks/Update"
+                    "Microsoft.Intune/DeviceConfigurations/Update"
                 ]
             },
             {
                 "Category": "Microsoft.DeviceManagement",
-                "Service": "PAW Endpoint Management - Tier1",
+                "Service": "User Device Enrollment Management",
                 "RoleAssignmentScopeName": [
-                    "<Tier1PAWScopeTagId>"
+                    "<Tier2EnterpriseDeviceScopeTagId>"
                 ],
                 "ExcludedRoleAssignmentScopeName": [],
                 "RoleDefinitionActions": [
-                    "Microsoft.Intune/AssignmentFilter/Create",
-                    "Microsoft.Intune/AssignmentFilter/Delete",
-                    "Microsoft.Intune/AssignmentFilter/Update",
+                    "Microsoft.Intune/AppleDeviceSerialNumbers/Create",
+                    "Microsoft.Intune/AppleDeviceSerialNumbers/Delete",
+                    "Microsoft.Intune/AppleDeviceSerialNumbers/Update",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Assign",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Create",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Delete",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Update",
                     "Microsoft.Intune/CorporateDeviceIdentifiers/Create",
                     "Microsoft.Intune/CorporateDeviceIdentifiers/Delete",
                     "Microsoft.Intune/CorporateDeviceIdentifiers/Update",
-                    "Microsoft.Intune/DeviceCompliancePolices/Assign",
-                    "Microsoft.Intune/DeviceCompliancePolices/Create",
-                    "Microsoft.Intune/DeviceCompliancePolices/Delete",
-                    "Microsoft.Intune/DeviceCompliancePolices/Update",
-                    "Microsoft.Intune/DeviceConfigurations/Assign",
-                    "Microsoft.Intune/DeviceConfigurations/Create",
-                    "Microsoft.Intune/DeviceConfigurations/Delete",
-                    "Microsoft.Intune/DeviceConfigurations/Update",
-                    "Microsoft.Intune/DeviceEnrollmentManagers/Update",
+                    "Microsoft.Intune/EnrollmentProfiles/EnrollmentTimeMembershipAssign",
                     "Microsoft.Intune/EnrollmentProgramToken/Create",
                     "Microsoft.Intune/EnrollmentProgramToken/Delete",
-                    "Microsoft.Intune/EnrollmentProgramToken/Update",
-                    "Microsoft.Intune/ManagedApps/Assign",
-                    "Microsoft.Intune/ManagedApps/Create",
-                    "Microsoft.Intune/ManagedApps/Delete",
-                    "Microsoft.Intune/ManagedApps/Update",
-                    "Microsoft.Intune/ManagedApps/Wipe",
-                    "Microsoft.Intune/ManagedDevices/Delete",
-                    "Microsoft.Intune/ManagedDevices/Read",
-                    "Microsoft.Intune/ManagedDevices/SetPrimaryUser",
-                    "Microsoft.Intune/ManagedDevices/Update",
-                    "Microsoft.Intune/Organization/Create",
-                    "Microsoft.Intune/Organization/Delete",
-                    "Microsoft.Intune/Organization/Update",
-                    "Microsoft.Intune/PolicySets/Delete",
-                    "Microsoft.Intune/SecurityTasks/Update"
+                    "Microsoft.Intune/EnrollmentProgramToken/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "User Endpoint Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    ""
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "User Mobile Device Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/AndroidSync/UpdateApps",
+                    "Microsoft.Intune/AndroidSync/UpdateEnrollmentProfiles",
+                    "Microsoft.Intune/AndroidSync/UpdateOnboarding",
+                    "Microsoft.Intune/MobileApps/Assign",
+                    "Microsoft.Intune/MobileApps/Create",
+                    "Microsoft.Intune/MobileApps/Delete",
+                    "Microsoft.Intune/MobileApps/Relate",
+                    "Microsoft.Intune/MobileApps/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "User Privileged Endpoint Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/EpmPolicy/Assign",
+                    "Microsoft.Intune/EpmPolicy/Create",
+                    "Microsoft.Intune/EpmPolicy/Delete",
+                    "Microsoft.Intune/EpmPolicy/ModifyElevationRequests",
+                    "Microsoft.Intune/EpmPolicy/Update"
+                ]
+            },
+            {
+                "Category": "Microsoft.DeviceManagement",
+                "Service": "User Remote Assistance",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceScopeTagId>"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.Intune/RemoteAssistance/Update",
+                    "Microsoft.Intune/RemoteAssistanceApp/Elevation",
+                    "Microsoft.Intune/RemoteAssistanceApp/TakeFullControl",
+                    "Microsoft.Intune/RemoteAssistanceApp/Unattended",
+                    "Microsoft.Intune/RemoteAssistanceApp/ViewScreen",
+                    "Microsoft.Intune/RemoteTasks/ActivateDeviceEsim",
+                    "Microsoft.Intune/RemoteTasks/ChangeAssignments",
+                    "Microsoft.Intune/RemoteTasks/CleanPC",
+                    "Microsoft.Intune/RemoteTasks/ConfigurationManagerAction",
+                    "Microsoft.Intune/RemoteTasks/CustomNotification",
+                    "Microsoft.Intune/RemoteTasks/DeviceLogs",
+                    "Microsoft.Intune/RemoteTasks/DisableLostMode",
+                    "Microsoft.Intune/RemoteTasks/EnableLostMode",
+                    "Microsoft.Intune/RemoteTasks/EnableWindowsIntuneAgent",
+                    "Microsoft.Intune/RemoteTasks/GetFileVaultKey",
+                    "Microsoft.Intune/RemoteTasks/InitiateDeviceAttestation",
+                    "Microsoft.Intune/RemoteTasks/InitiateMDMKeyRecovery",
+                    "Microsoft.Intune/RemoteTasks/LocateDevice",
+                    "Microsoft.Intune/RemoteTasks/ManageSharedDeviceUsers",
+                    "Microsoft.Intune/RemoteTasks/OnDemandProactiveRemediation",
+                    "Microsoft.Intune/RemoteTasks/PlayLostModeSound",
+                    "Microsoft.Intune/RemoteTasks/RebootNow",
+                    "Microsoft.Intune/RemoteTasks/RemoteLock",
+                    "Microsoft.Intune/RemoteTasks/RequestRemoteAssistance",
+                    "Microsoft.Intune/RemoteTasks/ResetPasscode",
+                    "Microsoft.Intune/RemoteTasks/Retire",
+                    "Microsoft.Intune/RemoteTasks/RevokeAppleVppLicenses",
+                    "Microsoft.Intune/RemoteTasks/RotateBitLockerKeys",
+                    "Microsoft.Intune/RemoteTasks/RotateFileVaultKey",
+                    "Microsoft.Intune/RemoteTasks/SetDeviceName",
+                    "Microsoft.Intune/RemoteTasks/ShutDown",
+                    "Microsoft.Intune/RemoteTasks/SyncDevice",
+                    "Microsoft.Intune/RemoteTasks/UpdateDeviceAccount",
+                    "Microsoft.Intune/RemoteTasks/WindowsDefender",
+                    "Microsoft.Intune/RemoteTasks/Wipe"
                 ]
             }
         ]
@@ -203,43 +704,56 @@
         "TierLevelDefinition": [
             {
                 "Category": "Microsoft.DeviceManagement",
-                "Service": "Device Management",
+                "Service": "Intune Configuration (Reader)",
                 "RoleAssignmentScopeName": [
-                    "<EnterpriseDeviceScopeId>"
+                    "/"
                 ],
                 "RoleDefinitionActions": [
-                    "Microsoft.Intune/AssignmentFilter/Create",
-                    "Microsoft.Intune/AssignmentFilter/Delete",
-                    "Microsoft.Intune/AssignmentFilter/Update",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Create",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Delete",
-                    "Microsoft.Intune/CorporateDeviceIdentifiers/Update",
-                    "Microsoft.Intune/DeviceCompliancePolices/Assign",
-                    "Microsoft.Intune/DeviceCompliancePolices/Create",
-                    "Microsoft.Intune/DeviceCompliancePolices/Delete",
-                    "Microsoft.Intune/DeviceCompliancePolices/Update",
-                    "Microsoft.Intune/DeviceConfigurations/Assign",
-                    "Microsoft.Intune/DeviceConfigurations/Create",
-                    "Microsoft.Intune/DeviceConfigurations/Delete",
-                    "Microsoft.Intune/DeviceConfigurations/Update",
+                    "Microsoft.Intune/AndroidFota/Read",
+                    "Microsoft.Intune/AndroidSync/Read",
+                    "Microsoft.Intune/AppleDeviceSerialNumbers/Read",
+                    "Microsoft.Intune/AppleEnrollmentProfiles/Read",
+                    "Microsoft.Intune/AssignmentFilter/Read",
+                    "Microsoft.Intune/Audit/Read",
+                    "Microsoft.Intune/CertificateConnector/Read",
+                    "Microsoft.Intune/CorporateDeviceIdentifiers/Read",
+                    "Microsoft.Intune/Customization/Read",
+                    "Microsoft.Intune/DerivedCredentials/Read",
+                    "Microsoft.Intune/DeviceCompliancePolices/Read",
+                    "Microsoft.Intune/DeviceConfigurations/Read",
+                    "Microsoft.Intune/DeviceConfigurations/ViewReports",
+                    "Microsoft.Intune/DeviceCompliancePolices/ViewReports",
+                    "Microsoft.Intune/DeviceEnrollmentManagers/Read",
                     "Microsoft.Intune/DeviceEnrollmentManagers/Update",
-                    "Microsoft.Intune/EnrollmentProgramToken/Create",
-                    "Microsoft.Intune/EnrollmentProgramToken/Delete",
-                    "Microsoft.Intune/EnrollmentProgramToken/Update",
-                    "Microsoft.Intune/ManagedApps/Assign",
-                    "Microsoft.Intune/ManagedApps/Create",
-                    "Microsoft.Intune/ManagedApps/Delete",
-                    "Microsoft.Intune/ManagedApps/Update",
-                    "Microsoft.Intune/ManagedApps/Wipe",
-                    "Microsoft.Intune/ManagedDevices/Delete",
+                    "Microsoft.Intune/EndpointAnalytics/Read",
+                    "Microsoft.Intune/EndpointProtection/Read",
+                    "Microsoft.Intune/EnrollmentProgramToken/Read",
+                    "Microsoft.Intune/EpmPolicy/Read",
+                    "Microsoft.Intune/EpmPolicy/ViewElevationRequests",
+                    "Microsoft.Intune/EpmPolicy/ViewReports",
+                    "Microsoft.Intune/ManagedApps/Read",
                     "Microsoft.Intune/ManagedDevices/Read",
-                    "Microsoft.Intune/ManagedDevices/SetPrimaryUser",
-                    "Microsoft.Intune/ManagedDevices/Update",
-                    "Microsoft.Intune/Organization/Create",
-                    "Microsoft.Intune/Organization/Delete",
-                    "Microsoft.Intune/Organization/Update",
-                    "Microsoft.Intune/PolicySets/Delete",
-                    "Microsoft.Intune/SecurityTasks/Update"
+                    "Microsoft.Intune/MicrosoftDefenderATP/Read",
+                    "Microsoft.Intune/MicrosoftStoreForBusiness/Read",
+                    "Microsoft.Intune/MobileApps/Read",
+                    "Microsoft.Intune/MobileThreatDefense/Read",
+                    "Microsoft.Intune/Organization/Read",
+                    "Microsoft.Intune/OrganizationalMessages/Read",
+                    "Microsoft.Intune/PartnerDeviceManagement/Read",
+                    "Microsoft.Intune/PolicySets/Read",
+                    "Microsoft.Intune/QuietTimePolicies/Read",
+                    "Microsoft.Intune/QuietTimePolicies/ViewReports",
+                    "Microsoft.Intune/RemoteAssistance/Read",
+                    "Microsoft.Intune/RemoteAssistance/ViewReports",
+                    "Microsoft.Intune/Reports/Read",
+                    "Microsoft.Intune/Roles/Read",
+                    "Microsoft.Intune/SecurityBaselines/Read",
+                    "Microsoft.Intune/SecurityTasks/Read",
+                    "Microsoft.Intune/ServiceNow/ViewIncidents",
+                    "Microsoft.Intune/TelecomExpenses/Read",
+                    "Microsoft.Intune/TermsAndConditions/Read",
+                    "Microsoft.Intune/WindowsEnterpriseCertificate/Read",
+                    "Microsoft.Intune/WindowsOSRecovery/Read"
                 ]
             }
         ]
