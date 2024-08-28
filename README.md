@@ -317,6 +317,10 @@ Pre-requisite: EntraOps data has been ingested to WatchList or Custom Table and 
   
   [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Overview.json)
 
+**EntraOps Privileged EAM - Workload Identities**
+  
+  [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Workload%20Identities.json)
+
 
 ## Classify privileged objects by Custom Security Attributes
 You might want to classify privileged users on the target Enterprise Access Level and relation to user/device. By default, the following custom security attributes will be used to identify what is the purposed tiered level of the user or workload identity.
