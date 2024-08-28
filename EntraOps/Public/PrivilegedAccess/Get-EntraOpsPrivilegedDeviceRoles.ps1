@@ -98,22 +98,24 @@ function Get-EntraOpsPrivilegedDeviceRoles {
                     $RoleAssignmentScopeName = "Tenant-wide"
                 }
 
-                [pscustomobject]@{
-                    RoleAssignmentId              = $DeviceMgmtPrincipalRoleAssignment.Id
-                    RoleAssignmentScopeId         = $directoryScopeId
-                    RoleAssignmentScopeName       = $RoleAssignmentScopeName
-                    RoleAssignmentType            = "Direct"
-                    RoleAssignmentSubType         = ""
-                    PIMManagedRole                = $False
-                    PIMAssignmentType             = "Permanent"
-                    RoleDefinitionName            = $Role.displayName
-                    RoleDefinitionId              = $Role.id
-                    RoleType                      = if ($Role.isBuiltIn -eq $True) { "Built-In" } else { "Custom" }
-                    RoleIsPrivileged              = $Role.isPrivileged
-                    ObjectId                      = $Principal
-                    ObjectType                    = $ObjectType
-                    TransitiveByObjectId          = ""
-                    TransitiveByObjectDisplayName = ""
+                $RoleAssignmentScopeName | foreach-object {
+                    [pscustomobject]@{
+                        RoleAssignmentId              = $DeviceMgmtPrincipalRoleAssignment.Id
+                        RoleAssignmentScopeId         = $directoryScopeId
+                        RoleAssignmentScopeName       = $_
+                        RoleAssignmentType            = "Direct"
+                        RoleAssignmentSubType         = ""
+                        PIMManagedRole                = $False
+                        PIMAssignmentType             = "Permanent"
+                        RoleDefinitionName            = $Role.displayName
+                        RoleDefinitionId              = $Role.id
+                        RoleType                      = if ($Role.isBuiltIn -eq $True) { "Built-In" } else { "Custom" }
+                        RoleIsPrivileged              = $Role.isPrivileged
+                        ObjectId                      = $Principal
+                        ObjectType                    = $ObjectType
+                        TransitiveByObjectId          = ""
+                        TransitiveByObjectDisplayName = ""
+                    }
                 }
             }
         }
@@ -173,6 +175,6 @@ function Get-EntraOpsPrivilegedDeviceRoles {
     $AllDeviceMgmtRbacAssignments += $DeviceMgmtTransitiveRbacAssignments
     $AllDeviceMgmtRbacAssignments = $AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -in $PrincipalTypeFilter }
     $AllDeviceMgmtRbacAssignments = $AllDeviceMgmtRbacAssignments | select-object -Unique *
-    $AllDeviceMgmtRbacAssignments | Sort-Object RoleAssignmentId, RoleAssignmentType, ObjectId
+    $AllDeviceMgmtRbacAssignments | Sort-Object RoleAssignmentId, RoleAssignmentScopeId, RoleAssignmentType, ObjectId
     #endregion
 }
