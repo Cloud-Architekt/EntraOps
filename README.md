@@ -52,11 +52,12 @@ Currently the following RBAC systems are supported:
 - 🔑 Microsoft Entra roles
 - 🔄 Microsoft Entra Identity Governance
 - 🤖 Microsoft Graph App Roles
+- 🖥️ Microsoft Intune
 
 The following RBAC systems are in development and will be released soon:
 - ☁️ Microsoft Azure (RBAC)
 - 💵 Microsoft Billing Profiles (Enterprise Agreement)
-- 🖥️ Microsoft Intune
+
 
 EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline and any automation/worker environment which supports  PowerShell Core. The automation to create a pipeline supports GitHub only yet.
 
