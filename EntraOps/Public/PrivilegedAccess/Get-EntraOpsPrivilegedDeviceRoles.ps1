@@ -79,23 +79,24 @@ function Get-EntraOpsPrivilegedDeviceRoles {
             $Role = ($DeviceMgmtRoleDefinitions | where-object { $_.id -eq $DeviceMgmtPrincipalRoleAssignment.roleDefinitionId })
 
             if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DeviceMgmtPrincipalRoleAssignment.id)" }
-            
             # Directory Scope Id is null if the role is assigned to all devices or all users, only scoping on both object types includes "/" as directoryScopeId
             # No indicator to identify the scope type, so empty value is used for considering RBAC role without specific directoryScopeId
             if ( [string]::IsNullOrEmpty($DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) ) {
-                $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds = ""
+                $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds = "/"
             }
 
             foreach ($directoryScopeId in $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) {
-
                 # Get scope name from tags
                 if ($directoryScopeId -ne "/") {
                     $RoleAssignmentScopeName = foreach ($appScopeId in $DeviceMgmtPrincipalRoleAssignment.appScopeIds) {
                         $ScopeTags | Where-Object { $_.Id -eq $appScopeId } | Select-Object -ExpandProperty displayName
                     }
                 }
-                else {
+                elseif ($directoryScopeId -eq "/") {
                     $RoleAssignmentScopeName = "Tenant-wide"
+                }
+                else {
+                    Write-Warning "No scope name found for directoryScopeId $directoryScopeId"
                 }
 
                 $RoleAssignmentScopeName | foreach-object {
@@ -175,6 +176,6 @@ function Get-EntraOpsPrivilegedDeviceRoles {
     $AllDeviceMgmtRbacAssignments += $DeviceMgmtTransitiveRbacAssignments
     $AllDeviceMgmtRbacAssignments = $AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -in $PrincipalTypeFilter }
     $AllDeviceMgmtRbacAssignments = $AllDeviceMgmtRbacAssignments | select-object -Unique *
-    $AllDeviceMgmtRbacAssignments | Sort-Object RoleAssignmentId, RoleAssignmentScopeId, RoleAssignmentType, ObjectId
+    $AllDeviceMgmtRbacAssignments | Sort-Object RoleAssignmentId, RoleAssignmentScopeId, RoleAssignmentScopeName, RoleAssignmentType, ObjectId
     #endregion
 }
