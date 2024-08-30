@@ -37,6 +37,23 @@ function Get-EntraOpsPrivilegedEamEntraId {
 
     Write-Host "Get Entra ID role assignments..."
 
+    #region Define sensitive role definitions without actions to classify
+    $ControlPlaneRolesWithoutRoleActions = @()
+    $ControlPlaneRolesWithoutRoleActions += New-Object PSObject -Property @{
+        "RoleId"  = 'd29b2b05-8046-44ba-8758-1e26182fcf32' # Directory Synchronization Accounts
+        "Service" = 'Hybrid Identity Synchronization'
+    }
+    $ControlPlaneRolesWithoutRoleActions += New-Object PSObject -Property @{
+        "RoleId"  = "a92aed5d-d78a-4d16-b381-09adb37eb3b0" # On Premises Directory Sync Account
+        "Service" = 'Hybrid Identity Synchronization'
+    }
+    $ControlPlaneRolesWithoutRoleActions += New-Object PSObject -Property @{
+        "RoleId"  = "9f06204d-73c1-4d4c-880a-6edb90606fd8" # Azure AD Joined Device Local Administrator
+        "Service" = 'Global Endpoint Management'
+    }
+
+    #endregion
+
     #region Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_AadResources.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
@@ -70,6 +87,16 @@ function Get-EntraOpsPrivilegedEamEntraId {
     Write-Host "Classifiying of all Entra ID RBAC assignments by classification in JSON"
     $AadRbacClassifications = foreach ($AadRbacAssignment in $AadRbacAssignments) {
         $Classification = $AadRbacEamScope | Where-Object { $_.ResourceId -eq $CurrentRoleAssignmentScope } | select-object AdminTierLevel, AdminTierLevelName, Service, TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+
+        if ($ControlPlaneRolesWithoutRoleActions.RoleId -contains $AadRbacAssignment.RoleId) {
+            $Classification = $ControlPlaneRolesWithoutRoleActions | Where-Object { $_.RoleId -contains $AadRbacAssignment.RoleId }
+            $Classification = [PSCustomObject]@{
+                'AdminTierLevel'     = "ControlPlane"
+                'AdminTierLevelName' = "0"
+                'Service'            = $Classification.Service
+                'TaggedBy'           = "ControlPlaneRolesWithoutRoleActions"
+            }
+        }
 
         [PSCustomObject]@{
             'RoleAssignmentId'              = $AadRbacAssignment.RoleAssignmentId
@@ -162,6 +189,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
             # Classification
             $Classification = @()
             $Classification += (($AllAadRbacEntriesOfObject).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service) | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+
             if ($Classification.Count -eq 0) {
                 $Classification = @()
                 $Classification += [PSCustomObject]@{
