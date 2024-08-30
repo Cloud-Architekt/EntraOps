@@ -806,6 +806,32 @@
       },
       {
         "Category": "Microsoft.AzureAD",
+        "Service": "Microsoft 365 Backup",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "microsoft.backup/exchangeProtectionPolicies/allProperties/allTasks",
+          "microsoft.backup/exchangeRestoreSessions/allProperties/allTasks",
+          "microsoft.backup/restorePoints/userMailboxes/allProperties/allTasks",
+          "microsoft.backup/userMailboxProtectionUnits/allProperties/allTasks",
+          "microsoft.backup/userMailboxRestoreArtifacts/allProperties/allTasks",
+          "microsoft.backup/oneDriveForBusinessProtectionPolicies/allProperties/allTasks",
+          "microsoft.backup/oneDriveForBusinessRestoreSessions/allProperties/allTasks",
+          "microsoft.backup/restorePoints/sites/allProperties/allTasks",
+          "microsoft.backup/restorePoints/userDrives/allProperties/allTasks",
+          "microsoft.backup/sharePointProtectionPolicies/allProperties/allTasks",
+          "microsoft.backup/sharePointRestoreSessions/allProperties/allTasks",
+          "microsoft.backup/siteProtectionUnits/allProperties/allTasks",
+          "microsoft.backup/siteRestoreArtifacts/allProperties/allTasks",
+          "microsoft.backup/allEntities/allProperties/allTasks",
+          "microsoft.backup/userDriveProtectionUnits/allProperties/allTasks",
+          "microsoft.backup/userDriveRestoreArtifacts/allProperties/allTasks",
+          "microsoft.backup/allEntities/allProperties/read"
+        ]
+      },
+      {
+        "Category": "Microsoft.AzureAD",
         "Service": "Microsoft 365 Billing Management",
         "RoleAssignmentScopeName": [
           "/"
@@ -839,6 +865,7 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "microsoft.graph.dataConnect/allEntities/allProperties/allTasks",
           "microsoft.office365.knowledge/contentUnderstanding/allProperties/allTasks",
           "microsoft.office365.knowledge/contentUnderstanding/analytics/allProperties/read",
           "microsoft.office365.knowledge/knowledgeNetwork/allProperties/allTasks",
@@ -905,7 +932,8 @@
           "/"
         ],
         "RoleDefinitionActions": [
-          "microsoft.office365.sharePoint/allEntities/allTasks"
+          "microsoft.office365.sharePoint/allEntities/allTasks",
+          "microsoft.office365.fileStorageContainers/allEntities/allProperties/allTasks"
         ]
       },
       {
