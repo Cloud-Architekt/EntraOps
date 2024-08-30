@@ -59,7 +59,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
     #endregion
 
     #region Get role assignments for all permanent role member
-    Write-Host "Get details of Device Management Role Assignments foreach individual principal..."    
+    Write-Host "Get details of Device Management Role Assignments foreach individual principal..."
     $DeviceMgmtRoleAssignmentPrincipals = ($DeviceMgmtRoleAssignments | select-object -ExpandProperty principalIds -Unique)
     $DeviceMgmtPermanentRbacAssignments = foreach ($Principal in $DeviceMgmtRoleAssignmentPrincipals) {
         Write-Verbose "Get identity information from permanent member $Principal"
@@ -79,9 +79,10 @@ function Get-EntraOpsPrivilegedDeviceRoles {
             $Role = ($DeviceMgmtRoleDefinitions | where-object { $_.id -eq $DeviceMgmtPrincipalRoleAssignment.roleDefinitionId })
 
             if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DeviceMgmtPrincipalRoleAssignment.id)" }
-            # Directory Scope Id is null if the role is assigned to all devices or all users, only scoping on both object types includes "/" as directoryScopeId
-            # No indicator to identify the scope type, so empty value is used for considering RBAC role without specific directoryScopeId
+
             if ( [string]::IsNullOrEmpty($DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) ) {
+                # Directory Scope Id is null if the role is assigned to all devices or all users, only scoping on both object types includes "/" as directoryScopeId
+                # No indicator to identify the scope type, so empty value is used for considering RBAC role without specific directoryScopeId
                 $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds = "/"
             }
 
@@ -126,7 +127,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
     # Summarize results with direct permanent (excl. activated roles) and eligible role assignments
     $AllDeviceMgmtRbacAssignments = @()
     $AllDeviceMgmtRbacAssignments += $DeviceMgmtPermanentRbacAssignments
-    
+
     #region Collect transitive assignments by group members of Role-Assignable Groups or Security Groups
     if ($ExpandGroupMembers -eq $True) {
         Write-Verbose -Message "Expanding groups for direct or transitive Intune role assignments"
@@ -176,6 +177,6 @@ function Get-EntraOpsPrivilegedDeviceRoles {
     $AllDeviceMgmtRbacAssignments += $DeviceMgmtTransitiveRbacAssignments
     $AllDeviceMgmtRbacAssignments = $AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -in $PrincipalTypeFilter }
     $AllDeviceMgmtRbacAssignments = $AllDeviceMgmtRbacAssignments | select-object -Unique *
-    $AllDeviceMgmtRbacAssignments | Sort-Object RoleAssignmentId, RoleAssignmentScopeId, RoleAssignmentScopeName, RoleAssignmentType, ObjectId
+    $AllDeviceMgmtRbacAssignments | Sort-Object RoleAssignmentId, RoleAssignmentScopeName, RoleAssignmentScopeId, RoleAssignmentType, ObjectId
     #endregion
 }
