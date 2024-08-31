@@ -118,7 +118,8 @@ function Update-EntraOpsClassificationControlPlaneScope {
     $PrivilegedObjects = $PrivilegedObjects | sort-object ObjectType, ObjectDisplayName | Select-Object -Unique *
     Write-Output "Identified privileged objects:"
     $PrivilegedObjects | ForEach-Object {
-        Write-Output "$($_.ObjectType) - $($_.ObjectId) - $($_.ObjectDisplayName)"
+        
+        Write-Output "$($_.ObjectType.toLower()) - $($_.ObjectId) - $($_.ObjectDisplayName)"
     }
     #endregion   
 
