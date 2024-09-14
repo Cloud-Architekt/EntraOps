@@ -82,7 +82,7 @@ function New-EntraOpsConfigFile {
 
         [Parameter(Mandatory = $false)]
         [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps"),
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement"),
 
         [Parameter(Mandatory = $false)]
         [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
@@ -129,7 +129,7 @@ function New-EntraOpsConfigFile {
         AuthenticationType                            = $($AuthenticationType)
         ClientId                                      = "Use New-EntraOpsWorkloadIdentity to create a new App Registration or enter here manually"
         DevOpsPlatform                                = $($DevOpsPlatform)
-        RbacSystems                                   = ("EntraID", "IdentityGovernance", "ResourceApps")
+        RbacSystems                                   = $($RbacSystems)
         WorkflowTrigger                               = [ordered]@{
             PullScheduledTrigger         = $true
             PullScheduledCron            = "30 9 * * *"
@@ -138,7 +138,7 @@ function New-EntraOpsConfigFile {
         AutomatedControlPlaneScopeUpdate              = [ordered]@{
             ApplyAutomatedControlPlaneScopeUpdate = $ApplyAutomatedControlPlaneScopeUpdate
             PrivilegedObjectClassificationSource  = ("EntraOps", "PrivilegedRolesFromAzGraph", "PrivilegedEdgesFromExposureManagement")
-            EntraOpsScopes                        = ("EntraID", "IdentityGovernance", "ResourceApps")
+            EntraOpsScopes                        = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement")
             AzureHighPrivilegedRoles              = ("Owner", "Role Based Access Control Administrator", "User Access Administrator")
             AzureHighPrivilegedScopes             = ("/")
             ExposureCriticalityLevel              = "<1"
