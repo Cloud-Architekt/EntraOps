@@ -96,7 +96,8 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                     Invoke-EntraOpsMsGraphQuery -Method "POST" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -DisableCache -Body $OdataBody -OutputType PSObject
                 }
             }
-            else {
+            # Check if privileged objects exists which should be synced to existing AU
+            elseif ($null -ne $EntraOpsPrivilegedObjects.Id) {
                 # Add or remove members from the AU which are not in scope of classification
                 $Diff = Compare-Object $EntraOpsPrivilegedObjects.ObjectId $CurrentAdminUnitMembers.Id
                 $Diff | ForEach-Object {
@@ -128,6 +129,10 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                         }
                     }
                 }
+            }
+            # No privileged objects found for the AU, cleanup existing assignments
+            else {
+                Write-Warning "No privileges objects found for entire $($AdminUnitName). Skipping AU sync. Removing all existing members from $($AdminUnitName) will not be applied for security reasons. Remove them manually if needed."
             }
         }
         #endregion

@@ -60,7 +60,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
 
     #region Get role assignments for all permanent role member
     Write-Host "Get details of Device Management Role Assignments foreach individual principal..."
-    if (![string]::IsNullOrWhiteSpace($DeviceMgmtRoleAssignments)) {
+    if (![string]::IsNullOrWhiteSpace($DeviceMgmtRoleAssignments.id)) {
         $DeviceMgmtRoleAssignmentPrincipals = ($DeviceMgmtRoleAssignments | select-object -ExpandProperty principalIds -Unique)
         $DeviceMgmtPermanentRbacAssignments = foreach ($Principal in $DeviceMgmtRoleAssignmentPrincipals) {
             Write-Verbose "Get identity information from permanent member $Principal"
