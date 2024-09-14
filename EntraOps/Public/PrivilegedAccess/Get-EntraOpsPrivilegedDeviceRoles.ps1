@@ -60,68 +60,75 @@ function Get-EntraOpsPrivilegedDeviceRoles {
 
     #region Get role assignments for all permanent role member
     Write-Host "Get details of Device Management Role Assignments foreach individual principal..."
-    $DeviceMgmtRoleAssignmentPrincipals = ($DeviceMgmtRoleAssignments | select-object -ExpandProperty principalIds -Unique)
-    $DeviceMgmtPermanentRbacAssignments = foreach ($Principal in $DeviceMgmtRoleAssignmentPrincipals) {
-        Write-Verbose "Get identity information from permanent member $Principal"
-        try {
-            $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($Principal)" -OutputType PSObject
-            $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
-        }
-        catch {
-            Write-Host $_
-            Write-Error "Issue to resolve directory object $Principal"
-        }
-
-        $AllPrinicpalDeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/RoleAssignments?$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual" -OutputType PSObject
-
-        foreach ($DeviceMgmtPrincipalRoleAssignment in $AllPrinicpalDeviceMgmtRoleAssignments) {
-
-            $Role = ($DeviceMgmtRoleDefinitions | where-object { $_.id -eq $DeviceMgmtPrincipalRoleAssignment.roleDefinitionId })
-
-            if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DeviceMgmtPrincipalRoleAssignment.id)" }
-
-            if ( [string]::IsNullOrEmpty($DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) ) {
-                # Directory Scope Id is null if the role is assigned to all devices or all users, only scoping on both object types includes "/" as directoryScopeId
-                # No indicator to identify the scope type, so empty value is used for considering RBAC role without specific directoryScopeId
-                $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds = "/"
+    if (![string]::IsNullOrWhiteSpace($DeviceMgmtRoleAssignments)) {
+        $DeviceMgmtRoleAssignmentPrincipals = ($DeviceMgmtRoleAssignments | select-object -ExpandProperty principalIds -Unique)
+        $DeviceMgmtPermanentRbacAssignments = foreach ($Principal in $DeviceMgmtRoleAssignmentPrincipals) {
+            Write-Verbose "Get identity information from permanent member $Principal"
+            try {
+                $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($Principal)" -OutputType PSObject
+                $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
+            }
+            catch {
+                Write-Host $_
+                Write-Error "Issue to resolve directory object $Principal"
             }
 
-            foreach ($directoryScopeId in $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) {
-                # Get scope name from tags
-                if ($directoryScopeId -ne "/") {
-                    $RoleAssignmentScopeName = foreach ($appScopeId in $DeviceMgmtPrincipalRoleAssignment.appScopeIds) {
-                        $ScopeTags | Where-Object { $_.Id -eq $appScopeId } | Select-Object -ExpandProperty displayName
-                    }
-                }
-                elseif ($directoryScopeId -eq "/") {
-                    $RoleAssignmentScopeName = "Tenant-wide"
-                }
-                else {
-                    Write-Warning "No scope name found for directoryScopeId $directoryScopeId"
+            $AllPrinicpalDeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/RoleAssignments?$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual" -OutputType PSObject
+
+            foreach ($DeviceMgmtPrincipalRoleAssignment in $AllPrinicpalDeviceMgmtRoleAssignments) {
+
+                $Role = ($DeviceMgmtRoleDefinitions | where-object { $_.id -eq $DeviceMgmtPrincipalRoleAssignment.roleDefinitionId })
+
+                if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DeviceMgmtPrincipalRoleAssignment.id)" }
+
+                if ( [string]::IsNullOrEmpty($DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) ) {
+                    # Directory Scope Id is null if the role is assigned to all devices or all users, only scoping on both object types includes "/" as directoryScopeId
+                    # No indicator to identify the scope type, so empty value is used for considering RBAC role without specific directoryScopeId
+                    $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds = "/"
                 }
 
-                $RoleAssignmentScopeName | foreach-object {
-                    [pscustomobject]@{
-                        RoleAssignmentId              = $DeviceMgmtPrincipalRoleAssignment.Id
-                        RoleAssignmentScopeId         = $directoryScopeId
-                        RoleAssignmentScopeName       = $_
-                        RoleAssignmentType            = "Direct"
-                        RoleAssignmentSubType         = ""
-                        PIMManagedRole                = $False
-                        PIMAssignmentType             = "Permanent"
-                        RoleDefinitionName            = $Role.displayName
-                        RoleDefinitionId              = $Role.id
-                        RoleType                      = if ($Role.isBuiltIn -eq $True) { "Built-In" } else { "Custom" }
-                        RoleIsPrivileged              = $Role.isPrivileged
-                        ObjectId                      = $Principal
-                        ObjectType                    = $ObjectType
-                        TransitiveByObjectId          = ""
-                        TransitiveByObjectDisplayName = ""
+                foreach ($directoryScopeId in $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) {
+                    # Get scope name from tags
+                    if ($directoryScopeId -ne "/") {
+                        $RoleAssignmentScopeName = foreach ($appScopeId in $DeviceMgmtPrincipalRoleAssignment.appScopeIds) {
+                            $ScopeTags | Where-Object { $_.Id -eq $appScopeId } | Select-Object -ExpandProperty displayName
+                        }
+                    }
+                    elseif ($directoryScopeId -eq "/") {
+                        $RoleAssignmentScopeName = "Tenant-wide"
+                    }
+                    else {
+                        Write-Warning "No scope name found for directoryScopeId $directoryScopeId"
+                    }
+
+                    $RoleAssignmentScopeName | foreach-object {
+                        [pscustomobject]@{
+                            RoleAssignmentId              = $DeviceMgmtPrincipalRoleAssignment.Id
+                            RoleAssignmentScopeId         = $directoryScopeId
+                            RoleAssignmentScopeName       = $_
+                            RoleAssignmentType            = "Direct"
+                            RoleAssignmentSubType         = ""
+                            PIMManagedRole                = $False
+                            PIMAssignmentType             = "Permanent"
+                            RoleDefinitionName            = $Role.displayName
+                            RoleDefinitionId              = $Role.id
+                            RoleType                      = if ($Role.isBuiltIn -eq $True) { "Built-In" } else { "Custom" }
+                            RoleIsPrivileged              = $Role.isPrivileged
+                            ObjectId                      = $Principal
+                            ObjectType                    = $ObjectType
+                            TransitiveByObjectId          = ""
+                            TransitiveByObjectDisplayName = ""
+                        }
                     }
                 }
             }
         }
     }
+    else {
+        Write-Warning "No Device Management Role Assignments found!"
+        $DeviceMgmtPermanentRbacAssignments = $null
+    }
+
     #endregion
 
     # Summarize results with direct permanent (excl. activated roles) and eligible role assignments

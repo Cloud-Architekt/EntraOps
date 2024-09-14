@@ -2,7 +2,7 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
-## [0.3] - 2024-09-12
+## [0.3] - 2024-09-14
 
 Added support for Intune RBAC (Device Management) and new workbook for (Privileged) Workload Identities
 
