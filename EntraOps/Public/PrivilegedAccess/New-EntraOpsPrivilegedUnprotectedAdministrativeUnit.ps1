@@ -32,7 +32,7 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance")
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
     )
 
     # Get Tier Levels with unprotected privileged EAM objects

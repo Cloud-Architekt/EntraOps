@@ -43,7 +43,7 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance")
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
         ,
         [Parameter(Mandatory = $true)]
         [String]$AdminUnitName

@@ -41,13 +41,13 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance")
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
         ,
         [Parameter(Mandatory = $false)]
-        [String]$AdminUnitName        
+        [String]$AdminUnitName
     )
 
-    
+
     # Get all unique AdminTierLevels which needs to be iterated for assigning objects to Conditional Access Target Groups
     $PrivilegedEamTierLevels = Get-ChildItem -Path "$($DefaultFolderClassification)/Templates" -File -Recurse -Exclude *.Param.json | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
     $SelectedPrivilegedEamTierLevels = $PrivilegedEamTierLevels | where-object { $_.EAMTierLevelName -in $ApplyToAccessTierLevel } | select-object -unique @{Name = 'AdminTierLevel'; Expression = 'EAMTierLevelTagValue' }, @{Name = 'AdminTierLevelName'; Expression = 'EAMTierLevelName' }
@@ -92,7 +92,7 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                     }
                 }
             }
-            else {
+            elseif ($null -ne $PrivilegedObjects.ObjectId) {
                 Compare-Object $PrivilegedObjects.ObjectId $CurrentGroupMembers.Id | ForEach-Object {
                     if ($_.SideIndicator -eq "=>") {
                         Write-Warning "$($_.InputObject) will be removed from $($GroupName)!"
@@ -109,6 +109,10 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                         Invoke-MgGraphRequest -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject
                     }
                 }
+            }
+            # No privileged objects found for the AU, cleanup existing assignments
+            else {
+                Write-Warning "No privileges objects found for entire $($GroupName). Skipping CA group sync. Removing all existing members from $($AdminUnitName) will not be applied for security reasons. Remove them manually if needed."
             }
         }
         #endregion

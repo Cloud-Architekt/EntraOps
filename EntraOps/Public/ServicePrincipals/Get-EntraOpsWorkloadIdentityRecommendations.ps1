@@ -30,10 +30,10 @@ function Get-EntraOpsWorkloadIdentityRecommendations {
     Write-Verbose "Collecting data for Entra Recommendations"
     $Recommendations = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/directory/recommendations?`$filter=impactType eq 'apps'" -OutputType PSObject).value | select-object id, displayName, priority, insights, benefits
 
-    foreach ($Recommendation in $Recommendations) {
+    $RecommendationItems = foreach ($Recommendation in $Recommendations) {
         $Resources = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/directory/recommendations/$($Recommendation.id)/impactedResources" -OutputType PSObject).value
         $Resources | ForEach-Object {
-            $CurrentItem = @{
+            $CurrentItem = [pscustomobject]@{
                 'RecommendationId'           = $_.recommendationId
                 'AddedDateTime'              = $_.AddedDateTime
                 'Name'                       = $Recommendation.displayName
@@ -45,14 +45,15 @@ function Get-EntraOpsWorkloadIdentityRecommendations {
                 'Details'                    = $_.additionaldetails.value
                 'ImpactedResourceIdentifier' = $_.recommendationId + "_" + $_.id
             }
-            $RecommendationItems.Add( $CurrentItem ) | Out-Null
+            return $CurrentItem
         }
     }
 
     if ($StatusFilter -ne "All") {
         $FilteredRecommendationItems = $RecommendationItems | where-object { $_.Status -eq $StatusFilter }
         return $FilteredRecommendationItems
-    } else {
+    }
+    else {
         return $RecommendationItems
     }
 }

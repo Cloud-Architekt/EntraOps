@@ -52,11 +52,12 @@ Currently the following RBAC systems are supported:
 - 🔑 Microsoft Entra roles
 - 🔄 Microsoft Entra Identity Governance
 - 🤖 Microsoft Graph App Roles
+- 🖥️ Microsoft Intune
 
 The following RBAC systems are in development and will be released soon:
 - ☁️ Microsoft Azure (RBAC)
 - 💵 Microsoft Billing Profiles (Enterprise Agreement)
-- 🖥️ Microsoft Intune
+
 
 EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline and any automation/worker environment which supports  PowerShell Core. The automation to create a pipeline supports GitHub only yet.
 
@@ -316,6 +317,10 @@ Pre-requisite: EntraOps data has been ingested to WatchList or Custom Table and 
 **EntraOps Privileged EAM - Overview**
   
   [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Overview.json)
+
+**EntraOps Privileged EAM - Workload Identities**
+  
+  [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FWorkbooks%2FEntraOps%20Privileged%20EAM%20-%20Workload%20Identities.json)
 
 
 ## Classify privileged objects by Custom Security Attributes

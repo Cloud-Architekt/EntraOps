@@ -34,7 +34,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance")
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
     )
 
     # Get all privileged EAM objects
@@ -43,7 +43,11 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
     }
 
     # Get all privileged EAM objects without any restricted management and their tier levels
-    $UnprotectedPrivilegedUser = $PrivilegedEamObjects | Where-Object { $_.RestrictedManagementByRAG -ne $True -and $_.RestrictedManagementByAadRole -ne $True -and $_.RestrictedManagementByRMAU -ne $True -and $_.ObjectType -in $FilterObjectType }
+    $UnprotectedPrivilegedUser = $PrivilegedEamObjects | Where-Object {
+        $_.RestrictedManagementByRAG -ne $True -and `
+            $_.RestrictedManagementByAadRole -ne $True -and `
+            $_.RestrictedManagementByRMAU -ne $True -and `
+            $_.ObjectType -in $FilterObjectType }
 
 
     # Get all unique AdminTierLevels which needs to be iterated for assigning objects to Conditional Access Target Groups
@@ -113,14 +117,23 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                 if ($_.SideIndicator -eq "=>") {
 
                     $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/directoryObjects/$($_.InputObject)" -OutputType PSObject
-                    Write-Verbose "Removing $($AdminUnitMember.displayName) from $($AdminUnitName)"
-                    try {
-                        Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($_.InputObject)/`$ref" -OutputType PSObject
-                    }
-                    catch {
-                        Write-Warning "Removal for $($AdminUnitMember.displayName) has been failed!"
-                    }
 
+                    Write-Verbose "Check if $($_.InputObject) is member of other RMAUs, otherwise it would be also remove from UnprotectedObjects AU"
+                    $AssignmentsToOtherRMAUs = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/directoryObjects/$($_.InputObject)/memberOf/Microsoft.DirectoryServices.AdministrativeUnit" -OutputType PSObject `
+                    | Where-Object { $_.isMemberManagementRestricted -eq $True -and $_.id -ne $AdminUnitId -and $_.displayName -notlike "*.UnprotectedObjects" }
+
+                    if (![string]::IsNullOrEmpty($AssignmentsToOtherRMAUs.id)) {
+                        Write-Verbose "Removing $($AdminUnitMember.displayName) from $($AdminUnitName)"
+                        try {
+                            Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($_.InputObject)/`$ref" -OutputType PSObject
+                        }
+                        catch {
+                            Write-Warning "Removal for $($AdminUnitMember.displayName) has been failed!"
+                        }
+                    }
+                    else {
+                        Write-Warning "Object $($AdminUnitMember.displayName) will keep in RMAU because of missing protection by other protection capability or RMAU!"
+                    }
                 }
                 elseif ($_.SideIndicator -eq "<=") {
                     try {

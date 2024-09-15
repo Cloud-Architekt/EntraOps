@@ -48,6 +48,13 @@ function Export-EntraOpsClassificationDirectoryRoles {
         [bool]$ShowOnly = $false           
     )
 
+    # Define sensitive role definitions without actions to classify
+    $ControlPlaneRolesWithoutRoleActions = @(
+        'd29b2b05-8046-44ba-8758-1e26182fcf32', # Directory Synchronization Accounts
+        'a92aed5d-d78a-4d16-b381-09adb37eb3b0', # On Premises Directory Sync Account
+        '9f06204d-73c1-4d4c-880a-6edb90606fd8' # Azure AD Joined Device Local Administrator
+    )
+
     # Get EntraOps Classification
     # Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_AadResources.json"
@@ -64,7 +71,7 @@ function Export-EntraOpsClassificationDirectoryRoles {
 
     # Single Classification (highest tier level only)
     Write-Output "Query directory role templates for mapping ID to name and further details"
-    $DirectoryRoleDefinitions = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions").value | select-object displayName, templateId, isBuiltin, isPrivileged, rolePermissions
+    $DirectoryRoleDefinitions = (Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions").value | select-object displayName, templateId, isBuiltin, isPrivileged, rolePermissions, categories, richDescription
 
     if ($IncludeCustomRoles -eq $False) {
         $DirectoryRoleDefinitions = $DirectoryRoleDefinitions | where-object { $_.isBuiltin -eq "True" }
@@ -113,10 +120,19 @@ function Export-EntraOpsClassificationDirectoryRoles {
             $RoleDefinitionClassification.Add($FilteredRoleClassifications)
         }
 
+        if ($ControlPlaneRolesWithoutRoleActions -contains $_.templateId) {
+            $RoleDefinitionClassification = [PSCustomObject]@{
+                "EAMTierLevelName"     = "ControlPlane"
+                "EAMTierLevelTagValue" = "0"
+            }
+        }
+
         [PSCustomObject]@{
             "RoleId"          = $_.templateId
             "RoleName"        = $_.displayName
             "isPrivileged"    = $_.isPrivileged
+            "Categories"      = $_.categories
+            "RichDescription" = $_.richDescription
             "RolePermissions" = $ClassifiedDirectoryRolePermissions
             "Classification"  = $RoleDefinitionClassification
         }
