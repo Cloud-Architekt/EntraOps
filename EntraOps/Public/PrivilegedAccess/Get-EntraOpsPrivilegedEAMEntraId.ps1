@@ -91,8 +91,8 @@ function Get-EntraOpsPrivilegedEamEntraId {
         if ($ControlPlaneRolesWithoutRoleActions.RoleId -contains $AadRbacAssignment.RoleId) {
             $Classification = $ControlPlaneRolesWithoutRoleActions | Where-Object { $_.RoleId -contains $AadRbacAssignment.RoleId }
             $Classification = [PSCustomObject]@{
-                'AdminTierLevel'     = "ControlPlane"
-                'AdminTierLevelName' = "0"
+                'AdminTierLevel'     = "0"
+                'AdminTierLevelName' = "ControlPlane"
                 'Service'            = $Classification.Service
                 'TaggedBy'           = "ControlPlaneRolesWithoutRoleActions"
             }

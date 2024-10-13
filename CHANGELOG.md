@@ -2,6 +2,11 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [0.3.1] - 2024-10-13
+
+### Fixed
+- Correct description of `AdminTierLevel` and `AdminTierLevelName` for classification of Control Plane roles without Role actions (e.g., Directory Synchronization Accounts)
+
 ## [0.3] - 2024-09-15
 Added support for Intune RBAC (Device Management) and new workbook for (Privileged) Workload Identities
 
