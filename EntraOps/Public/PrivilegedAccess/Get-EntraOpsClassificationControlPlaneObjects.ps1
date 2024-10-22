@@ -134,6 +134,8 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "EntraOps" -Force | Out-Null                
                 return $PrivilegedObject
             }
+            
+            $PrivilegedObjects += $EntraOpsObjectClassification
 
             $EntraOpsRoleClassification = $EntraOpsAllPrivilegedObjects | Where-Object { $_.Classification.AdminTierLevelName -contains "ControlPlane" } `
             | ForEach-Object {
@@ -144,7 +146,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                 return $PrivilegedObject
             }
 
-            $PrivilegedObjects += $EntraOpsObjectClassification + $EntraOpsRoleClassification
+            $PrivilegedObjects += $EntraOpsRoleClassification
         }
     }
     #endregion
