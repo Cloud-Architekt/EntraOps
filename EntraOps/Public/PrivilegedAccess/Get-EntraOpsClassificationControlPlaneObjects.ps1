@@ -125,10 +125,10 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         }
         else {
             $EntraOpsObjectClassification = $EntraOpsAllPrivilegedObjects | Where-Object { $_.ObjectAdminTierLevelName -eq "ControlPlane" } `
+            | Select-Object -Unique ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices `
             | ForEach-Object {
-                $PrivilegedObject = $_ | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices
-                $ClassificationReason = @()
-                $ClassificationReason += @("ObjectAdminTierLevelName")
+                $PrivilegedObject = $_ 
+                $ClassificationReason = @("ObjectAdminTierLevelName")
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ObjectSignInName -Value ($PrivilegedObject.ObjectUserPrincipalName) -Force | Out-Null
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value $ClassificationReason -Force | Out-Null
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "EntraOps" -Force | Out-Null                
