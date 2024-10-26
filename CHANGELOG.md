@@ -2,6 +2,11 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [0.3.2] - 2024-10-26
+
+### Fixed
+- Bug fixes for `Get-EntraOpsClassificationControlPlaneObjects` cmdlet [#27](https://github.com/Cloud-Architekt/EntraOps/pull/27) and avoid duplicated `ObjectAdminTierLevelName` entries.
+
 ## [0.3.1] - 2024-10-13
 
 ### Fixed
