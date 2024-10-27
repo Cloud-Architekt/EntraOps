@@ -48,6 +48,19 @@
       },
       {
         "Category": "Microsoft.Graph",
+        "Service": "Cloud PKI",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "DeviceManagementCloudCA.Read.All",
+          "DeviceManagementCloudCA.ReadWrite.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
         "Service": "Conditional Access",
         "ResourceAppId": "00000003-0000-0000-c000-000000000000",
         "ResourceScope": "Application",
@@ -131,6 +144,7 @@
           "DeviceManagementManagedDevices.ReadWrite.All",
           "DeviceManagementServiceConfig.Read.All",
           "DeviceManagementServiceConfig.ReadWrite.All",
+          "Policy.ReadWrite.DeviceConfiguration",
           "Policy.ReadWrite.MobilityManagement",
           "WindowsUpdates.ReadWrite.All"
         ]
@@ -225,7 +239,8 @@
           "IdentityProvider.ReadWrite.All",
           "IdentityRiskEvent.ReadWrite.All",
           "IdentityRiskyServicePrincipal.ReadWrite.All",
-          "IdentityRiskyUser.ReadWrite.All"
+          "IdentityRiskyUser.ReadWrite.All",
+          "SecurityIdentitiesUserActions.ReadWrite.All"
         ]
       },
       {
@@ -276,6 +291,8 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "CustomSecAttributeProvisioning.ReadWrite.All",
+          "CustomSecAttributeProvisioning.Read.All",
           "CustomSecAttributeAssignment.Read.All",
           "CustomSecAttributeAssignment.ReadWrite.All",
           "CustomSecAttributeDefinition.Read.All",
@@ -296,12 +313,15 @@
           "PrivilegedAccess.ReadWrite.AzureADGroup",
           "PrivilegedAccess.ReadWrite.AzureResources",
           "PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup",
+          "PrivilegedAssignmentSchedule.Remove.AzureADGroup",
           "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
+          "PrivilegedEligibilitySchedule.Remove.AzureADGroup",
           "RoleAssignmentSchedule.ReadWrite.Directory",
           "RoleEligibilitySchedule.ReadWrite.Directory",
           "RoleManagement.ReadWrite.CloudPC",
           "RoleManagement.ReadWrite.Directory",
           "RoleManagement.ReadWrite.Exchange",
+          "RoleAssignmentSchedule.Remove.Directory",
           "RoleManagementAlert.ReadWrite.Directory",
           "RoleManagementPolicy.ReadWrite.AzureADGroup",
           "RoleManagementPolicy.ReadWrite.Directory"
@@ -418,6 +438,8 @@
         ],
         "RoleDefinitionActions": [
           "Bookings.Read.All",
+          "Bookings.Manage.All",
+          "Bookings.ReadWrite.All",
           "BookingsAppointment.ReadWrite.All"
         ]
       },
@@ -578,6 +600,7 @@
           "AppCatalog.Read.All",
           "AppCatalog.ReadWrite.All",
           "CallEvents.Read.All",
+          "CallEvents-Emergency.Read.All",
           "CallRecord-PstnCalls.Read.All",
           "CallRecords.Read.All",
           "Calls.AccessMedia.All",
@@ -609,6 +632,8 @@
           "ChatMember.ReadWrite.WhereInstalled",
           "ChatMessage.Read.All",
           "OnlineMeetingArtifact.Read.All",
+          "OnlineMeetingAiInsight.Read.All",
+          "OnlineMeetingAiInsight.Read.Chat",
           "OnlineMeetingRecording.Read.All",
           "OnlineMeetings.Read.All",
           "OnlineMeetings.ReadWrite.All",
@@ -732,6 +757,7 @@
           "SecurityAlert.Read.All",
           "SecurityAnalyzedMessage.Read.All",
           "SecurityEvents.Read.All",
+          "SecurityIdentitiesUserActions.Read.All",
           "SecurityIncident.Read.All",
           "SecurityRecommendation.Read.All",
           "ThreatAssessment.Read.All",
@@ -788,6 +814,7 @@
           "PendingExternalUserProfile.Read.All",
           "Policy.Read.All",
           "Policy.Read.ConditionalAccess",
+          "Policy.Read.DeviceConfiguration",
           "Policy.Read.IdentityProtection",
           "Policy.Read.PermissionGrant",
           "PrivilegedAccess.Read.AzureAD",

@@ -326,6 +326,17 @@
       },
       {
         "Category": "Microsoft.AzureAD",
+        "Service": "Hybrid Identity Synchronization",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "microsoft.directory/onPremisesSynchronization/basic/update",
+          "microsoft.directory/onPremisesSynchronization/standard/read"
+        ]
+      },
+      {
+        "Category": "Microsoft.AzureAD",
         "Service": "Identity Threat Detection and Response",
         "RoleAssignmentScopeName": [
           "/"
