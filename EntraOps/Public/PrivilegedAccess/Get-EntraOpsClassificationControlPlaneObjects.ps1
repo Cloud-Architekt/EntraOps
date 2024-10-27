@@ -102,8 +102,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     if (!(Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext))")) {
         try {
             New-Item -Path "$($DefaultFolderClassification)/$($TenantNameContext)" -ItemType Directory -Force | Out-Null
-        }
-        catch {
+        } catch {
             Write-Error "Failed to create folder $($EntraIdCustomizedClassificationFile)! $_.Exception.Message"
         }
     }
@@ -114,16 +113,14 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         $EntraOpsAllPrivilegedObjects = foreach ($EntraOpsScope in $EntraOpsScopes) {
             try {
                 Get-Content -Path $EntraOpsEamFolder\$($EntraOpsScope)\$($EntraOpsScope).json -ErrorAction Stop | ConvertFrom-Json -Depth 10
-            }
-            catch {
+            } catch {
                 Write-Warning "No privileged objects found for $($EntraOpsScope) in EntraOps! $_.Exception.Message"
             }
         }
 
         if ($null -eq $EntraOpsAllPrivilegedObjects) {
             Write-Warning "No privileged objects found in EntraOps!"
-        }
-        else {
+        } else {
             $EntraOpsObjectClassification = $EntraOpsAllPrivilegedObjects | Where-Object { $_.ObjectAdminTierLevelName -eq "ControlPlane" } `
             | Select-Object -Unique ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices `
             | ForEach-Object {
@@ -157,25 +154,22 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         # Query template and update them with parameter value of high privileged Azure roles and scopes
         $Query = 'AuthorizationResources
     | where type =~ "microsoft.authorization/roleassignments"
-    | extend principalType = tostring(properties["principalType"])
-    | extend principalId = tostring(properties["principalId"])
-    | extend roleDefinitionId = tolower(tostring(properties["roleDefinitionId"]))
-    | extend scope = tolower(tostring(properties["scope"]))
-    | where isnotempty(scope)
+    | extend PrincipalType = tolower(tostring(properties["principalType"]))
+    | extend PrincipalId = tostring(properties["principalId"])
+    | extend RoleDefinitionId = tolower(tostring(properties["roleDefinitionId"]))
+    | extend RoleScope = tolower(tostring(properties["scope"]))
+    | where isnotempty(RoleScope)
     | join kind=inner ( AuthorizationResources
     | where type =~ "microsoft.authorization/roledefinitions"
-    | extend roleDefinitionId = tolower(id)
-    | mv-expand parse_json(properties.assignableScopes)
-    | extend RoleScope = tolower(properties.assignableScopes)
-    | mv-expand parse_json(RoleScope)
+    | extend RoleDefinitionId = tolower(id)
     | extend RoleName = (properties.roleName)
     | where RoleName in (%AzureHighPrivilegedRoles%)
-    ) on roleDefinitionId
-    | project PrincipalId = principalId, PrincipalType = tolower(principalType), RoleScope, RoleName'
+    ) on RoleDefinitionId
+    | project PrincipalId, PrincipalType, RoleScope, RoleName'
         $Query = $Query.Replace("%AzureHighPrivilegedRoles%", "'$($AzureHighPrivilegedRoles -join "', '")'")
         if ($null -ne $AzureHighPrivilegedScopes -and $AzureHighPrivilegedScopes -ne "*") {
             $Scopes = "'$($AzureHighPrivilegedScopes -join "', '")'"
-            $Query = $Query.Replace("isnotempty(scope)", "scope in ($($Scopes))")
+            $Query = $Query.Replace("isnotempty(RoleScope)", "RoleScope in ($($Scopes))")
         }
 
         # Get details of high privileged objects
@@ -191,8 +185,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                     $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "Azure Resource Graph" -Force | Out-Null
                     return $PrivilegedObject
                 }
-            }
-            catch {
+            } catch {
                 Write-Warning "High privileged object with id $($HighPrivilegedObjectId.PrincipalId) not found! $_"
             }
         }

@@ -5,7 +5,10 @@ All essential changes on EntraOps will be documented in this changelog.
 ## [0.3.2] - 2024-10-26
 
 ### Fixed
-- Bug fixes for `Get-EntraOpsClassificationControlPlaneObjects` cmdlet [#27](https://github.com/Cloud-Architekt/EntraOps/pull/27) and avoid duplicated `ObjectAdminTierLevelName` entries.
+- Various bug fixes for `Get-EntraOpsClassificationControlPlaneObjects` cmdlet, including
+  - Method invocation failed [#27](https://github.com/Cloud-Architekt/EntraOps/pull/27)
+  - Avoid duplicated `ObjectAdminTierLevelName` entries
+  - Correct scope of high privileged roles from Azure Resource Graph
 
 ## [0.3.1] - 2024-10-13
 
