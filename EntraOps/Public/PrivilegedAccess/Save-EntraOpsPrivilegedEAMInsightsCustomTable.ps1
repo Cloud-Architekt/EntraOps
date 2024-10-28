@@ -81,14 +81,25 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
             catch {
                 Write-Warning "No $($RbacSystem).json found!"
             }
+
             if ($EamFiles.Count -gt 0) {
                 Write-Host "Upload classification data for object type: $($ObjectType)"
-                $EamSummary = @()
-                $EamSummary += $EamFiles | ForEach-Object {
-                    Get-Content $_ | ConvertFrom-Json -Depth 10
+            
+                # Loop through files in batches of 50 to avoid errors hitting the 1Mb file limit for DCRs
+                for ($i = 0; $i -lt $EamFiles.Count; $i += 50) {
+                    # Select the current batch of 50 files
+                    $Batch = $EamFiles[$i..([math]::Min($i + 49, $EamFiles.Count - 1))]
+                
+                    # Process the batch
+                    $EamSummary = @()
+                    $EamSummary += $Batch | ForEach-Object { Get-Content $_ | ConvertFrom-Json -Depth 10 }
+                    $Json = $EamSummary | ConvertTo-Json -Depth 10
+                
+                    # Send the batch to the API
+                    Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId
+                
+                    Write-Host "Processed batch of 50 files starting at index $i."
                 }
-                $Json = $EamSummary | ConvertTo-Json -Depth 10
-                Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId
             }
         }
     }
