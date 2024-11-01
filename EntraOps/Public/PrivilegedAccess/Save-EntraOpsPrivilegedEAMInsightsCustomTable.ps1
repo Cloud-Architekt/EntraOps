@@ -92,13 +92,24 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
                 
                     # Process the batch
                     $EamSummary = @()
-                    $EamSummary += $Batch | ForEach-Object { Get-Content $_ | ConvertFrom-Json -Depth 10 }
-                    $Json = $EamSummary | ConvertTo-Json -Depth 10
+                    $EamSummary += $Batch | ForEach-Object {
+                        # Check that each item is indeed a file before processing
+                        if (Test-Path $_ -PathType Leaf) {
+                            Get-Content $_ | ConvertFrom-Json -Depth 10
+                        }
+                        else {
+                            Write-Warning "Skipped non-file item: $_"
+                        }
+                    }
+
+                    if ($EamSummary.Count -ne 0) {
+                        $Json = $EamSummary | ConvertTo-Json -Depth 10
                 
-                    # Send the batch to the API
-                    Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId
-                
-                    Write-Host "Processed batch of 50 files starting at index $i."
+                        # Send the batch to the API
+                        Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId                
+                    }
+                    
+                    Write-Host "Processed batch of $($EamSummary.Count) files starting at index $i."
                 }
             }
         }
