@@ -87,7 +87,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         [object]$AzureHighPrivilegedRoles = ("Owner", "Role Based Access Control Administrator", "User Access Administrator")
         ,
         [Parameter(Mandatory = $false)]
-        [string]$AzureHighPrivilegedScopes = "*"
+        [object]$AzureHighPrivilegedScopes = "*"
         ,
         [Parameter(Mandatory = $false)]
         [string]$ExposureCriticalityLevel = "<1"
