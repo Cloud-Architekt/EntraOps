@@ -39,11 +39,9 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     $ClassificationFileName = "Classification_AppRoles.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
         $ResourceAppsClassificationFilePath = "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)"
-    }
-    elseif (Test-Path -Path "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)") {
+    } elseif (Test-Path -Path "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)") {
         $ResourceAppsClassificationFilePath = "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)"
-    }
-    else {
+    } else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
     }
 
@@ -52,14 +50,12 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     # Get all role assignments and global exclusions
     if ($SampleMode -ne $True) {
         $AppRoleAssignments = Get-EntraOpsPrivilegedAppRoles -TenantId $TenantId
-    }
-    else {
+    } else {
         Write-Warning "Currently not supported!"
     }
     if ($GlobalExclusion -eq $true) {
         $GlobalExclusionList = (Get-Content -Path "$DefaultFolderClassification/Global.json" | ConvertFrom-Json -Depth 10).ExcludedPrincipalId
-    }
-    else {
+    } else {
         $GlobalExclusionList = $null
     }
     #endregion
@@ -78,7 +74,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         $Classification = @()
         if (($AppRoleInJsonDefinition.Count -gt 0)) {
             $ClassifiedAppRole = @()
-            $ClassifiedAppRole += $AppRoleInJsonDefinition | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
+            $ClassifiedAppRole += $AppRoleInJsonDefinition | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service | Sort-Object EAMTierLevelTagValue, EAMTierLevelName, Service
             $Classification += $ClassifiedAppRole | ForEach-Object {
                 [PSCustomObject]@{
                     'AdminTierLevel'     = $_.EAMTierLevelTagValue
@@ -87,8 +83,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     'TaggedBy'           = "JSONwithAction"
                 }
             }
-        }
-        else {
+        } else {
             $Classification += [PSCustomObject]@{
                 'AdminTierLevel'     = "Unclassified"
                 'AdminTierLevelName' = "Unclassified"
@@ -102,6 +97,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             'Classification'        = $Classification
         }
     }
+    $AppRoleClassificationsByJSON = $AppRoleClassificationsByJSON | sort-object -property @{e = { $_.Classification.AdminTierLevel } }
     #endregion
 
     #region Classify App Role Assignments
@@ -109,11 +105,13 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         $AppRoleAssignment = $AppRoleAssignment | Select-Object -ExcludeProperty Classification
         $Classification = @()
         $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScope -eq $AppRoleAssignment.RoleAssignmentScope -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
-        $Classification += $ClassificationCollection.Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy | Sort-Object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $ClassificationCollection.Classification = $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+        $Classification += $ClassificationCollection.Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $AppRoleAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $AppRoleAssignment
     }
     #endregion
+    $AppRoleClassifications = $AppRoleClassifications | sort-object -property @{e = { $_.Classification.AdminTierLevel } }, RoleDefinitionName
 
     #region Add classification and details of Service Principals to output
     Write-Host "Classifiying of all assigned privileged app roles to service principals..."
@@ -131,7 +129,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
             # Classification
             $Classification = @()
-            $Classification += $AppRoleClassification
+            $Classification += $AppRoleClassification | Sort-Object AdminTierLevel, AdminTierLevelName, Service
             if ($Classification.Count -eq 0) {
                 $Classification += [PSCustomObject]@{
                     'AdminTierLevel'     = "Unclassified"
