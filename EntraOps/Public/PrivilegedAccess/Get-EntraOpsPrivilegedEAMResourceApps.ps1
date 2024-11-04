@@ -105,8 +105,10 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         $AppRoleAssignment = $AppRoleAssignment | Select-Object -ExcludeProperty Classification
         $Classification = @()
         $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScope -eq $AppRoleAssignment.RoleAssignmentScope -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
-        $ClassificationCollection.Classification = $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service
-        $Classification += $ClassificationCollection.Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        if ($ClassificationCollection.Classification.Count -gt 0) {
+            $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+            $Classification += $ClassificationCollection.Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        }
         $AppRoleAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $AppRoleAssignment
     }
