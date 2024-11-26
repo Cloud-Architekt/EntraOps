@@ -1,7 +1,7 @@
 Parser:
   Title: PrivilegedEAM (WatchLists)
   Version: 0.1
-  LastUpdated: 2024-06-21
+  LastUpdated: 2024-11-26
 Product:
   Name: EntraOps
 References:
@@ -11,9 +11,9 @@ Description: |
   This parser is used to have a standarized schema of EntraOps classification of Privileged EAM.
 ParserName: PrivilegedEAM
 ParserQuery: |
-  _GetWatchlist('EntraOpsBeta_Principals')
+  _GetWatchlist('EntraOps_Principals')
   | join kind=inner (
-      _GetWatchlist('EntraOpsBeta_RoleAssignments')
+      _GetWatchlist('EntraOps_RoleAssignments')
           | extend EligibilityBy = case(
               RoleSystem == "EntraID" and PIMAssignmentType == "Eligible", "PIM for Entra ID Roles",
               RoleSystem == "EntraID" and PIMAssignmentType == "Eligible" and (RoleAssignmentSubType == "Nested Eligible member" or RoleAssignmentSubType  == "Eligible member"), "PIM for Entra ID Roles and Groups",
