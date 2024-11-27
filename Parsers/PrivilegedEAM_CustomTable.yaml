@@ -1,7 +1,7 @@
 Parser:
   Title: PrivilegedEAM (Custom Table)
-  Version: 0.1
-  LastUpdated: 2024-06-21
+  Version: 0.2
+  LastUpdated: 2024-11-26
 Product:
   Name: EntraOps
 References:
@@ -16,6 +16,21 @@ ParserQuery: |
   | summarize arg_max(TimeGenerated, *) by ObjectId,RoleSystem
   | project-away TenantId
   | extend Type = "EntraOps_CustomTable"
+  | mv-apply RoleAssignments on
+  (
+      extend RoleAssignments = bag_merge(
+          RoleAssignments,
+          bag_pack(
+              "EligibilityBy", case(
+                  RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible", "PIM for Entra ID Roles",
+                  RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible" and (RoleAssignments.RoleAssignmentSubType == "Nested Eligible member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member"), "PIM for Entra ID Roles and Groups",
+                  RoleAssignments.RoleAssignmentSubType == "Nested Eligible group member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member", "PIM for Groups",
+                  "N/A"),
+              "TransitiveByPim", iff((RoleAssignments.RoleAssignmentSubType == "Nested Eligible member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member"), true, false)
+              )
+          )
+      | summarize RoleAssignments = make_list(RoleAssignments)
+  )
   | project-reorder 
       TimeGenerated,
       ObjectId,

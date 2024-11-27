@@ -2,6 +2,23 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [0.3.3] - 2024-11-27
+
+### Added
+- Status of Restricted Management in Privileged EAM Workbook [#28](https://github.com/Cloud-Architekt/EntraOps/issues/28)
+- Added support for EligibilityBy and enhanced PIM for Groups support
+
+### Changed
+- Added tenant root group as default for high privileged scopes
+- Support for multiple scopes for high privileged 
+- Improvement in visualization of Privileged EAM Workbook
+- Support to identify Privileged Auth Admin as Control Plane
+
+### Fixed
+- Order of ResourceApps by tiered levels
+- Improvements to Ingest API processing (fix by [weskroesbergen](https://github.com/weskroesbergen))
+  - Process files in batches of 50 to avoid errors hitting the 1Mb file limit for DCRs
+
 ## [0.3.2] - 2024-10-26
 
 ### Fixed

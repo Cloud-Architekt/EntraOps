@@ -99,8 +99,7 @@ function New-EntraOpsConfigFile {
     # Get TenantId
     try {
         $TenantId = (Invoke-RestMethod -Uri ("https://login.windows.net/$($TenantName)/.well-known/openid-configuration")).token_endpoint.split('/')[3]
-    }
-    catch {
+    } catch {
         Write-Error "Can't find tenant with name $TenantName. Error: $_"
     }
 
@@ -109,15 +108,13 @@ function New-EntraOpsConfigFile {
     if ($AzContext.Tenant.Id -ne $TenantId) {
         Write-Verbose "Call Connect-AzAccount to $($TenantId)..."
         Connect-AzAccount -TenantId $TenantId
-    }
-    else {
+    } else {
         Write-Verbose "Already connected to $($AzContext.Tenant.Id)"
     }
 
     try {
         $TenantDetails = Get-AzTenant -TenantId $TenantId
-    }
-    catch {
+    } catch {
         Write-Error "Failed to get Tenant details for TenantId $TenantId. Error: $_"
     }
     #endregion
@@ -140,7 +137,7 @@ function New-EntraOpsConfigFile {
             PrivilegedObjectClassificationSource  = ("EntraOps", "PrivilegedRolesFromAzGraph", "PrivilegedEdgesFromExposureManagement")
             EntraOpsScopes                        = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement")
             AzureHighPrivilegedRoles              = ("Owner", "Role Based Access Control Administrator", "User Access Administrator")
-            AzureHighPrivilegedScopes             = ("/")
+            AzureHighPrivilegedScopes             = ("/", "/providers/microsoft.management/managementgroups/$($TenantId)")
             ExposureCriticalityLevel              = "<1"
         }
         AutomatedClassificationUpdate                 = [ordered]@{
@@ -196,8 +193,7 @@ function New-EntraOpsConfigFile {
     try {
         Write-Output "Writing configuration file to $($ConfigFilePath)..."
         $EnvConfigSchema | ConvertTo-Json | Out-File -Path $($ConfigFilePath)
-    }
-    catch {
+    } catch {
         Write-Error "Failed to write configuration file to $($ConfigFilePath). Error: $_"
     }
     #endregion

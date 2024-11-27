@@ -89,7 +89,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
         [object]$AzureHighPrivilegedRoles = ("Owner", "Role Based Access Control Administrator", "User Access Administrator")
         ,
         [Parameter(Mandatory = $false)]
-        [string]$AzureHighPrivilegedScopes = "*"
+        [object]$AzureHighPrivilegedScopes = ("*")
         ,
         [Parameter(Mandatory = $false)]
         [string]$ExposureCriticalityLevel = "<1"
@@ -127,22 +127,24 @@ function Update-EntraOpsClassificationControlPlaneScope {
     #region Privileged User
     Write-Output "Identify directory role scope of privileged users..."
     $PrivilegedUsersWithoutProtection = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and ($_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByAadRole -eq $False -and $RestrictedManagementByRMAU -eq $False) }
-    $PrivilegedUserWithRMAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $_.RestrictedManagementByRMAU -eq $True }
-    $ScopeNamePrivilegedUsers = $PrivilegedUserWithRMAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+
+    # Include all Administrative Units because of Privileged Authentication Admin role assignment on (RM)AU level
+    $PrivilegedUserWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.AssignedAdministrativeUnits }
+    $ScopeNamePrivilegedUsers = $PrivilegedUserWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
     if ($PrivilegedUsersWithoutProtection -gt "0") {
         Write-Warning "Control Plane user without any protection, requires to avoid directory role assignments for user management!"
         Write-Host $PrivilegedUsersWithoutProtection
         $ScopeNamePrivilegedUsers += $DirectoryLevelAssignmentScope
     }
+
     if ($null -ne $ScopeNamePrivilegedUsers) {
         $ScopeNamePrivilegedUsersJSON = $ScopeNamePrivilegedUsers | Sort-Object | ConvertTo-Json
         $ScopeNamePrivilegedUsersJSON = $ScopeNamePrivilegedUsersJSON.Replace('[', '').Replace(']', '')
         $ScopeNamePrivilegedUsersJSON = $ScopeNamePrivilegedUsersJSON -creplace '\s+', ' '
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedUsers>', $ScopeNamePrivilegedUsersJSON)
-    }
-    else {
-        Write-Warning "No privileged user in scope of classification!"
-        $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedUsers>', '"/"')
+    } else {
+        Write-Warning "No privileged user in scope of classification because of applied protections or restricted management! No requirement to set scope of Privileged User Management."
+        $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedUsers>', '')
     }
     #endregion
 
@@ -165,10 +167,9 @@ function Update-EntraOpsClassificationControlPlaneScope {
         $ScopeNamePrivilegedDevicesJSON = $ScopeNamePrivilegedDevicesJSON.Replace('[', '').Replace(']', '')
         $ScopeNamePrivilegedDevicesJSON = $ScopeNamePrivilegedDevicesJSON -creplace '\s+', ' '
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedDevices>', $ScopeNamePrivilegedDevicesJSON)
-    }
-    else {
-        Write-Warning "No privileged device in scope of classification!"
-        $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedDevices>', '"/"')
+    } else {
+        Write-Warning "No privileged device in scope of classification! It seems no privileged devices exists in this tenant.  No requirement to set scope of Privileged Device Management."
+        $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedDevices>', '')
     }
     #endregion
 
@@ -186,10 +187,9 @@ function Update-EntraOpsClassificationControlPlaneScope {
         $ScopeNamePrivilegedGroupsJSON = $ScopeNamePrivilegedGroupsJSON.Replace('[', '').Replace(']', '')
         $ScopeNamePrivilegedGroupsJSON = $ScopeNamePrivilegedGroupsJSON -creplace '\s+', ' '
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedGroups>', $ScopeNamePrivilegedGroupsJSON)
-    }
-    else {
-        Write-Warning "No privileged groups in scope of classification!"
-        $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedGroups>', '"/"')
+    } else {
+        Write-Warning "No privileged group in scope of classification because of applied protections or restricted management! No requirement to set scope of Privileged Group Management."
+        $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedGroups>', '')
     }
 
     #endregion
@@ -216,8 +216,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
 
         # Always add also directory level assignment scope becuase of missing protection of service principal by RAG, AAD Role or RMAU assignment
         $ScopeNamePrivilegedServicePrincipals = $ScopeNameServicePrincipalObject + $ScopeNameApplicationObject + $DirectoryLevelAssignmentScope
-    }
-    else {
+    } else {
         Write-Warning "No privileged applications found! It's still recommended to avoid (Cloud) Application on directory scope..."
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedGroups>', '"/"')
     }

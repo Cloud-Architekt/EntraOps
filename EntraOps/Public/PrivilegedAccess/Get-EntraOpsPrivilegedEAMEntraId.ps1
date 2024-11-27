@@ -51,6 +51,10 @@ function Get-EntraOpsPrivilegedEamEntraId {
         "RoleId"  = "9f06204d-73c1-4d4c-880a-6edb90606fd8" # Azure AD Joined Device Local Administrator
         "Service" = 'Global Endpoint Management'
     }
+    $ControlPlaneRolesWithoutRoleActions += New-Object PSObject -Property @{
+        "RoleId"  = "7be44c8a-adaf-4e2a-84d6-ab2649e08a13" # Privileged Authentication Administrator
+        "Service" = 'Privileged User Management'
+    }
 
     #endregion
 
@@ -58,11 +62,9 @@ function Get-EntraOpsPrivilegedEamEntraId {
     $ClassificationFileName = "Classification_AadResources.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
         $AadClassificationFilePath = "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)"
-    }
-    elseif (Test-Path -Path "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)") {
+    } elseif (Test-Path -Path "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)") {
         $AadClassificationFilePath = "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)"
-    }
-    else {
+    } else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
     }
     #endregion
@@ -70,15 +72,13 @@ function Get-EntraOpsPrivilegedEamEntraId {
     #region Get all role assignments and global exclusions
     if ($SampleMode -eq $True) {
         $AadRbacAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementAssignments.json" | ConvertFrom-Json -Depth 10
-    }
-    else {
+    } else {
         $AadRbacAssignments = Get-EntraOpsPrivilegedEntraIdRoles -TenantId $TenantId
     }
 
     if ($GlobalExclusion -eq $true) {
         $GlobalExclusionList = (Get-Content -Path "$DefaultFolderClassification/Global.json" | ConvertFrom-Json -Depth 10).ExcludedPrincipalId
-    }
-    else {
+    } else {
         $GlobalExclusionList = $null
     }
     #endregion
@@ -87,16 +87,6 @@ function Get-EntraOpsPrivilegedEamEntraId {
     Write-Host "Classifiying of all Entra ID RBAC assignments by classification in JSON"
     $AadRbacClassifications = foreach ($AadRbacAssignment in $AadRbacAssignments) {
         $Classification = $AadRbacEamScope | Where-Object { $_.ResourceId -eq $CurrentRoleAssignmentScope } | select-object AdminTierLevel, AdminTierLevelName, Service, TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service
-
-        if ($ControlPlaneRolesWithoutRoleActions.RoleId -contains $AadRbacAssignment.RoleId) {
-            $Classification = $ControlPlaneRolesWithoutRoleActions | Where-Object { $_.RoleId -contains $AadRbacAssignment.RoleId }
-            $Classification = [PSCustomObject]@{
-                'AdminTierLevel'     = "0"
-                'AdminTierLevelName' = "ControlPlane"
-                'Service'            = $Classification.Service
-                'TaggedBy'           = "ControlPlaneRolesWithoutRoleActions"
-            }
-        }
 
         [PSCustomObject]@{
             'RoleAssignmentId'              = $AadRbacAssignment.RoleAssignmentId
@@ -124,8 +114,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
     # Get all role actions for Entra ID roles, role actions are defined tenant wide
     if ($SampleMode -eq $True) {
         $AllAadRoleActions = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementRoleDefinitions.json" | ConvertFrom-Json -Depth 10
-    }
-    else {
+    } else {
         $AllAadRoleActions = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions" -OutputType PSObject)
     }
     #endregion
@@ -151,13 +140,26 @@ function Get-EntraOpsPrivilegedEamEntraId {
             $MatchedClassificationByScope | Where-Object { $_.RoleDefinitionActions -Contains $Action -and $Classification.ExcludedRoleDefinitionActions -notcontains $_.RoleDefinitionActions }
         }
 
+        $CurrentAadRbacClassification.Classification = New-Object System.Collections.ArrayList
+
+        if ($ControlPlaneRolesWithoutRoleActions.RoleId -contains $CurrentAadRbacClassification.RoleDefinitionId) {
+            Write-Warning "Apply classification for role $($CurrentAadRbacClassification.RoleDefinitionName) without role actions..."
+            $Classification = $ControlPlaneRolesWithoutRoleActions | Where-Object { $_.RoleId -contains $CurrentAadRbacClassification.RoleDefinitionId }
+            $ClassifiedAadRbacRoleWithoutActions = [PSCustomObject]@{
+                'AdminTierLevel'     = "0"
+                'AdminTierLevelName' = "ControlPlane"
+                'Service'            = $Classification.Service
+                'TaggedBy'           = "ControlPlaneWithoutRoleActions"
+            }
+            $CurrentAadRbacClassification.Classification.Add( $ClassifiedAadRbacRoleWithoutActions ) | Out-Null  
+        }        
+
         if (($AadRoleActionsInJsonDefinition.Count -gt 0)) {
             $ClassifiedAadRbacRoleWithActions = @()
             foreach ($AadRoleAction in $AadRoleActions.rolePermissions.allowedResourceActions) {
                 $ClassifiedAadRbacRoleWithActions += $AadRoleActionsInJsonDefinition | Where-Object { $AadRoleAction -in $_.RoleDefinitionActions }
             }
             $ClassifiedAadRbacRoleWithActions = $ClassifiedAadRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service | Sort-Object EAMTierLevelTagValue, Service
-            $CurrentAadRbacClassification.Classification = New-Object System.Collections.ArrayList
             $ClassifiedAadRbacRoleWithActions | ForEach-Object {
                 $ClassifiedRoleAction = [PSCustomObject]@{
                     'AdminTierLevel'     = $_.EAMTierLevelTagValue
@@ -167,8 +169,9 @@ function Get-EntraOpsPrivilegedEamEntraId {
                 }
                 $CurrentAadRbacClassification.Classification.Add( $ClassifiedRoleAction ) | Out-Null
             }
-        }
-        $CurrentAadRbacClassification | sort-object AdminTierLevel, AdminTierLevelName, Service
+        }     
+
+        $CurrentAadRbacClassification 
     }
     #endregion
 

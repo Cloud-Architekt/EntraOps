@@ -1,7 +1,7 @@
 Parser:
   Title: PrivilegedEAM (WatchLists)
   Version: 0.1
-  LastUpdated: 2024-06-21
+  LastUpdated: 2024-11-26
 Product:
   Name: EntraOps
 References:
@@ -12,26 +12,36 @@ Description: |
 ParserName: PrivilegedEAM
 ParserQuery: |
   _GetWatchlist('EntraOps_Principals')
-  | join kind=inner ( _GetWatchlist('EntraOps_RoleAssignments')
-  | extend RoleAssignment = bag_pack_columns(
-      Classification,
-      ObjectId,
-      ObjectType,
-      PIMAssignmentType,
-      PIMManagedRole,
-      RoleAssignmentId,
-      RoleAssignmentScopeId,
-      RoleAssignmentScopeName,
-      RoleAssignmentType,
-      RoleDefinitionId,
-      RoleDefinitionName,
-      RoleIsPrivileged,
-      RoleType,
-      TransitiveByObjectDisplayName,
-      TransitiveByObjectId
-      )
-  | summarize RoleAssignments = make_set(RoleAssignment) by ObjectId, RoleSystem
-  ) on ObjectId, RoleSystem
+  | join kind=inner (
+      _GetWatchlist('EntraOps_RoleAssignments')
+          | extend EligibilityBy = case(
+              RoleSystem == "EntraID" and PIMAssignmentType == "Eligible", "PIM for Entra ID Roles",
+              RoleSystem == "EntraID" and PIMAssignmentType == "Eligible" and (RoleAssignmentSubType == "Nested Eligible member" or RoleAssignmentSubType  == "Eligible member"), "PIM for Entra ID Roles and Groups",
+              RoleAssignmentSubType == "Nested Eligible group member" or RoleAssignmentSubType  == "Eligible member", "PIM for Groups",
+              "N/A") 
+          | extend TransitiveByPim = iff((RoleAssignmentSubType == "Nested Eligible member" or RoleAssignmentSubType  == "Eligible member"), true, false)
+          | extend RoleAssignment = bag_pack_columns(
+              Classification,
+              ObjectId,
+              ObjectType,
+              EligibilityBy,
+              PIMAssignmentType,
+              PIMManagedRole,
+              RoleAssignmentId,
+              RoleAssignmentScopeId,
+              RoleAssignmentScopeName,
+              RoleAssignmentType,
+              RoleAssignmentSubType,
+              RoleDefinitionId,
+              RoleDefinitionName,
+              RoleIsPrivileged,
+              RoleType,
+              TransitiveByPim,
+              TransitiveByObjectDisplayName,
+              TransitiveByObjectId
+              )
+          | summarize RoleAssignments = make_set(RoleAssignment) by ObjectId, RoleSystem
+      ) on ObjectId, RoleSystem
   | extend Type = "EntraOps_WatchLists"
   | project-rename TimeGenerated = LastUpdatedTimeUTC
   | project-away _DTItemId, SearchKey, ObjectId1, RoleSystem1, Tags, UniqueId
