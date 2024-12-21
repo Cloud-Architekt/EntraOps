@@ -2,6 +2,11 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [0.3.4] - 2024-12-21
+### Fixed
+- Type of Owners field is inconsistent [#31](https://github.com/Cloud-Architekt/EntraOps/issues/31)
+  - Overall fix for multi-value fields as result of `Get-EntraOpsPrivilegedEntraObjects` to ensure valid and consistency of array type
+  
 ## [0.3.3] - 2024-11-27
 
 ### Added

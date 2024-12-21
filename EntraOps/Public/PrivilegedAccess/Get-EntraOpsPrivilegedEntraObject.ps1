@@ -51,12 +51,19 @@ function Get-EntraOpsPrivilegedEntraObject {
 
     try {
         $ObjectDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId") -OutputType PSObject
-    }
-    catch {
+    } catch {
         $ObjectDetails = $null
         Write-Verbose "No object has been found with Id: $AadObjectId"
         Write-Warning $_.Exception.Message
     }
+
+    # Variables for ownership or other object relationships
+    [System.Collections.ArrayList]$Owners = @()
+    [System.Collections.ArrayList]$ObjectOwner = @()
+    [System.Collections.ArrayList]$DeviceOwner = @()
+    [System.Collections.ArrayList]$WorkAccount = @()
+    [System.Collections.ArrayList]$PawDevice = @()    
+    [System.Collections.ArrayList]$AssignedAdministrativeUnits = @()    
 
     #region Memberships to calculate protection level
     Write-Verbose -Message "Lookup for $($ObjectDetails.'@odata.type') - $($ObjectDetails.displayName) $($AadObjectId)"
@@ -66,16 +73,10 @@ function Get-EntraOpsPrivilegedEntraObject {
         $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
         $RestrictedManagementByAadRole = ("" -ne $AadRolesActive.value -or $null -ne $AadRolesEligible)
         $RestrictedManagementByRMAU = ($ObjectDetails.isManagementRestricted -eq $true)
-    }
-    catch {
+    } catch {
         Write-Warning "No group or role assignment status available"
     }
     #endregion
-
-    #region Default empty arrays
-    $WorkAccount = @()
-    $PawDevice = @()
-    $DeviceOwner = @()
 
     switch ( $ObjectDetails.'@odata.type' ) {
         #region User object details
@@ -83,8 +84,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             $ObjectType = 'user'
             if ($ObjectDetails.UserType -eq "Member") {
                 $ObjectSubType = "Member"
-            }
-            else { $ObjectSubType = "Guest" }
+            } else { $ObjectSubType = "Guest" }
 
 
             # User Sign-in Name
@@ -92,14 +92,12 @@ function Get-EntraOpsPrivilegedEntraObject {
 
             if ($ObjectDetails.userType -ne "Member" -or $ObjectDetails.UserPrincipalName -like "*#EXT#@*") {
                 $OutsideOfAadTenant = $True
-            }
-            else { $OutsideOfAadTenant = $False }
+            } else { $OutsideOfAadTenant = $False }
 
             # Object Classification
             try {
                 $ObjectCustomSec = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$($AAdObjectId)" + '?$select=customSecurityAttributes') -OutputType PSObject).customSecurityAttributes.$($CustomSecurityUserAttribute)
-            }
-            catch {
+            } catch {
                 Write-Warning "No custom security attribute for $($AadObjectId)"
             }
             $AdminTierLevel = (($ObjectCustomSec) | select-object -Unique adminTierLevel).AdminTierLevel
@@ -107,33 +105,21 @@ function Get-EntraOpsPrivilegedEntraObject {
 
             # Administrative Unit Assignments
             $RestrictedManagementByRAG = $ObjectMemberships.isAssignableToRole -contains $true
-            $AuMemberships = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName)
-
-            # No owners for user objects
-            $Owners = @()
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName | ForEach-Object { $AssignedAdministrativeUnits.Add($_) | out-null }
 
             # Relation between PAW and user
             if ($null -ne $ObjectCustomSec.$($CustomSecurityUserPawAttribute)) {
-                $PawDevice = @($ObjectCustomSec.$($CustomSecurityUserPawAttribute))
-            }
-            else {
-                $PawDevice = @()
+                $ObjectCustomSec.$($CustomSecurityUserPawAttribute) | ForEach-Object { $PawDevice.Add($_) | out-null }
             }
             if ($null -ne $ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute)) {
-                $WorkAccount = @($ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute))
+                $ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute) | ForEach-Object { $WorkAccount.Add($_) | out-null }                
             }
-            else {
-                $WorkAccount = @()
-            }
+            
             # Object Ownership of Privileged User
-            $ObjectOwner = @((Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/ownedObjects" + '?$select=id') -OutputType PSObject).id)
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/ownedObjects" + '?$select=id') -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
 
             # Device Ownership of Privileged User
-            $DeviceOwner = @((Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/ownedDevices" + '?$select=id') -OutputType PSObject).id)
-            # Workaround for null result for device ownership
-            if ($DeviceOwner.Count -eq "1" -and $null -in $DeviceOwner) {
-                $DeviceOwner = @()
-            }
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/ownedDevices" + '?$select=id') -OutputType PSObject | ForEach-Object { $DeviceOwner.Add($_.id) | out-null }
         }
         #endregion
 
@@ -143,22 +129,21 @@ function Get-EntraOpsPrivilegedEntraObject {
             if ($ObjectDetails.isAssignableToRole -eq $True) {
                 $ObjectSubType = "Role-assignable"
                 $RestrictedManagementByRAG = $true
-            }
-            else {
+            } else {
                 $ObjectSubType = "Security"
                 $RestrictedManagementByRAG = $false
             }
             $OutsideOfAadTenant = $false
 
             # Owners
-            $Owners = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/groups/$AadObjectId/owners") -OutputType PSObject).id
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$AadObjectId/owners") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
 
             # No support for custom security attributes
             $AdminTierLevel = ""
             $AdminTierLevelName = ""
 
             # Administrative Unit Assignments
-            $AuMemberships = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/groups/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName)
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/groups/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName | ForEach-Object { $AssignedAdministrativeUnits.Add($_) | out-null }
         }
         #endregion
 
@@ -170,7 +155,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             $ObjectSubType = $SPObject.ServicePrincipalType
 
             # Owners
-            $Owners = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$AadObjectId/owners") -OutputType PSObject).id
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$AadObjectId/owners") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
 
             # Administrative Units and Restricted Management does not apply to service principals
             $AuMemberships = @()
@@ -181,8 +166,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             # Details of classified object from custom security attribute
             try {
                 $ObjectCustomSec = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$($AAdObjectId)" + '?$select=customSecurityAttributes') -OutputType PSObject).customSecurityAttributes.$($CustomSecurityServicePrincipalAttribute)
-            }
-            catch {
+            } catch {
                 Write-Warning "No custom security attribute for $($AadObjectId)"
             }
             $AdminTierLevel = (($ObjectCustomSec) | select-object -Unique adminTier).AdminTier
@@ -202,12 +186,18 @@ function Get-EntraOpsPrivilegedEntraObject {
         #endregion
     }
 
-    # Handling Empty arrays for schema
-    if ($null -eq $AuMemberships -or $null -eq $AuMemberships.id) { $AuMemberships = @() }
-    if ($null -eq $ObjectOwner -or $ObjectOwner -eq "") { $ObjectOwner = @() }
-    if ($null -eq $Owners) { $Owners = @() }
-    if ($null -eq $ObjectDetails.passwordPolicies) { $PasswordPolicies = @() } else { $PasswordPolicies = $ObjectDetails.passwordPolicies }
-    if ($null -eq $ObjectSignInName) { $ObjectSignInName = "" }
+    # Set empty arrays to avoid null values for arrays in schema
+    if ([string]::IsNullOrEmpty($Owners)) { $Owners = @() }    
+    if ([string]::IsNullOrEmpty($ObjectOwner)) { $ObjectOwner = @() }
+    if ([string]::IsNullOrEmpty($DeviceOwner)) { $DeviceOwner = @() }
+    if ([string]::IsNullOrEmpty($WorkAccount)) { $WorkAccount = @() }
+    if ([string]::IsNullOrEmpty($PawDevice )) { $PawDevice = @() }
+    if ([string]::IsNullOrEmpty($AssignedAdministrativeUnits)) { $AssignedAdministrativeUnits = @() }
+    if ([string]::IsNullOrEmpty($ObjectSignInName)) { $ObjectSignInName = "" }    
+    if ([string]::IsNullOrEmpty($ObjectDetails.passwordPolicies)) { $PasswordPolicies = @()
+    } else {
+        $PasswordPolicies = $ObjectDetails.passwordPolicies
+    }
 
     if ($null -ne $ObjectDetails) {
         [PSCustomObject]@{
@@ -227,7 +217,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             'RestrictedManagementByRAG'     = $RestrictedManagementByRAG
             'RestrictedManagementByAadRole' = $RestrictedManagementByAadRole
             'RestrictedManagementByRMAU'    = $RestrictedManagementByRMAU
-            'AssignedAdministrativeUnits'   = $AuMemberships
+            'AssignedAdministrativeUnits'   = $AssignedAdministrativeUnits
             'PasswordPolicyAssigned'        = $PasswordPolicies
             'OutsideOfHomeTenant'           = $OutsideOfAadTenant
         }
