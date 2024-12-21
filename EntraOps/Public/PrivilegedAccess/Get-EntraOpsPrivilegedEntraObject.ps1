@@ -158,7 +158,6 @@ function Get-EntraOpsPrivilegedEntraObject {
             Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$AadObjectId/owners") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
 
             # Administrative Units and Restricted Management does not apply to service principals
-            $AuMemberships = @()
             $RestrictedManagementByRAG = $false
             $RestrictedManagementByRMAU = $false
             $RestrictedManagementByAadRole = $false
@@ -192,7 +191,7 @@ function Get-EntraOpsPrivilegedEntraObject {
     if ([string]::IsNullOrEmpty($DeviceOwner)) { $DeviceOwner = @() }
     if ([string]::IsNullOrEmpty($WorkAccount)) { $WorkAccount = @() }
     if ([string]::IsNullOrEmpty($PawDevice )) { $PawDevice = @() }
-    if ([string]::IsNullOrEmpty($AssignedAdministrativeUnits)) { $AssignedAdministrativeUnits = @() }
+    if ([string]::IsNullOrEmpty($AssignedAdministrativeUnits.id)) { $AssignedAdministrativeUnits = @() }
     if ([string]::IsNullOrEmpty($ObjectSignInName)) { $ObjectSignInName = "" }    
     if ([string]::IsNullOrEmpty($ObjectDetails.passwordPolicies)) { $PasswordPolicies = @()
     } else {
