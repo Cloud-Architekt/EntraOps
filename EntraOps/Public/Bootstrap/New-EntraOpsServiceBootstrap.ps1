@@ -117,7 +117,7 @@ function New-EntraOpsServiceBootstrap {
                 }
             }
             if($graphOwner.Id -notin $graphMembers.Id -and -not $OwnerIsNotMember){
-                $graphMembers += $ServiceOwner
+                $graphMembers += $graphOwner
             }
         }catch{
             Write-Verbose "$logPrefix Failed to process Service Members"
