@@ -109,12 +109,14 @@ function New-EntraOpsServiceEMAssignment {
             $checkAssignments += Get-MgEntitlementManagementAssignment @assignmentsSplat
             Write-Verbose "$logPrefix Service Member IDs: $($ServiceMembers.Id|ConvertTo-Json -Compress)"
             Write-Verbose "$logPrefix Assignment Target IDs: $($checkAssignments.Target.ObjectId|ConvertTo-Json -Compress)"
-            if(-not ($null = $checkAssignments.Target.ObjectId)){
+            if(-not ($null -eq $checkAssignments.Target.ObjectId)){
                 if((Compare-Object $ServiceMembers.Id $checkAssignments.Target.ObjectId|Measure-Object).Count -eq 0){
                     Write-Verbose "$logPrefix Graph consistency found confirming"
                     $confirmed = $true
                     continue
                 }
+            }else{
+                Write-Verbose "$logPrefix No assignments available skipping comparison"
             }
             $i++
             if($i -eq 5){

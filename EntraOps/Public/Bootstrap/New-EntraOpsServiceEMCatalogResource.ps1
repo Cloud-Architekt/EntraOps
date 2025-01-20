@@ -80,10 +80,10 @@ function New-EntraOpsServiceEMCatalogResource {
                             continue
                         }elseif($_.FullyQualifiedErrorId -like "ResourceNotFoundInOriginSystem*"){
                             Write-Verbose "$logPrefix group not available in Entitlement Management"
-                            Write-Error $_
+                            Write-Error $_ -ErrorAction Continue
                         }else{
                             Write-Verbose "$logPrefix unknown failure reason, retrying"
-                            Write-Error $_
+                            Write-Error $_ -ErrorAction Continue
                         }
                     }
                     $i++
