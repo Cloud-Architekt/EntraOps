@@ -109,10 +109,12 @@ function New-EntraOpsServiceEMAssignment {
             $checkAssignments += Get-MgEntitlementManagementAssignment @assignmentsSplat
             Write-Verbose "$logPrefix Service Member IDs: $($ServiceMembers.Id|ConvertTo-Json -Compress)"
             Write-Verbose "$logPrefix Assignment Target IDs: $($checkAssignments.Target.ObjectId|ConvertTo-Json -Compress)"
-            if((Compare-Object $ServiceMembers.Id $checkAssignments.Target.ObjectId|Measure-Object).Count -eq 0){
-                Write-Verbose "$logPrefix Graph consistency found confirming"
-                $confirmed = $true
-                continue
+            if(-not ($null = $checkAssignments.Target.ObjectId)){
+                if((Compare-Object $ServiceMembers.Id $checkAssignments.Target.ObjectId|Measure-Object).Count -eq 0){
+                    Write-Verbose "$logPrefix Graph consistency found confirming"
+                    $confirmed = $true
+                    continue
+                }
             }
             $i++
             if($i -eq 5){
