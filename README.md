@@ -97,7 +97,7 @@ Service Principal with ClientSecret
 ```powershell
 $ServicePrincipalCredentials = Get-Credential
 Connect-AzAccount -Credential $ServicePrincipalCredentials -ServicePrincipal -Tenant $TenantName
-Connect-EntraOps -TenantName $TenantName -AuthenticationType "AlreadyAuthenticated" -TenantName
+Connect-EntraOps -TenantName $TenantName -AuthenticationType "AlreadyAuthenticated"
 ```
 
 Workload with already authenticated Azure PowerShell
