@@ -1,0 +1,201 @@
+[
+    {
+        "EAMTierLevelName": "ControlPlane",
+        "EAMTierLevelTagValue": "0",
+        "TierLevelDefinition": [
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "Global Security and Compliance Management",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/configuration/*/manage",
+                    "microsoft.xdr/configuration/security/*/manage",
+                    "microsoft.xdr/configuration/security/core/manage",
+                    "microsoft.xdr/configuration/system/manage",
+                    "microsoft.xdr/secops/*/manage"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "Global Security Posture Management",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/securityposture/*/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/*/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/applicationhandling/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/baselineassessmentprofiles/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/exceptionhandling/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/securescore/manage"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "Global Security Response",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/secops/securitydata/filecollection/manage",
+                    "microsoft.xdr/secops/securitydata/liveresponse-advanced/manage",
+                    "microsoft.xdr/secops/securitydata/liveresponse-basic/manage"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "Global Security Analytics",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/configuration/security/*/read",
+                    "microsoft.xdr/secops/securitydata/*/read",
+                    "microsoft.xdr/secops/securitydata/alerts/manage",
+                    "microsoft.xdr/secops/securitydata/copilot/read",
+                    "microsoft.xdr/securityposture/*/read",
+                    "microsoft.xdr/securityposture/posturemanagement/*/read"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "Privileged IAM",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/configuration/authorization/manage"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "Privileged Security Analytics",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceGroupId>",
+                    "<Tier1PrivilegedDeviceGroupId>"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/configuration/security/*/read",
+                    "microsoft.xdr/secops/securitydata/*/read",
+                    "microsoft.xdr/secops/securitydata/alerts/manage",
+                    "microsoft.xdr/secops/securitydata/copilot/read",
+                    "microsoft.xdr/securityposture/*/read",
+                    "microsoft.xdr/securityposture/posturemanagement/*/read"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "Privileged Security Response",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceGroupId>",
+                    "<Tier1PrivilegedDeviceGroupId>"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/secops/securitydata/filecollection/manage",
+                    "microsoft.xdr/secops/securitydata/liveresponse-advanced/manage",
+                    "microsoft.xdr/secops/securitydata/liveresponse-basic/manage"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "Privileged Security and Compliance Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier0PrivilegedDeviceGroupId>",
+                    "<Tier1PrivilegedDeviceGroupId>"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/configuration/*/manage",
+                    "microsoft.xdr/configuration/security/core/manage",
+                    "microsoft.xdr/configuration/system/manage",
+                    "microsoft.xdr/secops/*/manage",
+                    "microsoft.xdr/securityposture/*/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/applicationhandling/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/baselineassessmentprofiles/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/exceptionhandling/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/securescore/manage"
+                ]
+            }
+        ]
+    },
+    {
+        "EAMTierLevelName": "ManagementPlane",
+        "EAMTierLevelTagValue": "1",
+        "TierLevelDefinition": [
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "Global Security and Compliance Reporting",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/configuration/*/read",
+                    "microsoft.xdr/configuration/authorization/read",
+                    "microsoft.xdr/securityposture/*/read",
+                    "microsoft.xdr/secops/*/read"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "Global Exchange Online Protection",
+                "RoleAssignmentScopeName": [
+                    "/"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/secops/securitydata/emailadvancedactions/manage",
+                    "microsoft.xdr/secops/securitydata/emailquarantine/manage",
+                    "microsoft.xdr/secops/securitydata/response/manage",
+                    "microsoft.xdr/secops/rawdata/emailcontent/read"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "User Security Analytics",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceGroupId>"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/configuration/security/*/read",
+                    "microsoft.xdr/secops/securitydata/*/read",
+                    "microsoft.xdr/secops/securitydata/alerts/manage",
+                    "microsoft.xdr/secops/securitydata/copilot/read",
+                    "microsoft.xdr/securityposture/*/read",
+                    "microsoft.xdr/securityposture/posturemanagement/*/read"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "User Security Response",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceGroupId>"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/secops/securitydata/filecollection/manage",
+                    "microsoft.xdr/secops/securitydata/liveresponse-advanced/manage",
+                    "microsoft.xdr/secops/securitydata/liveresponse-basic/manage"
+                ]
+            },
+            {
+                "Category": "Microsoft.Defender",
+                "Service": "User Security and Compliance Management",
+                "RoleAssignmentScopeName": [
+                    "<Tier2EnterpriseDeviceGroupId>"
+                ],
+                "RoleDefinitionActions": [
+                    "microsoft.xdr/configuration/*/manage",
+                    "microsoft.xdr/configuration/security/core/manage",
+                    "microsoft.xdr/configuration/system/manage",
+                    "microsoft.xdr/secops/*/manage",
+                    "microsoft.xdr/securityposture/*/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/applicationhandling/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/baselineassessmentprofiles/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/exceptionhandling/manage",
+                    "microsoft.xdr/securityposture/posturemanagement/securescore/manage"
+                ]
+            }
+        ]
+    }
+]

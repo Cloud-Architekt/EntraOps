@@ -33,8 +33,8 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
         [Array]$FilterObjectType = ("User", "Group")
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
+        [ValidateSet("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement", "Defender")
     )
 
     # Get all privileged EAM objects
@@ -87,8 +87,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
 
                 Invoke-EntraOpsMsGraphQuery -Method "POST" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -Body $OdataBody -OutputType PSObject
             }
-        }
-        elseif ($null -eq $UnprotectedPrivilegedUserOnTierLevel) {
+        } elseif ($null -eq $UnprotectedPrivilegedUserOnTierLevel) {
 
             # Keep user in RMAU if no other RMAU is protecting the user or user is no longer privileged
             $CurrentAdminUnitMembers | ForEach-Object {
@@ -101,18 +100,15 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                         try {
                             $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($_.Id)" -OutputType PSObject -DisableCache
                             Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($_.Id)/`$ref" -OutputType PSObject -DisableCache
-                        }
-                        catch {
+                        } catch {
                             Write-Warning "Removal for $($AdminUnitMember.displayName) has been failed!"
                         }
                     }
-                }
-                else {
+                } else {
                     Write-Warning "Object $($AdminUnitMember.displayName) will keep in RMAU because of missing protection by regular RMAU!"
                 }
             }
-        }
-        else {
+        } else {
             Compare-Object $UnprotectedPrivilegedUserOnTierLevel.ObjectId $CurrentAdminUnitMembers.Id | ForEach-Object {
                 if ($_.SideIndicator -eq "=>") {
 
@@ -126,16 +122,13 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                         Write-Verbose "Removing $($AdminUnitMember.displayName) from $($AdminUnitName)"
                         try {
                             Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($_.InputObject)/`$ref" -OutputType PSObject
-                        }
-                        catch {
+                        } catch {
                             Write-Warning "Removal for $($AdminUnitMember.displayName) has been failed!"
                         }
-                    }
-                    else {
+                    } else {
                         Write-Warning "Object $($AdminUnitMember.displayName) will keep in RMAU because of missing protection by other protection capability or RMAU!"
                     }
-                }
-                elseif ($_.SideIndicator -eq "<=") {
+                } elseif ($_.SideIndicator -eq "<=") {
                     try {
                         $AdminUnitMember = (Get-MgDirectoryObject -DirectoryObjectId $_.InputObject)
                         Write-Verbose "Adding $($AdminUnitMember.displayName) to $($AdminUnitName)"
@@ -145,8 +138,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                         } | ConvertTo-Json
 
                         Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -Body $OdataBody -OutputType PSObject
-                    }
-                    catch {
+                    } catch {
                         Write-Warning "Duplicated entry for $($AdminUnitMember.displayName)"
                     }
                 }

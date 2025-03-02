@@ -60,8 +60,8 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         [System.String]$WatchListPrefix = "EntraOps_"
         ,
         [Parameter(Mandatory = $false)]
-        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
+        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
+        [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]

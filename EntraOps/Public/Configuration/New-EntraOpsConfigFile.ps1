@@ -81,8 +81,8 @@ function New-EntraOpsConfigFile {
         [boolean]$ApplyRmauAssignmentsForUnprotectedObjects = $false,
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement"),
+        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender"),
 
         [Parameter(Mandatory = $false)]
         [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
@@ -135,7 +135,7 @@ function New-EntraOpsConfigFile {
         AutomatedControlPlaneScopeUpdate              = [ordered]@{
             ApplyAutomatedControlPlaneScopeUpdate = $ApplyAutomatedControlPlaneScopeUpdate
             PrivilegedObjectClassificationSource  = ("EntraOps", "PrivilegedRolesFromAzGraph", "PrivilegedEdgesFromExposureManagement")
-            EntraOpsScopes                        = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement")
+            EntraOpsScopes                        = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
             AzureHighPrivilegedRoles              = ("Owner", "Role Based Access Control Administrator", "User Access Administrator")
             AzureHighPrivilegedScopes             = ("/", "/providers/microsoft.management/managementgroups/$($TenantId)")
             ExposureCriticalityLevel              = "<1"
@@ -169,7 +169,7 @@ function New-EntraOpsConfigFile {
             ApplyAdministrativeUnitAssignments = $ApplyAdministrativeUnitAssignments
             ApplyToAccessTierLevel             = ("ControlPlane", "ManagementPlane")
             FilterObjectType                   = ("User", "Group")
-            RbacSystems                        = ("EntraID", "IdentityGovernance", "DeviceManagement")
+            RbacSystems                        = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
             RestrictedAuMode                   = "selected"
         }
         AutomatedConditionalAccessTargetGroups        = [ordered]@{
@@ -178,13 +178,13 @@ function New-EntraOpsConfigFile {
             ApplyToAccessTierLevel             = ("ControlPlane", "ManagementPlane")
             FilterObjectType                   = ("User", "Group")
             GroupPrefix                        = "sug_Entra.CA.IncludeUsers.PrivilegedAccounts."
-            RbacSystems                        = ("EntraID", "IdentityGovernance", "DeviceManagement")
+            RbacSystems                        = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
         }
         AutomatedRmauAssignmentsForUnprotectedObjects = [ordered]@{
             ApplyRmauAssignmentsForUnprotectedObjects = $ApplyRmauAssignmentsForUnprotectedObjects
             ApplyToAccessTierLevel                    = ("ControlPlane", "ManagementPlane")
             FilterObjectType                          = ("User", "Group")
-            RbacSystems                               = ("EntraID", "IdentityGovernance", "DeviceManagement")
+            RbacSystems                               = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
         }
     }
     #endregion

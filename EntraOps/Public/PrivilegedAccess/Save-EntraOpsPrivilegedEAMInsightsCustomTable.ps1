@@ -65,8 +65,8 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
         [object]$PrincipalTypeFilter = ("User", "Group", "ServicePrincipal").toLower()
         ,
         [Parameter(Mandatory = $false)]
-        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
+        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
+        [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
     )
 
     Set-AzContext -SubscriptionId $DataCollectionRuleSubscriptionId

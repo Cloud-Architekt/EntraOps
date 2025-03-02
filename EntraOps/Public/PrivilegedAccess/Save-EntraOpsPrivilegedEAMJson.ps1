@@ -24,8 +24,8 @@ function Save-EntraOpsPrivilegedEAMJson {
         [System.String]$ExportFolder = $DefaultFolderClassifiedEam
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
+        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
     )
 
     Write-Output "Clearing cache before analyzing RBAC and classification data"
@@ -38,8 +38,7 @@ function Save-EntraOpsPrivilegedEAMJson {
         if ((Test-Path -path "$($ExportFolder)")) {
             Remove-Item "$($ExportFolder)" -Force -Recurse
             New-Item "$($ExportFolder)" -ItemType Directory -Force
-        }
-        else {
+        } else {
             New-Item "$($ExportFolder)" -ItemType Directory -Force
         }
 
@@ -64,8 +63,7 @@ function Save-EntraOpsPrivilegedEAMJson {
         if ((Test-Path -path "$($ExportFolder)")) {
             Remove-Item "$($ExportFolder)" -Force -Recurse
             New-Item "$($ExportFolder)" -ItemType Directory -Force
-        }
-        else {
+        } else {
             New-Item "$($ExportFolder)" -ItemType Directory -Force
         }
 
@@ -92,8 +90,7 @@ function Save-EntraOpsPrivilegedEAMJson {
         if ((Test-Path -path "$($ExportFolder)")) {
             Remove-Item "$($ExportFolder)" -Force -Recurse
             New-Item "$($ExportFolder)" -ItemType Directory -Force
-        }
-        else {
+        } else {
             New-Item "$($ExportFolder)" -ItemType Directory -Force
         }
         $EamDeviceMgmt | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/DeviceManagement.json"
@@ -119,8 +116,7 @@ function Save-EntraOpsPrivilegedEAMJson {
         if ((Test-Path -path "$($ExportFolder)")) {
             Remove-Item "$($ExportFolder)" -Force -Recurse
             New-Item "$($ExportFolder)" -ItemType Directory -Force
-        }
-        else {
+        } else {
             New-Item "$($ExportFolder)" -ItemType Directory -Force
         }
         $EamIdGov | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/IdentityGovernance.json"

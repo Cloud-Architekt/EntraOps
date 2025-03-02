@@ -31,8 +31,8 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
         [Array]$FilterObjectType = ("User", "Group")
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
+        [ValidateSet("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
     )
 
     # Get Tier Levels with unprotected privileged EAM objects

@@ -48,11 +48,9 @@ function Get-EntraOpsPrivilegedEamIntune {
     $ClassificationFileName = "Classification_DeviceManagement.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
         $IntuneClassificationFilePath = "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)"
-    }
-    elseif (Test-Path -Path "$DefaultFolderClassification/Templates/$($ClassificationFileName)") {
+    } elseif (Test-Path -Path "$DefaultFolderClassification/Templates/$($ClassificationFileName)") {
         $IntuneClassificationFilePath = "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)"
-    }
-    else {
+    } else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
     }
 
@@ -61,15 +59,13 @@ function Get-EntraOpsPrivilegedEamIntune {
 
     if ($SampleMode -ne $True) {
         $DeviceMgmtRbacAssignments = Get-EntraOpsPrivilegedDeviceRoles -TenantId $TenantId
-    }
-    else {
+    } else {
         Write-Warning "Currently not supported!"
     }
 
     if ($GlobalExclusion -eq $true) {
         $GlobalExclusionList = (Get-Content -Path "$DefaultFolderClassification/Global.json" | ConvertFrom-Json -Depth 10).ExcludedPrincipalId
-    }
-    else {
+    } else {
         $GlobalExclusionList = $null
     }
     #endregion
@@ -88,8 +84,7 @@ function Get-EntraOpsPrivilegedEamIntune {
                     'ScopeTagId'   = $ScopeTag.Id
                     'AssignmentId' = $AssignmentId.Replace("_0", "")
                 }
-            }
-            else {
+            } else {
                 Write-Warning "No assignments for $($ScopeTag.DisplayName) - $($ScopeTag.Id)"
             }
         }
@@ -118,13 +113,11 @@ function Get-EntraOpsPrivilegedEamIntune {
                             $Devices += Foreach ($DeviceId in $DeviceIds) {
                             (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
                             }                           
-                        }
-                        else {
+                        } else {
                             Write-Output "No device for Entra ID DeviceId $($ClassifiedPrivilegedPawUser.AssociatedPawDevice) of $($ClassifiedPrivilegedPawUser.ObjectDisplayName) found in Intune!"
                         }
                     }
-                }
-                catch {
+                } catch {
                     Write-Output "No device with Entra ID DeviceId $($ClassifiedPrivilegedPawUser.AssociatedPawDevice) of $($ClassifiedPrivilegedPawUser.ObjectDisplayName) - $($ClassifiedPrivilegedPawUser.ObjectId) found in Intune!"
                 }
 
@@ -137,13 +130,11 @@ function Get-EntraOpsPrivilegedEamIntune {
                             $Devices += Foreach ($DeviceId in $DeviceIds) {
                             (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
                             } 
-                        }
-                        else {
+                        } else {
                             Write-Warning "No device for $($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName) found in Intune! $($_)"
                         }
                     }
-                }
-                catch {
+                } catch {
                     Write-Warning "No device Entra ID Device found for $($ClassifiedPrivilegedPawUser.ObjectDisplayName) - $($ClassifiedPrivilegedPawUser.ObjectId) in Intune"
                 }
                 # Summarize all devices of classified privileged user
@@ -170,12 +161,11 @@ function Get-EntraOpsPrivilegedEamIntune {
             if ($DeviceMgmtRbacAssignment.RoleAssignmentScopeId -eq "/") {
                 $Classification += ($MatchedClassificationPawDevices).Classification | Sort-Object AdminTierLevel | Select-Object -Unique *
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
-                $DeviceMgmtRbacAssignment.Classification | ForEach-Object { $_ | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "AssignedDevicebjects" -Force }
-            }
-            else {
+                $DeviceMgmtRbacAssignment.Classification | ForEach-Object { $_ | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "AssignedDeviceObjects" -Force }
+            } else {
                 $Classification += ($ClassifiedScopeTagsAssignments | Where-Object { $_.AssignmentId -eq $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId) }).Classification | Sort-Object AdminTierLevel | Select-Object -Unique *
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
-                $DeviceMgmtRbacAssignment.Classification | ForEach-Object { $_ | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "AssignedDevicebjects" -Force }
+                $DeviceMgmtRbacAssignment.Classification | ForEach-Object { $_ | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "AssignedDeviceObjects" -Force }
             }
             if ($Classification.count -eq "0") {
                 Write-Warning "No classification found for $($DeviceMgmtRbacAssignment.RoleDefinitionId) with scope $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId)!"
@@ -183,8 +173,7 @@ function Get-EntraOpsPrivilegedEamIntune {
             }
             $DeviceMgmtRbacAssignment
         }
-    }
-    else {
+    } else {
         $DeviceMgmtRbacClassificationsByAssignedObjects = $null
     }
     #endregion
@@ -200,8 +189,7 @@ function Get-EntraOpsPrivilegedEamIntune {
         # Role actions are defined for scope and role definition contains an action of the role, otherwise all role actions within role assignment scope will be applied
         if ($SampleMode -eq $True) {
             Write-Warning "Currently not supported!"
-        }
-        else {
+        } else {
             $IntuneRoleActions = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri https://graph.microsoft.com/beta/roleManagement/deviceManagement/roleDefinitions -OutputType PSObject) | Where-Object { $_.Id -eq "$($DeviceMgmtRbacAssignment.RoleDefinitionId)" }
         }
 
@@ -239,8 +227,7 @@ function Get-EntraOpsPrivilegedEamIntune {
                 'RoleAssignmentScopeId' = $DeviceMgmtRbacAssignment.RoleAssignmentScopeId
                 'Classification'        = $Classification
             }
-        }
-        else {
+        } else {
             $ClassifiedDeviceMgmtRbacRoleWithActions = @()
         }
     }

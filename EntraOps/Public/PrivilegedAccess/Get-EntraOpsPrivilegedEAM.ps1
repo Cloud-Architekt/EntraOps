@@ -18,8 +18,8 @@ function Get-EntraOpsPrivilegedEAM {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps")
+        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "Defender")
         ,
         [Parameter(Mandatory = $False)]
         [System.Boolean]$ClearCache = $false 
