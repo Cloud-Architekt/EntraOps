@@ -135,7 +135,7 @@ function New-EntraOpsConfigFile {
         AutomatedControlPlaneScopeUpdate              = [ordered]@{
             ApplyAutomatedControlPlaneScopeUpdate = $ApplyAutomatedControlPlaneScopeUpdate
             PrivilegedObjectClassificationSource  = ("EntraOps", "PrivilegedRolesFromAzGraph", "PrivilegedEdgesFromExposureManagement")
-            EntraOpsScopes                        = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
+            EntraOpsScopes                        = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement")
             AzureHighPrivilegedRoles              = ("Owner", "Role Based Access Control Administrator", "User Access Administrator")
             AzureHighPrivilegedScopes             = ("/", "/providers/microsoft.management/managementgroups/$($TenantId)")
             ExposureCriticalityLevel              = "<1"
