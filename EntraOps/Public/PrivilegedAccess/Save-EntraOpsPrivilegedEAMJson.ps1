@@ -130,4 +130,29 @@ function Save-EntraOpsPrivilegedEAMJson {
         }
     }
     #endregion
+    #region Defender
+    if ($RbacSystems -contains "Defender") {
+        $ExportFolder = "$($DefaultFolderClassifiedEam)/Defender"
+
+        $EamDefender = Get-EntraOpsPrivilegedEAMDefender
+        $EamDefender | Measure-Object
+        $EamDefender = $EamDefender | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
+
+        if ((Test-Path -path "$($ExportFolder)")) {
+            Remove-Item "$($ExportFolder)" -Force -Recurse
+            New-Item "$($ExportFolder)" -ItemType Directory -Force
+        } else {
+            New-Item "$($ExportFolder)" -ItemType Directory -Force
+        }
+        $EamDefender | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/Defender.json"
+        foreach ($PrivilegedObject in $EamDefender) {
+            $ObjectType = $PrivilegedObject.ObjectType
+            $SingleJSONExportPath = "$($ExportFolder)/$ObjectType"
+            If (!(test-path $SingleJSONExportPath)) {
+                New-Item -ItemType Directory -Force -Path $SingleJSONExportPath
+            }
+            $PrivilegedObject | Convertto-Json -Depth 10 | Out-File -Path "$SingleJSONExportPath/$($PrivilegedObject.ObjectId).json" -Force
+        }
+    }
+    #endregion
 }
