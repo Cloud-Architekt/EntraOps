@@ -5,6 +5,7 @@ All essential changes on EntraOps will be documented in this changelog.
 ## [0.4] - 2025-03-19
 ### Added
 - Support for Role Management Provider "Defender" (Unified RBAC for Microsoft Defender XDR)
+  - Currently this feature is supported for interactive execution of EntraOps (RoleManagement.Read.All is not applicable as Application Permission yet)
 
 ## [0.3.4] - 2024-12-21
 ### Fixed
