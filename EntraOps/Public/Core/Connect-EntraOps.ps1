@@ -94,6 +94,7 @@ function Connect-EntraOps {
                 "PrivilegedEligibilitySchedule.Read.AzureADGroup",
                 "Policy.Read.All",
                 "RoleManagement.Read.All",
+                "RoleManagement.Read.Defender",
                 "ThreatHunting.Read.All",
                 "User.Read.All"
             )

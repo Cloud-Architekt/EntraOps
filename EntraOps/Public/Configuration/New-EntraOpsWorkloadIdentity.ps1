@@ -103,18 +103,15 @@ function New-EntraOpsWorkloadIdentity {
         Write-Verbose "Get details of existing Service Principal with ObjectId $ExistingSpObjectId..."
         try {
             $SpObject = Get-MgServicePrincipal -ServicePrincipalId $ExistingSpObjectId
-        }
-        catch {
+        } catch {
             Write-Error "Failed to get Service Principal with ObjectId $ExistingSpObjectId. Error: $_"
         }
-    }
-    else {
+    } else {
         # Create App Registration
         Write-Output "Create App Registration $AppDisplayName..."
         try {
             $AppObject = New-MgApplication -DisplayName $AppDisplayName -SignInAudience AzureADMyOrg
-        }
-        catch {
+        } catch {
             Write-Error "Failed to create $AppDisplayName. Error: $_"
         }
 
@@ -126,8 +123,7 @@ function New-EntraOpsWorkloadIdentity {
         Write-Verbose "Create Service Principal from $AppDisplayName $($AppObject.Id)..."
         try {
             $SpObject = New-MgServicePrincipal -DisplayName $AppDisplayName -AppId $AppObject.AppId
-        }
-        catch {
+        } catch {
             Write-Error "Failed to create Service Principal for $AppDisplayName. Error: $_"
         }
         #endregion
@@ -156,6 +152,7 @@ function New-EntraOpsWorkloadIdentity {
         "PrivilegedEligibilitySchedule.Read.AzureADGroup",
         "Policy.Read.All",
         "RoleManagement.Read.All",
+        "RoleManagement.Read.Defender",        
         "ThreatHunting.Read.All",
         "User.Read.All"
     )
@@ -166,8 +163,7 @@ function New-EntraOpsWorkloadIdentity {
         Write-Host "- Adding $($GraphApiPermission.Origin) API Permission $($GraphApiPermission.Value)"
         try {
             New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $SPObject.Id -PrincipalId $SPObject.Id -ResourceId $MsGraph.Id -AppRoleId $GraphApiPermission.Id | Out-Null
-        }
-        catch {
+        } catch {
             Write-Warning "Failed to add API Permission $($GraphApiPermission.Value) to $AppDisplayName. Error: $_"
         }
     }
@@ -187,13 +183,11 @@ function New-EntraOpsWorkloadIdentity {
             Write-Host "- Adding $($GraphApiPermission.Origin) API Permission $($GraphApiPermission.Value)"
             try {
                 New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $SPObject.Id -PrincipalId $SPObject.Id -ResourceId $MsGraph.Id -AppRoleId $GraphApiPermission.Id | Out-Null
-            }
-            catch {
+            } catch {
                 Write-Error "Failed to add API Permission $($GraphApiPermission.Value) to $AppDisplayName. Error: $_"
             }
         }        
-    }
-    else {
+    } else {
         Write-Output "Skipping Push permissions... (ApplyAdministrativeUnitAssignments and/or ApplyRmauAssignmentsForUnprotectedObjects is set to false)"
     }
 
@@ -217,8 +211,7 @@ function New-EntraOpsWorkloadIdentity {
             $Body = $AuParams | ConvertTo-Json -Depth 10
             try {
                 $NewAdminUnitId = (Invoke-MgGraphRequest -Method "POST" -Body $Body -Uri "https://graph.microsoft.com/beta/administrativeUnits").id
-            }
-            catch {
+            } catch {
                 Write-Warning "Can not create Administrative Unit $($AdminUnitName)! Error: $_"
             }
 
@@ -227,12 +220,10 @@ function New-EntraOpsWorkloadIdentity {
                 Do { Start-Sleep -Seconds 1 }
                 Until ($AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits/$($NewAdminUnitId)" -DisableCache).Id)
                 Write-Host "$($AdminUnitName) - $($AdminUnitId) has been created successfully" -f Green
-            }
-            Catch {
+            } Catch {
                 Write-Warning "$($AdminUnitName) not available yet"
             }
-        }
-        else {
+        } else {
             Write-Host "Administrative Unit $($AdminUnitName) - $($AdminUnitId) already exists"
         }
 
@@ -248,13 +239,11 @@ function New-EntraOpsWorkloadIdentity {
             $Body = $ScopedGroupAdminRoleParams | ConvertTo-Json -Depth 10
             $DirectoryRoleAssignmentId = (Invoke-MgGraphRequest -Method "POST" -Body $Body -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleAssignments").id
             Write-Host "Assigned permissions to Administrative Unit $($AdminUnitName) for $($SpObject.Id) - $($DirectoryRoleAssignmentId)" -f Green
-        }
-        catch {
+        } catch {
             Write-Warning "Can not assign permissions to Administrative Unit $($AdminUnitName) for $($SpObject.Id)! Error: $_"
         }
 
-    }
-    else {
+    } else {
         Write-Output "Skipping permissions to manage Conditional Access Groups... (ApplyConditionalAccessTargetGroups is set to false)"
     }    
     #endregion
@@ -264,19 +253,16 @@ function New-EntraOpsWorkloadIdentity {
     function Add-AzureRolePermissions ($RoleDefinitionName, $ResourceGroupName, $SubscriptionId) {
         if (!$RoleDefinitionName -or !$ResourceGroupName -or !$SubscriptionId) {
             Write-Error "SentinelResourceGroupName and DataCollectionResourceGroupName needs to be defined in environment file to configure permissions for Push operations."
-        }
-        else {
+        } else {
             try {
                 Set-AzContext -SubscriptionId $SubscriptionId
                 Get-AzResourceGroup -Name $ResourceGroupName
-            }
-            catch {
+            } catch {
                 Write-Error "Invalid Resource Group Name $($ResourceGroupName) to set $($RoleDefinitionName). Error: $_"
             }
             try {
                 New-AzRoleAssignment -ObjectId $SpObject.Id -RoleDefinitionName $RoleDefinitionName -ResourceGroupName $ResourceGroupName
-            }
-            catch {
+            } catch {
                 Write-Error "Failed to assign role $($RoleDefinitionName) to $($SpObject.DisplayName) on Resource Group $($ResourceGroupName). Error: $_"
             }
         }
@@ -288,12 +274,10 @@ function New-EntraOpsWorkloadIdentity {
             Write-Output "Adding permissions to Resource Group of Data Collection Rule on $($DataCollectionRuleResourceGroupId)..."
             Add-AzureRolePermissions -RoleDefinitionName "Monitoring Metrics Publisher" -ResourceGroupName $Config.LogAnalytics.DataCollectionResourceGroupName -SubscriptionId $Config.LogAnalytics.DataCollectionRuleSubscriptionId
             Add-AzureRolePermissions -RoleDefinitionName "Reader" -ResourceGroupName $Config.LogAnalytics.DataCollectionResourceGroupName -SubscriptionId $Config.LogAnalytics.DataCollectionRuleSubscriptionId    
-        }
-        catch {
+        } catch {
             Write-Warning "Failed to assign roles on $($DataCollectionRuleResourceGroupId). Error: $_"
         }
-    }
-    else {
+    } else {
         Write-Output "Skipping Data Collection Rule permissions... (IngestToLogAnalytics is set to false)"
     }
 
@@ -301,12 +285,10 @@ function New-EntraOpsWorkloadIdentity {
         try {
             Write-Output "Adding permissions to Resource Group of Sentinel workspace on $($DataCollectionRuleResourceGroupId)..."
             Add-AzureRolePermissions -RoleDefinitionName "Microsoft Sentinel Contributor" -ResourceGroupName $Config.SentinelWatchLists.SentinelResourceGroupName -SubscriptionId $Config.SentinelWatchLists.SentinelSubscriptionId    
-        }
-        catch {
+        } catch {
             Write-Warning "Failed to assign roles on $($DataCollectionRuleResourceGroupId). Error: $_"
         }
-    }
-    else {
+    } else {
         Write-Output "Skipping WatchList permissions... (IngestToWatchLists is set to false)"
     }
 
@@ -350,16 +332,13 @@ function New-EntraOpsWorkloadIdentity {
 
             try {
                 New-MgApplicationFederatedIdentityCredential -ApplicationId $AppObject.Id -BodyParameter $FederatedCredentialParam
-            }
-            catch {
+            } catch {
                 Write-Warning "Failed to add Federated Credential to $AppDisplayName. Error: $_"
             }
-        }
-        else {
+        } else {
             Write-Warning "Automation configuration of federated credential for DevOps Platform $($Config.DevOpsPlatform) is not implemented yet."
         }
-    }
-    else {
+    } else {
         Write-Verbose "Skipping Federated Credential configuration... (AuthenticationType is not Federated)"
     }
 }
