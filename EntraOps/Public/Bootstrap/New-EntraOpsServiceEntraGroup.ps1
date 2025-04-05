@@ -38,6 +38,9 @@ function New-EntraOpsServiceEntraGroup {
         [Parameter(Mandatory)]
         [psobject[]]$ServiceRoles,
 
+        [Parameter()]
+        [switch]$IsAssignableToRole,
+
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
@@ -55,6 +58,7 @@ function New-EntraOpsServiceEntraGroup {
         $groupParams = @{
             Description = ""
             SecurityEnabled = $true
+            IsAssignableToRole = $IsAssignableToRole
             "owners@odata.bind" = @($ServiceOwner)
         }
         $unifiedParams = $groupParams + @{

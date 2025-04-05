@@ -134,7 +134,7 @@ Members,,Unified
 Members,Management,
 Users,Workload,
 Admins,Workload,
-Admins,Entitlement,
+Admins,Control,
 Admins,Management,
 "@|ConvertFrom-Csv
         }else{
@@ -146,8 +146,8 @@ Admins,Management,
                 if(@("Users","Admins","Members") -inotcontains $ServiceRole.name){
                     throw "$($ServiceRole.name) is not in accepted values of 'Users', 'Admins', or 'Members'"
                 }
-                if(@("Workload","Entitlement","Management","") -inotcontains $ServiceRole.type){
-                    throw "$($ServiceRole.type) is not in accepted values of 'Workload', 'Entitlement', 'Management', or ''"
+                if(@("Workload","Control","Management","") -inotcontains $ServiceRole.type){
+                    throw "$($ServiceRole.type) is not in accepted values of 'Workload', 'Control', 'Management', or ''"
                 }
                 if(@("Unified","Security","") -inotcontains $ServiceRole.groupType){
                     throw "$($ServiceRole.groupType) is not in accepted values of 'Unified' or ''"
