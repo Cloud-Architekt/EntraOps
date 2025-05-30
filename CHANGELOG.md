@@ -2,10 +2,10 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
-## [0.4] - 2025-03-19
+## [0.4] - 2025-05-30
 ### Added
 - Support for Role Management Provider "Defender" (Unified RBAC for Microsoft Defender XDR)
-  - Currently this feature is supported for interactive execution of EntraOps (RoleManagement.Read.All is not applicable as Application Permission yet)
+  - Currently, the API does not include details on Device Groups or Scope. Therefore, the RBAC system is not covered by using default settings (EntraOps.config) to avoid wrong classification by missing consideration of scope.
 
 ## [0.3.4] - 2024-12-21
 ### Fixed
