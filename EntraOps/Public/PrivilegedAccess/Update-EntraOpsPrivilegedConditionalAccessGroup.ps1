@@ -40,8 +40,8 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
         [string]$GroupPrefix = "sug_Entra.CA.IncludeUsers.PrivilegedAccounts."
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
+        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "Defender")]
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement", "Defender")
         ,
         [Parameter(Mandatory = $false)]
         [String]$AdminUnitName
@@ -86,19 +86,16 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
 
                     try {
                         Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject
-                    }
-                    catch {
+                    } catch {
                         Write-Warning "Failed to add $($GroupMember.displayName) to $($GroupName). Error: $_"
                     }
                 }
-            }
-            elseif ($null -ne $PrivilegedObjects.ObjectId) {
+            } elseif ($null -ne $PrivilegedObjects.ObjectId) {
                 Compare-Object $PrivilegedObjects.ObjectId $CurrentGroupMembers.Id | ForEach-Object {
                     if ($_.SideIndicator -eq "=>") {
                         Write-Warning "$($_.InputObject) will be removed from $($GroupName)!"
                         Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/groups/$($GroupId)/members/$($_.InputObject)/`$ref" -OutputType PSObject
-                    }
-                    elseif ($_.SideIndicator -eq "<=") {
+                    } elseif ($_.SideIndicator -eq "<=") {
                         $GroupMember = Invoke-MgGraphRequest -Method GET -Uri "/beta/directoryObjects/$($_.InputObject)" -OutputType PSObject
                         Write-Host "Adding $($GroupMember.displayName) to $($GroupName)"
 

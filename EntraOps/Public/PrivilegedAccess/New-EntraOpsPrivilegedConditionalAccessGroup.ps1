@@ -42,8 +42,8 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
         [string]$GroupPrefix = "sug_Entra.CA.IncludeUsers.PrivilegedAccounts."
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
+        [ValidateSet("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
         ,
         [Parameter(Mandatory = $true)]
         [String]$AdminUnitName

@@ -51,8 +51,8 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
         [System.String]$SentinelWorkspaceName
         ,
         [Parameter(Mandatory = $false)]
-        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
+        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
+        [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "All", "VIPUsers", "HighValueAssets", "IdentityCorrelation")]
@@ -61,8 +61,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
 
     try {
         Import-Module "SentinelEnrichment" -ErrorAction Stop
-    }
-    catch {
+    } catch {
         throw "Issue to import SentinelEnrichment modul!"
     }
 
@@ -70,8 +69,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
     $Privileges = foreach ($Rbac in $RbacSystems) {
         try {
             Get-Content -Path "$($ImportPath)/$($Rbac)/$($Rbac).json" -ErrorAction Stop | ConvertFrom-Json -Depth 10
-        }
-        catch {
+        } catch {
             Write-Warning "No information found for $Rbac in file $($ImportPath)/$($Rbac)/$($Rbac).json"
             continue
         }
@@ -100,8 +98,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
                     # Get classification by custom security attribute of the privileged user
                     $Classification = ($Privileges | Where-Object { $_.ObjectId -eq $PrivilegedUser.ObjectId } | Select-Object -Unique ObjectAdminTierLevelName)[0]
                     $Tags.Add($($Classification.AdminTierLevelName)) | Out-Null
-                }
-                else {
+                } else {
                     # Get highest classification by assigned roles
                     $Classification = ($Privileges | Where-Object { $_.ObjectId -eq $PrivilegedUser.ObjectId } | Select-Object -ExpandProperty Classification | Sort-Object AdminTierLevel | Select-Object AdminTierLevelName)[0]
                     $Tags.Add($($Classification.AdminTierLevelName)) | Out-Null
@@ -169,8 +166,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
                         # Get classification by custom security attribute of the privileged user
                         $Classification = ($Privileges | Where-Object { $_.ObjectId -eq $AssociatedPrivilegedUser.ObjectId } | Select-Object -Unique ObjectAdminTierLevelName)[0]
                         $Tags.Add($($Classification.AdminTierLevelName)) | Out-Null
-                    }
-                    else {
+                    } else {
                         # Get highest classification by assigned roles
                         $Classification = ($Privileges | Where-Object { $_.ObjectId -eq $AssociatedPrivilegedUser.ObjectId } | Select-Object -ExpandProperty Classification | Sort-Object AdminTierLevel | Select-Object AdminTierLevelName)[0]
                         $Tags.Add($($Classification.AdminTierLevelName)) | Out-Null

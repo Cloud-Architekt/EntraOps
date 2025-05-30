@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-    Get a list of directory role member assignments in Microsoft Intune.
+    Get a list of directory role member assignments in Microsoft Defender.
 
 .DESCRIPTION
-    Get a list of RBAC member assignments in Microsoft Intune.
+    Get a list of RBAC member assignments in Microsoft Defender.
 
 .PARAMETER TenantId
-    Tenant ID of the Microsoft Microsoft Intune tenant. Default is the current tenant ID.
+    Tenant ID of the Microsoft Microsoft Defender tenant. Default is the current tenant ID.
 
 .PARAMETER PrincipalTypeFilter
     Filter for principal type. Default is User, Group, ServicePrincipal. Possible values are User, Group, ServicePrincipal.
@@ -18,11 +18,11 @@
     Use sample data for testing or offline mode. Default is $False.
 
 .EXAMPLE
-    Get a list of assignment of Microsoft Intune roles.
-    Get-EntraOpsPrivilegedDeviceRoles
+    Get a list of assignment of Microsoft Defender roles.
+    Get-EntraOpsPrivilegedDefenderRoles
 #>
 
-function Get-EntraOpsPrivilegedDeviceRoles {
+function Get-EntraOpsPrivilegedDefenderRoles {
     param (
         [Parameter(Mandatory = $False)]
         [System.String]$TenantId = (Get-AzContext).Tenant.id
@@ -42,67 +42,62 @@ function Get-EntraOpsPrivilegedDeviceRoles {
     $ErrorActionPreference = "Stop"
 
     #region Get Role Definitions and Role Assignments
-    Write-Host "Get Device Management Role Management Assignments and Role Definition..."
+    Write-Host "Get Defender Role Management Assignments and Role Definition..."
     if ($SampleMode -eq $True) {
         Write-Warning "Not supported yet!"
     } else {
-        $DeviceMgmtRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/roleDefinitions" -OutputType PSObject
-        $DeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/roleAssignments" -OutputType PSObject
+        $DefenderRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleDefinitions" -OutputType PSObject
+        $DefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleAssignments" -OutputType PSObject
     }
     #endregion
 
-    #region Get Scope and tags
-    Write-Verbose -Message "Getting scope and tags for scope name ..."
-    $ScopeTags = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/roleScopeTags" -OutputType PSObject)
-    # In research, replacement of the workaround solution (see blow) by using Get-MgBetaDeviceManagementDeviceCategory?
-    #endregion
 
     #region Get role assignments for all permanent role member
-    Write-Host "Get details of Device Management Role Assignments foreach individual principal..."
-    if (![string]::IsNullOrWhiteSpace($DeviceMgmtRoleAssignments.id)) {
-        $DeviceMgmtRoleAssignmentPrincipals = ($DeviceMgmtRoleAssignments | select-object -ExpandProperty principalIds -Unique)
-        $DeviceMgmtPermanentRbacAssignments = foreach ($Principal in $DeviceMgmtRoleAssignmentPrincipals) {
+    Write-Host "Get details of Defender Role Assignments foreach individual principal..."
+    if (![string]::IsNullOrWhiteSpace($DefenderRoleAssignments.id)) {
+        $DefenderRoleAssignmentPrincipals = ($DefenderRoleAssignments | select-object -ExpandProperty principalIds -Unique)
+        $DefenderPermanentRbacAssignments = foreach ($Principal in $DefenderRoleAssignmentPrincipals) {
             Write-Verbose "Get identity information from permanent member $Principal"
             try {
                 $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($Principal)" -OutputType PSObject
                 $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
-            }
-            catch {
+            } catch {
                 Write-Host $_
                 Write-Error "Issue to resolve directory object $Principal"
             }
 
-            $AllPrinicpalDeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/RoleAssignments?$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual" -OutputType PSObject
+            $AllPrinicpalDefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/RoleAssignments?$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual" -OutputType PSObject
 
-            foreach ($DeviceMgmtPrincipalRoleAssignment in $AllPrinicpalDeviceMgmtRoleAssignments) {
+            foreach ($DefenderPrincipalRoleAssignment in $AllPrinicpalDefenderRoleAssignments) {
 
-                $Role = ($DeviceMgmtRoleDefinitions | where-object { $_.id -eq $DeviceMgmtPrincipalRoleAssignment.roleDefinitionId })
+                $Role = ($DefenderRoleDefinitions | where-object { $_.id -eq $DefenderPrincipalRoleAssignment.roleDefinitionId })
 
-                if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DeviceMgmtPrincipalRoleAssignment.id)" }
+                if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DefenderPrincipalRoleAssignment.id)" }
 
-                if ( [string]::IsNullOrEmpty($DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) ) {
+                if ( [string]::IsNullOrEmpty($DefenderPrincipalRoleAssignment.directoryScopeIds) ) {
                     # Directory Scope Id is null if the role is assigned to all devices or all users, only scoping on both object types includes "/" as directoryScopeId
                     # No indicator to identify the scope type, so empty value is used for considering RBAC role without specific directoryScopeId
-                    $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds = "/"
+                    $DefenderPrincipalRoleAssignment.directoryScopeIds = "/"
                 }
 
-                foreach ($directoryScopeId in $DeviceMgmtPrincipalRoleAssignment.directoryScopeIds) {
+                foreach ($directoryScopeId in $DefenderPrincipalRoleAssignment.directoryScopeIds) {
                     # Get scope name from tags
                     if ($directoryScopeId -ne "/") {
-                        $RoleAssignmentScopeName = foreach ($appScopeId in $DeviceMgmtPrincipalRoleAssignment.appScopeIds) {
+                        $RoleAssignmentScopeName = foreach ($appScopeId in $DefenderPrincipalRoleAssignment.appScopeIds) {
                             $ScopeTags | Where-Object { $_.Id -eq $appScopeId } | Select-Object -ExpandProperty displayName
                         }
-                    }
-                    elseif ($directoryScopeId -eq "/") {
+                    } elseif ($directoryScopeId -eq "/") {
                         $RoleAssignmentScopeName = "Tenant-wide"
-                    }
-                    else {
+                    } else {
                         Write-Warning "No scope name found for directoryScopeId $directoryScopeId"
                     }
 
+                    # Check for restriction of Device Groups
+                    
+
                     $RoleAssignmentScopeName | foreach-object {
                         [pscustomobject]@{
-                            RoleAssignmentId              = $DeviceMgmtPrincipalRoleAssignment.Id
+                            RoleAssignmentId              = $DefenderPrincipalRoleAssignment.Id
                             RoleAssignmentScopeId         = $directoryScopeId
                             RoleAssignmentScopeName       = $_
                             RoleAssignmentType            = "Direct"
@@ -123,21 +118,21 @@ function Get-EntraOpsPrivilegedDeviceRoles {
             }
         }
     } else {
-        Write-Warning "No Device Management Role Assignments found!"
-        $DeviceMgmtPermanentRbacAssignments = $null
+        Write-Warning "No Defender Role Assignments found!"
+        $DefenderPermanentRbacAssignments = $null
     }
 
     #endregion
 
     # Summarize results with direct permanent (excl. activated roles) and eligible role assignments
-    $AllDeviceMgmtRbacAssignments = @()
-    $AllDeviceMgmtRbacAssignments += $DeviceMgmtPermanentRbacAssignments
+    $AllDefenderRbacAssignments = @()
+    $AllDefenderRbacAssignments += $DefenderPermanentRbacAssignments
 
     #region Collect transitive assignments by group members of Role-Assignable Groups or Security Groups
     if ($ExpandGroupMembers -eq $True) {
-        Write-Verbose -Message "Expanding groups for direct or transitive Intune role assignments"
-        # DeviceMgmtRbacAssignments
-        $GroupsWithRbacAssignment = $AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -eq "Group" } | Select-Object -Unique ObjectId, displayName
+        Write-Verbose -Message "Expanding groups for direct or transitive Microsoft Defender XDR role assignments"
+        # DefenderRbacAssignments
+        $GroupsWithRbacAssignment = $AllDefenderRbacAssignments | where-object { $_.ObjectType -eq "Group" } | Select-Object -Unique ObjectId, displayName
         $AllTransitiveMembers = $GroupsWithRbacAssignment | foreach-object {
             $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($_.ObjectId)" -OutputType PSObject).displayName
             $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $_.ObjectId
@@ -146,7 +141,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
             return $TransitiveMembers
         }
 
-        $DeviceMgmtTransitiveRbacAssignments = foreach ($RbacAssignmentByGroup in ($AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -eq "group" }) ) {
+        $DefenderTransitiveRbacAssignments = foreach ($RbacAssignmentByGroup in ($AllDefenderRbacAssignments | where-object { $_.ObjectType -eq "group" }) ) {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
@@ -170,8 +165,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
                         TransitiveByObjectDisplayName = $_.GroupObjectDisplayName
                     }
                 }
-            }
-            else {
+            } else {
                 Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId) - $($GroupObjectDisplayName)"
             }
         }
@@ -179,9 +173,9 @@ function Get-EntraOpsPrivilegedDeviceRoles {
     #endregion
 
     #region Filtering export if needed
-    $AllDeviceMgmtRbacAssignments += $DeviceMgmtTransitiveRbacAssignments
-    $AllDeviceMgmtRbacAssignments = $AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -in $PrincipalTypeFilter }
-    $AllDeviceMgmtRbacAssignments = $AllDeviceMgmtRbacAssignments | select-object -Unique *
-    $AllDeviceMgmtRbacAssignments | Sort-Object RoleAssignmentId, RoleAssignmentScopeName, RoleAssignmentScopeId, RoleAssignmentType, ObjectId
+    $AllDefenderRbacAssignments += $DefenderTransitiveRbacAssignments
+    $AllDefenderRbacAssignments = $AllDefenderRbacAssignments | where-object { $_.ObjectType -in $PrincipalTypeFilter }
+    $AllDefenderRbacAssignments = $AllDefenderRbacAssignments | select-object -Unique *
+    $AllDefenderRbacAssignments | Sort-Object RoleAssignmentId, RoleAssignmentScopeName, RoleAssignmentScopeId, RoleAssignmentType, ObjectId
     #endregion
 }

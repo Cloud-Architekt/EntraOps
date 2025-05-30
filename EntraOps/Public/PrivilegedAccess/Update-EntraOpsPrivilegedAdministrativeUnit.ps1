@@ -34,7 +34,7 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "Selected", "All")]
@@ -47,11 +47,9 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
         # Get EAM classification files
         if ($RbacSystem -eq "EntraID") {
             $ClassificationTemplateSubFolder = "AadResources"
-        }
-        elseif ($RbacSystem -eq "ResourceApps") {
+        } elseif ($RbacSystem -eq "ResourceApps") {
             $ClassificationTemplateSubFolder = "AppRoles"
-        }
-        else {
+        } else {
             $ClassificationTemplateSubFolder = $RbacSystem
         }
         $Classification = "$DefaultFolderClassifiedEam/$RbacSystem/$($RbacSystem).json"
@@ -106,13 +104,11 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                         Write-Host "Removing $($AdminUnitMember.displayName) from $($AdminUnitName)"
                         try {
                             Invoke-EntraOpsMsGraphQuery -Method "DELETE" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($_.InputObject)/`$ref" -OutputType PSObject
-                        }
-                        catch {
+                        } catch {
                             Write-Warning "Removal for $($AdminUnitMember.displayName) has been failed!"
                         }
 
-                    }
-                    elseif ($_.SideIndicator -eq "<=") {
+                    } elseif ($_.SideIndicator -eq "<=") {
                         try {
                             $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($_.InputObject)" -DisableCache -OutputType PSObject
                             Write-Host "Adding $($AdminUnitMember.displayName) to $($AdminUnitName)"
@@ -122,8 +118,7 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                             } | ConvertTo-Json
 
                             Invoke-EntraOpsMsGraphQuery -Method "POST" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -DisableCache -Body $OdataBody -OutputType PSObject
-                        }
-                        catch {
+                        } catch {
                             Write-Warning "Can not add $($AdminUnitMember.displayName)"
                             Write-Host $_.Exception
                         }

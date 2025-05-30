@@ -80,8 +80,8 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         [string]$EntraOpsEamFolder = "$DefaultFolderClassifiedEam"
         ,
         [Parameter(Mandatory = $false)]
-        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [object]$EntraOpsScopes = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")
+        [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
+        [object]$EntraOpsScopes = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
         ,
         [Parameter(Mandatory = $false)]
         [object]$AzureHighPrivilegedRoles = ("Owner", "Role Based Access Control Administrator", "User Access Administrator")

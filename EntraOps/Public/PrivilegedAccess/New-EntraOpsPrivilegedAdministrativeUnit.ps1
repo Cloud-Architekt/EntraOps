@@ -33,8 +33,8 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
         [Array]$FilterObjectType = ("User", "Group")
         ,        
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "DeviceManagement")
+        [ValidateSet("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "Selected", "All")]
@@ -46,8 +46,7 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
         # Get EAM classification files
         if ($RbacSystem -eq "EntraID") {
             $ClassificationTemplateSubFolder = "AadResources"
-        }
-        else {
+        } else {
             $ClassificationTemplateSubFolder = $RbacSystem
         }
 
@@ -76,17 +75,14 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
                     $body = $AuParams | ConvertTo-Json -Depth 10
                     try {
                         $CreatedAuObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $Body -Uri "/beta/administrativeUnits"
-                    }
-                    catch {
+                    } catch {
                         Write-Warning "Can not create Administrative Unit $($AuParams.DisplayName)"
                     }
-                }
-                else {
+                } else {
                     $Body = $AuParams | ConvertTo-Json -Depth 10
                     try {
                         $CreatedAuObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $Body -Uri "/beta/administrativeUnits"
-                    }
-                    catch {
+                    } catch {
                         Write-Warning "Can not create Administrative Unit $($AuParams.DisplayName)! Error: $_"
                     }
 
@@ -97,12 +93,10 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
                     Do { Start-Sleep -Seconds 1 }
                     Until ($AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits/$($CreatedAuObject.id)" -DisableCache))
                     Write-Host "$($AdministrativeUnit.displayName) has been created successfully" -f Green
-                }
-                Catch {
+                } Catch {
                     Write-Warning "$($AuParams.DisplayName) not available yet"
                 }
-            }
-            else {
+            } else {
                 Write-Host "Administrative Unit $($AdministrativeUnit) already exists"
             }
             #endregion
