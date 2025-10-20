@@ -103,15 +103,17 @@ function New-EntraOpsServiceEMAssignment {
         }
 
         # Update this to `in` if upstream function ever switches to array
-        try{
-            $assignmentParams.assignment.targetId = $ServiceOwner.Id
-            $assignmentParams.assignment.assignmentPolicyId = ($ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Initial Management Admin Policy"}).Id
-            $assignmentParams.assignment.accessPackageId = ($ServicePackages|Where-Object{$_.DisplayName -like "*Admins-Management"}).Id
-            Write-Verbose "$logPrefix Creating Assignment Request for Service Owner - $($assignmentParams|ConvertTo-Json -Compress)"
-            $assignmentRequests += New-MgEntitlementManagementAssignmentRequest -BodyParameter $assignmentParams
-        }catch{
-            Write-Verbose "$logPrefix Failed to create Assignment Request for Service Owner"
-            Write-Error $_
+        if($ServiceOwner.Id -notin $assignments.Target.ObjectId -and $ServiceOwner.Id -notin $assignmentRequests.Assignment.Target.ObjectId){
+            try{
+                $assignmentParams.assignment.targetId = $ServiceOwner.Id
+                $assignmentParams.assignment.assignmentPolicyId = ($ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Initial Management Admin Policy"}).Id
+                $assignmentParams.assignment.accessPackageId = ($ServicePackages|Where-Object{$_.DisplayName -like "*Admins-Management"}).Id
+                Write-Verbose "$logPrefix Creating Assignment Request for Service Owner - $($assignmentParams|ConvertTo-Json -Compress)"
+                $assignmentRequests += New-MgEntitlementManagementAssignmentRequest -BodyParameter $assignmentParams
+            }catch{
+                Write-Verbose "$logPrefix Failed to create Assignment Request for Service Owner"
+                Write-Error $_
+            }
         }
     }
 
@@ -122,10 +124,11 @@ function New-EntraOpsServiceEMAssignment {
             Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
             $checkAssignments = @()
             $checkAssignments += Get-MgEntitlementManagementAssignment @assignmentsSplat
-            Write-Verbose "$logPrefix Service Member IDs: $($ServiceMembers.Id|ConvertTo-Json -Compress)"
+            $checkIds = $ServiceMembers.Id + $ServiceOwner.Id
+            Write-Verbose "$logPrefix Service Member IDs: $($checkIds|ConvertTo-Json -Compress)"
             Write-Verbose "$logPrefix Assignment Target IDs: $($checkAssignments.Target.ObjectId|ConvertTo-Json -Compress)"
             if(-not ($null -eq $checkAssignments.Target.ObjectId)){
-                if((Compare-Object $ServiceMembers.Id $checkAssignments.Target.ObjectId|Measure-Object).Count -eq 0){
+                if((Compare-Object $checkIds $checkAssignments.Target.ObjectId|Measure-Object).Count -eq 0){
                     Write-Verbose "$logPrefix Graph consistency found confirming"
                     $confirmed = $true
                     continue
