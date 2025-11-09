@@ -189,7 +189,7 @@ function New-EntraOpsServiceAZContainer {
                     $roleManagementPolicySplat = @{
                         Scope = $resourceGroup.ResourceId
                         Name = $add.RoleId
-                        Rules = @{
+                        Rule = @{
                             id = "Expiration_Admin_Eligibility"
                             IsExpirationRequired = $false
                             ruleType = "RoleManagementPolicyExpirationRule"
