@@ -32,6 +32,11 @@ function New-EntraOpsServiceAZContainer {
         [Parameter(Mandatory)]
         [psobject[]]$ServiceGroups,
 
+        [ValidateSet("Azure","PIM","Both")]
+        [string]$rbacModel = "PIM",
+
+        [switch]$pimForGroups,
+
         [string]$Location = "eastus",
 
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
@@ -67,51 +72,114 @@ function New-EntraOpsServiceAZContainer {
             }
         }
         try{
-            $owner = Get-AzRoleDefinition -Name Owner
-            $reader = Get-AzRoleDefinition -Name Reader
+            $owner           = Get-AzRoleDefinition -Name Owner
+            $reader          = Get-AzRoleDefinition -Name Reader
+            $userAccessAdmin = Get-AzRoleDefinition -Name "User Access Administrator"
+            $contributor     = Get-AzRoleDefinition -Name Contributor
         }catch{
-            Write-Verbose "$logPrefix Failed to fine role definitions"
+            Write-Verbose "$logPrefix Failed to find role definitions"
             Write-Error $_
         }
-        $pimAdmins = $ServiceGroups|Where-Object{$_.DisplayName -like "*-PIM-*"}
-        $members = $ServiceGroups|Where-Object{$_.DisplayName -like "*-Members-*"}
+        $pimAdmins  = $ServiceGroups|Where-Object{$_.DisplayName -like "*-PIM-*"}
+        $members    = $ServiceGroups|Where-Object{$_.DisplayName -like "*-Members-Management"}
+        $control    = $ServiceGroups|Where-Object{$_.DisplayName -like "*-Admins-Control"}
+        $management = $ServiceGroups|Where-Object{$_.DisplayName -like "*-Admins-Management"}
+        $scheduleRequestParams = @{
+            Name = ""
+            RoleDefinitionId = ""
+            PrincipalId = ""
+            Scope = $resourceGroup.ResourceId
+            RequestType = "AdminAssign"
+            Justification = "Initial Bootstrap"
+            ExpirationDuration = "P1Y"
+            ExpirationType = "AfterDuration"
+            ScheduleInfoStartDateTime = (Get-Date -Format o)
+        }
+        $roleDefinitionPrefix = "/Subscriptions/$((Get-AzContext).Subscription.Id)/providers/Microsoft.Authorization/roleDefinitions/"
         $rbacSet = @()
+        $eligibleRbacSet = @()
+        $toAdd = @()
     }
 
     process {
-        $rbacSet = @()
-        try{
-            Write-Verbose "$logPrefix Looking up Role Assignments for ID: $($resourceGroup.ResourceId)"
-            $rbacSet += Get-AzRoleAssignment -Scope $resourceGroup.ResourceId
-        }catch{
-            Write-Verbose "$logPrefix Failed to get Role Assignments"
-            Write-Error $_
-        }
-        $rbacSplat = @{
-            ResourceGroupName = $resourceGroup.ResourceGroupName
-        }
-        if("$($pimAdmins.Id)_$($owner.Id)" -notin ($rbacSet|ForEach-Object{"$($_.ObjectId)_$($_.RoleDefinitionId)"})){
-            $rbacSplat.RoleDefinitionName = $owner.Name
-            $rbacSplat.ObjectId = $pimAdmins.Id
+        if($rbacModel -in ("Azure","Both")){
+            $rbacSet = @()
             try{
-                Write-Verbose "$logPrefix Creating Role Assignment for ID: $($pimAdmins.Id)"
-                Write-Verbose "$logPrefix $($rbacSplat|ConvertTo-Json -Compress)"
-                $rbacSet += New-AzRoleAssignment @rbacSplat
+                Write-Verbose "$logPrefix Looking up Role Assignments for ID: $($resourceGroup.ResourceId)"
+                $rbacSet += Get-AzRoleAssignment -Scope $resourceGroup.ResourceId
             }catch{
-                Write-Verbose "$logPrefix Failed to create role assignment"
+                Write-Verbose "$logPrefix Failed to get Role Assignments"
                 Write-Error $_
             }
+            $rbacSplat = @{
+                ResourceGroupName = $resourceGroup.ResourceGroupName
+            }
+            if($pimForGroups -and "$($pimAdmins.Id)_$($owner.Id)" -notin ($rbacSet|ForEach-Object{"$($_.ObjectId)_$($_.RoleDefinitionId)"})){
+                $rbacSplat.RoleDefinitionName = $owner.Name
+                $rbacSplat.ObjectId = $pimAdmins.Id
+                try{
+                    Write-Verbose "$logPrefix Creating Role Assignment for ID: $($pimAdmins.Id)"
+                    Write-Verbose "$logPrefix $($rbacSplat|ConvertTo-Json -Compress)"
+                    $rbacSet += New-AzRoleAssignment @rbacSplat
+                }catch{
+                    Write-Verbose "$logPrefix Failed to create role assignment"
+                    Write-Error $_
+                }
+            }
+            if("$($members.Id)_$($reader.Id)" -notin ($rbacSet|ForEach-Object{"$($_.ObjectId)_$($_.RoleDefinitionId)"})){
+                $rbacSplat.RoleDefinitionName = $reader.Name
+                $rbacSplat.ObjectId = $members.Id
+                try{
+                    Write-Verbose "$logPrefix Creating Role Assignment for ID: $($members.Id)"
+                    Write-Verbose "$logPrefix $($rbacSplat|ConvertTo-Json -Compress)"
+                    $rbacSet += New-AzRoleAssignment @rbacSplat
+                }catch{
+                    Write-Verbose "$logPrefix Failed to create role assignment"
+                    Write-Error $_
+                }
+            }
         }
-        if("$($members.Id)_$($reader.Id)" -notin ($rbacSet|ForEach-Object{"$($_.ObjectId)_$($_.RoleDefinitionId)"})){
-            $rbacSplat.RoleDefinitionName = $reader.Name
-            $rbacSplat.ObjectId = $members.Id
+
+        if($rbacModel -in ("PIM","Both")){
             try{
-                Write-Verbose "$logPrefix Creating Role Assignment for ID: $($members.Id)"
-                Write-Verbose "$logPrefix $($rbacSplat|ConvertTo-Json -Compress)"
-                $rbacSet += New-AzRoleAssignment @rbacSplat
+                Write-Verbose "$logPrefix Getting PIM Eligible Assignments"
+                $existing = Get-AzRoleEligibilitySchedule -Scope $resourceGroup.ResourceId
+                $eligibleRbacSet += $existing|Select-Object @{n="c";e={$_.RoleDefinitionDisplayName + "_" + $_.PrincipalId}}|ForEach-Object c
             }catch{
-                Write-Verbose "$logPrefix Failed to create role assignment"
+                Write-Verbose "$logPrefix Failed to get PIM Eligible Assignments"
                 Write-Error $_
+            }
+
+            if("$($reader.Name)_$($members.Id)" -notin $eligibleRbacSet){
+                $toAdd += @{
+                    RoleDefinitionId = "$roleDefinitionPrefix/$($reader.Id)"
+                    PrincipalId = $members.Id
+                }
+            }
+            if("$($contributor.Name)_$($management.Id)" -notin $eligibleRbacSet){
+                $toAdd += @{
+                    RoleDefinitionId = "$roleDefinitionPrefix/$($contributor.Id)"
+                    PrincipalId = $management.Id
+                }
+            }
+            if("$($userAccessAdmin.Name)_$($control.Id)" -notin $eligibleRbacSet){
+                $toAdd += @{
+                    RoleDefinitionId = "$roleDefinitionPrefix/$($userAccessAdmin.Id)"
+                    PrincipalId = $control.Id
+                }
+            }
+            
+            foreach($add in $toAdd){
+                try{
+                    Write-Verbose "$logPrefix Creating PIM Eligible Assignment for PrincipalId: $($add.PrincipalId)"
+                    $scheduleRequestParams.Name = [guid]::NewGuid()
+                    $scheduleRequestParams.RoleDefinitionId = $add.RoleDefinitionId
+                    $scheduleRequestParams.PrincipalId = $add.PrincipalId
+                    $rbacSet += New-AzRoleEligibilityScheduleRequest @scheduleRequestParams
+                }catch{
+                    Write-Verbose "$logPrefix Failed to create PIM Eligible Assignment"
+                    Write-Error $_
+                }
             }
         }
     }
