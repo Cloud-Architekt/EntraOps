@@ -91,8 +91,8 @@ function New-EntraOpsServiceAZContainer {
             Scope = $resourceGroup.ResourceId
             RequestType = "AdminAssign"
             Justification = "Initial Bootstrap"
-            ExpirationDuration = "P1Y"
-            ExpirationType = "AfterDuration"
+            #ExpirationDuration = "P1Y"
+            ExpirationType = "NoExpiration" #AfterDuration
             ScheduleInfoStartDateTime = (Get-Date -Format o)
         }
         $roleDefinitionPrefix = "/Subscriptions/$((Get-AzContext).Subscription.Id)/providers/Microsoft.Authorization/roleDefinitions/"
@@ -153,28 +153,58 @@ function New-EntraOpsServiceAZContainer {
             if("$($reader.Name)_$($members.Id)" -notin $eligibleRbacSet){
                 $toAdd += @{
                     RoleDefinitionId = "$roleDefinitionPrefix/$($reader.Id)"
+                    RoleId = $reader.Id
                     PrincipalId = $members.Id
                 }
             }
             if("$($contributor.Name)_$($management.Id)" -notin $eligibleRbacSet){
                 $toAdd += @{
                     RoleDefinitionId = "$roleDefinitionPrefix/$($contributor.Id)"
+                    RoleId = $contributor.Id
                     PrincipalId = $management.Id
                 }
             }
             if("$($userAccessAdmin.Name)_$($control.Id)" -notin $eligibleRbacSet){
                 $toAdd += @{
                     RoleDefinitionId = "$roleDefinitionPrefix/$($userAccessAdmin.Id)"
+                    RoleId = $userAccessAdmin.Id
                     PrincipalId = $control.Id
                 }
             }
             
             foreach($add in $toAdd){
+                $scheduleRequestParams.Name = [guid]::NewGuid()
+                $scheduleRequestParams.RoleDefinitionId = $add.RoleDefinitionId
+                $scheduleRequestParams.PrincipalId = $add.PrincipalId
+
+                try{
+                    Write-Verbose "$logPrefix Getting role management policy for: $($add.RoleId)"
+                    $policy = Get-AzRoleManagementPolicy -Scope $scheduleRequestParams.Scope -Name $add.RoleId
+                }catch{
+                    Write-Verbose "$logPrefix Failed to get role management policy"
+                    Write-Error $_
+                }
+                if(($policy.Rule|Where-Object{$_.Id -eq "Expiration_Admin_Eligibility"}).IsExpirationRequired){
+                    Write-Verbose "$logPrefix Policy requires eligible expiration, updating"
+                    $roleManagementPolicySplat = @{
+                        Scope = $resourceGroup.ResourceId
+                        Name = $add.RoleId
+                        Rules = @{
+                            id = "Expiration_Admin_Eligibility"
+                            IsExpirationRequired = $false
+                            ruleType = "RoleManagementPolicyExpirationRule"
+                        }
+                    }
+                    try{
+                        Update-AzRoleManagementPolicy @roleManagementPolicySplat
+                    }catch{
+                        Write-Verbose "$logPrefix Failed to update role management policy rules"
+                        Write-Error $_
+                    }
+                }
+
                 try{
                     Write-Verbose "$logPrefix Creating PIM Eligible Assignment for PrincipalId: $($add.PrincipalId)"
-                    $scheduleRequestParams.Name = [guid]::NewGuid()
-                    $scheduleRequestParams.RoleDefinitionId = $add.RoleDefinitionId
-                    $scheduleRequestParams.PrincipalId = $add.PrincipalId
                     $rbacSet += New-AzRoleEligibilityScheduleRequest @scheduleRequestParams
                 }catch{
                     Write-Verbose "$logPrefix Failed to create PIM Eligible Assignment"
