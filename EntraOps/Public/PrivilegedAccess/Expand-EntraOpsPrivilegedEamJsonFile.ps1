@@ -22,55 +22,64 @@ function Expand-EntraOpsPrivilegedEAMJsonFile {
         [System.String]$FilePath
     )
 
-    $JSON = Get-Content -Path $FilePath | ConvertFrom-Json -Depth 10
-    $TierLevelDefinitions = @()
+    $JSON = Get-Content -Path $FilePath -Raw | ConvertFrom-Json -Depth 10
+
+    # 1) Expand TierLevelDefinition
+    $TierLevelDefinitions = [System.Collections.Generic.List[object]]::new()
     foreach ($EAMTierLevel in $JSON) {
-        $TierLevelDefinitions += $EAMTierLevel | ForEach-Object {
-            $_.TierLevelDefinition | ForEach-Object {
+        foreach ($Definition in $EAMTierLevel.TierLevelDefinition) {
+            $null = $TierLevelDefinitions.Add(
                 [PSCustomObject]@{
                     'EAMTierLevelName'                = $EAMTierLevel.EAMTierLevelName
                     'EAMTierLevelTagValue'            = $EAMTierLevel.EAMTierLevelTagValue
-                    'Category'                        = $_.Category
-                    'Service'                         = $_.Service
-                    'RoleAssignmentScopeName'         = $_.RoleAssignmentScopeName
-                    'ExcludedRoleAssignmentScopeName' = $_.ExcludedRoleAssignmentScopeName
-                    'RoleDefinitionActions'           = $_.RoleDefinitionActions
-                    'ExcludedRoleDefinitionActions'   = $_.ExcludedRoleDefinitionActions
+                    'Category'                        = $Definition.Category
+                    'Service'                         = $Definition.Service
+                    'RoleAssignmentScopeName'         = $Definition.RoleAssignmentScopeName
+                    'ExcludedRoleAssignmentScopeName' = $Definition.ExcludedRoleAssignmentScopeName
+                    'RoleDefinitionActions'           = $Definition.RoleDefinitionActions
+                    'ExcludedRoleDefinitionActions'   = $Definition.ExcludedRoleDefinitionActions
                 }
-            }
+            )
         }
     }
 
-    $TierLevelRoleScopes = @()
+    # 2) Expand RoleAssignmentScopeName
+    $TierLevelRoleScopes = [System.Collections.Generic.List[object]]::new()
     foreach ($TierLevelDefinition in $TierLevelDefinitions) {
-        $TierLevelRoleScopes += $TierLevelDefinition.RoleAssignmentScopeName | ForEach-Object {
-            [PSCustomObject]@{
-                'EAMTierLevelName'                = $TierLevelDefinition.EAMTierLevelName
-                'EAMTierLevelTagValue'            = $TierLevelDefinition.EAMTierLevelTagValue
-                'Category'                        = $TierLevelDefinition.Category
-                'Service'                         = $TierLevelDefinition.Service
-                'RoleAssignmentScopeName'         = $_
-                'ExcludedRoleAssignmentScopeName' = $TierLevelDefinition.ExcludedRoleAssignmentScopeName
-                'RoleDefinitionActions'           = $TierLevelDefinition.RoleDefinitionActions
-                'ExcludedRoleDefinitionActions'   = $TierLevelDefinition.ExcludedRoleDefinitionActions
-            }
+        foreach ($ScopeName in $TierLevelDefinition.RoleAssignmentScopeName) {
+            $null = $TierLevelRoleScopes.Add(
+                [PSCustomObject]@{
+                    'EAMTierLevelName'                = $TierLevelDefinition.EAMTierLevelName
+                    'EAMTierLevelTagValue'            = $TierLevelDefinition.EAMTierLevelTagValue
+                    'Category'                        = $TierLevelDefinition.Category
+                    'Service'                         = $TierLevelDefinition.Service
+                    'RoleAssignmentScopeName'         = $ScopeName
+                    'ExcludedRoleAssignmentScopeName' = $TierLevelDefinition.ExcludedRoleAssignmentScopeName
+                    'RoleDefinitionActions'           = $TierLevelDefinition.RoleDefinitionActions
+                    'ExcludedRoleDefinitionActions'   = $TierLevelDefinition.ExcludedRoleDefinitionActions
+                }
+            )
         }
     }
 
-    $TierLevelRoleScopesWithRoleActions = $null
+    # 3) Expand RoleDefinitionActions
+    $TierLevelRoleScopesWithRoleActions = [System.Collections.Generic.List[object]]::new()
     foreach ($TierLevelRoleScope in $TierLevelRoleScopes) {
-        $TierLevelRoleScopesWithRoleActions += $TierLevelRoleScope.RoleDefinitionActions | ForEach-Object {
-            [PSCustomObject]@{
-                'EAMTierLevelName'                = $TierLevelRoleScope.EAMTierLevelName
-                'EAMTierLevelTagValue'            = $TierLevelRoleScope.EAMTierLevelTagValue
-                'Category'                        = $TierLevelRoleScope.Category
-                'Service'                         = $TierLevelRoleScope.Service
-                'RoleAssignmentScopeName'         = $TierLevelRoleScope.RoleAssignmentScopeName
-                'ExcludedRoleAssignmentScopeName' = $TierLevelRoleScope.ExcludedRoleAssignmentScopeName
-                'RoleDefinitionActions'           = $_
-                'ExcludedRoleDefinitionActions'   = $TierLevelRoleScope.ExcludedRoleDefinitionActions
-            }
+        foreach ($RoleAction in $TierLevelRoleScope.RoleDefinitionActions) {
+            $null = $TierLevelRoleScopesWithRoleActions.Add(
+                [PSCustomObject]@{
+                    'EAMTierLevelName'                = $TierLevelRoleScope.EAMTierLevelName
+                    'EAMTierLevelTagValue'            = $TierLevelRoleScope.EAMTierLevelTagValue
+                    'Category'                        = $TierLevelRoleScope.Category
+                    'Service'                         = $TierLevelRoleScope.Service
+                    'RoleAssignmentScopeName'         = $TierLevelRoleScope.RoleAssignmentScopeName
+                    'ExcludedRoleAssignmentScopeName' = $TierLevelRoleScope.ExcludedRoleAssignmentScopeName
+                    'RoleDefinitionActions'           = $RoleAction
+                    'ExcludedRoleDefinitionActions'   = $TierLevelRoleScope.ExcludedRoleDefinitionActions
+                }
+            )
         }
     }
+
     $TierLevelRoleScopesWithRoleActions
 }
