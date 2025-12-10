@@ -143,10 +143,12 @@ function Get-EntraOpsPrivilegedEntraObject {
                         | project AccountObjectId = SourceProviderAccountId                    
                     "
                     $IdentityAccountResult = Invoke-EntraOpsGraphSecurityQuery -Query $IdentityAccountQuery -Timespan "P14D"
-                    $IdentityAccountResult.AccountObjectId | ForEach-Object { $WorkAccount.Add($_) | out-null }   
                 }
                 catch {
                     Write-Warning "Query for associated work account failed for $($AadObjectId): $($_.Exception.Message)"
+                }
+                if ($null -ne $IdentityAccountResult) {
+                    $IdentityAccountResult.AccountObjectId | ForEach-Object { $WorkAccount.Add($_) | out-null }   
                 }
             }
             
