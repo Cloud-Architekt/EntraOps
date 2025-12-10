@@ -45,8 +45,7 @@ function Get-EntraOpsPrivilegedIdGovRoles {
 
     if ($SampleMode -eq $True) {
         Write-Warning "Not supported yet!"
-    }
-    else {
+    } else {
         $ElmRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/roleDefinitions"
         $ElmRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/roleAssignments"
     }
@@ -59,7 +58,7 @@ function Get-EntraOpsPrivilegedIdGovRoles {
             $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
         }
         catch {
-            Write-Error "Issue to resolve directory object $Principal. Error: $($_.Exception.Message)"
+            Write-Warning "Issue to resolve directory object $Principal! $($_.Exception.Message)"
         }
 
         $AllPrinicpalElmRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/RoleAssignments?$count=true&`$filter=principalId eq '$Principal'" -ConsistencyLevel "eventual"
@@ -67,8 +66,12 @@ function Get-EntraOpsPrivilegedIdGovRoles {
             $Role = ($ElmRoleDefinitions | where-object { $_.id -eq $ElmPrincipalRoleAssignment.roleDefinitionId })
 
             try {
-                $CatalogId = $($ElmPrincipalRoleAssignment.appScopeId).Replace("/AccessPackageCatalog/", "")
-                $AccessPackageDisplayName = (Invoke-EntraOpsMsGraphQuery -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$($CatalogId)" -OutputType PSObject).displayName
+                if ($ElmPrincipalRoleAssignment.appScopeId -eq "/") {
+                    $AccessPackageDisplayName = "Directory"
+                } else {
+                    $CatalogId = $($ElmPrincipalRoleAssignment.appScopeId).Replace("/AccessPackageCatalog/", "")
+                    $AccessPackageDisplayName = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageCatalogs/$($CatalogId)" -OutputType PSObject).displayName
+                }
             }
             catch {
                 $AccessPackageDisplayName = "Unknown name"
@@ -93,21 +96,32 @@ function Get-EntraOpsPrivilegedIdGovRoles {
             }
         }
     }
-
     # List all eligible roleAssignment
 
-    if ($ExpandGroupMembers -eq $True) {
-        Write-Verbose -Message "Expanding groups for direct or transitive Entra ID role assignments"
+    #region Collect transitive assignments by group members of Role-Assignable Groups
+    if ($ExpandGroupMembers -eq $True) {    
+        Write-Verbose "Expanding groups for direct or transitive ELM role assignments"
         $GroupsWithRbacAssignment = $ElmRbacAssignments | where-object { $_.ObjectType -eq "group" }
-        $AllTransitiveMembers = $GroupsWithRbacAssignment | foreach-object {
-            $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($_.ObjectId)" -OutputType PSObject).displayName
-            $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $_.ObjectId
-            $TransitiveMembers | Add-Member -MemberType NoteProperty -Name "GroupObjectDisplayName" -Value $GroupObjectDisplayName -Force
-            $TransitiveMembers | Add-Member -MemberType NoteProperty -Name "GroupObjectId" -Value $_.ObjectId -Force
-            return $TransitiveMembers
+        $AllTransitiveMembers = @()
+
+        foreach ($GroupWithRbacAssignment in $GroupsWithRbacAssignment) {
+            $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($GroupWithRbacAssignment.ObjectId)" -OutputType PSObject).displayName
+            $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId)
+            foreach ($TransitiveMember in $TransitiveMembers) {
+                $Member = [pscustomobject]@{
+                    displayName           = $TransitiveMember.displayName
+                    id                    = $TransitiveMember.id
+                    '@odata.type'         = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType = $TransitiveMember.RoleAssignmentSubType
+                    GroupObjectDisplayName = $GroupObjectDisplayName
+                    GroupObjectId          = $GroupWithRbacAssignment.ObjectId
+                }
+                $AllTransitiveMembers += $Member
+            }
         }
 
-        $ElmRbacTransitiveAssignments = foreach ($RbacAssignmentByGroup in $GroupsWithRbacAssignment ) {
+        $ElmRbacTransitiveAssignments = [System.Collections.Generic.List[object]]::new()
+        foreach ($RbacAssignmentByGroup in ($GroupsWithRbacAssignment | where-object { $_.ObjectType -eq "group" }) ) {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
@@ -131,12 +145,15 @@ function Get-EntraOpsPrivilegedIdGovRoles {
                         TransitiveByObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($RbacAssignmentByGroup.ObjectId)" -OutputType PSObject).displayName
                     }
                 }
+            } else {
+                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
             }
-            else {
-                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId) - $($GroupObjectDisplayName)"
-            }
+
+            $ElmRbacTransitiveAssignments.Add($TransitiveMember) | Out-Null
         }
     }
+    #endregion
+
     $AllElmRbacAssignments = @()
     $AllElmRbacAssignments += $ElmRbacAssignments
     $AllElmRbacAssignments += $ElmRbacTransitiveAssignments

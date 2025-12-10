@@ -53,70 +53,112 @@ function Get-EntraOpsPrivilegedEamIdGov {
     $ClassificationFileName = "Classification_IdentityGovernance.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
         $IdGovClassificationFilePath = "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)"
-    }
-    elseif (Test-Path -Path "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)") {
+    } elseif (Test-Path -Path "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)") {
         $IdGovClassificationFilePath = "$($DefaultFolderClassification)/Templates/$($ClassificationFileName)"
-    }
-    else {
+    } else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
     }
+
+    # Default classification for Entra ID roles if no classified role definition found
+    $EntraRolesDefaultClassification = Invoke-RestMethod -Method Get -Uri "https://raw.githubusercontent.com/Cloud-Architekt/AzurePrivilegedIAM/refs/heads/main/Classification/Classification_EntraIdDirectoryRoles.json"
 
     # Get all role assignments and global exclusions
     Write-Host "Getting Microsoft Entra ID Governance information..."
 
     if ($SampleMode -ne $True) {
         $IdGovRbacAssignments = Get-EntraOpsPrivilegedIdGovRoles -TenantId $TenantId
-    }
-    else {
+    } else {
         Write-Warning "Currently not supported!"
     }
 
     if ($GlobalExclusion -eq $true) {
         $GlobalExclusionList = (Get-Content -Path "$DefaultFolderClassification/Global.json" | ConvertFrom-Json -Depth 10).ExcludedPrincipalId
-    }
-    else {
+    } else {
         $GlobalExclusionList = $null
     }
     #endregion
 
     #region Classification of assignments
     Write-Host "Classifiying of all Identity Governance assignments by classification of assigned and classified catalog objects"
-    $IdGovRbacClassificationsByAssignedObjects = foreach ($IdGovRbacScope in $IdGovRbacAssignments | Select-Object -Unique RoleAssignmentScopeId) {
+    $IdGovRbacScopes = $IdGovRbacAssignments | Select-Object -Unique RoleAssignmentScopeId
+    $IdGovRbacClassificationsByAssignedObjects = New-Object System.Collections.Generic.List[psobject]
+    foreach ($IdGovRbacScope in $IdGovRbacScopes) {
         $CurrentRoleAssignmentScope = $IdGovRbacScope.RoleAssignmentScopeId
         Write-Verbose -Message "Classify assignment scope $($CurrentRoleAssignmentScope)"
 
         if ($CurrentRoleAssignmentScope -like "/AccessPackageCatalog/*") {
             # Get all objects assigned to Access Package Catalog
             $AccessPackageCatalogId = $CurrentRoleAssignmentScope.Replace("/AccessPackageCatalog/", "")
-            $AssignedCatalogObjects = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageCatalogs/$AccessPackageCatalogId/accessPackageResources" -ConsistencyLevel "eventual"
-            $ClassificationOfAssignedCatalogObjects = @()
-            $ClassificationOfAssignedCatalogObjects += foreach ($AssignedCatalogObject in $AssignedCatalogObjects) {
+            $AssignedCatalogResources = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageCatalogs/$($AccessPackageCatalogId)/accessPackageResources?`$expand=accessPackageResourceScopes,accessPackageResourceRoles" -ConsistencyLevel "eventual" | Where-Object { $null -ne $_.originId }
+            Write-Verbose -Message "Found $($AssignedCatalogResources.Count) assigned catalog resources in catalog $($AccessPackageCatalogId)"
+            $MatchedClassificationToCatalogResources = New-Object System.Collections.Generic.List[psobject]
+            foreach ($AssignedCatalogResource in $AssignedCatalogResources) {
                 # Get classification object of the object from all or filtered RBAC system
-                $MatchedClassificationToCatalogObject = @()
-                $MatchedClassificationToCatalogObject += foreach ($RbacSystem in $FilterClassifiedRbacs) {
-                    $ClassificationSource = $FolderClassifiedObjects + "/" + $RbacSystem + "/" + $RbacSystem + ".json"
-                    $MatchedRbacClassification = Get-Content -Path $ClassificationSource -ErrorAction SilentlyContinue | ConvertFrom-Json -Depth 10 | Where-Object { $_.ObjectId -eq $AssignedCatalogObject.originId }
-                    if ($Null -ne $MatchedRbacClassification) {
-                        $MatchedRbacClassification
-                    }
-                    else {
-                        Write-Output "No classification for $($AssignedCatalogObject.displayName) $($AssignedCatalogObject.id) found in $RbacSystem or file $ClassificationSource is missing!"
-                    }
-                }
-                # Return classification object of the object as summary
-                $MatchedClassificationToCatalogObject
+                switch ($AssignedCatalogResource.originSystem) {
+
+                    'AadGroup' {
+                        Write-Verbose -Message "Classifying assigned catalog object $($AssignedCatalogResource.displayName) from origin system $($AssignedCatalogResource.originSystem) by $FilterClassifiedRbacs"
+                        foreach ($RbacSystem in $FilterClassifiedRbacs) {
+                            $ClassificationSource = $FolderClassifiedObjects + $RbacSystem + "/" + $RbacSystem + ".json"
+                            $ClassifiedObject = Get-Content -Path $ClassificationSource -ErrorAction SilentlyContinue | ConvertFrom-Json -Depth 10 | Where-Object { $_.ObjectId -eq $AssignedCatalogResource.originId }
+                            if ($null -ne $($ClassifiedObject.Classification)) {
+                                $MatchedRbacClassification = $ClassifiedObject.Classification
+                                $MatchedRbacClassification | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)" -Force
+                                $MatchedClassificationToCatalogResources.Add($MatchedRbacClassification) | Out-Null
+                            } else {
+                                Write-Verbose "No classification for $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in $RbacSystem or file $ClassificationSource is missing!"
+                            }
+                        }
+                    } 'DirectoryRole' {
+                        Write-Verbose -Message "Classifying assigned catalog object $($AssignedCatalogResource.displayName) from origin system $($AssignedCatalogResource.originSystem) by EntraID"
+                        $ClassificationSource = $FolderClassifiedObjects + "EntraID/EntraID.json"
+                        # Get classification from EntraID roles only on root scope, as directory roles can be only assigned in Entitlement Management on root scope
+                        if ($AssignedCatalogResource.accessPackageResourceScopes.isRootScope -ne $true) {
+                            Write-Verbose -Message "Assigned catalog resource scope is root scope, get classification from EntraID roles"
+                        } else {
+                            Write-Warning "Assigned catalog resource scope is not root scope, directory roles are currently only supported on root scope!"
+                        }
+                        $AllRbacClassification = (Get-Content -Path $ClassificationSource -ErrorAction SilentlyContinue | ConvertFrom-Json -Depth 10).RoleAssignments
+                        $Classification = ($AllRbacClassification | Where-Object { $_.RoleAssignmentScopeId -eq "/" -and $_.RoleDefinitionId -eq $AssignedCatalogResource.originId } | Select-Object -First 1).Classification
+                        if ($Null -eq $Classification) {
+                            Write-Warning "No classification for $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in EntraID or file $ClassificationSource is missing! Fallback to default classification from AzurePrivilegedIAM repository."
+                            $DefaultRoleClassification = ($EntraRolesDefaultClassification | Where-Object { $_.RoleId -eq $AssignedCatalogResource.originId } | Select-Object -First 1).RolePermissions | Select-Object -Unique EAMTierLevelTagValue, EAMTierLevelName, Category
+                            $Classification = $DefaultRoleClassification | foreach-object {
+                                [PSCustomObject]@{
+                                    'AdminTierLevel'     = $_.EAMTierLevelTagValue
+                                    'AdminTierLevelName' = $_.EAMTierLevelName
+                                    'Service'            = $_.Category | Select-Object -First 1
+                                }
+                            }
+                        }
+                        if ($Null -eq $Classification.AdminTierLevel) {
+                            Write-Warning "No default classification for $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in AzurePrivilegedIAM repository!"
+                            $Classification = [PSCustomObject]@{
+                                'AdminTierLevel'     = "Unclassified"
+                                'AdminTierLevelName' = "Unclassified"
+                                'Service'            = "Unclassified"
+                            }
+                        }
+                        $Classification | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)Resource" -Force
+                        $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
+                    } 'OAuthApplication' {
+                        Write-Warning "Classification of assigned API permissions currently not supported!"
+                    } default { Write-Warning "Origin system $($AssignedCatalogResource.originSystem) not supported for classification!" }
+                }                
             }
-            if ($Null -ne $ClassificationOfAssignedCatalogObjects.Classification) {
-                $ClassificationOfAssignedCatalogObjects.Classification | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "AssignedCatalogObjects" -Force
-                $Classification = (($ClassificationOfAssignedCatalogObjects).Classification | select-object -Unique *)
-                [PSCustomObject]@{
-                    'RoleAssignmentScopeId' = $CurrentRoleAssignmentScope
-                    'Classification'        = $Classification
-                }
-            }
-        }
-        else {
+        } elseif ($CurrentRoleAssignmentScope -eq "/") {
+            Write-Warning "Skipping root scope, currently only delegated roles of catalog creator and connected organization admin available."
+        } else {
             Write-Error "Invalid scope $CurrentRoleAssignmentScopeId"
+        }
+
+        if ([string]::IsNullOrEmpty -ne $MatchedClassificationToCatalogResources -and [string]::IsNullOrEmpty -ne $CurrentRoleAssignmentScope) {
+            $Classification = $($MatchedClassificationToCatalogResources | ForEach-Object { $_ }) | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy | Select-Object -Unique *
+            $IdGovRbacClassificationsByAssignedObject = [PSCustomObject]@{
+                'RoleAssignmentScopeId' = $CurrentRoleAssignmentScope
+                'Classification'        = $Classification
+            }
+            $IdGovRbacClassificationsByAssignedObjects.Add($IdGovRbacClassificationsByAssignedObject) | Out-Null
         }
     }
     #endregion
@@ -129,8 +171,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
         # Role actions are defined for scope and role definition contains an action of the role, otherwise all role actions within role assignment scope will be applied
         if ($SampleMode -eq $True) {
             Write-Warning "Currently not supported!"
-        }
-        else {
+        } else {
             $IdGovRoleActions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/EntitlementManagement/roleDefinitions" | Where-Object { $_.Id -eq "$($IdGovRbacAssignment.RoleDefinitionId)" }
         }
 
@@ -168,8 +209,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
                 'RoleAssignmentScopeId' = $IdGovRbacAssignment.RoleAssignmentScopeId
                 'Classification'        = $Classification
             }
-        }
-        else {
+        } else {
             $ClassifiedIdGovRbacRoleWithActions = @()
         }
     }
@@ -187,7 +227,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
 
     Write-Host "Classifiying of all assigned privileged users and groups in Identity Governance..."
     $IdGovRbacClassifiedObjects = $IdGovRbacAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
-        if ($_.ObjectId -ne $null) {
+        if ($null -ne $_.ObjectId) {
 
             # Object types
             $ObjectId = $_.ObjectId
@@ -225,6 +265,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
                 'RoleSystem'                    = "IdentityGovernance"
                 'Classification'                = $Classification
                 'RoleAssignments'               = $IdGovRbacClassifiedAssignments
+                'Sponsors'                      = $ObjectDetails.Sponsors
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
                 'OwnedDevices'                  = $ObjectDetails.OwnedDevices
