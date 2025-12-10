@@ -88,6 +88,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 'AdminTierLevel'     = "Unclassified"
                 'AdminTierLevelName' = "Unclassified"
                 'Service'            = "Unclassified"
+                'TaggedBy'           = "JSONwithAction"
             }
         }
 
@@ -118,7 +119,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     #region Add classification and details of Service Principals to output
     Write-Host "Classifiying of all assigned privileged app roles to service principals..."
     $AppRoleClassifiedObjects = $AppRoleAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
-        if ($_.ObjectId -ne $null) {
+        if ($null -ne $_.ObjectId) {
 
             # Object types
             $ObjectId = $_.ObjectId
@@ -156,6 +157,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 'RoleSystem'                    = "ResourceApp"
                 'Classification'                = $Classification
                 'RoleAssignments'               = $AppRoleClassifiedAssignments
+                'Sponsors'                      = $ObjectDetails.Sponsors
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
                 'OwnedDevices'                  = $ObjectDetails.OwnedDevices

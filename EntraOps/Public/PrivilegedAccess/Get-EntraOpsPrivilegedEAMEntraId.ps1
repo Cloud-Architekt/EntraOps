@@ -218,6 +218,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
                 'RoleSystem'                    = "EntraID"
                 'Classification'                = $Classification
                 'RoleAssignments'               = $AllAadRbacEntriesOfObject
+                'Sponsors'                      = $ObjectDetails.Sponsors
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
                 'OwnedDevices'                  = $ObjectDetails.OwnedDevices
