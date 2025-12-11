@@ -40,7 +40,7 @@ function Invoke-EntraOpsGraphSecurityQuery {
         do {
             try {
                 $retry = $false
-                $QueryResponse = (Invoke-MtGraphRequest -ApiVersion "beta" -RelativeUri "security/runHuntingQuery" -Method POST -Body $Body -OutputType PSObject -ErrorVariable QueryError)
+                $QueryResponse = (Invoke-EntraOpsMsGraphQuery -Uri "https://graph.microsoft.com/beta/security/runHuntingQuery" -Method POST -Body $Body -OutputType PSObject -ErrorVariable QueryError)
                 $QueryResults = $QueryResponse.Results
             }
             catch {
