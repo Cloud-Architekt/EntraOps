@@ -9,7 +9,7 @@ All essential changes on EntraOps will be documented in this changelog.
 - IdentityAccountInfo will be used for identify "AssociatedWorkAccount" if no CustomSecurityAttributes are defined
   - Correlation between privileged and work account can be made by using [link/unlink an account in Microsoft Defender](https://learn.microsoft.com/en-us/defender-for-identity/link-unlink-account-to-identity)
 - Identify and classify Entra roles as access package resources in catalogs
-- Eessential support for the “Agent ID” principal type (additional enhancements to identify inherited permissions through blueprints are planned)
+- Essential support for the “Agent ID” principal type (additional enhancements to identify inherited permissions through blueprints are planned)
 - Sponsors on supported privileged objects in the PrivilegedIAM reports
 
 ### Changed
