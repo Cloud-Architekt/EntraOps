@@ -53,6 +53,7 @@ function Export-EntraOpsClassificationDirectoryRoles {
         'd29b2b05-8046-44ba-8758-1e26182fcf32', # Directory Synchronization Accounts
         'a92aed5d-d78a-4d16-b381-09adb37eb3b0', # On Premises Directory Sync Account
         '9f06204d-73c1-4d4c-880a-6edb90606fd8' # Azure AD Joined Device Local Administrator
+        'db506228-d27e-4b7d-95e5-295956d6615f' # Agent ID Administrator is sensitive but has no corresponding role action
     )
 
     # Get EntraOps Classification

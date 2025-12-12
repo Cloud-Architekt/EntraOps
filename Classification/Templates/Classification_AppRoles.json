@@ -504,6 +504,19 @@
       },
       {
         "Category": "Microsoft.Graph",
+        "Service": "Copilot",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "CopilotPackages.Read.All",
+          "CopilotPackages.ReadWrite.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
         "Service": "Customer booking",
         "ResourceAppId": "00000003-0000-0000-c000-000000000000",
         "ResourceScope": "Application",
@@ -880,6 +893,7 @@
           "CustomSecAttributeAuditLogs.Read.All",
           "eDiscovery.Read.All",
           "eDiscovery.ReadWrite.All",
+          "ExchangeMessageTrace.Read.All",
           "IdentityProvider.Read.All",
           "IdentityRiskEvent.Read.All",
           "IdentityRiskyAgent.Read.All",
@@ -887,6 +901,7 @@
           "IdentityRiskyUser.Read.All",
           "InformationProtectionConfig.Read.All",
           "InformationProtectionPolicy.Read.All",
+          "MailboxItem.Export.All",
           "ProvisioningLog.Read.All",
           "Reports.Read.All",
           "ReportSettings.Read.All",
