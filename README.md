@@ -48,6 +48,14 @@ Integration to customize Control Plane scope automatically by critical assets in
 
 - 🛡️ Automated assignment of privileged assets in Conditional Access Groups and Restricted Management Administrative Units (RMAU) to protect high-privileged assets from lower privileges and apply strong Zero Trust policies. Privileged users and groups without existing restricted management by assignment to Administrative Unit (AU), role-assignable group or Entra ID role will be automatically covered by assignmend to a RMAU (named "UnprotectedObjects").
 
+- 🕵️‍♂️ GitHub Custom Agents to identify and analyse privileged objects in EntraOps
+  - EntraOps Report Agent: Applies Enterprise Access Model tiers and hygiene rules (cloud-only, no on-prem/guest for high privilege).
+  Detects tier mismatches, permanent high-privilege assignments, risky identity types, and insecure ownership.
+  Integrates with Microsoft Sentinel for UserRiskEvents, ServicePrincipalRiskEvents, and SecurityIncident data.
+  Builds an executive-summary style markdown report with categorized findings, severity, evidence (file/line), and attack path diagrams in ASCII.
+  - EntraOps QA Agent: This agent answers focused questions about a single identity or role. Locates only the relevant JSON files for the requested user, group, service principal, or role (no full dataset scan). Applies the Enterprise Access Model tiers and evaluates role assignments, PIM status, hygiene (on‑prem/guest, ownership), and simplified attack paths.
+  Optionally queries Microsoft Sentinel for user risk events or security incidents. Returns a chat-based response with an entity summary, critical findings, and a small role-assignments table.
+
 Currently the following RBAC systems are supported:
 - 🔑 Microsoft Entra roles
 - 🔄 Microsoft Entra Identity Governance
