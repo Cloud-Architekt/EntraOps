@@ -55,6 +55,10 @@ function Get-EntraOpsPrivilegedEamEntraId {
         "RoleId"  = "7be44c8a-adaf-4e2a-84d6-ab2649e08a13" # Privileged Authentication Administrator
         "Service" = 'Privileged User Management'
     }
+    $ControlPlaneRolesWithoutRoleActions += New-Object PSObject -Property @{
+        "RoleId"  = 'db506228-d27e-4b7d-95e5-295956d6615f' # Agent ID Administrator
+        "Service" = 'Agent Identity'
+    }    
 
     #endregion
 
@@ -218,6 +222,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
                 'RoleSystem'                    = "EntraID"
                 'Classification'                = $Classification
                 'RoleAssignments'               = $AllAadRbacEntriesOfObject
+                'Sponsors'                      = $ObjectDetails.Sponsors
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
                 'OwnedDevices'                  = $ObjectDetails.OwnedDevices

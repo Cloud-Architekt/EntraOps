@@ -172,6 +172,7 @@ function Get-EntraOpsPrivilegedEamDefender {
                 'RoleSystem'                    = "Defender"
                 'Classification'                = $Classification
                 'RoleAssignments'               = $DefenderRbacClassifiedAssignments
+                'Sponsors'                      = $ObjectDetails.Sponsors
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
                 'OwnedDevices'                  = $ObjectDetails.OwnedDevices

@@ -285,6 +285,7 @@ function Get-EntraOpsPrivilegedEamIntune {
                 'RoleSystem'                    = "DeviceManagement"
                 'Classification'                = $Classification
                 'RoleAssignments'               = $DeviceMgmtRbacClassifiedAssignments
+                'Sponsors'                      = $ObjectDetails.Sponsors
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
                 'OwnedDevices'                  = $ObjectDetails.OwnedDevices

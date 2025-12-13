@@ -68,8 +68,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
                 $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
             }
             catch {
-                Write-Host $_
-                Write-Error "Issue to resolve directory object $Principal"
+                Write-Warning "Issue to resolve directory object $Principal! $($_.Exception.Message)"
             }
 
             $AllPrinicpalDeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/RoleAssignments?$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual" -OutputType PSObject
@@ -137,16 +136,27 @@ function Get-EntraOpsPrivilegedDeviceRoles {
     if ($ExpandGroupMembers -eq $True) {
         Write-Verbose -Message "Expanding groups for direct or transitive Intune role assignments"
         # DeviceMgmtRbacAssignments
-        $GroupsWithRbacAssignment = $AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -eq "Group" } | Select-Object -Unique ObjectId, displayName
-        $AllTransitiveMembers = $GroupsWithRbacAssignment | foreach-object {
-            $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($_.ObjectId)" -OutputType PSObject).displayName
-            $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $_.ObjectId
-            $TransitiveMembers | Add-Member -MemberType NoteProperty -Name "GroupObjectDisplayName" -Value $GroupObjectDisplayName -Force
-            $TransitiveMembers | Add-Member -MemberType NoteProperty -Name "GroupObjectId" -Value $_.ObjectId -Force
-            return $TransitiveMembers
+        $GroupsWithRbacAssignment = $AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -eq "group" } | Select-Object -Unique ObjectId, ObjectDisplayName
+        $AllTransitiveMembers = @()
+        foreach ($GroupWithRbacAssignment in $GroupsWithRbacAssignment) {
+            $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId)
+            $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($GroupWithRbacAssignment.ObjectId)" -OutputType PSObject).displayName
+            foreach ($TransitiveMember in $TransitiveMembers) {
+                $Member = [pscustomobject]@{
+                    displayName           = $TransitiveMember.displayName
+                    id                    = $TransitiveMember.id
+                    '@odata.type'         = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType = $TransitiveMember.RoleAssignmentSubType
+                    GroupObjectDisplayName = $GroupObjectDisplayName
+                    GroupObjectId          = $GroupWithRbacAssignment.ObjectId
+                }
+                $AllTransitiveMembers += $Member
+            }
         }
 
-        $DeviceMgmtTransitiveRbacAssignments = foreach ($RbacAssignmentByGroup in ($AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -eq "group" }) ) {
+        $DeviceMgmtTransitiveRbacAssignments = [System.Collections.Generic.List[object]]::new()
+        foreach ($RbacAssignmentByGroup in ($AllDeviceMgmtRbacAssignments | where-object { $_.ObjectType -eq "group" }) ) {
+
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
@@ -170,10 +180,11 @@ function Get-EntraOpsPrivilegedDeviceRoles {
                         TransitiveByObjectDisplayName = $_.GroupObjectDisplayName
                     }
                 }
+            } else {
+                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
             }
-            else {
-                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId) - $($GroupObjectDisplayName)"
-            }
+
+            $DeviceMgmtTransitiveRbacAssignments.Add($TransitiveMember) | Out-Null
         }
     }
     #endregion

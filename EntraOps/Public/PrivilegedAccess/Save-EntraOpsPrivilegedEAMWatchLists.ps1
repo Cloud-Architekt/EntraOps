@@ -101,6 +101,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     "RoleSystem"                    = $Rbac
                     "Classification"                = $Privilege.Classification | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "Owners"                        = $Privilege.Owners | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    "Sponsors"                      = $Privilege.Sponsors | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "OwnedObjects"                  = $Privilege.OwnedObjects | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "OwnedDevices"                  = $Privilege.OwnedDevices | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "AssociatedWorkAccount"         = $Privilege.AssociatedWorkAccount | ConvertTo-Json -Depth 10 -Compress -AsArray

@@ -52,7 +52,7 @@ function Get-EntraOpsPrivilegedAppRoles {
     # Get names for app roles
     $AppRoleResourceIds = ($AppRoleAssignments | Select-Object -unique RoleAssignmentScopeId).RoleAssignmentScopeId
     $AppRolesByResource = foreach ($AppRoleResourceId in $AppRoleResourceIds) {
-        Invoke-EntraOpsMsGraphQuery -Uri "/v1.0/servicePrincipals/$($AppRoleResourceId)?$select=appRoles,appDisplayName"
+        Invoke-EntraOpsMsGraphQuery -Uri "/beta/servicePrincipals/$($AppRoleResourceId)?$select=appRoles,appDisplayName"
     }
 
     # Lookup for app role names for app role assignments

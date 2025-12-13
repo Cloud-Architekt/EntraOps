@@ -46,8 +46,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     if ($SampleMode -eq $True) {
         $AadRoleDefinitions = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementRoleDefinitions.json" | ConvertFrom-Json -Depth 10
         $AadRoleAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementAssignments.json" | ConvertFrom-Json -Depth 10
-    }
-    else {
+    } else {
         $AadRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions"
         $AadRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleAssignments"
     }
@@ -75,8 +74,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 $RoleType = "BuiltInRole"
                 $RoleIsPrivileged = $Role.isPrivileged
                 $RoleDefinitionName = $Role.displayName
-            }
-            else {
+            } else {
                 # RoleDefinitionId in Assignment has different Guid than in RoleDefinition, explicit request will resolve original RoleDefinitionName
                 # Set RoleDisplayName and RoleDefinitionId from RoleDefinition Endpoint
                 # Side Note: Deprecated role definition are just visible by direct RoleDefinition requests
@@ -86,8 +84,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 $RoleIsPrivileged = $OriginalRoleDefinition.isPrivileged
                 if ($OriginalRoleDefinition.isBuiltIn -eq "true") {
                     $RoleType = "BuiltInRole"
-                }
-                else {
+                } else {
                     $RoleType = "CustomRole"
                 }
             }
@@ -106,13 +103,11 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                         Write-Warning "Can't found scope name of $($AadPrincipalRoleAssignment.directoryScopeId) for $($Principal)"
                         $RoleAssignmentScopeName = "Unknown name"
                     }
-                }
-                else {
+                } else {
                     $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
                 }
 
-            }
-            else {
+            } else {
                 $RoleAssignmentScopeName = "Directory"
             }
 
@@ -128,7 +123,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 RoleAssignmentScopeName         = $RoleAssignmentScopeName
                 RoleAssignmentType              = "Direct"
                 RoleAssignmentSubType           = ""
-                ObjectDisplayName               = $PrincipalProfile.AdditionalProperties.displayName
+                ObjectDisplayName               = $PrincipalProfile.displayName
                 ObjectId                        = $Principal
                 ObjectType                      = $ObjectType.ToLower()
                 TransitiveByObjectId            = $null
@@ -167,8 +162,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                     Write-Warning "Dep - $($AadPrincipalRoleAssignment.roleDefinitionId)"
                     $RoleDefinitionName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/roleManagement/directory/roleDefinitions/$($EligiblePrincipalRoleAssignment.roleDefinitionId)" -OutputType PSObject).displayName
                 }
-            }
-            else {
+            } else {
                 # RoleDefinitionId in Assignment has different Guid than in RoleDefinition, explicit request will resolve original RoleDefinitionName
                 # Set RoleDisplayName and RoleDefinitionId from RoleDefinition Endpoint
                 # Side Note: Deprecated role definition are just visible by direct RoleDefinition requests
@@ -178,8 +172,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 $RoleIsPrivileged = $OriginalRoleDefinition.isPrivileged
                 if ($OriginalRoleDefinition.isBuiltIn -eq "true") {
                     $RoleType = "BuiltInRole"
-                }
-                else {
+                } else {
                     $RoleType = "CustomRole"
                 }
             }
@@ -196,8 +189,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                     Write-Warning "Can't found $($EligiblePrincipalRoleAssignment.directoryScopeId) for $($Principal)"
                     $RoleAssignmentScopeName = "Unknown name"
                 }
-            }
-            else {
+            } else {
                 $RoleAssignmentScopeName = "Directory"
             }
 
@@ -213,7 +205,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 RoleAssignmentScopeName         = $RoleAssignmentScopeName
                 RoleAssignmentType              = "Direct"
                 RoleAssignmentSubType           = ""
-                ObjectDisplayName               = $PrincipalProfile.AdditionalProperties.displayName
+                ObjectDisplayName               = $PrincipalProfile.displayName
                 ObjectId                        = $Principal
                 ObjectType                      = $ObjectType.ToLower()
                 TransitiveByObjectId            = $null
@@ -232,12 +224,10 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         if (($AadRbacActiveAndPermanentAssignment.RoleAssignmentId -in $AadActiveRoleAssignments.id) -and ($AadRbacActiveAndPermanentAssignment.RoleAssignmentId -in $AadActiveRoleAssignments.RoleAssignmentOriginId)) {
             $AadRbacActiveAndPermanentAssignment.RoleAssignmentPIMRelated = $True
             $AadRbacActiveAndPermanentAssignment.RoleAssignmentPIMAssignmentType = "Activated"
-        }
-        elseif ((($AadRbacActiveAndPermanentAssignment.RoleAssignmentId -in $AadTimeBoundedRoleAssignments.id) -and ($AadRbacActiveAndPermanentAssignment.RoleAssignmentId -in $AadTimeBoundedRoleAssignments.RoleAssignmentOriginId))) {
+        } elseif ((($AadRbacActiveAndPermanentAssignment.RoleAssignmentId -in $AadTimeBoundedRoleAssignments.id) -and ($AadRbacActiveAndPermanentAssignment.RoleAssignmentId -in $AadTimeBoundedRoleAssignments.RoleAssignmentOriginId))) {
             $AadRbacActiveAndPermanentAssignment.RoleAssignmentPIMRelated = $True
             $AadRbacActiveAndPermanentAssignment.RoleAssignmentPIMAssignmentType = "TimeBounded"
-        }
-        else {
+        } else {
             Write-Verbose "Permanent assignment $($AadRbacActiveAndPermanentAssignment) No active or eligible assignment detected"
         }
         $AadRbacActiveAndPermanentAssignment
@@ -246,24 +236,34 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     $AadPermanentRoleAssignments = $AadPermanentRoleAssignmentsWithEnrichment | Where-Object { $_.RoleAssignmentPIMAssignmentType -ne "Activated" }
     #endregion
 
-    # Summarize results with direct permanent (excl. activated roles) and eligible role assignments
+    # Summarize results with direct permanent (excl.s activated roles) and eligible role assignments
     $AllAadRbacAssignments = @()
     $AllAadRbacAssignments += $AadPermanentRoleAssignments
     $AllAadRbacAssignments += $AadEligibleUserRoleAssignments
 
     #region Collect transitive assignments by group members of Role-Assignable Groups
-    if ($ExpandGroupMembers -eq $True) {
+    if ($ExpandGroupMembers -eq $True) {    
         Write-Verbose "Expanding groups for direct or transitive Entra ID role assignments"
-        $GroupsWithRbacAssignment = $AllAadRbacAssignments | where-object { $_.ObjectType -eq "group" } | Select-Object -Unique ObjectId, displayName
-        $AllTransitiveMembers = $GroupsWithRbacAssignment | foreach-object {
-            $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($_.ObjectId)" -OutputType PSObject).displayName
-            $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $_.ObjectId
-            $TransitiveMembers | Add-Member -MemberType NoteProperty -Name "GroupObjectDisplayName" -Value $GroupObjectDisplayName -Force
-            $TransitiveMembers | Add-Member -MemberType NoteProperty -Name "GroupObjectId" -Value $_.ObjectId -Force
-            return $TransitiveMembers
+        $GroupsWithRbacAssignment = $AllAadRbacAssignments | where-object { $_.ObjectType -eq "group" } | Select-Object -Unique ObjectId, ObjectDisplayName
+        $AllTransitiveMembers = @()
+
+        foreach ($GroupWithRbacAssignment in $GroupsWithRbacAssignment) {
+            $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId)
+            foreach ($TransitiveMember in $TransitiveMembers) {
+                $Member = [pscustomobject]@{
+                    displayName           = $TransitiveMember.displayName
+                    id                    = $TransitiveMember.id
+                    '@odata.type'         = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType = $TransitiveMember.RoleAssignmentSubType
+                    GroupObjectDisplayName = $GroupWithRbacAssignment.ObjectDisplayName
+                    GroupObjectId          = $GroupWithRbacAssignment.ObjectId
+                }
+                $AllTransitiveMembers += $Member
+            }
         }
 
-        $AadRbacTransitiveAssignments = foreach ($RbacAssignmentByGroup in ($AllAadRbacAssignments | where-object { $_.ObjectType -eq "group" }) ) {
+        $AadRbacTransitiveAssignments = [System.Collections.Generic.List[object]]::new()
+        foreach ($RbacAssignmentByGroup in ($AllAadRbacAssignments | where-object { $_.ObjectType -eq "group" }) ) {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
@@ -288,11 +288,11 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                         TransitiveByObjectDisplayName   = $_.GroupObjectDisplayName
                     }
                 }
-            }
-            else {
+            } else {
                 Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
             }
 
+            $AadRbacTransitiveAssignments.Add($TransitiveMember) | Out-Null
         }
     }
     #endregion

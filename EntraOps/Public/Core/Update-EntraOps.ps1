@@ -23,8 +23,8 @@ function Update-EntraOps {
         [System.String]$ConfigFile = "./EntraOpsConfig.json"
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("./.github", "./EntraOps", "./Parsers", "./Queries", "./Samples", "./Workbooks")]
-        [Object]$TargetUpdateFolders = @("./.github", "./EntraOps", "./Parsers", "./Queries", "./Samples", "./Workbooks")
+        [ValidateSet("./.github", "./.github/agents", "./EntraOps", "./Parsers", "./Queries", "./Samples", "./Workbooks")]
+        [Object]$TargetUpdateFolders = @("./.github", "./.github/agents", "./EntraOps", "./Parsers", "./Queries", "./Samples", "./Workbooks")
         ,
         [Parameter(Mandatory = $False)]
         [System.String]$TemporaryUpdateFolder = "TmpUpdate"

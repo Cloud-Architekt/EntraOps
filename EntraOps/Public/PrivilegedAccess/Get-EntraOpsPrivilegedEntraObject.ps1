@@ -59,6 +59,7 @@ function Get-EntraOpsPrivilegedEntraObject {
 
     # Variables for ownership or other object relationships
     [System.Collections.ArrayList]$Owners = @()
+    [System.Collections.ArrayList]$Sponsors = @()
     [System.Collections.ArrayList]$ObjectOwner = @()
     [System.Collections.ArrayList]$DeviceOwner = @()
     [System.Collections.ArrayList]$WorkAccount = @()
@@ -72,7 +73,7 @@ function Get-EntraOpsPrivilegedEntraObject {
         $AadRolesActive = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$AadObjectId'" -ConsistencyLevel "eventual")
         $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
         $RestrictedManagementByAadRole = ("" -ne $AadRolesActive.value -or $null -ne $AadRolesEligible)
-        $RestrictedManagementByRMAU = ($ObjectDetails.isManagementRestricted -eq $true)
+        $RestrictedManagementByRMAU = $($ObjectDetails.isManagementRestricted)
     } catch {
         Write-Warning "No group or role assignment status available"
     }
@@ -81,11 +82,20 @@ function Get-EntraOpsPrivilegedEntraObject {
     switch ( $ObjectDetails.'@odata.type' ) {
         #region User object details
         '#microsoft.graph.user' {
-            $ObjectType = 'user'
-            if ($ObjectDetails.UserType -eq "Member") {
-                $ObjectSubType = "Member"
-            } else { $ObjectSubType = "Guest" }
 
+            # odata type by directoryObject includes value of user which could be either user or agentUser
+            $ObjectType = 'user'
+            $UserDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AadObjectId)" -OutputType PSObject
+            $IdentityParent = $($UserDetails.identityParent).id
+
+            if ($null -ne $UserDetails.'@odata.type') {
+                $ObjectSubType = $UserDetails.'@odata.type'.Replace("#microsoft.graph.", "")
+            } else {
+                $ObjectSubType = $UserDetails.UserType
+            }
+
+            # Sponsors
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
 
             # User Sign-in Name
             $ObjectSignInName = $ObjectDetails.UserPrincipalName
@@ -113,6 +123,31 @@ function Get-EntraOpsPrivilegedEntraObject {
             }
             if ($null -ne $ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute)) {
                 $ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute) | ForEach-Object { $WorkAccount.Add($_) | out-null }                
+            } else {
+                try {
+                    $IdentityAccountQuery = "
+                        IdentityAccountInfo
+                        | where SourceProvider == 'AzureActiveDirectory'
+                        | where SourceProviderAccountId == '$($AadObjectId)'
+                        | summarize arg_max(TimeGenerated, *) by AccountId
+                        | where IsPrimary == false
+                        | project TimeGenerated, DisplayName, SourceProviderAccountId, IdentityId, IdentityLinkBy, IdentityLinkType, IsPrimary, AccountId
+                        | join kind = leftouter (
+                            IdentityAccountInfo
+                                | where SourceProvider == 'AzureActiveDirectory'
+                                | summarize arg_max(TimeGenerated, *) by AccountId
+                                | where IsPrimary == true
+                                | project IdentityId, AccountObjectId = SourceProviderAccountId, AccountUpn
+                        ) on IdentityId
+                        | extend AssociatedPrimaryAccount = bag_pack_columns(AccountObjectId, AccountUpn, IdentityLinkType, IdentityId)
+                        | project AccountObjectId = SourceProviderAccountId                    
+                    "
+                    $IdentityAccountResult = Invoke-EntraOpsGraphSecurityQuery -Query $IdentityAccountQuery -Timespan "P14D"
+                    $IdentityAccountResult.AccountObjectId | ForEach-Object { $WorkAccount.Add($_) | out-null }   
+                }
+                catch {
+                    Write-Warning "Query for associated work account failed for $($AadObjectId): $($_.Exception.Message)"
+                }
             }
             
             # Object Ownership of Privileged User
@@ -122,6 +157,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/ownedDevices" + '?$select=id') -OutputType PSObject | ForEach-Object { $DeviceOwner.Add($_.id) | out-null }
         }
         #endregion
+
 
         #region Group object details
         '#microsoft.graph.group' {
@@ -159,7 +195,6 @@ function Get-EntraOpsPrivilegedEntraObject {
 
             # Administrative Units and Restricted Management does not apply to service principals
             $RestrictedManagementByRAG = $false
-            $RestrictedManagementByRMAU = $false
             $RestrictedManagementByAadRole = $false
 
             # Details of classified object from custom security attribute
@@ -171,8 +206,35 @@ function Get-EntraOpsPrivilegedEntraObject {
             $AdminTierLevel = (($ObjectCustomSec) | select-object -Unique adminTier).AdminTier
             $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique adminTierLevelName).AdminTierLevelName
             $OutsideOfAadTenant = ($SPObject.AppOwnerOrganizationId -ne $TenantId)
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$AadObjectId/ownedObjects" + '?$select=id') -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
+
+            #region Agent identity object details$
+            if ( $SPObject.'@odata.type' -like "*agentIdentity*" ) {
+
+                $ObjectSubType = $SPObject.'@odata.type'.Replace("#microsoft.graph.", "")
+
+                if ($ObjectSubType -ne "agentIdentityBlueprintPrincipal") {
+                    $BlueprintAppId = $($SPObject.agentAppId)
+                    $AgentIdentityBlueprintPrincipalObject = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/servicePrincipals(appId='$($BlueprintAppId)')/microsoft.graph.agentIdentityBlueprintPrincipal" -OutputType PSObject
+                    $IdentityParent = $AgentIdentityBlueprintPrincipalObject.appId
+                } else {
+                    $AgentIdentityBlueprintPrincipalObject = $SPObject
+                }
+
+                if ($null -ne $IdentityParent) {
+                   
+                }
+
+                $OutsideOfAadTenant = ($AgentIdentityBlueprintPrincipalObject.AppOwnerOrganizationId -ne $TenantId)
+
+                # Sponsors
+                Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$AadObjectId/$($SPObject.'@odata.type')/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+
+            }
+            #endregion
         }
         #endregion
+
         #region Unknown object
         '' {
             $ObjectDetails = [PSCustomObject]@{
@@ -186,7 +248,9 @@ function Get-EntraOpsPrivilegedEntraObject {
     }
 
     # Set empty arrays to avoid null values for arrays in schema
+    if ([string]::IsNullOrEmpty($RestrictedManagementByRMAU)) { $RestrictedManagementByRMAU = $false }        
     if ([string]::IsNullOrEmpty($Owners)) { $Owners = @() }    
+    if ([string]::IsNullOrEmpty($Sponsors)) { $Sponsors = @() }    
     if ([string]::IsNullOrEmpty($ObjectOwner)) { $ObjectOwner = @() }
     if ([string]::IsNullOrEmpty($DeviceOwner)) { $DeviceOwner = @() }
     if ([string]::IsNullOrEmpty($WorkAccount)) { $WorkAccount = @() }
@@ -208,6 +272,8 @@ function Get-EntraOpsPrivilegedEntraObject {
             'OwnedObjects'                  = $ObjectOwner
             'OwnedDevices'                  = $DeviceOwner
             'Owners'                        = $Owners
+            'Sponsors'                      = $Sponsors
+            'IdentityParent'                = $IdentityParent 
             'AdminTierLevel'                = if ($null -eq $AdminTierLevel -and $ObjectType -ne "group") { "Unclassified" } else { $AdminTierLevel.ToString() }
             'AdminTierLevelName'            = if ($null -eq $AdminTierLevelName -and $ObjectType -ne "group") { "Unclassified" } else { $AdminTierLevelName }
             'AssociatedWorkAccount'         = $WorkAccount

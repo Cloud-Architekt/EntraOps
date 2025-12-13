@@ -2,6 +2,24 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [0.5.0] - 2025-12-10
+### Added
+- [Experimental] GitHub Custom Agents for EntraOps: Report Generation and QA Agent
+  - The update workflow covers agent files starting with this release; manual copying of the files is required to upgrade to v0.5
+- IdentityAccountInfo will be used for identify "AssociatedWorkAccount" if no CustomSecurityAttributes are defined
+  - Correlation between privileged and work account can be made by using [link/unlink an account in Microsoft Defender](https://learn.microsoft.com/en-us/defender-for-identity/link-unlink-account-to-identity)
+- Identify and classify Entra roles as access package resources in catalogs
+- Essential support for the “Agent ID” principal type (additional enhancements to identify inherited permissions through blueprints are planned)
+- Sponsors on supported privileged objects in the PrivilegedIAM reports
+
+### Changed
+- Improved logic to expand JSON files for classification
+- Updated version of Classification Templates from AzurePrivilegedIAM
+
+### Fixed
+- Limitations on identify nested PIM for Groups in role-assignable groups
+
+
 ## [0.4.1] - 2025-09-16
 ### Fixed
 - Improvement in processing WatchList uploads and updates

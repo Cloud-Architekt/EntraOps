@@ -136,6 +136,7 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                     'RoleSystem'                    = "FirstPartyResourceApp"
                     'Classification'                = $Classification
                     'RoleAssignments'               = $AppRoleClassifiedAssignments
+                    'Sponsors'                      = $ObjectDetails.Sponsors
                     'OwnedObjects'                  = $ObjectDetails.OwnedObjects
                     'OwnedDevices'                  = $ObjectDetails.OwnedDevices
                     'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
