@@ -62,6 +62,9 @@ function Get-EntraOpsPrivilegedEamIdGov {
     # Default classification for Entra ID roles if no classified role definition found
     $EntraRolesDefaultClassification = Invoke-RestMethod -Method Get -Uri "https://raw.githubusercontent.com/Cloud-Architekt/AzurePrivilegedIAM/refs/heads/main/Classification/Classification_EntraIdDirectoryRoles.json"
 
+    # Classification for API permissions
+    $AppRolesClassification = Get-Content -Path $($FolderClassification + "Templates/Classification_AppRoles.json") | ConvertFrom-Json -Depth 10
+
     # Get all role assignments and global exclusions
     Write-Host "Getting Microsoft Entra ID Governance information..."
 
@@ -142,7 +145,28 @@ function Get-EntraOpsPrivilegedEamIdGov {
                         $Classification | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)Resource" -Force
                         $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                     } 'OAuthApplication' {
-                        Write-Warning "Classification of assigned API permissions currently not supported!"
+                        Write-Verbose -Message "Classifying assigned catalog object $($AssignedCatalogResource.displayName) from origin system $($AssignedCatalogResource.originSystem) by Graph API App roles"
+                        $Classification = foreach ($AppRoleScope in $AssignedCatalogResource.accessPackageResourceRoles) {
+                            $AppRoleClassification = ($AppRolesClassification | Where-Object { $_.TierLevelDefinition.RoleDefinitionActions -eq $AppRoleScope.displayName -and $_.TierLevelDefinition.ResourceAppId -eq $AssignedCatalogResource.originId }) | Select-Object EAMTierLevelName, EAMTierLevelTagValue
+                            $AppRoleService = ($AppRolesClassification.TierLevelDefinition | Where-Object { $_.RoleDefinitionActions -eq $AppRoleScope.displayName -and $_.ResourceAppId -eq $AssignedCatalogResource.originId }) | Select-Object Service
+                            if ($Null -ne $AppRoleClassification) {
+                                [PSCustomObject]@{
+                                    'AdminTierLevel'     = $AppRoleClassification.EAMTierLevelTagValue
+                                    'AdminTierLevelName' = $AppRoleClassification.EAMTierLevelName
+                                    'Service'            = $AppRoleService.Service
+                                    'TaggedBy'           = "Assigned$($AssignedCatalogResource.originSystem)Resource"
+                                }
+                            } else {
+                                Write-Warning "No classification for app role $($AppRoleScope.displayName) of application $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in App Roles classification!"
+                                [PSCustomObject]@{
+                                    'AdminTierLevel'     = "Unclassified"
+                                    'AdminTierLevelName' = "Unclassified"
+                                    'Service'            = "Unclassified"
+                                    'TaggedBy'           = "Assigned$($AssignedCatalogResource.originSystem)Resource"
+                                }
+                            }
+                        }
+                        $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                     } default { Write-Warning "Origin system $($AssignedCatalogResource.originSystem) not supported for classification!" }
                 }                
             }
