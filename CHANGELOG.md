@@ -2,6 +2,11 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [0.6.0] - 2025-12-25
+### Added
+- Identify and classify API permissions as access package resources in catalogs
+- Update Control Plane scope on Administrative Units and assign RMAUs for Application and Service Principle objects
+  
 ## [0.5.0] - 2025-12-10
 ### Added
 - [Experimental] GitHub Custom Agents for EntraOps: Report Generation and QA Agent
