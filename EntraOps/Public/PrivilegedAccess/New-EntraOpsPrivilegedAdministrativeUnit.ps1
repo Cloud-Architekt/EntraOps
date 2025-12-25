@@ -29,8 +29,8 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
         [Array]$ApplyToAccessTierLevel = ("ControlPlane", "ManagementPlane")
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("User", "Group")]
-        [Array]$FilterObjectType = ("User", "Group")
+        [ValidateSet("User", "Group", "ServicePrincipal", "Application")]
+        [Array]$FilterObjectType = ("User", "Group", "ServicePrincipal", "Application")
         ,        
         [Parameter(Mandatory = $False)]
         [ValidateSet("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")]
@@ -46,10 +46,11 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
         # Get EAM classification files
         if ($RbacSystem -eq "EntraID") {
             $ClassificationTemplateSubFolder = "AadResources"
+        } elseif ($RbacSystem -eq "ResourceApps") {
+            $ClassificationTemplateSubFolder = "AppRoles"
         } else {
             $ClassificationTemplateSubFolder = $RbacSystem
         }
-
         $ClassificationTemplates = "$DefaultFolderClassification/Templates/Classification_$($ClassificationTemplateSubFolder).json"
 
         $PrivilegedEamClassificationFiles = @()
@@ -70,7 +71,10 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
                 }
 
                 # Create Administrative Unit (AU) or Restricted Management AU for related Tier level
-                if ($RestrictedAUMode -eq "All" -or ($RestrictedAUMode -eq "Selected" -and ($TierLevel.EAMTierLevelTagValue -ne "0") -and ($RbacSystem -ne "EntraID") -and ($RbacSystem -ne "IdentityGovernance"))) {
+                if ($RestrictedAUMode -eq "All" `
+                        -or ($RestrictedAUMode -eq "Selected" -and ($TierLevel.EAMTierLevelTagValue -ne "0") -and ($RbacSystem -ne "EntraID") -and ($RbacSystem -ne "IdentityGovernance") -and ($RBACSystem -ne "ResourceApps")) `
+                        -or ($RestrictedAUMode -eq "Selected" -and ($RbacSystem -eq "ResourceApps" -and ($TierLevel.EAMTierLevelTagValue -ne "1"))) `
+                        ) {
                     $AuParams.IsMemberManagementRestricted = $true
                     $body = $AuParams | ConvertTo-Json -Depth 10
                     try {
