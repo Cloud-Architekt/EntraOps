@@ -144,8 +144,7 @@ function Get-EntraOpsPrivilegedEntraObject {
                     "
                     $IdentityAccountResult = Invoke-EntraOpsGraphSecurityQuery -Query $IdentityAccountQuery -Timespan "P14D"
                     $IdentityAccountResult.AccountObjectId | ForEach-Object { $WorkAccount.Add($_) | out-null }   
-                }
-                catch {
+                } catch {
                     Write-Warning "Query for associated work account failed for $($AadObjectId): $($_.Exception.Message)"
                 }
             }
@@ -231,6 +230,14 @@ function Get-EntraOpsPrivilegedEntraObject {
                 Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$AadObjectId/$($SPObject.'@odata.type')/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
 
             }
+
+            # Administrative Unit Assignments
+            $Body = @{
+                securityEnabledOnly = "false"
+            } | ConvertTo-Json
+            $AssignedAdminUnitIds = Invoke-EntraOpsMsGraphQuery -Method POST -Body $Body -Uri "/beta/directoryObjects/$($AAdObjectId)/getMemberObjects" -OutputType PSObject -DisableCache $true
+            $AllAdminUnitIds = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/administrativeunits" -OutputType PSObject            
+            $AllAdminUnitIds | Where-object { $_.Id -in $AssignedAdminUnitIds } | select-object id, displayName | ForEach-Object { $AssignedAdministrativeUnits.Add($_) | out-null }
             #endregion
         }
         #endregion

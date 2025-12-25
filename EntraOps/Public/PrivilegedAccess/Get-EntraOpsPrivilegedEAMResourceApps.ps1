@@ -154,7 +154,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
                 'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
                 'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
-                'RoleSystem'                    = "ResourceApp"
+                'RoleSystem'                    = "ResourceApps"
                 'Classification'                = $Classification
                 'RoleAssignments'               = $AppRoleClassifiedAssignments
                 'Sponsors'                      = $ObjectDetails.Sponsors

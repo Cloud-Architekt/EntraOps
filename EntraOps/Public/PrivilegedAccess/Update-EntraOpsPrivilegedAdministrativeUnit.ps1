@@ -29,18 +29,20 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
         [Array]$ApplyToAccessTierLevel = ("ControlPlane", "ManagementPlane")
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("User", "Group")]
+        [ValidateSet("User", "Group", "ServicePrincipal")]
         [Array]$FilterObjectType = ("User", "Group")
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps")]
-        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement", "Defender")
+        [ValidateSet("EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
+        [Array]$RbacSystems = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement")
         ,
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "Selected", "All")]
         [string]$RestrictedAuMode = "Selected" #Default value will not create RMAU for Tier0 and EntraID and Identity Governance RBACs
 
     )
+
+    $FirstPartyApps = Invoke-WebRequest -UseBasicParsing -Method GET -Uri "https://raw.githubusercontent.com/merill/microsoft-info/main/_info/MicrosoftApps.json" | ConvertFrom-Json
 
     foreach ($RbacSystem in $RbacSystems) {
 
@@ -63,6 +65,44 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
         $PrivilegedEam = @()
         $PrivilegedEam += Get-ChildItem -Path $Classification | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
         $PrivilegedEam = $PrivilegedEam | Where-Object { $_.ObjectType -in $FilterObjectType }
+
+        #region Add corresponding application objects of the service principals
+        if ($FilterObjectType -contains "ServicePrincipal" -and $PrivilegedEam.ObjectType -contains "ServicePrincipal") {
+            $ServicePrincipalObjects = $PrivilegedEam | Where-Object { $_.ObjectType -eq "ServicePrincipal" -and $_.ObjectSubType -eq "Application" }
+            foreach ($ServicePrincipal in $ServicePrincipalObjects) {
+                $ApplicationObject = Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/applications?`$filter=appId eq '$($ServicePrincipal.ObjectUserPrincipalName)'"
+                if ($null -ne $ApplicationObject.Id) {
+                    $AppObj = [PSCustomObject]@{
+                        ObjectId                = $ApplicationObject.Id
+                        ObjectDisplayName       = $ApplicationObject.DisplayName
+                        ObjectType              = "Application"
+                        RoleSystem              = $RbacSystem
+                        ObjectUserPrincipalName = $ApplicationObject.AppId
+                        Classification          = $ServicePrincipal.Classification
+                    }
+                    $PrivilegedEam += $AppObj
+                }
+            }
+        }
+        #endregion
+
+        #region Filter first party apps which are not supported to be assigned to AUs
+        if ($FilterObjectType -contains "ServicePrincipal" -and $PrivilegedEam.ObjectType -contains "ServicePrincipal") {
+            $PrivilegedEam | select-object -Unique ObjectUserPrincipalName, ObjectDisplayName | Where-Object { $_.ObjectUserPrincipalName -in $FirstPartyApps.AppId } | ForEach-Object {
+                Write-Warning "Service Principal $($_.ObjectDisplayName) is a first party application and can not be assigned to Administrative Units. Removing it from the list."
+            }
+            $PrivilegedEam = $PrivilegedEam | Where-Object { $_.ObjectUserPrincipalName -notin $FirstPartyApps.AppId }
+        }
+        #endregion
+
+        #region Filter managed identities which are not supported to be assigned to AUs
+        if ($FilterObjectType -contains "ServicePrincipal" -and $PrivilegedEam.ObjectSubType -contains "ManagedIdentity") {
+            $MsiCount = ($PrivilegedEam | where-object { $_.ObjectSubType -eq "ManagedIdentity" } | Measure-Object).Count
+            Write-Warning "Managed Identities should not be assigned to Administrative Units. $($MsiCount) Objects - Removing them from the list."
+            $PrivilegedEam = $PrivilegedEam | where-object { $_.ObjectSubType -ne "ManagedIdentity" }
+        }
+        #endregion        
+
         $PrivilegedEamCount = ($PrivilegedEam | Where-Object { $null -eq $_.Classification }).count
         if ($PrivilegedEamCount -gt 0) { Write-Warning "Numbers of objects without classification: $PrivilegedEamCount" }
         $PrivilegedEamClassifiedObjects = $PrivilegedEam | where-object { $_.Classification.AdminTierLevel -notcontains $null -and $_.RoleSystem -eq $RbacSystem }
@@ -95,9 +135,10 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                 }
             }
             # Check if privileged objects exists which should be synced to existing AU
-            elseif ($null -ne $EntraOpsPrivilegedObjects.Id) {
+            elseif ($null -ne $EntraOpsPrivilegedObjects.ObjectId) {
                 # Add or remove members from the AU which are not in scope of classification
-                $Diff = Compare-Object $EntraOpsPrivilegedObjects.ObjectId $CurrentAdminUnitMembers.Id
+                $Diff = Compare-Object $($EntraOpsPrivilegedObjects.ObjectId) $($CurrentAdminUnitMembers.Id)
+
                 $Diff | ForEach-Object {
                     if ($_.SideIndicator -eq "=>") {
                         $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/directoryObjects/$($_.InputObject)" -OutputType PSObject

@@ -214,8 +214,11 @@ function Update-EntraOpsClassificationControlPlaneScope {
             }
         }
 
-        # Always add also directory level assignment scope becuase of missing protection of service principal by RAG, AAD Role or RMAU assignment
-        $ScopeNamePrivilegedServicePrincipals = $ScopeNameServicePrincipalObject + $ScopeNameApplicationObject + $DirectoryLevelAssignmentScope
+        $PrivilegedServicePrincipalWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" -and $null -ne $_.AssignedAdministrativeUnits }
+        $PrivilegedServicePrincipalWithAU = $PrivilegedServicePrincipalWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+
+        # Always add also directory level assignment scope because of missing protection of service principal by RAG, AAD Role or RMAU assignment
+        $ScopeNamePrivilegedServicePrincipals = $ScopeNameServicePrincipalObject + $ScopeNameApplicationObject + $DirectoryLevelAssignmentScope + $PrivilegedServicePrincipalWithAU
     } else {
         Write-Warning "No privileged applications found! It's still recommended to avoid (Cloud) Application on directory scope..."
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedGroups>', '"/"')
