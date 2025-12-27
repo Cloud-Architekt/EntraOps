@@ -107,8 +107,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         $Classification = @()
         $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScope -eq $AppRoleAssignment.RoleAssignmentScope -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
         if ($ClassificationCollection.Classification.Count -gt 0) {
-            $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service
-            $Classification += $ClassificationCollection.Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+            $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         }
         $AppRoleAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $AppRoleAssignment
@@ -127,8 +126,9 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
             # RBAC Assignments
             $AppRoleClassifiedAssignments = @()
-            $AppRoleClassifiedAssignments += ($AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" })
+            $AppRoleClassifiedAssignments += ($AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *)
             $AppRoleClassification = $($AppRoleClassifiedAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+
 
             # Classification
             $Classification = @()
