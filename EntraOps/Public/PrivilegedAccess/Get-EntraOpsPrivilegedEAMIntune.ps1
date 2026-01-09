@@ -111,7 +111,7 @@ function Get-EntraOpsPrivilegedEamIntune {
                         $DeviceIds = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices?`$filter=azureADDeviceId+eq+'$($ClassifiedPrivilegedPawUser.AssociatedPawDevice)'" -OutputType PSObject).id
                         if ($Null -ne $DeviceIds) {      
                             $Devices += Foreach ($DeviceId in $DeviceIds) {
-                            (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
+                                (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
                             }                           
                         } else {
                             Write-Output "No device for Entra ID DeviceId $($ClassifiedPrivilegedPawUser.AssociatedPawDevice) of $($ClassifiedPrivilegedPawUser.ObjectDisplayName) found in Intune!"
@@ -128,7 +128,7 @@ function Get-EntraOpsPrivilegedEamIntune {
                         $DeviceIds = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices?`$filter=userPrincipalName+eq+'$($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName)'" -OutputType PSObject).id
                         if ($Null -ne $DeviceIds) {
                             $Devices += Foreach ($DeviceId in $DeviceIds) {
-                            (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
+                                (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
                             } 
                         } else {
                             Write-Warning "No device for $($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName) found in Intune! $($_)"
@@ -289,6 +289,7 @@ function Get-EntraOpsPrivilegedEamIntune {
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
                 'OwnedDevices'                  = $ObjectDetails.OwnedDevices
+                'IdentityParent'                = $ObjectDetails.IdentityParent                
                 'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
                 'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
             }

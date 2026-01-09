@@ -35,7 +35,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         [System.Boolean]$GlobalExclusion = $true
     )
 
-    # Check if classification file custom and/or template file exists, choose custom template for tenant if available
+    #region Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_AppRoles.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
         $ResourceAppsClassificationFilePath = "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)"
@@ -44,10 +44,11 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     } else {
         Write-Error "Classification file $($ClassificationFileName) not found in $($DefaultFolderClassification). Please run Update-EntraOpsClassificationFiles to download the latest classification files from AzurePrivilegedIAM repository."
     }
+    #endregion
 
     Write-Host "Getting App Roles from Entra ID Service Principals..."
 
-    # Get all role assignments and global exclusions
+    #region Get all role assignments and global exclusions
     if ($SampleMode -ne $True) {
         $AppRoleAssignments = Get-EntraOpsPrivilegedAppRoles -TenantId $TenantId
     } else {
@@ -101,7 +102,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     $AppRoleClassificationsByJSON = $AppRoleClassificationsByJSON | sort-object -property @{e = { $_.Classification.AdminTierLevel } }
     #endregion
 
-    #region Classify App Role Assignments
+    #region Classify App Role Assignments for Service Principals
     $AppRoleClassifications = foreach ($AppRoleAssignment in $AppRoleAssignments) {
         $AppRoleAssignment = $AppRoleAssignment | Select-Object -ExcludeProperty Classification
         $Classification = @()
@@ -115,18 +116,117 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     #endregion
     $AppRoleClassifications = $AppRoleClassifications | sort-object -property @{e = { $_.Classification.AdminTierLevel } }, RoleDefinitionName
 
+    #region Get Agent Identities and store to $AppRoleClassifiedAgentIdObjectsByParentId
+    Write-Host "Getting Agent Identities by parent blueprint principals..."
+    
+    $AllAgentIdBlueprintPrincipals = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/servicePrincipals/microsoft.graph.agentIdentityBlueprintPrincipal?`$select=id, appId, displayName, createdByAppId, appOwnerOrganizationId"
+    $AppRoleClassifiedAgentIdObjectsByParentId = foreach ( $AgentIdentityBlueprintPrincipal in $AllAgentIdBlueprintPrincipals ) {
+        #region Process each Agent Identity Blueprint Principal
+        Write-Verbose "Processing Agent Identity Blueprint Principal: $($AgentIdentityBlueprintPrincipal.displayName) ($($AgentIdentityBlueprintPrincipal.id))"
+
+        # Add classified role assignments to Agent Identity Blueprint Principal
+        $AgentIdentityBlueprintPrincipalAppRoles = $AppRoleClassifications | where-object { $_.ObjectId -eq $AgentIdentityBlueprintPrincipal.Id }
+
+        if ( $AgentIdentityBlueprintPrincipal.appOwnerOrganizationId -ne $TenantId ) {
+            Write-Warning "Skipping Agent Identity Blueprint Principal: $($AgentIdentityBlueprintPrincipal.displayName) ($($AgentIdentityBlueprintPrincipal.id)) as it belongs to multi-tenant app without visibility of inheritable permissions: $($AgentIdentityBlueprintPrincipal.appOwnerOrganizationId)"
+            $inheritablePermissionScopes = $null
+            continue
+        } else {
+            $AgentIdentityPermissions = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/applications/microsoft.graph.agentIdentityBlueprint/$($AgentIdentityBlueprintPrincipal.appid)/inheritablePermissions"
+            #region Extract inheritable permission scopes
+            $inheritablePermissionScopes = foreach ($AgentIdentityResourceAppPermission in $AgentIdentityPermissions) {
+                if ($AgentIdentityResourceAppPermission.inheritableScopes.kind -eq "allAllowed") {
+                    $InheritableResourceAppPermission = $AgentIdentityBlueprintPrincipalAppRoles | where-object { $_.RoleAssignmentScopeId -eq $RoleAssignmentScopeId -and $_.RoleType -eq "Delegated" }
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentType" -NotePropertyValue "Inheritable - allAllowed" -Force
+                    $InheritableResourceAppPermission
+                } elseif ($AgentIdentityResourceAppPermission.inheritableScopes.kind -eq "enumerated") {
+                    $RoleAssignmentScopeId = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=appId eq '$($AgentIdentityResourceAppPermission.resourceAppId)'" | select-object -ExpandProperty id
+                    $RoleDefinitionNames = $AgentIdentityResourceAppPermission.inheritableScopes.scopes 
+                    $InheritableResourceAppPermission = $AgentIdentityBlueprintPrincipalAppRoles | Where-Object { $_.RoleAssignmentScopeId -eq $RoleAssignmentScopeId -and $_.RoleDefinitionName -in $RoleDefinitionNames }
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentType" -NotePropertyValue "Inheritable - enumerated" -Force
+                    $InheritableResourceAppPermission
+                } elseif ($null -eq $AgentIdentityResourceAppPermission.inheritableScopes.kind) {
+                    Write-Verbose "No inheritable scopes defined for Agent Identity $($AgentIdentityBlueprintPrincipal.displayName) Resource App Permission: $($AgentIdentityResourceAppPermission.id)"
+                } else {
+                    Write-Warning "Unknown inheritableScopes.kind: $($AgentIdentityResourceAppPermission.inheritableScopes.kind)"
+                }
+            }
+            #endregion
+
+            if ( $inheritablePermissionScopes.Count -eq 0 -or $null -eq $inheritablePermissionScopes ) {
+                Write-Host "No inheritable permission scopes found for Agent Identity Blueprint Principal: $($AgentIdentityBlueprintPrincipal.displayName) ($($AgentIdentityBlueprintPrincipal.id))"
+                continue
+            } else {
+                $ChildAgentIdentities = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=(isof('microsoft.graph.agentIdentity')%20OR%20(tags%2Fany(p%3Astartswith(p%2C%20'power-virtual-agents-'))%20OR%20tags%2Fany(p%3Ap%20eq%20'AgenticInstance')))%20AND%20createdByAppId%20eq%20'$($AgentIdentityBlueprintPrincipal.appId)'"
+                foreach ( $ChildAgentIdentity in $ChildAgentIdentities ) {
+                    $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ChildAgentIdentity.Id
+
+                    # Classification
+                    $Classification = @()
+                    $Classification += $inheritablePermissionScopes.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+                    if ($Classification.Count -eq 0) {
+                        $Classification += [PSCustomObject]@{
+                            'AdminTierLevel'     = "Unclassified"
+                            'AdminTierLevelName' = "Unclassified"
+                            'Service'            = "Unclassified"
+                        }
+                    }
+                    $Classification = $Classification | Select-Object -Unique AdminTierLevel, AdminTierLevelName, Service
+
+                    [PSCustomObject]@{
+                        'ObjectId'                      = $ChildAgentIdentity.id
+                        'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
+                        'ObjectSubType'                 = $ObjectDetails.ObjectSubType
+                        'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
+                        'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
+                        'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
+                        'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
+                        'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
+                        'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
+                        'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
+                        'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
+                        'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                        'RoleSystem'                    = "ResourceApps"
+                        'Classification'                = $Classification
+                        'RoleAssignments'               = $inheritablePermissionScopes
+                        'Sponsors'                      = $ObjectDetails.Sponsors
+                        'Owners'                        = $ObjectDetails.Owners
+                        'OwnedObjects'                  = $ObjectDetails.OwnedObjects
+                        'OwnedDevices'                  = $ObjectDetails.OwnedDevices
+                        'IdentityParent'                = $ObjectDetails.IdentityParent
+                        'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
+                        'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                    }
+                }
+            }
+        }
+        # endregion
+    }
+    
+    #endregion
+
     #region Add classification and details of Service Principals to output
     Write-Host "Classifiying of all assigned privileged app roles to service principals..."
-    $AppRoleClassifiedObjects = $AppRoleAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
+    $AppRoleClassifiedSpObjects = $AppRoleAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
         if ($null -ne $_.ObjectId) {
 
             # Object types
             $ObjectId = $_.ObjectId
             $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
 
-            # RBAC Assignments
-            $AppRoleClassifiedAssignments = @()
-            $AppRoleClassifiedAssignments += ($AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *)
+            # Role Assignments
+            $AppRoleAssignments = @()
+
+            if ($ObjectId -in $AppRoleClassifiedAgentIdObjects.ObjectId) {
+                # Merge classifications and role assignments if service principal has inerherited agent identities and assigned app roles
+                $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
+                $AppRoleAssignments += $AppRoleClassifiedAgentIdObjects | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -ExpandProperty RoleAssignments
+            } else {
+                $AppRoleAssignments = @()
+                $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
+
+            }
+
             $AppRoleClassification = $($AppRoleClassifiedAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service
 
 
@@ -166,6 +266,11 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             }
         }
     }
+    #endregion
+
+    #region Add agent identities to classified objects if not already present
+    $AppRoleClassifiedAgentIdObjects = $AppRoleClassifiedAgentIdObjectsByParentId | where-object { $_.ObjectId -notin $AppRoleClassifiedSpObjects.ObjectId }
+    $AppRoleClassifiedObjects = $AppRoleClassifiedSpObjects + $AppRoleClassifiedAgentIdObjects
     #endregion
 
     $AppRoleClassifiedObjects = $AppRoleClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }

@@ -226,6 +226,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
                 'OwnedDevices'                  = $ObjectDetails.OwnedDevices
+                'IdentityParent'                = $ObjectDetails.IdentityParent                
                 'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
                 'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
             }
