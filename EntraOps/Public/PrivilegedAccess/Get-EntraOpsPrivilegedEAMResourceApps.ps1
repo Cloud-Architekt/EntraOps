@@ -221,7 +221,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
                 $AppRoleAssignments += $AppRoleClassifiedAgentIdObjects | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -ExpandProperty RoleAssignments
             } else {
-                $AppRoleAssignments = $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
+                $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
             }
 
             $AppRoleClassification = $($AppRoleAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service
@@ -279,4 +279,5 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
     $AppRoleClassifiedObjects = $AppRoleClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
     $AppRoleClassifiedObjects | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
+
 }
