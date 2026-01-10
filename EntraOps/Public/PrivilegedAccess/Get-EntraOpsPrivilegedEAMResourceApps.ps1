@@ -137,13 +137,15 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             $inheritablePermissionScopes = foreach ($AgentIdentityResourceAppPermission in $AgentIdentityPermissions) {
                 if ($AgentIdentityResourceAppPermission.inheritableScopes.kind -eq "allAllowed") {
                     $InheritableResourceAppPermission = $AgentIdentityBlueprintPrincipalAppRoles | where-object { $_.RoleAssignmentScopeId -eq $RoleAssignmentScopeId -and $_.RoleType -eq "Delegated" }
-                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentType" -NotePropertyValue "Inheritable - allAllowed" -Force
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentType" -NotePropertyValue "Inheritable" -Force
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentSubType" -NotePropertyValue "AllAllowed" -Force
                     $InheritableResourceAppPermission
                 } elseif ($AgentIdentityResourceAppPermission.inheritableScopes.kind -eq "enumerated") {
                     $RoleAssignmentScopeId = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=appId eq '$($AgentIdentityResourceAppPermission.resourceAppId)'" | select-object -ExpandProperty id
                     $RoleDefinitionNames = $AgentIdentityResourceAppPermission.inheritableScopes.scopes 
                     $InheritableResourceAppPermission = $AgentIdentityBlueprintPrincipalAppRoles | Where-Object { $_.RoleAssignmentScopeId -eq $RoleAssignmentScopeId -and $_.RoleDefinitionName -in $RoleDefinitionNames }
-                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentType" -NotePropertyValue "Inheritable - enumerated" -Force
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentType" -NotePropertyValue "Inheritable" -Force
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentSubType" -NotePropertyValue "Enumerated" -Force
                     $InheritableResourceAppPermission
                 } elseif ($null -eq $AgentIdentityResourceAppPermission.inheritableScopes.kind) {
                     Write-Verbose "No inheritable scopes defined for Agent Identity $($AgentIdentityBlueprintPrincipal.displayName) Resource App Permission: $($AgentIdentityResourceAppPermission.id)"
