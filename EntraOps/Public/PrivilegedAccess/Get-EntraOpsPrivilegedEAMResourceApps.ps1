@@ -173,6 +173,12 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     }
                     $Classification = $Classification | Select-Object -Unique AdminTierLevel, AdminTierLevelName, Service
 
+                    # Replace ObjectId with Child Agent Identity ObjectId in Role Assignments
+                    $inheritablePermissionScopes = $inheritablePermissionScopes | ForEach-Object {
+                        $_.ObjectId = $ChildAgentIdentity.Id
+                        $_
+                    }
+
                     [PSCustomObject]@{
                         'ObjectId'                      = $ChildAgentIdentity.id
                         'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
@@ -206,7 +212,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     #endregion
 
     #region Add classification and details of Service Principals to output
-    Write-Host "Classifiying of all assigned privileged app roles to service principals..."
+    Write-Host "Classifying of all assigned privileged app roles to service principals..."
     $AppRoleClassifiedSpObjects = $AppRoleAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
         if ($null -ne $_.ObjectId) {
 
@@ -218,7 +224,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             $AppRoleAssignments = @()
 
             if ($ObjectId -in $AppRoleClassifiedAgentIdObjects.ObjectId) {
-                # Merge classifications and role assignments if service principal has inerherited agent identities and assigned app roles
+                # Merge classifications and role assignments if service principal has inherherited agent identities and assigned app roles
                 $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
                 $AppRoleAssignments += $AppRoleClassifiedAgentIdObjects | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -ExpandProperty RoleAssignments
             } else {
@@ -228,7 +234,6 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             }
 
             $AppRoleClassification = $($AppRoleClassifiedAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service
-
 
             # Classification
             $Classification = @()

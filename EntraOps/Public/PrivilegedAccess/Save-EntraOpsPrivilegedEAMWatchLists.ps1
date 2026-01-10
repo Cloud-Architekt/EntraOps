@@ -104,7 +104,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     "Sponsors"                      = $Privilege.Sponsors | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "OwnedObjects"                  = $Privilege.OwnedObjects | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "OwnedDevices"                  = $Privilege.OwnedDevices | ConvertTo-Json -Depth 10 -Compress -AsArray
-                    "IdentityParent"                = $Privilege.IdentityParent | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    "IdentityParent"                = $Privilege.IdentityParent
                     "AssociatedWorkAccount"         = $Privilege.AssociatedWorkAccount | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "AssociatedPawDevice"           = $Privilege.AssociatedPawDevice | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "Tags"                          = @("$($Rbac)", "Privileged Principal", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress
