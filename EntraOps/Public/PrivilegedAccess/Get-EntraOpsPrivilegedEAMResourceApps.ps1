@@ -173,12 +173,6 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     }
                     $Classification = $Classification | Select-Object -Unique AdminTierLevel, AdminTierLevelName, Service
 
-                    # Replace ObjectId with Child Agent Identity ObjectId in Role Assignments
-                    $inheritablePermissionScopes = $inheritablePermissionScopes | ForEach-Object {
-                        $_.ObjectId = $ChildAgentIdentity.Id
-                        $_
-                    }
-
                     [PSCustomObject]@{
                         'ObjectId'                      = $ChildAgentIdentity.id
                         'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
@@ -208,7 +202,6 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         }
         # endregion
     }
-    
     #endregion
 
     #region Add classification and details of Service Principals to output
@@ -224,16 +217,14 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             $AppRoleAssignments = @()
 
             if ($ObjectId -in $AppRoleClassifiedAgentIdObjects.ObjectId) {
-                # Merge classifications and role assignments if service principal has inherherited agent identities and assigned app roles
+                # Merge classifications and role assignments if service principal has inheritable permissions by agent blueprint and assigned app roles
                 $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
                 $AppRoleAssignments += $AppRoleClassifiedAgentIdObjects | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -ExpandProperty RoleAssignments
             } else {
-                $AppRoleAssignments = @()
-                $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
-
+                $AppRoleAssignments = $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
             }
 
-            $AppRoleClassification = $($AppRoleClassifiedAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+            $AppRoleClassification = $($AppRoleAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service
 
             # Classification
             $Classification = @()
@@ -261,7 +252,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                 'RoleSystem'                    = "ResourceApps"
                 'Classification'                = $Classification
-                'RoleAssignments'               = $AppRoleClassifiedAssignments
+                'RoleAssignments'               = $AppRoleAssignments
                 'Sponsors'                      = $ObjectDetails.Sponsors
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -273,10 +264,18 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     }
     #endregion
 
-    #region Add agent identities to classified objects if not already present
+    #region Add agent identities to classified objects if not already present and correct role assignment ObjectIds
     $AppRoleClassifiedAgentIdObjects = $AppRoleClassifiedAgentIdObjectsByParentId | where-object { $_.ObjectId -notin $AppRoleClassifiedSpObjects.ObjectId }
     $AppRoleClassifiedObjects = $AppRoleClassifiedSpObjects + $AppRoleClassifiedAgentIdObjects
-    #endregion
+
+    # Overwrite ObjectId of RoleAssignments for Agent Identities to match Agent Identity ObjectId (and not include Blueprint Principal ObjectId)
+    $AppRoleClassifiedObjects | Where-Object { $_.ObjectSubType -eq "AgentIdentity" } | ForEach-Object {
+        $AgentObjectId = $_.ObjectId
+        $_.RoleAssignments | ForEach-Object {
+            $_.ObjectId = $AgentObjectId
+        }
+    }    
+    #endregion       
 
     $AppRoleClassifiedObjects = $AppRoleClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
     $AppRoleClassifiedObjects | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
