@@ -90,7 +90,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     "ObjectType"                    = $Privilege.ObjectType
                     "ObjectSubType"                 = $Privilege.ObjectSubType
                     "ObjectDisplayName"             = $Privilege.ObjectDisplayName
-                    "ObjectUserPrincipalName"       = $Privilege.ObjectDisplayName
+                    "ObjectUserPrincipalName"       = $Privilege.ObjectUserPrincipalName
                     "ObjectAdminTierLevel"          = $Privilege.ObjectAdminTierLevel
                     "ObjectAdminTierLevelName"      = $Privilege.ObjectAdminTierLevelName
                     "OnPremSynchronized"            = $Privilege.OnPremSynchronized
