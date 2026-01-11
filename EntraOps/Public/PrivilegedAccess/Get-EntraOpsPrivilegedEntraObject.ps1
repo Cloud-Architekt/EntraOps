@@ -210,14 +210,12 @@ function Get-EntraOpsPrivilegedEntraObject {
                     $AgentIdentityBlueprintPrincipalObject = $SPObject
                 }
 
-                if ($null -ne $IdentityParent) {
-                   
-                }
-
                 $OutsideOfAadTenant = ($AgentIdentityBlueprintPrincipalObject.AppOwnerOrganizationId -ne $TenantId)
 
                 # Sponsors
-                Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$AadObjectId/$($SPObject.'@odata.type')/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+                Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$($AadObjectId)/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+
+
 
             }
             #endregion
@@ -302,6 +300,11 @@ function Get-EntraOpsPrivilegedEntraObject {
         $PasswordPolicies = $ObjectDetails.passwordPolicies
     }
 
+    # Make sure that first character is uppercase
+    if (![string]::IsNullOrEmpty($ObjectSubType)) {
+        $ObjectSubType = $ObjectSubType.Substring(0,1).ToUpper() + $ObjectSubType.Substring(1)
+    }
+
     if ($null -ne $ObjectDetails) {
         [PSCustomObject]@{
             'ObjectId'                      = $ObjectDetails.Id
@@ -327,4 +330,5 @@ function Get-EntraOpsPrivilegedEntraObject {
             'OutsideOfHomeTenant'           = $OutsideOfAadTenant
         }
     }
+
 }
