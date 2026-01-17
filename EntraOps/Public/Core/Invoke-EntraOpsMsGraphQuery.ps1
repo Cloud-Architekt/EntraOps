@@ -61,10 +61,8 @@ function Invoke-EntraOpsMsGraphQuery {
     # Check if the Uri is valid.
     if ($Uri -like "/beta/*" -or $Uri -like "/v1.0/*") {
         $Uri = "https://graph.microsoft.com$Uri"
-    }
-    elseif ($Uri -like "https://graph.microsoft.com/*") {
-    }
-    else {
+    } elseif ($Uri -like "https://graph.microsoft.com/*") {
+    } else {
         throw "Invalid Graph URI: $($Uri)!"
     }
 
@@ -76,8 +74,7 @@ function Invoke-EntraOpsMsGraphQuery {
     # Check cache property for the Uri
     try {
         $isInCache = $__EntraOpsSession.GraphCache.ContainsKey($Uri)
-    }
-    catch {
+    } catch {
         Write-Verbose "Cache is empty"
     }
 
@@ -96,7 +93,7 @@ function Invoke-EntraOpsMsGraphQuery {
     if (!$QueryResult) {
         # Create empty arrays to store the results
         $QueryRequest = @()
-        $QueryResult = @()
+        $QueryResult = New-Object System.Collections.Generic.List[Object]
 
         if ($UseAzPwshOnly -eq $True -and $null -ne $MsGraphAccessToken) {
             Write-Verbose -Message "Using Invoke-RestMethod Cmdlet"
@@ -107,24 +104,22 @@ function Invoke-EntraOpsMsGraphQuery {
                 # Run the initial query to Graph API
                 if ($Method -eq 'GET') {
                     $QueryRequest = Invoke-RestMethod -Headers $HeaderParams -Uri $Uri -Method $Method -ContentType "application/json" -ResponseHeadersVariable $ResponseMessage
-                }
-                else {
+                } else {
                     $QueryRequest = Invoke-RestMethod -Headers $HeaderParams -Uri $Uri -Method $Method -ContentType "application/json" -Body $Body -ResponseHeadersVariable $ResponseMessage
                 }
 
                 # Add the initial query result to the result array
                 if ($QueryRequest.value) {
-                    $QueryResult += $QueryRequest.value
-                }
-                else {
-                    $QueryResult += $QueryRequest
+                    $QueryResult.AddRange($QueryRequest.value)
+                } else {
+                    $QueryResult.Add($QueryRequest)
                 }
 
                 # Run another query to fetch data until there are no pages left
                 if ($Uri -notlike "*`$top*") {
                     while ($QueryRequest.'@odata.nextLink') {
                         $QueryRequest = Invoke-RestMethod -Headers $HeaderParams -Uri $QueryRequest.'@odata.nextLink' -Method $Method -ContentType "application/json" -ResponseHeadersVariable $ResponseMessage
-                        $QueryResult += $QueryRequest.value
+                        $QueryResult.AddRange($QueryRequest.value)
                     }
                 }
 
@@ -135,41 +130,36 @@ function Invoke-EntraOpsMsGraphQuery {
                     HttpResponseMessage { $QueryResult = $ResponseMessage }
                 }
                 $QueryResult
-            }
-            catch {
+            } catch {
                 Write-Warning "Failed to execute $($URI). Error: $($_.Exception.Message)"
             }
-        }
-        else {
+        } else {
             Write-Verbose -Message "Using Invoke-MgGraphRequest Cmdlet"
 
             try {
                 # Run the initial query to Graph API
                 if ($Method -eq 'GET') {
                     $QueryRequest = Invoke-MgGraphRequest -Headers $HeaderParams -Uri $Uri -Method $Method -ContentType "application/json" -OutputType $OutputType
-                }
-                else {
+                } else {
                     $QueryRequest = Invoke-MgGraphRequest -Headers $HeaderParams -Uri $Uri -Method $Method -ContentType "application/json" -Body $Body -OutputType $OutputType
                 }
 
                 # Add the initial query result to the result array
                 if ($QueryRequest.value) {
-                    $QueryResult += $QueryRequest.value
-                }
-                else {
-                    $QueryResult += $QueryRequest
+                    $QueryResult.AddRange($QueryRequest.value)
+                } else {
+                    $QueryResult.Add($QueryRequest)
                 }
 
                 # Run another query to fetch data until there are no pages left
                 if ($Uri -notlike "*`$top*") {
                     while ($QueryRequest.'@odata.nextLink') {
                         $QueryRequest = Invoke-MgGraphRequest -Headers $HeaderParams -Uri $QueryRequest.'@odata.nextLink' -Method $Method -ContentType "application/json" -OutputType $OutputType
-                        $QueryResult += $QueryRequest.value
+                        $QueryResult.AddRange($QueryRequest.value)
                     }
                 }
                 $QueryResult
-            }
-            catch {
+            } catch {
                 Write-Warning "Failed to execute $($URI). Error: $($_.Exception.Message)"
             }
         }
@@ -178,13 +168,11 @@ function Invoke-EntraOpsMsGraphQuery {
             # Update cache
             if ($isInCache) {
                 $__EntraOpsSession.GraphCache[$cacheKey] = $QueryResult
-            }
-            else {
+            } else {
                 $__EntraOpsSession.GraphCache.Add($cacheKey, $QueryResult)
             }
         }
-    }
-    else {
+    } else {
         $QueryResult
     }
 }

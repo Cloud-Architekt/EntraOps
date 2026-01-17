@@ -121,6 +121,14 @@ function Get-EntraOpsPrivilegedEamEntraId {
     } else {
         $AllAadRoleActions = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions" -OutputType PSObject)
     }
+
+    # Optimization: Create a lookup Hashtable for role actions to avoid O(N^2) lookups
+    $RoleActionsLookup = @{}
+    foreach ($RoleAction in $AllAadRoleActions) {
+        if ($null -ne $RoleAction.DisplayName) {
+            $RoleActionsLookup[$RoleAction.DisplayName] = $RoleAction
+        }
+    }
     #endregion
 
     #region Apply classification for all role definitions
@@ -129,7 +137,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
         $AadRoleScope = $CurrentAadRbacClassification.RoleAssignmentScopeId
 
         # Get role actions for role definition
-        $AadRoleActions = $AllAadRoleActions | Where-Object { $_.DisplayName -eq "$($CurrentRoleDefinitionName)" }
+        $AadRoleActions = $RoleActionsLookup["$($CurrentRoleDefinitionName)"]
 
         $MatchedClassificationByScope = @()
         # Check if RBAC scope is listed in JSON by wildcard in RoleAssignmentScopeName (e.g. /azops-rg/*)
@@ -181,17 +189,20 @@ function Get-EntraOpsPrivilegedEamEntraId {
 
     #region Apply classification on all principals
     Write-Host "Classifiying of all assigned privileged users and groups to Entra ID roles..."
+
+    # Optimization: Group assignments by ObjectId to avoid O(N^2) filtering in loop
+    $RbacAssignmentsByObject = $AadRbacClassification | Group-Object ObjectId -AsHashTable -AsString
+
     $AadRbacClassifiedObjects = $AadRbacClassification | select-object -Unique ObjectId, ObjectType | ForEach-Object {
         if ($null -ne $_.ObjectId) {
-            Write-Verbose -Message "Get details for privileged user $($AadRbacClassification.ObjectId)..."
-            # Object types
             $ObjectId = $_.ObjectId
+            Write-Verbose -Message "Get details for privileged user $($ObjectId)..."
+            # Object types
             $ObjectType = $_.ObjectType
             $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
 
             # RBAC Assignments
-            $AllAadRbacEntriesOfObject = @()
-            $AllAadRbacEntriesOfObject += ($AadRbacClassification | Where-Object { $_.ObjectId -eq "$ObjectId" })
+            $AllAadRbacEntriesOfObject = $RbacAssignmentsByObject[$ObjectId]
 
             # Classification
             $Classification = @()
