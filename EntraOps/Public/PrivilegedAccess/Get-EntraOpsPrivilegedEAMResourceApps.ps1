@@ -72,7 +72,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         # Check if role action and scope exists in JSON definition
         $AppRoleInJsonDefinition = @()
         $AppRoleInJsonDefinition = foreach ($RoleDefinitionName in $AppRoleAssignment.RoleDefinitionName) {
-            $AppRoleByClassificationJSON | Where-Object { ($_.RoleDefinitionActions -eq $RoleDefinitionName -or $RoleDefinitionName -like $_.RoleDefinitionActions) -and $Classification.ExcludedRoleDefinitionActions -ne $RoleDefinitionName }
+            $AppRoleByClassificationJSON | Where-Object { ($_.RoleDefinitionActions -eq $RoleDefinitionName -or $RoleDefinitionName -like $_.RoleDefinitionActions) -and $_.ExcludedRoleDefinitionActions -ne $RoleDefinitionName }
         }
 
         $Classification = @()
@@ -109,7 +109,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     $AppRoleClassifications = foreach ($AppRoleAssignment in $AppRoleAssignments) {
         $AppRoleAssignment = $AppRoleAssignment | Select-Object -ExcludeProperty Classification
         $Classification = @()
-        $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScope -eq $AppRoleAssignment.RoleAssignmentScope -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
+        $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $AppRoleAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
         if ($ClassificationCollection.Classification.Count -gt 0) {
             $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         }
@@ -143,7 +143,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentType" -NotePropertyValue "Inheritable" -Force
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentSubType" -NotePropertyValue "AllAllowed" -Force
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectDisplayName" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.displayName)" -Force
-                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectId" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.displayName)" -Force                        
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectId" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.id)" -Force                        
                     $InheritableResourceAppPermission
                 } elseif ($AgentIdentityResourceAppPermission.inheritableScopes.kind -eq "enumerated") {
                     $RoleAssignmentScopeId = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=appId eq '$($AgentIdentityResourceAppPermission.resourceAppId)'" | select-object -ExpandProperty id
@@ -285,13 +285,15 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             }
             
             $Classification = @($UniqueClassificationsHash.Values | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
-            
+
             if ($Classification.Count -eq 0) {
-                $Classification = @([PSCustomObject]@{
-                    'AdminTierLevel'     = "Unclassified"
-                    'AdminTierLevelName' = "Unclassified"
-                    'Service'            = "Unclassified"
-                }
+                $Classification = @(
+                    [PSCustomObject]@{
+                        'AdminTierLevel'     = "Unclassified"
+                        'AdminTierLevelName' = "Unclassified"
+                        'Service'            = "Unclassified"
+                    }
+                )
             }
 
             [PSCustomObject]@{
