@@ -35,6 +35,9 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         [System.Boolean]$GlobalExclusion = $true
     )
 
+    # Configuration for batch processing
+    $BatchSize = 100  # Number of objects to process before showing progress
+
     #region Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_AppRoles.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
@@ -212,12 +215,50 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
     #region Add classification and details of Service Principals to output
     Write-Host "Classifying of all assigned privileged app roles to service principals..."
-    $AppRoleClassifiedSpObjects = $AppRoleAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
-        if ($null -ne $_.ObjectId) {
 
-            # Object types
+    # Optimization: Collect all unique ObjectIds and batch resolve details
+    $UniqueObjects = $AppRoleAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
+    $UniqueObjectIds = $UniqueObjects.ObjectId
+    
+    Write-Host "Resolving details for $($UniqueObjectIds.Count) unique objects..."
+    $ObjectDetailsCache = @{}
+    
+    # Batch resolution with progress reporting
+    for ($i = 0; $i -lt $UniqueObjectIds.Count; $i++) {
+        $ObjectId = $UniqueObjectIds[$i]
+        
+        if (($i % $BatchSize) -eq 0) {
+            $PercentComplete = [math]::Round(($i / $UniqueObjectIds.Count) * 100, 0)
+            Write-Progress -Activity "Resolving Object Details" -Status "Processing object $($i + 1) of $($UniqueObjectIds.Count)" -PercentComplete $PercentComplete
+            if ($VerbosePreference -ne 'SilentlyContinue') {
+                Write-Verbose "Processing object $($i + 1) of $($UniqueObjectIds.Count)..."
+            }
+        }
+        
+        try {
+            $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
+        } catch {
+            Write-Warning "Failed to get details for object $($ObjectId): $_"
+            $ObjectDetailsCache[$ObjectId] = $null
+        }
+    }
+    Write-Progress -Activity "Resolving Object Details" -Completed
+
+    $AppRoleClassifiedSpObjects = $UniqueObjects | ForEach-Object {
+        if ($null -ne $_.ObjectId) {
             $ObjectId = $_.ObjectId
-            $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
+            if ($VerbosePreference -ne 'SilentlyContinue') {
+                Write-Verbose -Message "Processing classifications for $($ObjectId)..."
+            }
+            
+            # Object types
+            $ObjectDetails = $ObjectDetailsCache[$ObjectId]
+            
+            # Skip if object details couldn't be retrieved
+            if ($null -eq $ObjectDetails) {
+                Write-Warning "Skipping object $ObjectId - failed to retrieve details"
+                return
+            }
 
             # Role Assignments
             $AppRoleAssignments = @()
@@ -230,13 +271,23 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
             }
 
-            $AppRoleClassification = $($AppRoleAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service
-
-            # Classification
-            $Classification = @()
-            $Classification += $AppRoleClassification | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+            # Classification - use hashtable for unique aggregation
+            $UniqueClassificationsHash = @{}
+            foreach ($Assignment in $AppRoleAssignments) {
+                if ($null -ne $Assignment.Classification) {
+                    foreach ($ClassItem in $Assignment.Classification) {
+                        $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                        if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                            $UniqueClassificationsHash[$key] = $ClassItem
+                        }
+                    }
+                }
+            }
+            
+            $Classification = @($UniqueClassificationsHash.Values | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+            
             if ($Classification.Count -eq 0) {
-                $Classification += [PSCustomObject]@{
+                $Classification = @([PSCustomObject]@{
                     'AdminTierLevel'     = "Unclassified"
                     'AdminTierLevelName' = "Unclassified"
                     'Service'            = "Unclassified"
@@ -283,7 +334,10 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     }    
     #endregion       
 
+    Write-Host "Applying global exclusions and finalizing results..."
     $AppRoleClassifiedObjects = $AppRoleClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
+    
+    Write-Host "Completed processing $($AppRoleClassifiedObjects.Count) privileged objects."
     $AppRoleClassifiedObjects | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 
 }

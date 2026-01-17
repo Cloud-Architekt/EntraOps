@@ -44,6 +44,9 @@ function Get-EntraOpsPrivilegedEamIntune {
         [System.Boolean]$GlobalExclusion = $true
     )
 
+    # Configuration for batch processing
+    $BatchSize = 100  # Number of objects to process before showing progress
+
     # Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_DeviceManagement.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
@@ -246,21 +249,73 @@ function Get-EntraOpsPrivilegedEamIntune {
     #endregion
 
     #region Apply classification to all assigned privileged users and groups in Device Management
-    Write-Host "Classifiying of all assigned privileged users and groups in Device Management..."
-    $DeviceMgmtRbacClassifiedObjects = $DeviceMgmtRbacAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
-        if ($null -ne $_.ObjectId) {
+    Write-Host "Classifying of all assigned privileged users and groups in Device Management..."
 
-            # Object types
+    # Optimization: Group assignments by ObjectId to avoid O(N^2) filtering
+    $DeviceMgmtRbacByObject = $DeviceMgmtRbacClassifications | Group-Object ObjectId -AsHashTable -AsString
+
+    # Optimization: Collect all unique ObjectIds and batch resolve details
+    $UniqueObjects = $DeviceMgmtRbacAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
+    $UniqueObjectIds = $UniqueObjects.ObjectId
+    
+    Write-Host "Resolving details for $($UniqueObjectIds.Count) unique objects..."
+    $ObjectDetailsCache = @{}
+    
+    # Batch resolution with progress reporting
+    for ($i = 0; $i -lt $UniqueObjectIds.Count; $i++) {
+        $ObjectId = $UniqueObjectIds[$i]
+        
+        # Update progress for better UX
+        if (($i % $BatchSize) -eq 0) {
+            $PercentComplete = [math]::Round(($i / $UniqueObjectIds.Count) * 100, 0)
+            Write-Progress -Activity "Resolving Object Details" -Status "Processing object $($i + 1) of $($UniqueObjectIds.Count)" -PercentComplete $PercentComplete
+            if ($VerbosePreference -ne 'SilentlyContinue') {
+                Write-Verbose "Processing object $($i + 1) of $($UniqueObjectIds.Count)..."
+            }
+        }
+        
+        try {
+            $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
+        } catch {
+            Write-Warning "Failed to get details for object $($ObjectId): $_"
+            $ObjectDetailsCache[$ObjectId] = $null
+        }
+    }
+    Write-Progress -Activity "Resolving Object Details" -Completed
+
+    $DeviceMgmtRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
+        if ($null -ne $_.ObjectId) {
             $ObjectId = $_.ObjectId
-            $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
+            if ($VerbosePreference -ne 'SilentlyContinue') {
+                Write-Verbose -Message "Processing classifications for $($ObjectId)..."
+            }
+            
+            # Object types
+            $ObjectDetails = $ObjectDetailsCache[$ObjectId]
+            
+            # Skip if object details couldn't be retrieved
+            if ($null -eq $ObjectDetails) {
+                Write-Warning "Skipping object $ObjectId - failed to retrieve details"
+                return
+            }
 
             # RBAC Assignments
-            $DeviceMgmtRbacClassifiedAssignments = @()
-            $DeviceMgmtRbacClassifiedAssignments += ($DeviceMgmtRbacClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" })
+            $DeviceMgmtRbacClassifiedAssignments = $DeviceMgmtRbacByObject[$ObjectId]
 
-            # Classification
-            $Classification = @()
-            $Classification += (($DeviceMgmtRbacClassifiedAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service) | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+            # Classification - use hashtable for unique aggregation
+            $UniqueClassificationsHash = @{}
+            foreach ($Assignment in $DeviceMgmtRbacClassifiedAssignments) {
+                if ($null -ne $Assignment.Classification) {
+                    foreach ($ClassItem in $Assignment.Classification) {
+                        $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                        if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                            $UniqueClassificationsHash[$key] = $ClassItem
+                        }
+                    }
+                }
+            }
+            
+            $Classification = @($UniqueClassificationsHash.Values | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
             if ($Classification.Count -eq 0) {
                 $Classification += [PSCustomObject]@{
                     'AdminTierLevel'     = "Unclassified"
@@ -296,5 +351,10 @@ function Get-EntraOpsPrivilegedEamIntune {
         }
     }
     #endregion
-    $DeviceMgmtRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
+    
+    Write-Host "Applying global exclusions and finalizing results..."
+    $FilteredIntuneObjects = $DeviceMgmtRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
+    
+    Write-Host "Completed processing $($FilteredIntuneObjects.Count) privileged objects."
+    $FilteredIntuneObjects | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 }
