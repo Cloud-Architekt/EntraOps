@@ -46,173 +46,265 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     if ($SampleMode -eq $True) {
         $AadRoleDefinitions = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementRoleDefinitions.json" | ConvertFrom-Json -Depth 10
         $AadRoleAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementAssignments.json" | ConvertFrom-Json -Depth 10
+        $AadEligibleRoleAssignments = @()
+        if (Test-Path "$EntraOpsBaseFolder/Samples/AadRoleManagementEligibleAssignments.json") {
+             $AadEligibleRoleAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementEligibleAssignments.json" | ConvertFrom-Json -Depth 10
+        }
     } else {
         $AadRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions"
         $AadRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleAssignments"
+        $AadEligibleRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules"
+    }
+
+    # Optimization: Build Lookup Tables
+    Write-Verbose "Building Role Definition Dictionary..."
+    $RoleDefLookup = @{}
+    foreach ($Role in $AadRoleDefinitions) { $RoleDefLookup[$Role.id] = $Role }
+
+    # Optimization: Collect all Unique IDs for Batch Resolution
+    $IdsToResolve = [System.Collections.Generic.HashSet[string]]::new()
+    $GuidPattern = "([0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12})"
+
+    foreach ($Ass in $AadRoleAssignments) {
+        if ($Ass.principalId) { $IdsToResolve.Add($Ass.principalId) | Out-Null }
+        if ($Ass.directoryScopeId -and $Ass.directoryScopeId -ne "/" -and $Ass.directoryScopeId -match $GuidPattern) {
+             $IdsToResolve.Add($Matches[1]) | Out-Null
+        }
+    }
+    $EligibleToProcess = $AadEligibleRoleAssignments | Where-Object { $_.memberType -eq "Direct" -and $_.status -eq "Provisioned" }
+    foreach ($Ass in $EligibleToProcess) {
+        if ($Ass.principalId) { $IdsToResolve.Add($Ass.principalId) | Out-Null }
+        if ($Ass.directoryScopeId -and $Ass.directoryScopeId -ne "/" -and $Ass.directoryScopeId -match $GuidPattern) {
+             $IdsToResolve.Add($Matches[1]) | Out-Null
+        }
+    }
+
+    Write-Host "Resolving $($IdsToResolve.Count) directory objects in batches..."
+    $DirObjLookup = @{}
+    $IdArray = $IdsToResolve | Select-Object -Unique
+    if ($IdArray.Count -gt 0) {
+        for ($i = 0; $i -lt $IdArray.Count; $i += 1000) {
+            $Batch = $IdArray[$i..([Math]::Min($i + 999, $IdArray.Count - 1))]
+            # directoryObjects/getByIds allows up to 1000 items
+            $Body = @{ ids = $Batch; types = @("directoryObject") } | ConvertTo-Json -Compress
+            try {
+                $Response = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/directoryObjects/getByIds" -Body $Body -OutputType PSObject
+                foreach ($Obj in $Response) { $DirObjLookup[$Obj.id] = $Obj }
+            } catch {
+                Write-Warning "Failed to resolve directory objects batch: $_"
+            }
+        }
     }
     #endregion
 
-    # Get all principals for role assignments for further iteration
-    $AadRoleAssignmentPrincipals = ($AadRoleAssignments | select-object principalId -Unique).principalId
-
     #region Collect permanent direct role assignments
     Write-Host "Get details of Entra ID Role Assignments foreach individual principal..."
-    $AadRbacActiveAndPermanentAssignments = foreach ($Principal in $AadRoleAssignmentPrincipals) {
-        Write-Verbose -Message "Collect basic information for permanent member $($Principal)!"
-        try {
-            $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($Principal)" -OutputType PSObject
-            $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
+    # Iterate over Assignments directly, filtered by local logic instead of Re-Querying API
+    $AadRbacActiveAndPermanentAssignments = foreach ($AadPrincipalRoleAssignment in $AadRoleAssignments) {
+        $Principal = $AadPrincipalRoleAssignment.principalId
+        
+        # Resolve Principal
+        $ObjectType = "unknown"
+        $PrincipalProfile = $null
+
+        if ($DirObjLookup.ContainsKey($Principal)) {
+            $PrincipalProfile = $DirObjLookup[$Principal]
         }
-        catch {
-            Write-Warning "Issue to resolve directory object $Principal. Error: $_"
+
+        # Fallback: If not found in batch lookup, try individual redundant fetch
+        if ($null -eq $PrincipalProfile) {
+             try {
+                $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($Principal)" -OutputType PSObject
+             } catch {
+                Write-Warning "Issue to resolve directory object $Principal. Error: $_"
+             }
         }
 
-        $AllPrinicpalAadRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleAssignments?$count=true&`$filter=principalId eq '$Principal'" -ConsistencyLevel "eventual"
-        foreach ($AadPrincipalRoleAssignment in $AllPrinicpalAadRoleAssignments) {
-            $Role = ($AadRoleDefinitions | where-object { $_.id -eq $AadPrincipalRoleAssignment.roleDefinitionId })
-            if ($Role.isBuiltIn -eq $True) {
-                $RoleType = "BuiltInRole"
-                $RoleIsPrivileged = $Role.isPrivileged
-                $RoleDefinitionName = $Role.displayName
+        if ($PrincipalProfile) {
+            if ($PrincipalProfile.'@odata.type') {
+                $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
             } else {
-                # RoleDefinitionId in Assignment has different Guid than in RoleDefinition, explicit request will resolve original RoleDefinitionName
-                # Set RoleDisplayName and RoleDefinitionId from RoleDefinition Endpoint
-                # Side Note: Deprecated role definition are just visible by direct RoleDefinition requests
-                $OriginalRoleDefinition = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions/$($AadPrincipalRoleAssignment.roleDefinitionId)" -OutputType PSObject
-                $AadPrincipalRoleAssignment.roleDefinitionId = $OriginalRoleDefinition.id
-                $RoleDefinitionName = $OriginalRoleDefinition.displayName
-                $RoleIsPrivileged = $OriginalRoleDefinition.isPrivileged
-                if ($OriginalRoleDefinition.isBuiltIn -eq "true") {
-                    $RoleType = "BuiltInRole"
-                } else {
-                    $RoleType = "CustomRole"
-                }
+                # Fallback if odata.type is missing (should not happen on Graph objects)
+                Write-Verbose "Object type missing for $Principal"
             }
+        }
+        
+        # Resolve Role
+        $RoleDefId = $AadPrincipalRoleAssignment.roleDefinitionId
+        $RoleDefinitionName = "Unknown"
+        $RoleType = "CustomRole"
+        $RoleIsPrivileged = $false
 
-            <# Workaround to get only ObjectId from RoleAssignmentScopeId #>
-            if ($AadPrincipalRoleAssignment.directoryScopeId -ne "/") {
-                $GuidPattern = "(\{){0,1}[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}(\}){0,1}"
-                $RoleAssignmentScopeObjectId = [Regex]::Matches($($AadPrincipalRoleAssignment.directoryScopeId), $GuidPattern).Value
+        if ($RoleDefLookup.ContainsKey($RoleDefId)) {
+            $Role = $RoleDefLookup[$RoleDefId]
+        } else {
+             # Fallback for deprecated/hidden roles
+             try {
+                 $Role = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions/$RoleDefId"
+                 $RoleDefLookup[$RoleDefId] = $Role
+             } catch { $Role = $null }
+        }
 
-                if ($null -ne $RoleAssignmentScopeObjectId) {
-                    try {
-                        $RoleAssignmentScopeObject = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($RoleAssignmentScopeObjectId)" -OutputType PSObject)
-                        $RoleAssignmentScopeName = "$($RoleAssignmentScopeObject.displayName)"
-                    }
-                    catch {
-                        Write-Warning "Can't found scope name of $($AadPrincipalRoleAssignment.directoryScopeId) for $($Principal)"
-                        $RoleAssignmentScopeName = "Unknown name"
-                    }
-                } else {
-                    $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
-                }
+        if ($Role) {
+            $RoleDefinitionName = $Role.displayName
+            $RoleIsPrivileged = $Role.isPrivileged
+            if ($Role.isBuiltIn -eq $True -or $Role.isBuiltIn -eq "true") { 
+                $RoleType = "BuiltInRole" 
+            }
+            if ($Role.templateId) {
+                $RoleDefId = $Role.templateId
+            }
+        }
 
+        # Resolve Scope
+        $RoleAssignmentScopeName = "Directory"
+        if ($AadPrincipalRoleAssignment.directoryScopeId -ne "/") {
+            $ScopeId = $null
+            if ($AadPrincipalRoleAssignment.directoryScopeId -match $GuidPattern) {
+                $ScopeId = $Matches[1]
+            }
+            if ($ScopeId -and $DirObjLookup.ContainsKey($ScopeId)) {
+                $RoleAssignmentScopeName = $DirObjLookup[$ScopeId].displayName
+            } elseif ($ScopeId) {
+                 try {
+                     $ScopeObj = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($ScopeId)" -OutputType PSObject
+                     if ($ScopeObj) {
+                          $DirObjLookup[$ScopeId] = $ScopeObj 
+                          $RoleAssignmentScopeName = $ScopeObj.displayName
+                     } else {
+                          $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
+                     }
+                 } catch {
+                     $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
+                 }
             } else {
-                $RoleAssignmentScopeName = "Directory"
+                $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
             }
+        }
 
-            [pscustomobject]@{
-                RoleAssignmentId                = $AadPrincipalRoleAssignment.Id
-                RoleName                        = $RoleDefinitionName
-                RoleId                          = $AadPrincipalRoleAssignment.roleDefinitionId
-                RoleType                        = $RoleType
-                IsPrivileged                    = $RoleIsPrivileged
-                RoleAssignmentPIMRelated        = $False
-                RoleAssignmentPIMAssignmentType = "Permanent"
-                RoleAssignmentScopeId           = $AadPrincipalRoleAssignment.directoryScopeId
-                RoleAssignmentScopeName         = $RoleAssignmentScopeName
-                RoleAssignmentType              = "Direct"
-                RoleAssignmentSubType           = ""
-                ObjectDisplayName               = $PrincipalProfile.displayName
-                ObjectId                        = $Principal
-                ObjectType                      = $ObjectType.ToLower()
-                TransitiveByObjectId            = $null
-                TransitiveByObjectDisplayName   = $null
-            }
+        [pscustomobject]@{
+            RoleAssignmentId                = $AadPrincipalRoleAssignment.Id
+            RoleName                        = $RoleDefinitionName
+            RoleId                          = $RoleDefId
+            RoleType                        = $RoleType
+            IsPrivileged                    = $RoleIsPrivileged
+            RoleAssignmentPIMRelated        = $False
+            RoleAssignmentPIMAssignmentType = "Permanent"
+            RoleAssignmentScopeId           = $AadPrincipalRoleAssignment.directoryScopeId
+            RoleAssignmentScopeName         = $RoleAssignmentScopeName
+            RoleAssignmentType              = "Direct"
+            RoleAssignmentSubType           = ""
+            ObjectDisplayName               = if ($PrincipalProfile) { $PrincipalProfile.displayName } else { $Principal }
+            ObjectId                        = $Principal
+            ObjectType                      = $ObjectType.ToLower()
+            TransitiveByObjectId            = $null
+            TransitiveByObjectDisplayName   = $null
         }
     }
     #endregion
 
     #region Collect eligible direct role assignments
     Write-Host "Get details of Entra ID Eligible Role Assignments..."
-    $AadEligibleRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules"
+    # Already filtered in EligibleToProcess (from top block)
+    $AadEligibleUserRoleAssignments = foreach ($EligiblePrincipalRoleAssignment in $EligibleToProcess) {
+        $Principal = $EligiblePrincipalRoleAssignment.principalId
+        
+        # Resolve Principal
+        $ObjectType = "unknown"
+        $PrincipalProfile = $null
 
-    # Filter for role assignments with direct assignments
-    $AadEligibleRolePrincipals = ($AadEligibleRoleAssignments | where-object { $_.memberType -eq "Direct" -and $_.status -eq "Provisioned" } | select-object principalId -Unique).principalId
-    $AadEligibleUserRoleAssignments = foreach ($Principal in $AadEligibleRolePrincipals) {
-        Write-Verbose -Message "Collect basic information for eligible member $($Principal)!"
-        try {
-            $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($Principal)" -OutputType PSObject
-            $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
+        if ($DirObjLookup.ContainsKey($Principal)) {
+            $PrincipalProfile = $DirObjLookup[$Principal]
         }
-        catch {
-            Write-Warning "Issue to resolve directory object $Principal. Error: $_"
+
+        # Fallback
+        if ($null -eq $PrincipalProfile) {
+             try {
+                $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($Principal)" -OutputType PSObject
+             } catch {
+                Write-Warning "Issue to resolve directory object $Principal. Error: $_"
+             }
         }
-        $AllEligiblePrincipalRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules?`$filter=principalId eq '$Principal'" | where-object { $_.memberType -eq "Direct" -and $_.status -eq "Provisioned" }
 
-        foreach ($EligiblePrincipalRoleAssignment in $AllEligiblePrincipalRoleAssignments) {
+        if ($PrincipalProfile) {
+            if ($PrincipalProfile.'@odata.type') {
+                $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
+            }
+        }
 
-            $Role = ($AadRoleDefinitions | where-object { $_.id -eq $EligiblePrincipalRoleAssignment.roleDefinitionId })
-            if ($Role.isBuiltIn -eq $True) {
-                $RoleType = "BuiltInRole"
-                $RoleDefinitionName = $Role.displayName
-                $RoleIsPrivileged = $Role.IsPrivileged
-                # Deprecated role definition are just visible by direct RoleDefinition requests
-                if ($null -eq $RoleDefinitionName) {
-                    Write-Warning "Dep - $($AadPrincipalRoleAssignment.roleDefinitionId)"
-                    $RoleDefinitionName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/roleManagement/directory/roleDefinitions/$($EligiblePrincipalRoleAssignment.roleDefinitionId)" -OutputType PSObject).displayName
-                }
+        # Resolve Role
+        $RoleDefId = $EligiblePrincipalRoleAssignment.roleDefinitionId
+        $RoleDefinitionName = "Unknown"
+        $RoleType = "CustomRole"
+        $RoleIsPrivileged = $false
+
+        if ($RoleDefLookup.ContainsKey($RoleDefId)) {
+            $Role = $RoleDefLookup[$RoleDefId]
+        } else {
+             # Fallback
+             try {
+                 $Role = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions/$RoleDefId"
+                 $RoleDefLookup[$RoleDefId] = $Role
+             } catch { $Role = $null }
+        }
+
+        if ($Role) {
+            $RoleDefinitionName = $Role.displayName
+            $RoleIsPrivileged = $Role.isPrivileged
+            if ($Role.isBuiltIn -eq $True -or $Role.isBuiltIn -eq "true") { 
+                $RoleType = "BuiltInRole" 
+            }
+            if ($Role.templateId) {
+                $RoleDefId = $Role.templateId
+            }
+        }
+
+        # Resolve Scope
+        $RoleAssignmentScopeName = "Directory"
+        if ($EligiblePrincipalRoleAssignment.directoryScopeId -ne "/") {
+            $ScopeId = $null
+            if ($EligiblePrincipalRoleAssignment.directoryScopeId -match $GuidPattern) {
+                $ScopeId = $Matches[1]
+            }
+            if ($ScopeId -and $DirObjLookup.ContainsKey($ScopeId)) {
+                $RoleAssignmentScopeName = $DirObjLookup[$ScopeId].displayName
+            } elseif ($ScopeId) {
+                 try {
+                     $ScopeObj = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($ScopeId)" -OutputType PSObject
+                     if ($ScopeObj) {
+                          $DirObjLookup[$ScopeId] = $ScopeObj 
+                          $RoleAssignmentScopeName = $ScopeObj.displayName
+                     } else {
+                          $RoleAssignmentScopeName = $EligiblePrincipalRoleAssignment.directoryScopeId
+                     }
+                 } catch {
+                     $RoleAssignmentScopeName = $EligiblePrincipalRoleAssignment.directoryScopeId
+                 }
             } else {
-                # RoleDefinitionId in Assignment has different Guid than in RoleDefinition, explicit request will resolve original RoleDefinitionName
-                # Set RoleDisplayName and RoleDefinitionId from RoleDefinition Endpoint
-                # Side Note: Deprecated role definition are just visible by direct RoleDefinition requests
-                $OriginalRoleDefinition = Invoke-EntraOpsMsGraphQuery -uri "/beta/roleManagement/directory/roleDefinitions/$($EligiblePrincipalRoleAssignment.roleDefinitionId)"
-                $EligiblePrincipalRoleAssignment.roleDefinitionId = $OriginalRoleDefinition.id
-                $RoleDefinitionName = $OriginalRoleDefinition.displayName
-                $RoleIsPrivileged = $OriginalRoleDefinition.isPrivileged
-                if ($OriginalRoleDefinition.isBuiltIn -eq "true") {
-                    $RoleType = "BuiltInRole"
-                } else {
-                    $RoleType = "CustomRole"
-                }
+                $RoleAssignmentScopeName = $EligiblePrincipalRoleAssignment.directoryScopeId
             }
+        }
 
-            <# Workaround to get only ObjectId from RoleAssignmentScopeId #>
-            if ($EligiblePrincipalRoleAssignment.directoryScopeId -ne "/") {
-                $GuidPattern = "(\{){0,1}[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}(\}){0,1}"
-                $RoleAssignmentScopeObjectId = [Regex]::Matches($EligiblePrincipalRoleAssignment.directoryScopeId, $GuidPattern).Value
-                try {
-                    $RoleAssignmentScopeObject = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($RoleAssignmentScopeObjectId)" -OutputType PSObject)
-                    $RoleAssignmentScopeName = "$($RoleAssignmentScopeObject.displayName)"
-                }
-                catch {
-                    Write-Warning "Can't found $($EligiblePrincipalRoleAssignment.directoryScopeId) for $($Principal)"
-                    $RoleAssignmentScopeName = "Unknown name"
-                }
-            } else {
-                $RoleAssignmentScopeName = "Directory"
-            }
-
-            [pscustomobject]@{
-                RoleAssignmentId                = $EligiblePrincipalRoleAssignment.Id
-                RoleName                        = $RoleDefinitionName
-                RoleId                          = $EligiblePrincipalRoleAssignment.roleDefinitionId
-                RoleType                        = $RoleType
-                IsPrivileged                    = $RoleIsPrivileged
-                RoleAssignmentPIMRelated        = $True
-                RoleAssignmentPIMAssignmentType = "Eligible"
-                RoleAssignmentScopeId           = $EligiblePrincipalRoleAssignment.directoryScopeId
-                RoleAssignmentScopeName         = $RoleAssignmentScopeName
-                RoleAssignmentType              = "Direct"
-                RoleAssignmentSubType           = ""
-                ObjectDisplayName               = $PrincipalProfile.displayName
-                ObjectId                        = $Principal
-                ObjectType                      = $ObjectType.ToLower()
-                TransitiveByObjectId            = $null
-                TransitiveByObjectDisplayName   = $null
-            }
+        [pscustomobject]@{
+            RoleAssignmentId                = $EligiblePrincipalRoleAssignment.Id
+            RoleName                        = $RoleDefinitionName
+            RoleId                          = $RoleDefId
+            RoleType                        = $RoleType
+            IsPrivileged                    = $RoleIsPrivileged
+            RoleAssignmentPIMRelated        = $True
+            RoleAssignmentPIMAssignmentType = "Eligible"
+            RoleAssignmentScopeId           = $EligiblePrincipalRoleAssignment.directoryScopeId
+            RoleAssignmentScopeName         = $RoleAssignmentScopeName
+            RoleAssignmentType              = "Direct"
+            RoleAssignmentSubType           = ""
+            ObjectDisplayName               = if ($PrincipalProfile) { $PrincipalProfile.displayName } else { $Principal }
+            ObjectId                        = $Principal
+            ObjectType                      = $ObjectType.ToLower()
+            TransitiveByObjectId            = $null
+            TransitiveByObjectDisplayName   = $null
         }
     }
+    #endregion
 
     #region Remove activated (eligible) assignments and mark time-bounded assignments in permanent assignments
     # Get active assignments to remove it from collection of role assignments
