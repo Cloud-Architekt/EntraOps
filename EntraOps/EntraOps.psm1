@@ -7,8 +7,7 @@ Foreach ($import in @($Public + $Private)) {
     Try {
         Write-Verbose "Importing $($Import.FullName)"
         . $import.fullname
-    }
-    Catch {
+    } Catch {
         Write-Error -Message "Failed to import function $($import.fullname): $_"
     }
 }
@@ -33,7 +32,6 @@ New-Variable -Name EntraOpsBaseFolder -Value $EntraOpsBasefolder -Scope Global -
 $ModuleManifest = Import-PowerShellDataFile "$PSScriptRoot\EntraOps.psd1"
 $PSEnvironment = "PowerShell " + ($PSVersionTable.PSEdition) + " " + ($PSVersionTable.PSVersion.ToString())
 $ModuleVersion = $($ModuleManifest.ModuleVersion)
-$host.ui.RawUI.WindowTitle = "EntraOps "
 
 $Splash = @"
  ______       _              ____

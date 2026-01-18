@@ -65,12 +65,11 @@ function Save-EntraOpsPrivilegedEAMJson {
                     if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
                 }
 
-                # Parallel File Write
-                $EamAzureAD | ForEach-Object -Parallel {
-                    $Obj = $_
-                    $Path = "$using:EntraExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+                # Write individual files
+                foreach ($Obj in $EamAzureAD) {
+                    $Path = "$EntraExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
                     $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
-                } -ThrottleLimit 50
+                }
                 
                 Write-Host "Completed EntraID processing: $($EamAzureAD.Count) objects exported"
             }
@@ -89,146 +88,149 @@ function Save-EntraOpsPrivilegedEAMJson {
                 if ((Test-Path -path "$ResAppExportFolder")) {
                     Remove-Item "$ResAppExportFolder" -Force -Recurse
                     New-Item "$ResAppExportFolder" -ItemType Directory -Force | Out-Null
-                    Sequential Processing: Device Management
-                    # Must be processed sequentially after parallel jobs
-                    if ($RbacSystems -contains "DeviceManagement") {
-                        Write-Host "Processing DeviceManagement RBAC system..."
-                        $DevMgmtExportFolder = "$($DefaultFolderClassifiedEam)/DeviceManagement"
-                        $EamDeviceMgmt = Get-EntraOpsPrivilegedEAMIntune
-
-                        if ((Test-Path -path "$($DevMgmtExportFolder)")) {
-                            Remove-Item "$($DevMgmtExportFolder)" -Force -Recurse
-                            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force | Out-Null
-                        } else {
-                            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force | Out-Null
-                        }
-                        $EamDeviceMgmt | Convertto-Json -Depth 10 | Out-File -Path "$($DevMgmtExportFolder)/DeviceManagement.json" -Force
-        
-                        # Create directories first
-                        $EamDeviceMgmt | Group-Object ObjectType | ForEach-Object {
-                            $Dir = "$($DevMgmtExportFolder)/$($_.Name)"
-                            if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
-                        }
-
-                        # Parallel File Write
-                        $EamDeviceMgmt | ForEach-Object -Parallel {
-                            $Obj = $_
-                            $Path = "$using:DevMgmtExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
-                        } -ThrottleLimit 50
-        
-                        WritSequential Processing: Identity Governance
-                        # Must be processed sequentially in defined order
-                        if ($RbacSystems -contains "IdentityGovernance") {
-                            Write-Host "Processing IdentityGovernance RBAC system..."
-                            $IdGovExportFolder = "$($DefaultFolderClassifiedEam)/IdentityGovernance"
-
-                            $EamIdGov = Get-EntraOpsPrivilegedEAMIdGov
-                            $EamIdGov | Measure-Object
-
-                            if ((Test-Path -path "$($IdGovExportFolder)")) {
-                                Remove-Item "$($IdGovExportFolder)" -Force -Recurse
-                                New-Item "$($IdGovExportFolder)" -ItemType Directory -Force | Out-Null
-                            } else {
-                                New-Item "$($IdGovExportFolder)" -ItemType Directory -Force | Out-Null
-                            }
-                            $EamIdGov | Convertto-Json -Depth 10 | Out-File -Path "$($IdGovExportFolder)/IdentityGovernance.json" -Force
-        
-                            # Create directories first
-                            $EamIdGov | Group-Object ObjectType | ForEach-Object {
-                                $Dir = "$($IdGovExportFolder)/$($_.Name)"
-                                if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
-                            }
-
-                            # Parallel File Write
-                            $EamIdGov | ForEach-Object -Parallel {
-                                $Obj = $_
-                                $Path = "$using:IdGovExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                                $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
-                            } -ThrottleLimit 50
-        
-                            Write-Host "Completed IdentityGovernance processing: $($EamIdGov.Count) objects exported"
-                            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force
-                        }
-                        $EamDeviceMgmt | Convertto-Json -Depth 10 | Out-File -Path "$($DevMgmtExportFolder)/DeviceManagement.json"
-        
-                        # Optimization: Create directories first
-                        $EamDeviceMgmt | Group-Object ObjectType | ForEach-Object {
-                            $Dir = "$($DevMgmtExportFolder)/$($_.Name)"
-                            if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
-                        }
-
-                        # Optimization: Parallel File Write
-                        $EamDeviceMgmt | ForEach-Object -Parallel {
-                            $Obj = $_
-                            $Path = "$using:DevMgmtExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
-                        } -ThrottleLimit 50
-                    }
-                    #endregion
-
-                    #region Identity Governance
-                    if ($RbacSystems -contains "IdentityGovernance") {
-                        $IdGovExportFolder = "$($DefaultFolderClassifiedEam)/IdentityGovernance"
-
-                        $EamIdGov = Get-EntraOpsPrivilegedEAMIdGov
-                        $EamIdGov | Measure-Object
-
-                        if ((Test-Path -path "$($IdGovExportFolder)")) {
-                            Remove-Item "$($IdGovExportFolder)" -Force -Recurse
-                            New-Item "$($IdGovExportFolder)" -ItemType Directory -Force
-                        } else {
-                            New-Item "$($IdGovExportFolder)" -ItemType Directory -Force
-                        }
-                        $EamIdGov | Convertto-Json -Depth 10 | Out-File -Path "$($IdGovExportFolder)/IdentityGovernance.json"
-        
-                        # Optimization: Create directories first
-                        $EamIdGov | Group-Object ObjectType | ForEach-Object {
-                            $Dir = "$($IdGovExportFolder)/$($_.Name)"
-                            if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
-                        }
-
-                        # OpSequential Processing: Defender
-                        # Must be processed sequentially in defined order
-                        if ($RbacSystems -contains "Defender") {
-                            Write-Host "Processing Defender RBAC system..."
-                            $DefenderExportFolder = "$($DefaultFolderClassifiedEam)/Defender"
-
-                            $EamDefender = Get-EntraOpsPrivilegedEAMDefender
-                            $EamDefender | Measure-Object
-
-                            if ((Test-Path -path "$($DefenderExportFolder)")) {
-                                Remove-Item "$($DefenderExportFolder)" -Force -Recurse
-                                New-Item "$($DefenderExportFolder)" -ItemType Directory -Force | Out-Null
-                            } else {
-                                New-Item "$($DefenderExportFolder)" -ItemType Directory -Force | Out-Null
-                            }
-                            $EamDefender | Convertto-Json -Depth 10 | Out-File -Path "$($DefenderExportFolder)/Defender.json" -Force
-        
-                            # Create directories first
-                            $EamDefender | Group-Object ObjectType | ForEach-Object {
-                                $Dir = "$($DefenderExportFolder)/$($_.Name)"
-                                if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
-                            }
-
-                            # Parallel File Write
-                            $EamDefender | ForEach-Object -Parallel {
-                                $Obj = $_
-                                $Path = "$using:DefenderExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                                $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
-                            } -ThrottleLimit 50
-        
-                            Write-Host "Completed Defender processing: $($EamDefender.Count) objects exported"
-                        }
-                        #endregion
-    
-                        Write-Host "`nAll RBAC systems processing completed successfully!"
-                        # Optimization: Parallel File Write
-                        $EamDefender | ForEach-Object -Parallel {
-                            $Obj = $_
-                            $Path = "$using:DefenderExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
-                        } -ThrottleLimit 50
-                    }
-                    #endregion
+                } else {
+                    New-Item "$ResAppExportFolder" -ItemType Directory -Force | Out-Null
                 }
+
+                Write-Host "Processing ResourceApps RBAC system..."
+                $EamAzureAdResourceApps = Get-EntraOpsPrivilegedEamResourceApps
+                $EamAzureAdResourceApps | Convertto-Json -Depth 10 | Out-File -Path "$ResAppExportFolder/ResourceApps.json" -Force
+
+                # Create directories first
+                $EamAzureAdResourceApps | Group-Object ObjectType | ForEach-Object {
+                    $Dir = "$ResAppExportFolder/$($_.Name)"
+                    if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+                }
+
+                # Write individual files
+                foreach ($Obj in $EamAzureAdResourceApps) {
+                    $Path = "$ResAppExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+                    $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+                }
+                
+                Write-Host "Completed ResourceApps processing: $($EamAzureAdResourceApps.Count) objects exported"
+            }
+        }
+    }
+    
+    # Execute parallel jobs if any exist
+    if ($ParallelJobs.Count -gt 0) {
+        $ModulePath = "$PSScriptRoot/../../EntraOps.psm1"
+        $InitScript = [ScriptBlock]::Create("Import-Module '$ModulePath' -Force -WarningAction SilentlyContinue -ErrorAction SilentlyContinue")
+        
+        $Jobs = $ParallelJobs | ForEach-Object {
+            Start-ThreadJob -Name $_.Name -ScriptBlock $_.ScriptBlock -ArgumentList $DefaultFolderClassifiedEam -InitializationScript $InitScript
+        }
+        
+        # Wait for all parallel jobs to complete
+        $Jobs | Wait-Job | ForEach-Object {
+            Write-Host "`n--- Output from $($_.Name) ---"
+            Receive-Job -Job $_
+            Remove-Job -Job $_
+        }
+        Write-Host "Parallel processing completed.`n"
+    }
+    #endregion
+
+    #region Sequential Processing: Device Management
+    # Must be processed sequentially after parallel jobs
+    if ($RbacSystems -contains "DeviceManagement") {
+        Write-Host "Processing DeviceManagement RBAC system..."
+        $DevMgmtExportFolder = "$($DefaultFolderClassifiedEam)/DeviceManagement"
+        $EamDeviceMgmt = Get-EntraOpsPrivilegedEAMIntune
+
+        if ((Test-Path -path "$($DevMgmtExportFolder)")) {
+            Remove-Item "$($DevMgmtExportFolder)" -Force -Recurse
+            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force | Out-Null
+        } else {
+            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force | Out-Null
+        }
+        $EamDeviceMgmt | Convertto-Json -Depth 10 | Out-File -Path "$($DevMgmtExportFolder)/DeviceManagement.json" -Force
+        
+        # Create directories first
+        $EamDeviceMgmt | Group-Object ObjectType | ForEach-Object {
+            $Dir = "$($DevMgmtExportFolder)/$($_.Name)"
+            if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+        }
+
+        # Parallel File Write
+        $EamDeviceMgmt | ForEach-Object -Parallel {
+            $Obj = $_
+            $Path = "$using:DevMgmtExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+        } -ThrottleLimit 50
+        
+        Write-Host "Completed DeviceManagement processing: $($EamDeviceMgmt.Count) objects exported"
+    }
+    #endregion
+
+    #region Sequential Processing: Identity Governance
+    # Must be processed sequentially in defined order
+    if ($RbacSystems -contains "IdentityGovernance") {
+        Write-Host "Processing IdentityGovernance RBAC system..."
+        $IdGovExportFolder = "$($DefaultFolderClassifiedEam)/IdentityGovernance"
+
+        $EamIdGov = Get-EntraOpsPrivilegedEAMIdGov
+        $EamIdGov | Measure-Object
+
+        if ((Test-Path -path "$($IdGovExportFolder)")) {
+            Remove-Item "$($IdGovExportFolder)" -Force -Recurse
+            New-Item "$($IdGovExportFolder)" -ItemType Directory -Force | Out-Null
+        } else {
+            New-Item "$($IdGovExportFolder)" -ItemType Directory -Force | Out-Null
+        }
+        $EamIdGov | Convertto-Json -Depth 10 | Out-File -Path "$($IdGovExportFolder)/IdentityGovernance.json" -Force
+        
+        # Create directories first
+        $EamIdGov | Group-Object ObjectType | ForEach-Object {
+            $Dir = "$($IdGovExportFolder)/$($_.Name)"
+            if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+        }
+
+        # Parallel File Write
+        $EamIdGov | ForEach-Object -Parallel {
+            $Obj = $_
+            $Path = "$using:IdGovExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+        } -ThrottleLimit 50
+        
+        Write-Host "Completed IdentityGovernance processing: $($EamIdGov.Count) objects exported"
+    }
+    #endregion
+
+    #region Sequential Processing: Defender
+    # Must be processed sequentially in defined order
+    if ($RbacSystems -contains "Defender") {
+        Write-Host "Processing Defender RBAC system..."
+        $DefenderExportFolder = "$($DefaultFolderClassifiedEam)/Defender"
+
+        $EamDefender = Get-EntraOpsPrivilegedEAMDefender
+        $EamDefender | Measure-Object
+
+        if ((Test-Path -path "$($DefenderExportFolder)")) {
+            Remove-Item "$($DefenderExportFolder)" -Force -Recurse
+            New-Item "$($DefenderExportFolder)" -ItemType Directory -Force | Out-Null
+        } else {
+            New-Item "$($DefenderExportFolder)" -ItemType Directory -Force | Out-Null
+        }
+        $EamDefender | Convertto-Json -Depth 10 | Out-File -Path "$($DefenderExportFolder)/Defender.json" -Force
+        
+        # Create directories first
+        $EamDefender | Group-Object ObjectType | ForEach-Object {
+            $Dir = "$($DefenderExportFolder)/$($_.Name)"
+            if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+        }
+
+        # Parallel File Write
+        $EamDefender | ForEach-Object -Parallel {
+            $Obj = $_
+            $Path = "$using:DefenderExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+        } -ThrottleLimit 50
+        
+        Write-Host "Completed Defender processing: $($EamDefender.Count) objects exported"
+    }
+    #endregion
+    
+    Write-Host "`nAll RBAC systems processing completed successfully!"
+}
