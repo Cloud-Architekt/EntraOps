@@ -116,7 +116,25 @@ function Save-EntraOpsPrivilegedEAMJson {
     # Execute parallel jobs if any exist
     if ($ParallelJobs.Count -gt 0) {
         $ModulePath = "$PSScriptRoot/../../EntraOps.psm1"
-        $InitScript = [ScriptBlock]::Create("Import-Module '$ModulePath' -Force -WarningAction SilentlyContinue -ErrorAction SilentlyContinue")
+        
+        # Capture global variables needed by the thread jobs
+        $GlobalVars = @{
+            DefaultFolderClassification = $DefaultFolderClassification
+            DefaultFolderClassifiedEam  = $DefaultFolderClassifiedEam
+            TenantIdContext             = $TenantIdContext
+            TenantNameContext           = $TenantNameContext
+            EntraOpsBaseFolder          = $EntraOpsBaseFolder
+        }
+        
+        # Create initialization script that imports module and sets global variables
+        $InitScript = [ScriptBlock]::Create(@"
+Import-Module '$ModulePath' -Force -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
+New-Variable -Name DefaultFolderClassification -Value '$($GlobalVars.DefaultFolderClassification)' -Scope Global -Force
+New-Variable -Name DefaultFolderClassifiedEam -Value '$($GlobalVars.DefaultFolderClassifiedEam)' -Scope Global -Force
+New-Variable -Name TenantIdContext -Value '$($GlobalVars.TenantIdContext)' -Scope Global -Force
+New-Variable -Name TenantNameContext -Value '$($GlobalVars.TenantNameContext)' -Scope Global -Force
+New-Variable -Name EntraOpsBaseFolder -Value '$($GlobalVars.EntraOpsBaseFolder)' -Scope Global -Force
+"@)
         
         $Jobs = $ParallelJobs | ForEach-Object {
             Start-ThreadJob -Name $_.Name -ScriptBlock $_.ScriptBlock -ArgumentList $DefaultFolderClassifiedEam -InitializationScript $InitScript
