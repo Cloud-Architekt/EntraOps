@@ -51,7 +51,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             $AadEligibleRoleAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementEligibleAssignments.json" | ConvertFrom-Json -Depth 10
         }
     } else {
-        $AadRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions?`$select=id,displayName,description,rolePermissions,isBuiltIn"
+        $AadRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions?`$select=id,displayName,description,rolePermissions,isBuiltIn,IsPrivileged"
         $AadRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleAssignments?`$select=id,principalId,roleDefinitionId,directoryScopeId"
         $AadEligibleRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules?`$select=id,principalId,roleDefinitionId,directoryScopeId,memberType,status"
     }
@@ -65,16 +65,16 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     $IdsToResolve = [System.Collections.Generic.HashSet[string]]::new()
     $GuidPattern = "([0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12})"
 
-    foreach ($Ass in $AadRoleAssignments) {
-        if ($Ass.principalId) { $IdsToResolve.Add($Ass.principalId) | Out-Null }
-        if ($Ass.directoryScopeId -and $Ass.directoryScopeId -ne "/" -and $Ass.directoryScopeId -match $GuidPattern) {
+    foreach ($AadRoleAssignment in $AadRoleAssignments) {
+        if ($AadRoleAssignment.principalId) { $IdsToResolve.Add($AadRoleAssignment.principalId) | Out-Null }
+        if ($AadRoleAssignment.directoryScopeId -and $AadRoleAssignment.directoryScopeId -ne "/" -and $AadRoleAssignment.directoryScopeId -match $GuidPattern) {
             $IdsToResolve.Add($Matches[1]) | Out-Null
         }
     }
     $EligibleToProcess = $AadEligibleRoleAssignments | Where-Object { $_.memberType -eq "Direct" -and $_.status -eq "Provisioned" }
-    foreach ($Ass in $EligibleToProcess) {
-        if ($Ass.principalId) { $IdsToResolve.Add($Ass.principalId) | Out-Null }
-        if ($Ass.directoryScopeId -and $Ass.directoryScopeId -ne "/" -and $Ass.directoryScopeId -match $GuidPattern) {
+    foreach ($AadRoleAssignment in $EligibleToProcess) {
+        if ($AadRoleAssignment.principalId) { $IdsToResolve.Add($AadRoleAssignment.principalId) | Out-Null }
+        if ($AadRoleAssignment.directoryScopeId -and $AadRoleAssignment.directoryScopeId -ne "/" -and $AadRoleAssignment.directoryScopeId -match $GuidPattern) {
             $IdsToResolve.Add($Matches[1]) | Out-Null
         }
     }
