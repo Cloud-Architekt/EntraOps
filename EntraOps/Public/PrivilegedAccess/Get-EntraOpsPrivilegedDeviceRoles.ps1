@@ -46,8 +46,8 @@ function Get-EntraOpsPrivilegedDeviceRoles {
     if ($SampleMode -eq $True) {
         Write-Warning "Not supported yet!"
     } else {
-        $DeviceMgmtRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/roleDefinitions" -OutputType PSObject
-        $DeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/roleAssignments" -OutputType PSObject
+        $DeviceMgmtRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/roleDefinitions?`$select=id,displayName,description,rolePermissions" -OutputType PSObject
+        $DeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/roleAssignments?`$select=id,principalIds,roleDefinitionId,resourceScopes" -OutputType PSObject
     }
     #endregion
 
@@ -160,7 +160,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
-            if ($RbacAssignmentByNestedGroupMembers.Count -gt "0") {
+            if ($RbacAssignmentByNestedGroupMembers.Count -gt 0) {
                 $RbacAssignmentByNestedGroupMembers | foreach-object {
                     [pscustomobject]@{
                         RoleAssignmentId              = $RbacAssignmentByGroup.RoleAssignmentId

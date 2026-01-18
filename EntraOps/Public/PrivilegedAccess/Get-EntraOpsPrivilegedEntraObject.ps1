@@ -72,7 +72,7 @@ function Get-EntraOpsPrivilegedEntraObject {
         $ObjectMemberships = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/transitiveMemberOf") -OutputType PSObject)
         $AadRolesActive = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$AadObjectId'" -ConsistencyLevel "eventual")
         $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
-        $RestrictedManagementByAadRole = ("" -ne $AadRolesActive.value -or $null -ne $AadRolesEligible)
+        $RestrictedManagementByAadRole = ($null -ne $AadRolesActive -or $null -ne $AadRolesEligible)
         $RestrictedManagementByRMAU = $($ObjectDetails.isManagementRestricted)
     } catch {
         Write-Warning "No group or role assignment status available"
@@ -94,8 +94,14 @@ function Get-EntraOpsPrivilegedEntraObject {
                 $ObjectSubType = $UserDetails.UserType
             }
 
-            # Sponsors
-            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+            # Sponsors (using $expand for efficiency)
+            try {
+                $UserWithSponsors = Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId?`$expand=sponsors(`$select=id)") -OutputType PSObject
+                $UserWithSponsors.sponsors | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+            } catch {
+                # Fallback if $expand not supported
+                Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+            }
 
             # User Sign-in Name
             $ObjectSignInName = $ObjectDetails.UserPrincipalName
@@ -212,10 +218,14 @@ function Get-EntraOpsPrivilegedEntraObject {
 
                 $OutsideOfAadTenant = ($AgentIdentityBlueprintPrincipalObject.AppOwnerOrganizationId -ne $TenantId)
 
-                # Sponsors
-                Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$($AadObjectId)/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
-
-
+                # Sponsors (using $expand for efficiency)
+                try {
+                    $SPWithSponsors = Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$($AadObjectId)?`$expand=sponsors(`$select=id)") -OutputType PSObject
+                    $SPWithSponsors.sponsors | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+                } catch {
+                    # Fallback if $expand not supported
+                    Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$($AadObjectId)/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+                }
 
             }
             #endregion
@@ -278,9 +288,14 @@ function Get-EntraOpsPrivilegedEntraObject {
 
     # Owners for non-user objects (since owners are not existent for user objects)
     if ($ObjectType -ne "user") {
-        Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/owners") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
+        try {
+            # Use $expand to fetch owners with main object call is not possible for directoryObjects, so keep separate call
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/owners?`$select=id") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
+        } catch {
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/owners") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
+        }
     }
-    # Owned Objects
+    # Owned Objects (already using $select)
     Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/ownedObjects" + '?$select=id') -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
 
     #endregion
@@ -302,7 +317,7 @@ function Get-EntraOpsPrivilegedEntraObject {
 
     # Make sure that first character is uppercase
     if (![string]::IsNullOrEmpty($ObjectSubType)) {
-        $ObjectSubType = $ObjectSubType.Substring(0,1).ToUpper() + $ObjectSubType.Substring(1)
+        $ObjectSubType = $ObjectSubType.Substring(0, 1).ToUpper() + $ObjectSubType.Substring(1)
     }
 
     if ($null -ne $ObjectDetails) {

@@ -110,11 +110,21 @@ function Get-EntraOpsPrivilegedEamIntune {
 
                 Write-Host "Checking Device ID in Associated PAW Device custom attribute in Intune..."
                 try {
-                    if ($ClassifiedPrivilegedPawUser.AssociatedPawDevice.Count -gt "0") {
-                        $DeviceIds = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices?`$filter=azureADDeviceId+eq+'$($ClassifiedPrivilegedPawUser.AssociatedPawDevice)'" -OutputType PSObject).id
-                        if ($Null -ne $DeviceIds) {      
-                            $Devices += Foreach ($DeviceId in $DeviceIds) {
-                                (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
+                    if ($ClassifiedPrivilegedPawUser.AssociatedPawDevice.Count -gt 0) {
+                        $DeviceIds = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices?`$filter=azureADDeviceId+eq+'$($ClassifiedPrivilegedPawUser.AssociatedPawDevice)'&`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject).id
+                        if ($Null -ne $DeviceIds) {
+                            # Parallelize device lookups for better performance
+                            if ($DeviceIds.Count -gt 3) {
+                                $Devices += $DeviceIds | ForEach-Object -Parallel {
+                                    $ModulePath = $using:PSScriptRoot
+                                    Import-Module "$ModulePath/../../EntraOps.psm1" -Force -WarningAction SilentlyContinue
+                                    (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($_)?`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject)
+                                } -ThrottleLimit 10
+                            } else {
+                                # For small counts, sequential is fine
+                                $Devices += Foreach ($DeviceId in $DeviceIds) {
+                                    (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)?`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject)
+                                }
                             }                           
                         } else {
                             Write-Output "No device for Entra ID DeviceId $($ClassifiedPrivilegedPawUser.AssociatedPawDevice) of $($ClassifiedPrivilegedPawUser.ObjectDisplayName) found in Intune!"
@@ -265,8 +275,9 @@ function Get-EntraOpsPrivilegedEamIntune {
     for ($i = 0; $i -lt $UniqueObjectIds.Count; $i++) {
         $ObjectId = $UniqueObjectIds[$i]
         
-        # Update progress for better UX
-        if (($i % $BatchSize) -eq 0) {
+        # Update progress more frequently for better UX (every 10 items or 5%, whichever is less frequent)
+        $ProgressInterval = [Math]::Max(10, [Math]::Floor($UniqueObjectIds.Count / 20))
+        if (($i % $ProgressInterval) -eq 0 -or $i -eq ($UniqueObjectIds.Count - 1)) {
             $PercentComplete = [math]::Round(($i / $UniqueObjectIds.Count) * 100, 0)
             Write-Progress -Activity "Resolving Object Details" -Status "Processing object $($i + 1) of $($UniqueObjectIds.Count)" -PercentComplete $PercentComplete
             if ($VerbosePreference -ne 'SilentlyContinue') {
@@ -356,5 +367,5 @@ function Get-EntraOpsPrivilegedEamIntune {
     $FilteredIntuneObjects = $DeviceMgmtRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
     
     Write-Host "Completed processing $($FilteredIntuneObjects.Count) privileged objects."
-    $FilteredIntuneObjects | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
+    $FilteredIntuneObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 }

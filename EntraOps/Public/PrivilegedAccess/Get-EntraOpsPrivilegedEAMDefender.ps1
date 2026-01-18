@@ -152,8 +152,9 @@ function Get-EntraOpsPrivilegedEamDefender {
     for ($i = 0; $i -lt $UniqueObjectIds.Count; $i++) {
         $ObjectId = $UniqueObjectIds[$i]
         
-        # Update progress for better UX
-        if (($i % $BatchSize) -eq 0) {
+        # Update progress more frequently for better UX (every 10 items or 5%, whichever is less frequent)
+        $ProgressInterval = [Math]::Max(10, [Math]::Floor($UniqueObjectIds.Count / 20))
+        if (($i % $ProgressInterval) -eq 0 -or $i -eq ($UniqueObjectIds.Count - 1)) {
             $PercentComplete = [math]::Round(($i / $UniqueObjectIds.Count) * 100, 0)
             Write-Progress -Activity "Resolving Object Details" -Status "Processing object $($i + 1) of $($UniqueObjectIds.Count)" -PercentComplete $PercentComplete
             if ($VerbosePreference -ne 'SilentlyContinue') {
@@ -243,5 +244,5 @@ function Get-EntraOpsPrivilegedEamDefender {
     $FilteredDefenderObjects = $DefenderRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
     
     Write-Host "Completed processing $($FilteredDefenderObjects.Count) privileged objects."
-    $FilteredDefenderObjects | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
+    $FilteredDefenderObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 }

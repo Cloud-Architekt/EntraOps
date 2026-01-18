@@ -46,12 +46,19 @@ function Get-EntraOpsPrivilegedIdGovRoles {
     if ($SampleMode -eq $True) {
         Write-Warning "Not supported yet!"
     } else {
-        $ElmRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/roleDefinitions"
-        $ElmRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/roleAssignments"
+        $ElmRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/roleDefinitions?`$select=id,displayName,description"
+        $ElmRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/roleAssignments?`$select=id,principalId,roleDefinitionId,appScopeId"
     }
 
     $ElmRoleAssignmentPrincipals = ($ElmRoleAssignments | select-object principalId -Unique).principalId
+    Write-Host "Processing $($ElmRoleAssignmentPrincipals.Count) Identity Governance role principals..."
+    $PrincipalCounter = 0
     $ElmRbacAssignments = foreach ($Principal in $ElmRoleAssignmentPrincipals) {
+        $PrincipalCounter++
+        if (($PrincipalCounter % 10) -eq 0 -or $PrincipalCounter -eq $ElmRoleAssignmentPrincipals.Count) {
+            $PercentComplete = [math]::Round(($PrincipalCounter / $ElmRoleAssignmentPrincipals.Count) * 100, 0)
+            Write-Progress -Activity "Processing IdGov Role Principals" -Status "Processing principal $PrincipalCounter of $($ElmRoleAssignmentPrincipals.Count)" -PercentComplete $PercentComplete
+        }
         Write-Verbose "Get identity information from permanent member $Principal"
         try {
             $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($Principal)" -OutputType PSObject
@@ -125,7 +132,7 @@ function Get-EntraOpsPrivilegedIdGovRoles {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
-            if ($RbacAssignmentByNestedGroupMembers.Count -gt "0") {
+            if ($RbacAssignmentByNestedGroupMembers.Count -gt 0) {
                 $RbacAssignmentByNestedGroupMembers | foreach-object {
                     [pscustomobject]@{
                         RoleAssignmentId              = $RbacAssignmentByGroup.RoleAssignmentId

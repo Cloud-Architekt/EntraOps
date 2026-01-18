@@ -197,7 +197,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
     #region Privileged Service Principals
     Write-Output "Identify directory role scope of service principals and application objects..."
     $PrivilegedServicePrincipals = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" }
-    if ($PrivilegedServicePrincipals.Count -gt "0") {
+    if ($PrivilegedServicePrincipals.Count -gt 0) {
         # Get list of object-level role assignment scope which includes Control Plane Service Principals
         $ScopeNameServicePrincipalObject = $PrivilegedServicePrincipals | ForEach-Object { "/$($_.ObjectId)" }
 

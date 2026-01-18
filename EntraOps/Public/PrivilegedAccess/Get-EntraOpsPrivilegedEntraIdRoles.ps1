@@ -48,12 +48,12 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $AadRoleAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementAssignments.json" | ConvertFrom-Json -Depth 10
         $AadEligibleRoleAssignments = @()
         if (Test-Path "$EntraOpsBaseFolder/Samples/AadRoleManagementEligibleAssignments.json") {
-             $AadEligibleRoleAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementEligibleAssignments.json" | ConvertFrom-Json -Depth 10
+            $AadEligibleRoleAssignments = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementEligibleAssignments.json" | ConvertFrom-Json -Depth 10
         }
     } else {
-        $AadRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions"
-        $AadRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleAssignments"
-        $AadEligibleRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules"
+        $AadRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions?`$select=id,displayName,description,rolePermissions,isBuiltIn"
+        $AadRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleAssignments?`$select=id,principalId,roleDefinitionId,directoryScopeId"
+        $AadEligibleRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules?`$select=id,principalId,roleDefinitionId,directoryScopeId,memberType,status"
     }
 
     # Optimization: Build Lookup Tables
@@ -68,14 +68,14 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     foreach ($Ass in $AadRoleAssignments) {
         if ($Ass.principalId) { $IdsToResolve.Add($Ass.principalId) | Out-Null }
         if ($Ass.directoryScopeId -and $Ass.directoryScopeId -ne "/" -and $Ass.directoryScopeId -match $GuidPattern) {
-             $IdsToResolve.Add($Matches[1]) | Out-Null
+            $IdsToResolve.Add($Matches[1]) | Out-Null
         }
     }
     $EligibleToProcess = $AadEligibleRoleAssignments | Where-Object { $_.memberType -eq "Direct" -and $_.status -eq "Provisioned" }
     foreach ($Ass in $EligibleToProcess) {
         if ($Ass.principalId) { $IdsToResolve.Add($Ass.principalId) | Out-Null }
         if ($Ass.directoryScopeId -and $Ass.directoryScopeId -ne "/" -and $Ass.directoryScopeId -match $GuidPattern) {
-             $IdsToResolve.Add($Matches[1]) | Out-Null
+            $IdsToResolve.Add($Matches[1]) | Out-Null
         }
     }
 
@@ -83,7 +83,13 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     $DirObjLookup = @{}
     $IdArray = $IdsToResolve | Select-Object -Unique
     if ($IdArray.Count -gt 0) {
+        $TotalBatches = [Math]::Ceiling($IdArray.Count / 1000)
+        Write-Verbose "Resolving $($IdArray.Count) directory objects in $TotalBatches batches..."
         for ($i = 0; $i -lt $IdArray.Count; $i += 1000) {
+            $CurrentBatch = [Math]::Floor($i / 1000) + 1
+            $PercentComplete = [math]::Round(($CurrentBatch / $TotalBatches) * 100, 0)
+            Write-Progress -Activity "Resolving Directory Objects" -Status "Processing batch $CurrentBatch of $TotalBatches" -PercentComplete $PercentComplete
+            
             $Batch = $IdArray[$i..([Math]::Min($i + 999, $IdArray.Count - 1))]
             # directoryObjects/getByIds allows up to 1000 items
             $Body = @{ ids = $Batch; types = @("directoryObject") } | ConvertTo-Json -Compress
@@ -94,6 +100,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 Write-Warning "Failed to resolve directory objects batch: $_"
             }
         }
+        Write-Progress -Activity "Resolving Directory Objects" -Completed
     }
     #endregion
 
@@ -113,11 +120,11 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
 
         # Fallback: If not found in batch lookup, try individual redundant fetch
         if ($null -eq $PrincipalProfile) {
-             try {
+            try {
                 $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($Principal)" -OutputType PSObject
-             } catch {
+            } catch {
                 Write-Warning "Issue to resolve directory object $Principal. Error: $_"
-             }
+            }
         }
 
         if ($PrincipalProfile) {
@@ -138,11 +145,11 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         if ($RoleDefLookup.ContainsKey($RoleDefId)) {
             $Role = $RoleDefLookup[$RoleDefId]
         } else {
-             # Fallback for deprecated/hidden roles
-             try {
-                 $Role = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions/$RoleDefId"
-                 $RoleDefLookup[$RoleDefId] = $Role
-             } catch { $Role = $null }
+            # Fallback for deprecated/hidden roles
+            try {
+                $Role = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions/$RoleDefId"
+                $RoleDefLookup[$RoleDefId] = $Role
+            } catch { $Role = $null }
         }
 
         if ($Role) {
@@ -166,17 +173,17 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             if ($ScopeId -and $DirObjLookup.ContainsKey($ScopeId)) {
                 $RoleAssignmentScopeName = $DirObjLookup[$ScopeId].displayName
             } elseif ($ScopeId) {
-                 try {
-                     $ScopeObj = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($ScopeId)" -OutputType PSObject
-                     if ($ScopeObj) {
-                          $DirObjLookup[$ScopeId] = $ScopeObj 
-                          $RoleAssignmentScopeName = $ScopeObj.displayName
-                     } else {
-                          $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
-                     }
-                 } catch {
-                     $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
-                 }
+                try {
+                    $ScopeObj = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($ScopeId)" -OutputType PSObject
+                    if ($ScopeObj) {
+                        $DirObjLookup[$ScopeId] = $ScopeObj 
+                        $RoleAssignmentScopeName = $ScopeObj.displayName
+                    } else {
+                        $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
+                    }
+                } catch {
+                    $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
+                }
             } else {
                 $RoleAssignmentScopeName = $AadPrincipalRoleAssignment.directoryScopeId
             }
@@ -219,11 +226,11 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
 
         # Fallback
         if ($null -eq $PrincipalProfile) {
-             try {
+            try {
                 $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($Principal)" -OutputType PSObject
-             } catch {
+            } catch {
                 Write-Warning "Issue to resolve directory object $Principal. Error: $_"
-             }
+            }
         }
 
         if ($PrincipalProfile) {
@@ -241,11 +248,11 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         if ($RoleDefLookup.ContainsKey($RoleDefId)) {
             $Role = $RoleDefLookup[$RoleDefId]
         } else {
-             # Fallback
-             try {
-                 $Role = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions/$RoleDefId"
-                 $RoleDefLookup[$RoleDefId] = $Role
-             } catch { $Role = $null }
+            # Fallback
+            try {
+                $Role = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions/$RoleDefId"
+                $RoleDefLookup[$RoleDefId] = $Role
+            } catch { $Role = $null }
         }
 
         if ($Role) {
@@ -269,17 +276,17 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             if ($ScopeId -and $DirObjLookup.ContainsKey($ScopeId)) {
                 $RoleAssignmentScopeName = $DirObjLookup[$ScopeId].displayName
             } elseif ($ScopeId) {
-                 try {
-                     $ScopeObj = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($ScopeId)" -OutputType PSObject
-                     if ($ScopeObj) {
-                          $DirObjLookup[$ScopeId] = $ScopeObj 
-                          $RoleAssignmentScopeName = $ScopeObj.displayName
-                     } else {
-                          $RoleAssignmentScopeName = $EligiblePrincipalRoleAssignment.directoryScopeId
-                     }
-                 } catch {
-                     $RoleAssignmentScopeName = $EligiblePrincipalRoleAssignment.directoryScopeId
-                 }
+                try {
+                    $ScopeObj = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($ScopeId)" -OutputType PSObject
+                    if ($ScopeObj) {
+                        $DirObjLookup[$ScopeId] = $ScopeObj 
+                        $RoleAssignmentScopeName = $ScopeObj.displayName
+                    } else {
+                        $RoleAssignmentScopeName = $EligiblePrincipalRoleAssignment.directoryScopeId
+                    }
+                } catch {
+                    $RoleAssignmentScopeName = $EligiblePrincipalRoleAssignment.directoryScopeId
+                }
             } else {
                 $RoleAssignmentScopeName = $EligiblePrincipalRoleAssignment.directoryScopeId
             }
@@ -343,10 +350,10 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId)
             foreach ($TransitiveMember in $TransitiveMembers) {
                 $Member = [pscustomobject]@{
-                    displayName           = $TransitiveMember.displayName
-                    id                    = $TransitiveMember.id
-                    '@odata.type'         = $TransitiveMember.'@odata.type'
-                    RoleAssignmentSubType = $TransitiveMember.RoleAssignmentSubType
+                    displayName            = $TransitiveMember.displayName
+                    id                     = $TransitiveMember.id
+                    '@odata.type'          = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
                     GroupObjectDisplayName = $GroupWithRbacAssignment.ObjectDisplayName
                     GroupObjectId          = $GroupWithRbacAssignment.ObjectId
                 }
@@ -359,7 +366,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
-            if ($RbacAssignmentByNestedGroupMembers.Count -gt "0") {
+            if ($RbacAssignmentByNestedGroupMembers.Count -gt 0) {
                 $RbacAssignmentByNestedGroupMembers | foreach-object {
                     [pscustomobject]@{
                         RoleAssignmentId                = $RbacAssignmentByGroup.RoleAssignmentId

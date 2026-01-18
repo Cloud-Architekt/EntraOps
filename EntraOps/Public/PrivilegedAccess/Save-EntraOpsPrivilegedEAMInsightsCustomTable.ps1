@@ -83,9 +83,14 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
 
             if ($EamFiles.Count -gt 0) {
                 Write-Host "Upload classification data for object type: $($ObjectType)"
+                $TotalBatches = [Math]::Ceiling($EamFiles.Count / 50)
             
                 # Loop through files in batches of 50 to avoid errors hitting the 1Mb file limit for DCRs
                 for ($i = 0; $i -lt $EamFiles.Count; $i += 50) {
+                    $CurrentBatch = [Math]::Floor($i / 50) + 1
+                    $PercentComplete = [math]::Round(($CurrentBatch / $TotalBatches) * 100, 0)
+                    Write-Progress -Activity "Uploading to Custom Table" -Status "Processing batch $CurrentBatch of $TotalBatches for $ObjectType" -PercentComplete $PercentComplete
+                    
                     # Select the current batch of 50 files
                     $Batch = $EamFiles[$i..([math]::Min($i + 49, $EamFiles.Count - 1))]
                 

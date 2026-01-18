@@ -46,8 +46,8 @@ function Get-EntraOpsPrivilegedDefenderRoles {
     if ($SampleMode -eq $True) {
         Write-Warning "Not supported yet!"
     } else {
-        $DefenderRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleDefinitions" -OutputType PSObject
-        $DefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleAssignments" -OutputType PSObject
+        $DefenderRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleDefinitions?`$select=id,displayName,description,rolePermissions" -OutputType PSObject
+        $DefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleAssignments?`$select=id,principalIds,roleDefinitionId,resourceScopes" -OutputType PSObject
     }
     #endregion
 
@@ -56,7 +56,14 @@ function Get-EntraOpsPrivilegedDefenderRoles {
     Write-Host "Get details of Defender Role Assignments foreach individual principal..."
     if (![string]::IsNullOrWhiteSpace($DefenderRoleAssignments.id)) {
         $DefenderRoleAssignmentPrincipals = ($DefenderRoleAssignments | select-object -ExpandProperty principalIds -Unique)
+        Write-Host "Processing $($DefenderRoleAssignmentPrincipals.Count) Defender role principals..."
+        $PrincipalCounter = 0
         $DefenderPermanentRbacAssignments = foreach ($Principal in $DefenderRoleAssignmentPrincipals) {
+            $PrincipalCounter++
+            if (($PrincipalCounter % 10) -eq 0 -or $PrincipalCounter -eq $DefenderRoleAssignmentPrincipals.Count) {
+                $PercentComplete = [math]::Round(($PrincipalCounter / $DefenderRoleAssignmentPrincipals.Count) * 100, 0)
+                Write-Progress -Activity "Processing Defender Role Principals" -Status "Processing principal $PrincipalCounter of $($DefenderRoleAssignmentPrincipals.Count)" -PercentComplete $PercentComplete
+            }
             Write-Verbose "Get identity information from permanent member $Principal"
             try {
                 $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($Principal)" -OutputType PSObject
@@ -116,6 +123,7 @@ function Get-EntraOpsPrivilegedDefenderRoles {
                 }
             }
         }
+        Write-Progress -Activity "Processing Defender Role Principals" -Completed
     } else {
         Write-Warning "No Defender Role Assignments found!"
         $DefenderPermanentRbacAssignments = $null
@@ -154,7 +162,7 @@ function Get-EntraOpsPrivilegedDefenderRoles {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
-            if ($RbacAssignmentByNestedGroupMembers.Count -gt "0") {
+            if ($RbacAssignmentByNestedGroupMembers.Count -gt 0) {
                 $RbacAssignmentByNestedGroupMembers | foreach-object {
                     [pscustomobject]@{
                         RoleAssignmentId              = $RbacAssignmentByGroup.RoleAssignmentId

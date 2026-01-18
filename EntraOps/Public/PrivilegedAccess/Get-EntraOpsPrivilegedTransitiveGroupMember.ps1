@@ -60,17 +60,17 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
 
         #Permanent Members in PIM-managed Group
         Write-Verbose "- Permanent membership"
-        $PermanentMembers = ($PimForGroupsMembers | Where-Object { $_.assignmentType -eq "assigned" }).principal | Where-Object { $null -ne $_.Id } | select-object DisplayName, Id, '@odata.type'
+        $PermanentMembers = ($PimForGroupsMembers | Where-Object { $_.assignmentType -eq "assigned" -and $null -ne $_.principal.Id }).principal | select-object DisplayName, Id, '@odata.type'
         $PermanentMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Permanent member" -Force
 
         #Active Members in PIM-managed Group
-        $ActiveMembers = ($PimForGroupsMembers | Where-Object { $_.assignmentType -eq "active" }).principal | Where-Object { $null -ne $_.Id } | select-object DisplayName, Id, '@odata.type'
+        $ActiveMembers = ($PimForGroupsMembers | Where-Object { $_.assignmentType -eq "active" -and $null -ne $_.principal.Id }).principal | select-object DisplayName, Id, '@odata.type'
         $ActiveMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Active member" -Force
 
         # Eligible Member
         Write-Verbose "- Direct eligible membership"
         $EligibleMembersUri = "/beta/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq `'$($GroupObjectId)`'&`$expand=principal"
-        $EligibleMembers = (Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $EligibleMembersUri -OutputType PSObject | Where-Object { $_.status -eq "Provisioned" -and $_.accessId -eq "member" }).principal | Where-Object { $null -ne $_.Id } | select-object DisplayName, Id, '@odata.type'
+        $EligibleMembers = (Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $EligibleMembersUri -OutputType PSObject | Where-Object { $_.status -eq "Provisioned" -and $_.accessId -eq "member" -and $null -ne $_.principal.Id }).principal | select-object DisplayName, Id, '@odata.type'
         $EligibleMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Eligible member" -Force
 
         # Check if Eligible Member groups have nested permanent group assignments

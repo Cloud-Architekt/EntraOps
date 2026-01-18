@@ -45,9 +45,8 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
     Set-AzContext -SubscriptionId $SentinelWorkspaceSubscriptionId | Out-Null
     $TenantId = (Get-AzContext).Tenant.Id
     $AppRolesClassification = Invoke-RestMethod -Method Get -Uri "https://raw.githubusercontent.com/Cloud-Architekt/AzurePrivilegedIAM/main/Classification/Classification_AppRoles.json"
-    $FirstPartyGraphActivitiyQuery = Invoke-RestMethod -Method GET -Uri "https://raw.githubusercontent.com/Cloud-Architekt/AzureSentinel/main/Hunting%20Queries/EID-WorkloadIdentities/GraphActivityFromFirstPartyApps.kusto" | Out-String
     $FirstPartyGraphActivitiyQuery = Invoke-RestMethod -Method GET -Uri "https://raw.githubusercontent.com/Cloud-Architekt/AzureSentinel/main/Hunting%20Queries/EID-WorkloadIdentities/GraphActivityFromFirstPartyApps.kusto"
-    $FirstPartyGraphActivities = (Invoke-AzOperationalInsightsQuery -WorkspaceId $SentinelWorkspaceId -Query $FirstPartyGraphActivitiyQuery).Results | ConvertTo-Json | ConvertFrom-Json
+    $FirstPartyGraphActivities = (Invoke-AzOperationalInsightsQuery -WorkspaceId $SentinelWorkspaceId -Query $FirstPartyGraphActivitiyQuery).Results
 
     switch ($Source) {
         MsGraphActivity {
@@ -70,8 +69,7 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                                 'TaggedBy'           = "JSONwithAction"
                             }
                         }
-                    }
-                    else {
+                    } else {
                         $Classification += [PSCustomObject]@{
                             'AdminTierLevel'     = "Unclassified"
                             'AdminTierLevelName' = "Unclassified"
@@ -101,8 +99,7 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                 try {
                     #$ObjectDetails = Get-AzADServicePrincipal -ObjectId $($FirstPartyGraphActivity.ServicePrincipalObjectId)
                     $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $($FirstPartyGraphActivity.ServicePrincipalObjectId) -TenantId $TenantId
-                }
-                catch {
+                } catch {
                     Write-Warning "Service Principal Object for $($FirstPartyGraphActivity.AppDisplayName) not found!"
                 }
 

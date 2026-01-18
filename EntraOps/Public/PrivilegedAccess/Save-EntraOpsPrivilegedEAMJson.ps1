@@ -43,7 +43,6 @@ function Save-EntraOpsPrivilegedEAMJson {
         }
 
         $EamAzureAD = Get-EntraOpsPrivilegedEamEntraId
-        $EamAzureAD = $EamAzureAD | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
         $EamAzureAD | Convertto-Json -Depth 10 | Out-File -Path "$($EntraExportFolder)/EntraID.json" -Force
         
         # Optimization: Create directories first
@@ -73,7 +72,6 @@ function Save-EntraOpsPrivilegedEAMJson {
         }
 
         $EamAzureAdResourceApps = Get-EntraOpsPrivilegedEamResourceApps
-        $EamAzureAdResourceApps = $EamAzureAdResourceApps | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
         $EamAzureAdResourceApps | Convertto-Json -Depth 10 | Out-File -Path "$($ResAppExportFolder)/ResourceApps.json"
 
         # Optimization: Create directories first
@@ -95,7 +93,6 @@ function Save-EntraOpsPrivilegedEAMJson {
     if ($RbacSystems -contains "DeviceManagement") {
         $DevMgmtExportFolder = "$($DefaultFolderClassifiedEam)/DeviceManagement"
         $EamDeviceMgmt = Get-EntraOpsPrivilegedEAMIntune
-        $EamDeviceMgmt = $EamDeviceMgmt | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
 
         if ((Test-Path -path "$($DevMgmtExportFolder)")) {
             Remove-Item "$($DevMgmtExportFolder)" -Force -Recurse
@@ -126,7 +123,6 @@ function Save-EntraOpsPrivilegedEAMJson {
 
         $EamIdGov = Get-EntraOpsPrivilegedEAMIdGov
         $EamIdGov | Measure-Object
-        $EamIdGov = $EamIdGov | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
 
         if ((Test-Path -path "$($IdGovExportFolder)")) {
             Remove-Item "$($IdGovExportFolder)" -Force -Recurse
@@ -156,7 +152,6 @@ function Save-EntraOpsPrivilegedEAMJson {
 
         $EamDefender = Get-EntraOpsPrivilegedEAMDefender
         $EamDefender | Measure-Object
-        $EamDefender = $EamDefender | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
 
         if ((Test-Path -path "$($DefenderExportFolder)")) {
             Remove-Item "$($DefenderExportFolder)" -Force -Recurse
