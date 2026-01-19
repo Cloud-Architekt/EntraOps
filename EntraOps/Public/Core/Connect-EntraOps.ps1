@@ -113,6 +113,14 @@ function Connect-EntraOps {
                     Write-Output "Logging in to Microsoft Graph..."
                     Connect-MgGraph -TenantId $TenantId -NoWelcome -ErrorAction Stop -Scopes $Scopes
                     Write-Output "Succesfully logged in to Microsoft Graph"
+                    
+                    # Store Microsoft Graph connection parameters for parallel processing
+                    $MgConnectionInfo = @{
+                        Scopes   = (Get-MgContext).Scopes
+                        TenantId = (Get-MgContext).TenantId
+                        ClientId = (Get-MgContext).ClientId
+                    }
+                    New-Variable -Name MgGraphConnectionInfo -Value $MgConnectionInfo -Scope Global -Force
                 } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
@@ -129,6 +137,14 @@ function Connect-EntraOps {
                     Write-Output "Logging in to Microsoft Graph..."
                     Connect-MgGraph -TenantId $TenantId -NoWelcome -ErrorAction Stop -Scopes $Scopes -UseDeviceAuthentication
                     Write-Output "Succesfully logged in to Microsoft Graph"
+                    
+                    # Store Microsoft Graph connection parameters for parallel processing
+                    $MgConnectionInfo = @{
+                        Scopes   = (Get-MgContext).Scopes
+                        TenantId = (Get-MgContext).TenantId
+                        ClientId = (Get-MgContext).ClientId
+                    }
+                    New-Variable -Name MgGraphConnectionInfo -Value $MgConnectionInfo -Scope Global -Force
                 } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
@@ -142,6 +158,15 @@ function Connect-EntraOps {
                     Write-Output "Logging in to Microsoft Graph..."
                     Connect-MgGraph -Identity -ErrorAction Stop -NoWelcome
                     Write-Output "Succesfully logged in to Microsoft Graph"
+                    
+                    # Store Microsoft Graph connection parameters for parallel processing
+                    # Using Global scope for cross-function access within module
+                    $MgConnectionInfo = @{
+                        TenantId = (Get-MgContext).TenantId
+                        ClientId = (Get-MgContext).ClientId
+                        AuthType = 'Identity'
+                    }
+                    New-Variable -Name MgGraphConnectionInfo -Value $MgConnectionInfo -Scope Global -Force
                 } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
@@ -155,6 +180,15 @@ function Connect-EntraOps {
                     Write-Output "Logging in to Microsoft Graph..."
                     Connect-MgGraph -Identity -ClientId $AccountId -NoWelcome -ErrorAction Stop
                     Write-Output "Succesfully logged in to Microsoft Graph"
+                    
+                    # Store Microsoft Graph connection parameters for parallel processing
+                    # Using Global scope for cross-function access within module
+                    $MgConnectionInfo = @{
+                        TenantId = (Get-MgContext).TenantId
+                        ClientId = $AccountId
+                        AuthType = 'UserAssignedIdentity'
+                    }
+                    New-Variable -Name MgGraphConnectionInfo -Value $MgConnectionInfo -Scope Global -Force
                 } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
@@ -165,8 +199,25 @@ function Connect-EntraOps {
                     throw "Federated environment is not already authenticated"
                 }
                 try {
-                    $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
+                    $MgTokenObj = Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com/"
+                    $MgToken = if ($MgTokenObj.Token -is [SecureString]) {
+                        $MgTokenObj.Token | ConvertFrom-SecureString -AsPlainText
+                    } else {
+                        $MgTokenObj.Token
+                    }
+                    $SecureAccessToken = ConvertTo-SecureString -String $MgToken -AsPlainText -Force
                     Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
+                    
+                    # Store Microsoft Graph connection parameters for parallel processing
+                    # Using Global scope for cross-function access within module
+                    # Store token as SecureString to prevent casual inspection
+                    $MgConnectionInfo = @{
+                        TenantId          = (Get-MgContext).TenantId
+                        ClientId          = (Get-MgContext).ClientId
+                        AuthType          = 'FederatedToken'
+                        SecureAccessToken = (ConvertTo-SecureString -String $MgToken -AsPlainText -Force)
+                    }
+                    New-Variable -Name MgGraphConnectionInfo -Value $MgConnectionInfo -Scope Global -Force
                 } catch {
                     throw $_.Exception
                 }
@@ -181,10 +232,37 @@ function Connect-EntraOps {
                         $SecureMsGraphAccessToken = $MsGraphAccessToken | ConvertTo-SecureString -AsPlainText -Force
                         Connect-MgGraph -AccessToken $SecureMsGraphAccessToken -NoWelcome
                     }
+                    # Store Microsoft Graph connection parameters for parallel processing
+                    # Using Global scope for cross-function access within module
+                    # Store token as SecureString to prevent casual inspection
+                    $MgConnectionInfo = @{
+                        TenantId          = (Get-MgContext).TenantId
+                        ClientId          = (Get-MgContext).ClientId
+                        AuthType          = 'ExplicitToken'
+                        SecureAccessToken = (ConvertTo-SecureString -String $MsGraphAccessToken -AsPlainText -Force)
+                    }
+                    New-Variable -Name MgGraphConnectionInfo -Value $MgConnectionInfo -Scope Global -Force
                 } elseif ($Null -ne (Get-AzContext).Tenant.Id) {
                     try {
-                        $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
+                        $MgTokenObj = Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com/"
+                        $MgToken = if ($MgTokenObj.Token -is [SecureString]) {
+                            $MgTokenObj.Token | ConvertFrom-SecureString -AsPlainText
+                        } else {
+                            $MgTokenObj.Token
+                        }
+                        $SecureAccessToken = ConvertTo-SecureString -String $MgToken -AsPlainText -Force
                         Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
+                        
+                        # Store Microsoft Graph connection parameters for parallel processing
+                        # Using Global scope for cross-function access within module
+                        # Store token as SecureString to prevent casual inspection
+                        $MgConnectionInfo = @{
+                            TenantId          = (Get-MgContext).TenantId
+                            ClientId          = (Get-MgContext).ClientId
+                            AuthType          = 'FromAzContext'
+                            SecureAccessToken = (ConvertTo-SecureString -String $MgToken -AsPlainText -Force)
+                        }
+                        New-Variable -Name MgGraphConnectionInfo -Value $MgConnectionInfo -Scope Global -Force
                     } catch {
                         throw $_.Exception
                     }

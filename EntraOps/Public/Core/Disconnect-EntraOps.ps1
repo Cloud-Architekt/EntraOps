@@ -32,6 +32,19 @@ function Disconnect-EntraOps {
     # Delete EntraOps cache
     Clear-EntraOpsCache
 
+    # Clear sensitive connection info from Global scope
+    if ($null -ne $Global:MgGraphConnectionInfo) {
+        # Clear any plaintext tokens
+        if ($Global:MgGraphConnectionInfo.AccessToken) {
+            $Global:MgGraphConnectionInfo.AccessToken = $null
+        }
+        # Dispose SecureString
+        if ($Global:MgGraphConnectionInfo.SecureAccessToken) {
+            $Global:MgGraphConnectionInfo.SecureAccessToken.Dispose()
+        }
+        Remove-Variable -Name MgGraphConnectionInfo -Scope Global -Force -ErrorAction SilentlyContinue
+    }
+
     # Disconnect from Microsoft Graph SDK if connected
     $MgContext = Get-MgContext
     if ($null -ne $MgContext -and $ClearGraphCache -eq $true -and (Test-Path $MgGraphCacheFolder)) {

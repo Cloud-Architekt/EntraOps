@@ -50,124 +50,265 @@ function Save-EntraOpsPrivilegedEAMJson {
     
     # Execute parallel jobs if any exist
     if ($ParallelJobs.Count -gt 0) {
-        # Capture global variables and context needed by the jobs
+        Write-Verbose "Preparing to launch $($ParallelJobs.Count) parallel jobs: $($ParallelJobs -join ', ')"
+        
+        # Capture authentication context from parent session
+        $AzContext = Get-AzContext
+        
+        # Get Microsoft Graph connection parameters (set by Connect-EntraOps)
+        # This preserves the original authentication scope from Connect-EntraOps
+        if ($null -eq $MgGraphConnectionInfo) {
+            throw "Microsoft Graph connection info not found. Please ensure Connect-EntraOps has been called with proper authentication."
+        }
+        
+        # Create a local copy to work with
+        $MgConnectionInfo = $MgGraphConnectionInfo
+        
+        # Convert SecureString token to plaintext only when needed for job serialization
+        # This is unavoidable as Start-Job ArgumentList requires serializable types
+        if ($MgConnectionInfo.SecureAccessToken) {
+            $MgConnectionInfo.AccessToken = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
+                [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($MgConnectionInfo.SecureAccessToken)
+            )
+            # Remove SecureString from hashtable to avoid serialization issues
+            $MgConnectionInfo.Remove('SecureAccessToken')
+        }
+        
+        # Get Azure ARM token as plain string (required by Connect-AzAccount)
+        $AzArmTokenObj = Get-AzAccessToken -ResourceUrl "https://management.azure.com/"
+        
+        # Ensure we have a plain string token
+        if ($AzArmTokenObj.Token -is [SecureString]) {
+            $AzArmAccessToken = $AzArmTokenObj.Token | ConvertFrom-SecureString -AsPlainText
+        } elseif ($AzArmTokenObj.Token -is [string]) {
+            $AzArmAccessToken = $AzArmTokenObj.Token
+        } else {
+            $AzArmAccessToken = $AzArmTokenObj.Token.ToString()
+        }
+        
+        # Validate token format (should be a JWT starting with "eyJ")
+        if (-not $AzArmAccessToken.StartsWith("eyJ")) {
+            throw "Azure ARM access token does not appear to be in valid JWT format"
+        }
+        
+        $AccountId = $AzContext.Account.Id
+        $TenantId = $AzContext.Tenant.Id
+        
+        Write-Verbose "Authentication context captured for Account: $AccountId, Tenant: $TenantId"
+        Write-Verbose "ARM Token length: $($AzArmAccessToken.Length)"
+        Write-Verbose "Microsoft Graph Auth Type: $($MgConnectionInfo.AuthType)"
+        
+        # Resolve module path
+        $ModulePath = "$EntraOpsBaseFolder/EntraOps/EntraOps.psm1"
+        Write-Verbose "Module path: $ModulePath"
+        
+        # Capture global variables needed by jobs
         $GlobalVars = @{
             DefaultFolderClassification = $DefaultFolderClassification
             DefaultFolderClassifiedEam  = $DefaultFolderClassifiedEam
             TenantIdContext             = $TenantIdContext
             TenantNameContext           = $TenantNameContext
             EntraOpsBaseFolder          = $EntraOpsBaseFolder
+            ModulePath                  = $ModulePath
         }
         
-        # Capture authentication tokens from the parent session
-        $AzContext = Get-AzContext
-        $MgGraphAccessToken = (Get-AzAccessToken -ResourceTypeName MSGraph).Token
-        $AzArmAccessToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/").Token
-        $AccountId = $AzContext.Account.Id
-        $TenantName = $AzContext.Tenant.Id
+        Write-Verbose "Global variables captured: $($GlobalVars.Keys -join ', ')"
         
-        # Resolve the absolute path to the module file using EntraOpsBaseFolder
-        $ModulePath = "$EntraOpsBaseFolder/EntraOps/EntraOps.psm1"
+        # Create a clean copy of connection info for jobs (without SecureString)
+        $MgConnectionInfoForJobs = $MgConnectionInfo.Clone()
         
-        # Use Start-Job instead of Start-ThreadJob to avoid assembly loading conflicts
-        # Start-Job creates separate PowerShell processes with isolated module loading
+        # Use Start-Job for true process isolation (avoids assembly loading conflicts)
+        Write-Verbose "Creating background jobs with Start-Job..."
         $Jobs = $ParallelJobs | ForEach-Object {
             $JobName = $_
+            Write-Verbose "Launching job: $JobName"
             
             Start-Job -Name $JobName -ScriptBlock {
-                param($JobName, $ExportFolder, $ModulePath, $GlobalVars, $AccountId, $TenantName, $MgGraphAccessToken, $AzArmAccessToken)
+                param($JobName, $ExportFolder, $GlobalVars, $AccountId, $TenantId, $MgConnectionInfo, $AzArmAccessToken)
                 
-                # Set global variables
-                New-Variable -Name DefaultFolderClassification -Value $GlobalVars.DefaultFolderClassification -Scope Global -Force
-                New-Variable -Name DefaultFolderClassifiedEam -Value $GlobalVars.DefaultFolderClassifiedEam -Scope Global -Force
-                New-Variable -Name TenantIdContext -Value $GlobalVars.TenantIdContext -Scope Global -Force
-                New-Variable -Name TenantNameContext -Value $GlobalVars.TenantNameContext -Scope Global -Force
-                New-Variable -Name EntraOpsBaseFolder -Value $GlobalVars.EntraOpsBaseFolder -Scope Global -Force
-                
-                # Import module which will handle loading required dependencies
-                Import-Module $ModulePath -Force -WarningAction SilentlyContinue
-                
-                # Convert tokens to SecureStrings for authentication
-                $SecureMsGraphAccessToken = $MgGraphAccessToken | ConvertTo-SecureString -AsPlainText -Force
-                $SecureAzArmAccessToken = $AzArmAccessToken | ConvertTo-SecureString -AsPlainText -Force
-                
-                # Authenticate using tokens from parent session
-                Connect-AzAccount -AccountId $AccountId -AccessToken $SecureAzArmAccessToken -Tenant $TenantName | Out-Null
-                Connect-MgGraph -AccessToken $SecureMsGraphAccessToken -NoWelcome | Out-Null
-                
-                # Set additional global variables needed after authentication
-                New-Variable -Name TenantIdContext -Value $TenantName -Scope Global -Force
-                New-Variable -Name TenantNameContext -Value $TenantName -Scope Global -Force
-                
-                # Execute the appropriate job based on name
-                switch ($JobName) {
-                    "EntraID" {
-                        $EntraExportFolder = "$ExportFolder/EntraID"
-
-                        if ((Test-Path -path "$EntraExportFolder")) {
-                            Remove-Item "$EntraExportFolder" -Force -Recurse
-                            New-Item "$EntraExportFolder" -ItemType Directory -Force | Out-Null
-                        } else {
-                            New-Item "$EntraExportFolder" -ItemType Directory -Force | Out-Null
-                        }
-
-                        Write-Host "Processing EntraID RBAC system..."
-                        $EamAzureAD = Get-EntraOpsPrivilegedEamEntraId
-                        $EamAzureAD | Convertto-Json -Depth 10 | Out-File -Path "$EntraExportFolder/EntraID.json" -Force
-                        
-                        # Create directories first
-                        $EamAzureAD | Group-Object ObjectType | ForEach-Object {
-                            $Dir = "$EntraExportFolder/$($_.Name)"
-                            if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
-                        }
-
-                        # Write individual files
-                        foreach ($Obj in $EamAzureAD) {
-                            $Path = "$EntraExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
-                        }
-                        
-                        Write-Host "Completed EntraID processing: $($EamAzureAD.Count) objects exported"
+                try {
+                    Write-Output "[$JobName] Starting processing..."
+                    
+                    # Set global variables
+                    $GlobalVars.GetEnumerator() | ForEach-Object {
+                        New-Variable -Name $_.Key -Value $_.Value -Scope Global -Force
                     }
-                    "ResourceApps" {
-                        $ResAppExportFolder = "$ExportFolder/ResourceApps"
-
-                        if ((Test-Path -path "$ResAppExportFolder")) {
-                            Remove-Item "$ResAppExportFolder" -Force -Recurse
-                            New-Item "$ResAppExportFolder" -ItemType Directory -Force | Out-Null
-                        } else {
-                            New-Item "$ResAppExportFolder" -ItemType Directory -Force | Out-Null
+                    
+                    Write-Verbose "[$JobName] Global variables set"
+                    Write-Output "[$JobName] ARM Token received (length: $($AzArmAccessToken.Length))"
+                    
+                    # Import EntraOps module (skip installation check in child jobs)
+                    Write-Verbose "[$JobName] Importing EntraOps module..."
+                    $env:ENTRAOPS_SKIP_MODULE_INSTALL = "true"
+                    Import-Module $GlobalVars.ModulePath -Force -WarningAction SilentlyContinue -ErrorAction Stop
+                    Write-Output "[$JobName] Module imported successfully"
+                    
+                    # Authenticate to Azure using token from parent session
+                    Write-Verbose "[$JobName] Authenticating to Azure with token..."
+                    Write-Verbose "[$JobName] Token starts with: $($AzArmAccessToken.Substring(0, [Math]::Min(10, $AzArmAccessToken.Length)))"
+                    
+                    $ConnectParams = @{
+                        AccessToken = $AzArmAccessToken
+                        AccountId   = $AccountId
+                        Tenant      = $TenantId
+                        ErrorAction = 'Stop'
+                    }
+                    Connect-AzAccount @ConnectParams | Out-Null
+                    
+                    # Authenticate to Microsoft Graph using connection parameters from parent session
+                    Write-Verbose "[$JobName] Authenticating to Microsoft Graph..."
+                    Write-Verbose "[$JobName] Auth Type: $($MgConnectionInfo.AuthType)"
+                    
+                    switch ($MgConnectionInfo.AuthType) {
+                        'Identity' {
+                            Connect-MgGraph -Identity -NoWelcome -ErrorAction Stop | Out-Null
                         }
-
-                        Write-Host "Processing ResourceApps RBAC system..."
-                        $EamAzureAdResourceApps = Get-EntraOpsPrivilegedEamResourceApps
-                        $EamAzureAdResourceApps | Convertto-Json -Depth 10 | Out-File -Path "$ResAppExportFolder/ResourceApps.json" -Force
-
-                        # Create directories first
-                        $EamAzureAdResourceApps | Group-Object ObjectType | ForEach-Object {
-                            $Dir = "$ResAppExportFolder/$($_.Name)"
-                            if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+                        'UserAssignedIdentity' {
+                            Connect-MgGraph -Identity -ClientId $MgConnectionInfo.ClientId -NoWelcome -ErrorAction Stop | Out-Null
                         }
-
-                        # Write individual files
-                        foreach ($Obj in $EamAzureAdResourceApps) {
-                            $Path = "$ResAppExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+                        { $_ -in @('FederatedToken', 'ExplicitToken', 'FromAzContext') } {
+                            $SecureToken = ConvertTo-SecureString -String $MgConnectionInfo.AccessToken -AsPlainText -Force
+                            Connect-MgGraph -AccessToken $SecureToken -NoWelcome -ErrorAction Stop | Out-Null
+                        }
+                        default {
+                            # For interactive/device auth modes with scopes
+                            if ($MgConnectionInfo.Scopes) {
+                                Connect-MgGraph -Scopes $MgConnectionInfo.Scopes -TenantId $MgConnectionInfo.TenantId -NoWelcome -ErrorAction Stop | Out-Null
+                            } else {
+                                throw "Unsupported authentication type: $($MgConnectionInfo.AuthType)"
+                            }
+                        }
+                    }
+                    
+                    Write-Output "[$JobName] Authentication completed successfully"
+                    
+                    # Process based on RBAC system type
+                    switch ($JobName) {
+                        'EntraID' {
+                            $SystemExportFolder = "$ExportFolder/EntraID"
+                            
+                            # Prepare export folder
+                            if (Test-Path $SystemExportFolder) {
+                                Remove-Item $SystemExportFolder -Force -Recurse
+                            }
+                            New-Item $SystemExportFolder -ItemType Directory -Force | Out-Null
+                            
+                            Write-Output "[$JobName] Retrieving privileged EAM data..."
+                            $EamData = Get-EntraOpsPrivilegedEamEntraId
+                            
+                            Write-Output "[$JobName] Exporting $($EamData.Count) objects..."
+                            $EamData | ConvertTo-Json -Depth 10 | Out-File -Path "$SystemExportFolder/EntraID.json" -Force
+                            
+                            # Create subdirectories and write individual files
+                            $EamData | Group-Object ObjectType | ForEach-Object {
+                                $Dir = "$SystemExportFolder/$($_.Name)"
+                                if (!(Test-Path $Dir)) { 
+                                    New-Item -ItemType Directory -Force -Path $Dir | Out-Null 
+                                }
+                            }
+                            
+                            foreach ($Obj in $EamData) {
+                                $Path = "$SystemExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+                                $Obj | ConvertTo-Json -Depth 10 | Out-File -Path $Path -Force
+                            }
+                            
+                            Write-Output "[$JobName] Successfully exported $($EamData.Count) objects"
                         }
                         
-                        Write-Host "Completed ResourceApps processing: $($EamAzureAdResourceApps.Count) objects exported"
+                        'ResourceApps' {
+                            $SystemExportFolder = "$ExportFolder/ResourceApps"
+                            
+                            # Prepare export folder
+                            if (Test-Path $SystemExportFolder) {
+                                Remove-Item $SystemExportFolder -Force -Recurse
+                            }
+                            New-Item $SystemExportFolder -ItemType Directory -Force | Out-Null
+                            
+                            Write-Output "[$JobName] Retrieving privileged EAM data..."
+                            $EamData = Get-EntraOpsPrivilegedEamResourceApps
+                            
+                            Write-Output "[$JobName] Exporting $($EamData.Count) objects..."
+                            $EamData | ConvertTo-Json -Depth 10 | Out-File -Path "$SystemExportFolder/ResourceApps.json" -Force
+                            
+                            # Create subdirectories and write individual files
+                            $EamData | Group-Object ObjectType | ForEach-Object {
+                                $Dir = "$SystemExportFolder/$($_.Name)"
+                                if (!(Test-Path $Dir)) { 
+                                    New-Item -ItemType Directory -Force -Path $Dir | Out-Null 
+                                }
+                            }
+                            
+                            foreach ($Obj in $EamData) {
+                                $Path = "$SystemExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+                                $Obj | ConvertTo-Json -Depth 10 | Out-File -Path $Path -Force
+                            }
+                            
+                            Write-Output "[$JobName] Successfully exported $($EamData.Count) objects"
+                        }
                     }
+                } catch {
+                    Write-Error "[$JobName] Error: $_"
+                    throw
                 }
-            } -ArgumentList $JobName, $DefaultFolderClassifiedEam, $ModulePath, $GlobalVars, $AccountId, $TenantName, $MgGraphAccessToken, $AzArmAccessToken
+            } -ArgumentList $JobName, $DefaultFolderClassifiedEam, $GlobalVars, $AccountId, $TenantId, $MgConnectionInfoForJobs, $AzArmAccessToken
         }
         
-        # Wait for all parallel jobs to complete
-        $Jobs | Wait-Job | ForEach-Object {
-            Write-Host "`n--- Output from $($_.Name) ---"
-            Receive-Job -Job $_
+        # Clear sensitive data from parent session after jobs are launched
+        if ($MgConnectionInfo.AccessToken) {
+            $MgConnectionInfo.AccessToken = $null
+        }
+        if ($MgConnectionInfoForJobs.AccessToken) {
+            $MgConnectionInfoForJobs.AccessToken = $null
+        }
+        
+        Write-Verbose "All jobs launched. Job IDs: $($Jobs.Id -join ', ')"
+        Write-Host "Jobs executing. Monitoring progress..."
+        
+        # Monitor job progress with real-time output streaming
+        $CompletedJobs = @()
+        while ($CompletedJobs.Count -lt $Jobs.Count) {
+            foreach ($Job in $Jobs) {
+                if ($Job.Id -notin $CompletedJobs) {
+                    $JobState = (Get-Job -Id $Job.Id).State
+                    
+                    # Stream any available output
+                    $Output = Receive-Job -Id $Job.Id
+                    if ($Output) {
+                        $Output | ForEach-Object { Write-Host "[$($Job.Name)] $_" }
+                    }
+                    
+                    # Mark as completed if finished
+                    if ($JobState -in @('Completed', 'Failed', 'Stopped')) {
+                        Write-Verbose "Job $($Job.Name) state: $JobState"
+                        $CompletedJobs += $Job.Id
+                    }
+                }
+            }
+            
+            if ($CompletedJobs.Count -lt $Jobs.Count) {
+                Start-Sleep -Milliseconds 500
+            }
+        }
+        
+        Write-Verbose "All jobs completed. Collecting final results..."
+        
+        # Collect final results and clean up
+        $Jobs | ForEach-Object {
+            Write-Host "`n--- Final output from $($_.Name) ---"
+            $FinalOutput = Receive-Job -Job $_
+            if ($FinalOutput) {
+                $FinalOutput | ForEach-Object { Write-Host $_ }
+            }
+            
+            # Check job state
+            if ($_.State -eq 'Failed') {
+                Write-Warning "Job $($_.Name) failed"
+            }
+            
             Remove-Job -Job $_
         }
-        Write-Host "Parallel processing completed.`n"
+        
+        Write-Host "`nParallel processing completed.`n"
     }
     #endregion
 
