@@ -39,85 +39,18 @@ function Save-EntraOpsPrivilegedEAMJson {
     
     $ParallelJobs = @()
     
-    # Job 1: Entra ID
+    # Determine which jobs to run
     if ($RbacSystems -contains "EntraID") {
-        $ParallelJobs += @{
-            Name        = "EntraID"
-            ScriptBlock = {
-                param($DefaultFolderClassifiedEam)
-                
-                $EntraExportFolder = "$DefaultFolderClassifiedEam/EntraID"
-
-                if ((Test-Path -path "$EntraExportFolder")) {
-                    Remove-Item "$EntraExportFolder" -Force -Recurse
-                    New-Item "$EntraExportFolder" -ItemType Directory -Force | Out-Null
-                } else {
-                    New-Item "$EntraExportFolder" -ItemType Directory -Force | Out-Null
-                }
-
-                Write-Host "Processing EntraID RBAC system..."
-                $EamAzureAD = Get-EntraOpsPrivilegedEamEntraId
-                $EamAzureAD | Convertto-Json -Depth 10 | Out-File -Path "$EntraExportFolder/EntraID.json" -Force
-                
-                # Create directories first
-                $EamAzureAD | Group-Object ObjectType | ForEach-Object {
-                    $Dir = "$EntraExportFolder/$($_.Name)"
-                    if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
-                }
-
-                # Write individual files
-                foreach ($Obj in $EamAzureAD) {
-                    $Path = "$EntraExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                    $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
-                }
-                
-                Write-Host "Completed EntraID processing: $($EamAzureAD.Count) objects exported"
-            }
-        }
+        $ParallelJobs += "EntraID"
     }
     
-    # Job 2: Resource Apps
     if ($RbacSystems -contains "ResourceApps") {
-        $ParallelJobs += @{
-            Name        = "ResourceApps"
-            ScriptBlock = {
-                param($DefaultFolderClassifiedEam)
-                
-                $ResAppExportFolder = "$DefaultFolderClassifiedEam/ResourceApps"
-
-                if ((Test-Path -path "$ResAppExportFolder")) {
-                    Remove-Item "$ResAppExportFolder" -Force -Recurse
-                    New-Item "$ResAppExportFolder" -ItemType Directory -Force | Out-Null
-                } else {
-                    New-Item "$ResAppExportFolder" -ItemType Directory -Force | Out-Null
-                }
-
-                Write-Host "Processing ResourceApps RBAC system..."
-                $EamAzureAdResourceApps = Get-EntraOpsPrivilegedEamResourceApps
-                $EamAzureAdResourceApps | Convertto-Json -Depth 10 | Out-File -Path "$ResAppExportFolder/ResourceApps.json" -Force
-
-                # Create directories first
-                $EamAzureAdResourceApps | Group-Object ObjectType | ForEach-Object {
-                    $Dir = "$ResAppExportFolder/$($_.Name)"
-                    if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
-                }
-
-                # Write individual files
-                foreach ($Obj in $EamAzureAdResourceApps) {
-                    $Path = "$ResAppExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                    $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
-                }
-                
-                Write-Host "Completed ResourceApps processing: $($EamAzureAdResourceApps.Count) objects exported"
-            }
-        }
+        $ParallelJobs += "ResourceApps"
     }
     
     # Execute parallel jobs if any exist
     if ($ParallelJobs.Count -gt 0) {
-        $ModulePath = "$PSScriptRoot/../../EntraOps.psm1"
-        
-        # Capture global variables needed by the thread jobs
+        # Capture global variables and context needed by the jobs
         $GlobalVars = @{
             DefaultFolderClassification = $DefaultFolderClassification
             DefaultFolderClassifiedEam  = $DefaultFolderClassifiedEam
@@ -126,18 +59,86 @@ function Save-EntraOpsPrivilegedEAMJson {
             EntraOpsBaseFolder          = $EntraOpsBaseFolder
         }
         
-        # Create initialization script that imports module and sets global variables
-        $InitScript = [ScriptBlock]::Create(@"
-Import-Module '$ModulePath' -Force -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
-New-Variable -Name DefaultFolderClassification -Value '$($GlobalVars.DefaultFolderClassification)' -Scope Global -Force
-New-Variable -Name DefaultFolderClassifiedEam -Value '$($GlobalVars.DefaultFolderClassifiedEam)' -Scope Global -Force
-New-Variable -Name TenantIdContext -Value '$($GlobalVars.TenantIdContext)' -Scope Global -Force
-New-Variable -Name TenantNameContext -Value '$($GlobalVars.TenantNameContext)' -Scope Global -Force
-New-Variable -Name EntraOpsBaseFolder -Value '$($GlobalVars.EntraOpsBaseFolder)' -Scope Global -Force
-"@)
+        $ModulePath = "$PSScriptRoot/../../EntraOps.psm1"
         
+        # Use Start-Job instead of Start-ThreadJob to avoid assembly loading conflicts
+        # Start-Job creates separate PowerShell processes with isolated module loading
         $Jobs = $ParallelJobs | ForEach-Object {
-            Start-ThreadJob -Name $_.Name -ScriptBlock $_.ScriptBlock -ArgumentList $DefaultFolderClassifiedEam -InitializationScript $InitScript
+            $JobName = $_
+            
+            Start-Job -Name $JobName -ScriptBlock {
+                param($JobName, $ExportFolder, $ModulePath, $GlobalVars)
+                
+                # Set global variables
+                New-Variable -Name DefaultFolderClassification -Value $GlobalVars.DefaultFolderClassification -Scope Global -Force
+                New-Variable -Name DefaultFolderClassifiedEam -Value $GlobalVars.DefaultFolderClassifiedEam -Scope Global -Force
+                New-Variable -Name TenantIdContext -Value $GlobalVars.TenantIdContext -Scope Global -Force
+                New-Variable -Name TenantNameContext -Value $GlobalVars.TenantNameContext -Scope Global -Force
+                New-Variable -Name EntraOpsBaseFolder -Value $GlobalVars.EntraOpsBaseFolder -Scope Global -Force
+                
+                # Import module which will handle loading required dependencies
+                Import-Module $ModulePath -Force -WarningAction SilentlyContinue
+                
+                # Execute the appropriate job based on name
+                switch ($JobName) {
+                    "EntraID" {
+                        $EntraExportFolder = "$ExportFolder/EntraID"
+
+                        if ((Test-Path -path "$EntraExportFolder")) {
+                            Remove-Item "$EntraExportFolder" -Force -Recurse
+                            New-Item "$EntraExportFolder" -ItemType Directory -Force | Out-Null
+                        } else {
+                            New-Item "$EntraExportFolder" -ItemType Directory -Force | Out-Null
+                        }
+
+                        Write-Host "Processing EntraID RBAC system..."
+                        $EamAzureAD = Get-EntraOpsPrivilegedEamEntraId
+                        $EamAzureAD | Convertto-Json -Depth 10 | Out-File -Path "$EntraExportFolder/EntraID.json" -Force
+                        
+                        # Create directories first
+                        $EamAzureAD | Group-Object ObjectType | ForEach-Object {
+                            $Dir = "$EntraExportFolder/$($_.Name)"
+                            if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+                        }
+
+                        # Write individual files
+                        foreach ($Obj in $EamAzureAD) {
+                            $Path = "$EntraExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+                            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+                        }
+                        
+                        Write-Host "Completed EntraID processing: $($EamAzureAD.Count) objects exported"
+                    }
+                    "ResourceApps" {
+                        $ResAppExportFolder = "$ExportFolder/ResourceApps"
+
+                        if ((Test-Path -path "$ResAppExportFolder")) {
+                            Remove-Item "$ResAppExportFolder" -Force -Recurse
+                            New-Item "$ResAppExportFolder" -ItemType Directory -Force | Out-Null
+                        } else {
+                            New-Item "$ResAppExportFolder" -ItemType Directory -Force | Out-Null
+                        }
+
+                        Write-Host "Processing ResourceApps RBAC system..."
+                        $EamAzureAdResourceApps = Get-EntraOpsPrivilegedEamResourceApps
+                        $EamAzureAdResourceApps | Convertto-Json -Depth 10 | Out-File -Path "$ResAppExportFolder/ResourceApps.json" -Force
+
+                        # Create directories first
+                        $EamAzureAdResourceApps | Group-Object ObjectType | ForEach-Object {
+                            $Dir = "$ResAppExportFolder/$($_.Name)"
+                            if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
+                        }
+
+                        # Write individual files
+                        foreach ($Obj in $EamAzureAdResourceApps) {
+                            $Path = "$ResAppExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+                            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+                        }
+                        
+                        Write-Host "Completed ResourceApps processing: $($EamAzureAdResourceApps.Count) objects exported"
+                    }
+                }
+            } -ArgumentList $JobName, $DefaultFolderClassifiedEam, $ModulePath, $GlobalVars
         }
         
         # Wait for all parallel jobs to complete
