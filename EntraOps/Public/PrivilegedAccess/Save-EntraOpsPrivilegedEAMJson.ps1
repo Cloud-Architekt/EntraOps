@@ -59,7 +59,15 @@ function Save-EntraOpsPrivilegedEAMJson {
             EntraOpsBaseFolder          = $EntraOpsBaseFolder
         }
         
-        $ModulePath = "$PSScriptRoot/../../EntraOps.psm1"
+        # Capture authentication tokens from the parent session
+        $AzContext = Get-AzContext
+        $MgGraphAccessToken = (Get-AzAccessToken -ResourceTypeName MSGraph).Token
+        $AzArmAccessToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/").Token
+        $AccountId = $AzContext.Account.Id
+        $TenantName = $AzContext.Tenant.Id
+        
+        # Resolve the absolute path to the module file using EntraOpsBaseFolder
+        $ModulePath = "$EntraOpsBaseFolder/EntraOps/EntraOps.psm1"
         
         # Use Start-Job instead of Start-ThreadJob to avoid assembly loading conflicts
         # Start-Job creates separate PowerShell processes with isolated module loading
@@ -67,7 +75,7 @@ function Save-EntraOpsPrivilegedEAMJson {
             $JobName = $_
             
             Start-Job -Name $JobName -ScriptBlock {
-                param($JobName, $ExportFolder, $ModulePath, $GlobalVars)
+                param($JobName, $ExportFolder, $ModulePath, $GlobalVars, $AccountId, $TenantName, $MgGraphAccessToken, $AzArmAccessToken)
                 
                 # Set global variables
                 New-Variable -Name DefaultFolderClassification -Value $GlobalVars.DefaultFolderClassification -Scope Global -Force
@@ -78,6 +86,18 @@ function Save-EntraOpsPrivilegedEAMJson {
                 
                 # Import module which will handle loading required dependencies
                 Import-Module $ModulePath -Force -WarningAction SilentlyContinue
+                
+                # Convert tokens to SecureStrings for authentication
+                $SecureMsGraphAccessToken = $MgGraphAccessToken | ConvertTo-SecureString -AsPlainText -Force
+                $SecureAzArmAccessToken = $AzArmAccessToken | ConvertTo-SecureString -AsPlainText -Force
+                
+                # Authenticate using tokens from parent session
+                Connect-AzAccount -AccountId $AccountId -AccessToken $SecureAzArmAccessToken -Tenant $TenantName | Out-Null
+                Connect-MgGraph -AccessToken $SecureMsGraphAccessToken -NoWelcome | Out-Null
+                
+                # Set additional global variables needed after authentication
+                New-Variable -Name TenantIdContext -Value $TenantName -Scope Global -Force
+                New-Variable -Name TenantNameContext -Value $TenantName -Scope Global -Force
                 
                 # Execute the appropriate job based on name
                 switch ($JobName) {
@@ -138,7 +158,7 @@ function Save-EntraOpsPrivilegedEAMJson {
                         Write-Host "Completed ResourceApps processing: $($EamAzureAdResourceApps.Count) objects exported"
                     }
                 }
-            } -ArgumentList $JobName, $DefaultFolderClassifiedEam, $ModulePath, $GlobalVars
+            } -ArgumentList $JobName, $DefaultFolderClassifiedEam, $ModulePath, $GlobalVars, $AccountId, $TenantName, $MgGraphAccessToken, $AzArmAccessToken
         }
         
         # Wait for all parallel jobs to complete

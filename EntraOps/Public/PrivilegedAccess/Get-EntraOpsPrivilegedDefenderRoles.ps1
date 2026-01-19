@@ -47,7 +47,7 @@ function Get-EntraOpsPrivilegedDefenderRoles {
         Write-Warning "Not supported yet!"
     } else {
         $DefenderRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleDefinitions?`$select=id,displayName,description,rolePermissions" -OutputType PSObject
-        $DefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleAssignments?`$select=id,principalIds,roleDefinitionId,resourceScopes" -OutputType PSObject
+        $DefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleAssignments?`$select=id,principalIds,roleDefinitionId,appScopeIds,directoryScopeIds" -OutputType PSObject
     }
     #endregion
 
@@ -146,10 +146,10 @@ function Get-EntraOpsPrivilegedDefenderRoles {
             $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($GroupWithRbacAssignment.ObjectId)" -OutputType PSObject).displayName
             foreach ($TransitiveMember in $TransitiveMembers) {
                 $Member = [pscustomobject]@{
-                    displayName           = $TransitiveMember.displayName
-                    id                    = $TransitiveMember.id
-                    '@odata.type'         = $TransitiveMember.'@odata.type'
-                    RoleAssignmentSubType = $TransitiveMember.RoleAssignmentSubType
+                    displayName            = $TransitiveMember.displayName
+                    id                     = $TransitiveMember.id
+                    '@odata.type'          = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
                     GroupObjectDisplayName = $GroupObjectDisplayName
                     GroupObjectId          = $GroupWithRbacAssignment.ObjectId
                 }

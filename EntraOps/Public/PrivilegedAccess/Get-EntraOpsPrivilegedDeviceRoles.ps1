@@ -47,7 +47,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
         Write-Warning "Not supported yet!"
     } else {
         $DeviceMgmtRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/roleDefinitions?`$select=id,displayName,description,rolePermissions" -OutputType PSObject
-        $DeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/roleAssignments?`$select=id,principalIds,roleDefinitionId,resourceScopes" -OutputType PSObject
+        $DeviceMgmtRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/deviceManagement/roleAssignments" -OutputType PSObject
     }
     #endregion
 
@@ -66,8 +66,7 @@ function Get-EntraOpsPrivilegedDeviceRoles {
             try {
                 $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($Principal)" -OutputType PSObject
                 $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
-            }
-            catch {
+            } catch {
                 Write-Warning "Issue to resolve directory object $Principal! $($_.Exception.Message)"
             }
 
@@ -91,11 +90,9 @@ function Get-EntraOpsPrivilegedDeviceRoles {
                         $RoleAssignmentScopeName = foreach ($appScopeId in $DeviceMgmtPrincipalRoleAssignment.appScopeIds) {
                             $ScopeTags | Where-Object { $_.Id -eq $appScopeId } | Select-Object -ExpandProperty displayName
                         }
-                    }
-                    elseif ($directoryScopeId -eq "/") {
+                    } elseif ($directoryScopeId -eq "/") {
                         $RoleAssignmentScopeName = "Tenant-wide"
-                    }
-                    else {
+                    } else {
                         Write-Warning "No scope name found for directoryScopeId $directoryScopeId"
                     }
 
@@ -143,10 +140,10 @@ function Get-EntraOpsPrivilegedDeviceRoles {
             $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($GroupWithRbacAssignment.ObjectId)" -OutputType PSObject).displayName
             foreach ($TransitiveMember in $TransitiveMembers) {
                 $Member = [pscustomobject]@{
-                    displayName           = $TransitiveMember.displayName
-                    id                    = $TransitiveMember.id
-                    '@odata.type'         = $TransitiveMember.'@odata.type'
-                    RoleAssignmentSubType = $TransitiveMember.RoleAssignmentSubType
+                    displayName            = $TransitiveMember.displayName
+                    id                     = $TransitiveMember.id
+                    '@odata.type'          = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
                     GroupObjectDisplayName = $GroupObjectDisplayName
                     GroupObjectId          = $GroupWithRbacAssignment.ObjectId
                 }
