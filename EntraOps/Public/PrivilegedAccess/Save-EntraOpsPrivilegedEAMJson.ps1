@@ -62,7 +62,7 @@ function Save-EntraOpsPrivilegedEAMJson {
         }
         
         # Create a local copy to work with
-        $MgConnectionInfo = $MgGraphConnectionInfo
+        $MgConnectionInfo = $MgGraphConnectionInfo.Clone()
         
         # Convert SecureString token to plaintext only when needed for job serialization
         # This is unavoidable as Start-Job ArgumentList requires serializable types
@@ -75,7 +75,12 @@ function Save-EntraOpsPrivilegedEAMJson {
         }
         
         # Get Azure ARM token as plain string (required by Connect-AzAccount)
-        $AzArmTokenObj = Get-AzAccessToken -ResourceUrl "https://management.azure.com/"
+        $AzArmTokenObj = Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -ErrorAction Stop
+        
+        # Validate token object was retrieved
+        if ($null -eq $AzArmTokenObj -or $null -eq $AzArmTokenObj.Token) {
+            throw "Failed to retrieve Azure ARM access token. Ensure you are properly authenticated with Connect-EntraOps or Connect-AzAccount."
+        }
         
         # Ensure we have a plain string token
         if ($AzArmTokenObj.Token -is [SecureString]) {
@@ -86,9 +91,14 @@ function Save-EntraOpsPrivilegedEAMJson {
             $AzArmAccessToken = $AzArmTokenObj.Token.ToString()
         }
         
+        # Validate token is not null or empty after conversion
+        if ([string]::IsNullOrEmpty($AzArmAccessToken)) {
+            throw "Azure ARM access token is null or empty after conversion"
+        }
+        
         # Validate token format (should be a JWT starting with "eyJ")
         if (-not $AzArmAccessToken.StartsWith("eyJ")) {
-            throw "Azure ARM access token does not appear to be in valid JWT format"
+            throw "Azure ARM access token does not appear to be in valid JWT format (got: $($AzArmAccessToken.Substring(0, [Math]::Min(20, $AzArmAccessToken.Length)))...)"
         }
         
         $AccountId = $AzContext.Account.Id
@@ -114,9 +124,6 @@ function Save-EntraOpsPrivilegedEAMJson {
         
         Write-Verbose "Global variables captured: $($GlobalVars.Keys -join ', ')"
         
-        # Create a clean copy of connection info for jobs (without SecureString)
-        $MgConnectionInfoForJobs = $MgConnectionInfo.Clone()
-        
         # Use Start-Job for true process isolation (avoids assembly loading conflicts)
         Write-Verbose "Creating background jobs with Start-Job..."
         $Jobs = $ParallelJobs | ForEach-Object {
@@ -128,6 +135,7 @@ function Save-EntraOpsPrivilegedEAMJson {
                 
                 try {
                     Write-Output "[$JobName] Starting processing..."
+                    Write-Verbose "[$JobName] MgConnectionInfo keys: $($MgConnectionInfo.Keys -join ', ')"
                     
                     # Set global variables
                     $GlobalVars.GetEnumerator() | ForEach-Object {
@@ -145,6 +153,12 @@ function Save-EntraOpsPrivilegedEAMJson {
                     
                     # Authenticate to Azure using token from parent session
                     Write-Verbose "[$JobName] Authenticating to Azure with token..."
+                    
+                    # Validate token is not null before using it
+                    if ([string]::IsNullOrEmpty($AzArmAccessToken)) {
+                        throw "Azure ARM access token is null or empty. Cannot authenticate."
+                    }
+                    
                     Write-Verbose "[$JobName] Token starts with: $($AzArmAccessToken.Substring(0, [Math]::Min(10, $AzArmAccessToken.Length)))"
                     
                     $ConnectParams = @{
@@ -167,6 +181,9 @@ function Save-EntraOpsPrivilegedEAMJson {
                             Connect-MgGraph -Identity -ClientId $MgConnectionInfo.ClientId -NoWelcome -ErrorAction Stop | Out-Null
                         }
                         { $_ -in @('FederatedToken', 'ExplicitToken', 'FromAzContext') } {
+                            if ([string]::IsNullOrEmpty($MgConnectionInfo.AccessToken)) {
+                                throw "Microsoft Graph access token is null or empty for auth type: $($MgConnectionInfo.AuthType)"
+                            }
                             $SecureToken = ConvertTo-SecureString -String $MgConnectionInfo.AccessToken -AsPlainText -Force
                             Connect-MgGraph -AccessToken $SecureToken -NoWelcome -ErrorAction Stop | Out-Null
                         }
@@ -247,18 +264,22 @@ function Save-EntraOpsPrivilegedEAMJson {
                         }
                     }
                 } catch {
-                    Write-Error "[$JobName] Error: $_"
-                    throw
+                    $ErrorMessage = if ($_.Exception.Message) { $_.Exception.Message } elseif ($_) { $_.ToString() } else { "Unknown error occurred" }
+                    Write-Output "[$JobName] ERROR: $ErrorMessage"
+                    Write-Output "[$JobName] Stack Trace: $($_.ScriptStackTrace)"
+                    # Don't throw - let the job complete so parent can handle it gracefully
+                    return $false
                 }
-            } -ArgumentList $JobName, $DefaultFolderClassifiedEam, $GlobalVars, $AccountId, $TenantId, $MgConnectionInfoForJobs, $AzArmAccessToken
+            } -ArgumentList $JobName, $ExportFolder, $GlobalVars, $AccountId, $TenantId, $MgConnectionInfo, $AzArmAccessToken
         }
         
         # Clear sensitive data from parent session after jobs are launched
-        if ($MgConnectionInfo.AccessToken) {
-            $MgConnectionInfo.AccessToken = $null
+        if ($MgConnectionInfo.ContainsKey('AccessToken')) {
+            $MgConnectionInfo.Remove('AccessToken')
         }
-        if ($MgConnectionInfoForJobs.AccessToken) {
-            $MgConnectionInfoForJobs.AccessToken = $null
+        # Also clear from original global if it was modified (shouldn't be due to Clone())
+        if ($MgGraphConnectionInfo.ContainsKey('AccessToken')) {
+            $MgGraphConnectionInfo.Remove('AccessToken')
         }
         
         Write-Verbose "All jobs launched. Job IDs: $($Jobs.Id -join ', ')"
@@ -274,7 +295,11 @@ function Save-EntraOpsPrivilegedEAMJson {
                     # Stream any available output
                     $Output = Receive-Job -Id $Job.Id
                     if ($Output) {
-                        $Output | ForEach-Object { Write-Host "[$($Job.Name)] $_" }
+                        $Output | ForEach-Object { 
+                            if ($null -ne $_) {
+                                Write-Host "[$($Job.Name)] $_"
+                            }
+                        }
                     }
                     
                     # Mark as completed if finished
@@ -297,7 +322,11 @@ function Save-EntraOpsPrivilegedEAMJson {
             Write-Host "`n--- Final output from $($_.Name) ---"
             $FinalOutput = Receive-Job -Job $_
             if ($FinalOutput) {
-                $FinalOutput | ForEach-Object { Write-Host $_ }
+                $FinalOutput | ForEach-Object { 
+                    if ($null -ne $_) {
+                        Write-Host $_
+                    }
+                }
             }
             
             # Check job state
