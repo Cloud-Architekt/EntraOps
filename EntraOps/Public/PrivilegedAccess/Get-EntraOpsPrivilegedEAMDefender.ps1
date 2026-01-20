@@ -203,7 +203,7 @@ function Get-EntraOpsPrivilegedEamDefender {
                 }
             }
             
-            $Classification = @($UniqueClassificationsHash.Values | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+            $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
             if ($Classification.Count -eq 0) {
                 $Classification += [PSCustomObject]@{
                     'AdminTierLevel'     = "Unclassified"

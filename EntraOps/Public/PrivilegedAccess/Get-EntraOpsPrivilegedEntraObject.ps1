@@ -72,7 +72,7 @@ function Get-EntraOpsPrivilegedEntraObject {
         $ObjectMemberships = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/transitiveMemberOf") -OutputType PSObject)
         $AadRolesActive = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$AadObjectId'" -ConsistencyLevel "eventual")
         $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
-        $RestrictedManagementByAadRole = ($null -ne $AadRolesActive -or $null -ne $AadRolesEligible)
+        $RestrictedManagementByAadRole = ($null -ne $AadRolesActive.id -or $null -ne $AadRolesEligible.id)
         $RestrictedManagementByRMAU = $($ObjectDetails.isManagementRestricted)
     } catch {
         Write-Warning "No group or role assignment status available"

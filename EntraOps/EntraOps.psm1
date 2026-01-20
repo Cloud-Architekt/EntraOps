@@ -16,11 +16,6 @@ Foreach ($import in @($Public + $Private)) {
 $ErrorActionPreference = "Stop"
 Export-ModuleMember -Function $Public.Basename
 
-# Skip module installation if flag is set (e.g., in background jobs where modules are already installed)
-if ($env:ENTRAOPS_SKIP_MODULE_INSTALL -ne "true") {
-    Install-EntraOpsAllRequiredModules
-}
-
 # Update Clear-ModuleVariable function in internal/Clear-ModuleVariable.ps1 if you add new variables here
 # This function has been adopted from the Maester Framework and has been originally written by Merill Fernando
 $__EntraOpsSession = @{
