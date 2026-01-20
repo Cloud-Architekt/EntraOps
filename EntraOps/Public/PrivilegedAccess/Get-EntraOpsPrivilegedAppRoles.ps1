@@ -99,6 +99,5 @@ function Get-EntraOpsPrivilegedAppRoles {
         }
         $Assignment
     }
-    $AppRoleAssignments
-    $AppRoleAssignments = $AppRoleAssignments | sort-object -property RoleAssignmentScopeName, RoleDefinitionName
+    $AppRoleAssignments | sort-object -property RoleAssignmentScopeName, RoleDefinitionName, RoleAssignmentId, RoleAssignmentScopeId
 }
