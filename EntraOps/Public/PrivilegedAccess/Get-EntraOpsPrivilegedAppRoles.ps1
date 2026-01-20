@@ -83,7 +83,22 @@ function Get-EntraOpsPrivilegedAppRoles {
                 # Resolve details using Lookup
                 $RoleName = $null
                 $ResourceName = $AppRole.resourceDisplayName
+
+                # If resourceId is missing, search through ResourceLookup to find which resource owns this appRoleId
+                if ($null -eq $AppRole.resourceId -and $null -ne $AppRole.appRoleId) {
+                    Write-Verbose "ResourceId missing for appRoleId $($AppRole.appRoleId). Searching ResourceLookup..."
+                    foreach ($ResourceId in $ResourceLookup.Keys) {
+                        if ($ResourceLookup[$ResourceId].AppRoles.ContainsKey($AppRole.appRoleId)) {
+                            $AppRole.resourceId = $ResourceId
+                            $ResourceName = $ResourceLookup[$ResourceId].DisplayName
+                            $RoleName = $ResourceLookup[$ResourceId].AppRoles[$AppRole.appRoleId]
+                            Write-Verbose "Found appRoleId in resource: $ResourceName ($ResourceId)"
+                            break
+                        }
+                    }
+                }
                 
+                # Standard lookup when resourceId is present
                 if ($null -ne $AppRole.resourceId -and $ResourceLookup.ContainsKey($AppRole.resourceId)) {
                     $ResourceMeta = $ResourceLookup[$AppRole.resourceId]
                     $ResourceName = $ResourceMeta.DisplayName
@@ -121,23 +136,42 @@ function Get-EntraOpsPrivilegedAppRoles {
         # Also, we must process ALL consentTypes ('Principal' and 'AllPrincipals'), as the original endpoint did.
         
         if ($Grant.clientId -and $ResourceLookup.ContainsKey($Grant.clientId)) { 
-             $ResourceMeta = $null
-             $ScopeLookup = $null
+            $ResourceMeta = $null
+            $ScopeLookup = $null
              
-             if ($null -ne $Grant.resourceId -and $ResourceLookup.ContainsKey($Grant.resourceId)) {
-                 $ResourceMeta = $ResourceLookup[$Grant.resourceId]
-                 $ScopeLookup = $ResourceMeta.Scopes
-             }
+            if ($null -ne $Grant.resourceId -and $ResourceLookup.ContainsKey($Grant.resourceId)) {
+                $ResourceMeta = $ResourceLookup[$Grant.resourceId]
+                $ScopeLookup = $ResourceMeta.Scopes
+            }
+            # If resourceId is missing, search through ResourceLookup to find matching scope
+            elseif ($null -eq $Grant.resourceId -and -not [string]::IsNullOrWhiteSpace($Grant.scope)) {
+                Write-Verbose "ResourceId missing for OAuth2PermissionGrant $($Grant.Id). Searching ResourceLookup by scopes..."
+                $Scopes = $Grant.scope -split " "
+                foreach ($ResourceId in $ResourceLookup.Keys) {
+                    $FoundMatch = $false
+                    foreach ($Scope in $Scopes) {
+                        if (-not [string]::IsNullOrWhiteSpace($Scope) -and $ResourceLookup[$ResourceId].Scopes.ContainsKey($Scope)) {
+                            $Grant.resourceId = $ResourceId
+                            $ResourceMeta = $ResourceLookup[$ResourceId]
+                            $ScopeLookup = $ResourceMeta.Scopes
+                            Write-Verbose "Found scope '$Scope' in resource: $($ResourceMeta.DisplayName) ($ResourceId)"
+                            $FoundMatch = $true
+                            break
+                        }
+                    }
+                    if ($FoundMatch) { break }
+                }
+            }
 
-             $Scopes = $Grant.scope -split " "
-             foreach ($Scope in $Scopes) {
-                 if (-not [string]::IsNullOrWhiteSpace($Scope)) {
-                     $ScopeId = $null
-                     if ($null -ne $Scope -and $ScopeLookup -and $ScopeLookup.ContainsKey($Scope)) {
-                         $ScopeId = $ScopeLookup[$Scope]
-                     }
+            $Scopes = $Grant.scope -split " "
+            foreach ($Scope in $Scopes) {
+                if (-not [string]::IsNullOrWhiteSpace($Scope)) {
+                    $ScopeId = $null
+                    if ($null -ne $Scope -and $ScopeLookup -and $ScopeLookup.ContainsKey($Scope)) {
+                        $ScopeId = $ScopeLookup[$Scope]
+                    }
 
-                     $AllAssignments += [pscustomobject]@{
+                    $AllAssignments += [pscustomobject]@{
                         RoleAssignmentId              = $Grant.Id
                         RoleAssignmentScopeId         = $Grant.resourceId
                         RoleAssignmentScopeName       = if ($ResourceMeta) { $ResourceMeta.DisplayName } else { $null }
@@ -154,11 +188,10 @@ function Get-EntraOpsPrivilegedAppRoles {
                         TransitiveByObjectId          = $null
                         TransitiveByObjectDisplayName = $null
                     }
-                 }
-             }
+                }
+            }
         }
     }
 
-    $AllAssignments
-    $AllAssignments = $AllAssignments | sort-object -property RoleAssignmentScopeName, RoleDefinitionName, RoleAssignmentId, RoleAssignmentScopeId
+    $AllAssignments | sort-object -property RoleAssignmentScopeName, RoleDefinitionName, RoleType, RoleAssignmentId, RoleAssignmentScopeId
 }
