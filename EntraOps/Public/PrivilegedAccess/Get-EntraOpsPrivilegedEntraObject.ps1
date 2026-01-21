@@ -220,11 +220,9 @@ function Get-EntraOpsPrivilegedEntraObject {
 
                 # Sponsors (using $expand for efficiency)
                 try {
-                    $SPWithSponsors = Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$($AadObjectId)?`$expand=sponsors(`$select=id)") -OutputType PSObject
-                    $SPWithSponsors.sponsors | ForEach-Object { $Sponsors.Add($_.id) | out-null }
-                } catch {
-                    # Fallback if $expand not supported
                     Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$($AadObjectId)/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+                } catch {
+                    Write-Warning "No sponsors supported for $($AadObjectId)"
                 }
 
             }
