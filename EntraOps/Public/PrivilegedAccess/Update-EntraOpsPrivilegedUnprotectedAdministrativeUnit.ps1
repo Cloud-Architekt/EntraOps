@@ -92,7 +92,14 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
             # Keep user in RMAU if no other RMAU is protecting the user or user is no longer privileged
             $CurrentAdminUnitMembers | ForEach-Object {
 
-                $AssignmentsToAUs = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/users/$($_.id)/memberOf/Microsoft.Graph.AdministrativeUnit" -OutputType PSObject -DisableCache).value
+
+                if ($_.'@odata.type' -eq "#microsoft.graph.user") {
+                    $AssignmentsToAUs = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/users/$($_.id)/memberOf/Microsoft.Graph.AdministrativeUnit" -OutputType PSObject -DisableCache).value
+                } elseif ($_.'@odata.type' -eq "#microsoft.graph.group") {
+                    $AssignmentsToAUs = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/groups/$($_.id)/memberOf/Microsoft.Graph.AdministrativeUnit" -OutputType PSObject -DisableCache).value
+                } else {
+                    Write-Warning "Unsupported object type $($_.objectType) in UnprotectedObjects AU!"
+                }
                 $AssignmentsToOtherRMAUs = $AssignmentsToAUs | Where-Object { $_.isMemberManagementRestricted -eq $True -and $_.id -ne $AdminUnitId }
 
                 if ($null -ne $AssignmentsToOtherRMAUs -or $_.id -notin $($PrivilegedEamObjects.ObjectId)) {
@@ -105,7 +112,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                         }
                     }
                 } else {
-                    Write-Warning "Object $($AdminUnitMember.displayName) will keep in RMAU because of missing protection by regular RMAU!"
+                    Write-Warning "Object $($_.displayName) will keep in RMAU because of missing protection by regular RMAU!"
                 }
             }
         } else {
