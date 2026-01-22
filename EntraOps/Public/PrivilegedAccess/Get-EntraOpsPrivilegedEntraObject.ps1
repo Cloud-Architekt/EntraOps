@@ -77,6 +77,15 @@ function Get-EntraOpsPrivilegedEntraObject {
     } catch {
         Write-Warning "No group or role assignment status available"
     }
+    #endregion
+
+    #region Get transitive memberships of object
+    try {
+        $ObjectMemberships = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/transitiveMemberOf") -OutputType PSObject)
+    } catch {
+        Write-Warning "No transitive memberships available"
+    }
+    #endregion    
     $StopwatchRegion.Stop()
     Write-Verbose "[Performance] Object details and RMAU protection: $($StopwatchRegion.ElapsedMilliseconds)ms"
     #endregion
@@ -84,7 +93,7 @@ function Get-EntraOpsPrivilegedEntraObject {
     #region Calculate protection by AAD Role assignment or eligibility (available only for user and group objects)
     $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
     if ( $ObjectDetails.'@odata.type' -in @('#microsoft.graph.user', '#microsoft.graph.group') ) {
-        $AadRolesActive = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$AadObjectId'" -ConsistencyLevel "eventual")
+        $AadRolesActive = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$($AadObjectId)'" -ConsistencyLevel "eventual")
         $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
         $RestrictedManagementByAadRole = ($null -ne $AadRolesActive.id -or $null -ne $AadRolesEligible.id)
     } else {
@@ -102,8 +111,8 @@ function Get-EntraOpsPrivilegedEntraObject {
             # odata type by directoryObject includes value of user which could be either user or agentUser
             $ObjectType = 'user'
             # Combine initial query with customSecurityAttributes to reduce API calls
-            $UserDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AadObjectId)?`$select=id,userPrincipalName,userType,displayName,customSecurityAttributes,identityParent" -OutputType PSObject
-            $IdentityParent = $($UserDetails.identityParent).id
+            $UserDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AadObjectId)?`$select=id,userPrincipalName,userType,displayName,customSecurityAttributes,identityParentId" -OutputType PSObject
+            $IdentityParent = $($UserDetails.identityParentId)
 
             if ($null -ne $UserDetails.'@odata.type') {
                 $ObjectSubType = $UserDetails.'@odata.type'.Replace("#microsoft.graph.", "")
