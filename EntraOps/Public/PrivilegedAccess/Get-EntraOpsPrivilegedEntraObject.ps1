@@ -12,16 +12,16 @@
     Tenant ID of the Microsoft Entra ID tenant. Default is the current tenant ID.
 
 .PARAMETER CustomSecurityUserAttribute
-    Custom security attribute for user object to get classification details. Default is "privilegedUser".
+    Custom security attribute for user object to get classification details. Default will be set by parameter in EntraOpsConfig.json file.
 
 .PARAMETER CustomSecurityServicePrincipalAttribute
-    Custom security attribute for service principal object to get classification details. Default is "privilegedWorkloadIdentitiy".
+    Custom security attribute for service principal object to get classification details. Default will be set by parameter in EntraOpsConfig.json file.
 
 .PARAMETER CustomSecurityUserPawAttribute
-    Custom security attribute for user object to get relation to PAW device. Default is "associatedSecureAdminWorkstation".
+    Custom security attribute for user object to get relation to PAW device. Default will be set by parameter in EntraOpsConfig.json file.
 
 .PARAMETER CustomSecurityUserWorkAccountAttribute
-    Custom security attribute for user object to get relation to work account. Default is "associatedWorkAccount".
+    Custom security attribute for user object to get relation to work account. Default will be set by parameter in EntraOpsConfig.json file.
 
 .EXAMPLE
     Details of privileged object by using ObjectId
@@ -37,16 +37,16 @@ function Get-EntraOpsPrivilegedEntraObject {
         [System.String]$TenantId
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$CustomSecurityUserAttribute = "privilegedUser"
+        [System.String]$CustomSecurityUserAttribute = $EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAttribute
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$CustomSecurityServicePrincipalAttribute = "privilegedWorkloadIdentity"
+        [System.String]$CustomSecurityUserPawAttribute = $EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserPawAttribute
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$CustomSecurityUserPawAttribute = "associatedSecureAdminWorkstation"
-        ,
+        [System.String]$CustomSecurityServicePrincipalAttribute = $EntraOpsConfig.CustomSecurityAttributes.PrivilegedServicePrincipalAttribute
+        ,        
         [Parameter(Mandatory = $false)]
-        [System.String]$CustomSecurityUserWorkAccountAttribute = "associatedWorkAccount"
+        [System.String]$CustomSecurityUserWorkAccountAttribute = $EntraOpsConfig.CustomSecurityAttributes.UserWorkAccountAttribute
     )
 
     $StopwatchTotal = [System.Diagnostics.Stopwatch]::StartNew()

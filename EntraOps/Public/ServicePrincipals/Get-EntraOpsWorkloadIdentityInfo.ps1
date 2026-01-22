@@ -17,7 +17,7 @@ function Get-EntraOpsWorkloadIdentityInfo {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $false)]
-        [System.String]$CustomSecurityServicePrincipalAttribute = "privilegedWorkloadIdentitiy"
+        [System.String]$CustomSecurityServicePrincipalAttribute = $EntraOpsConfig.CustomSecurityAttributes.PrivilegedServicePrincipalAttribute
     )
 
     # Global Variables
