@@ -66,16 +66,23 @@ function Get-EntraOpsPrivilegedEntraObject {
     [System.Collections.ArrayList]$PawDevice = @()    
     [System.Collections.ArrayList]$AssignedAdministrativeUnits = @()    
 
-    #region Memberships to calculate protection level
+    #region Calculate object details common for all object types and protection by RMAU membership
     Write-Verbose -Message "Lookup for $($ObjectDetails.'@odata.type') - $($ObjectDetails.displayName) $($AadObjectId)"
     try {
         $ObjectMemberships = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/transitiveMemberOf") -OutputType PSObject)
-        $AadRolesActive = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$AadObjectId'" -ConsistencyLevel "eventual")
-        $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
-        $RestrictedManagementByAadRole = ($null -ne $AadRolesActive.id -or $null -ne $AadRolesEligible.id)
         $RestrictedManagementByRMAU = $($ObjectDetails.isManagementRestricted)
     } catch {
         Write-Warning "No group or role assignment status available"
+    }
+    #endregion
+
+    #region Calculate protection by AAD Role assignment or eligibility (available only for user and group objects)
+    if ( $ObjectDetails.'@odata.type' -in @('#microsoft.graph.user', '#microsoft.graph.group') ) {
+        $AadRolesActive = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$AadObjectId'" -ConsistencyLevel "eventual")
+        $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
+        $RestrictedManagementByAadRole = ($null -ne $AadRolesActive.id -or $null -ne $AadRolesEligible.id)
+    } else {
+        $RestrictedManagementByAadRole = $false
     }
     #endregion
 
@@ -189,9 +196,8 @@ function Get-EntraOpsPrivilegedEntraObject {
             $ObjectType = 'servicePrincipal'
             $ObjectSubType = $SPObject.ServicePrincipalType
 
-            # Administrative Units and Restricted Management does not apply to service principals
+            # Restricted by Role Assignale Groups does not apply
             $RestrictedManagementByRAG = $false
-            $RestrictedManagementByAadRole = $false
 
             # Details of classified object from custom security attribute
             try {
@@ -240,7 +246,6 @@ function Get-EntraOpsPrivilegedEntraObject {
 
             # Administrative Units and Restricted Management does not apply to service principals
             $RestrictedManagementByRAG = $false
-            $RestrictedManagementByAadRole = $false
 
             # Details of classified object from custom security attribute
             try {
