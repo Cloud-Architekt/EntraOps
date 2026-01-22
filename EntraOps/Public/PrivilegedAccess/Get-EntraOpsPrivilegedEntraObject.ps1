@@ -40,7 +40,7 @@ function Get-EntraOpsPrivilegedEntraObject {
         [System.String]$CustomSecurityUserAttribute = "privilegedUser"
         ,
         [Parameter(Mandatory = $false)]
-        [System.String]$CustomSecurityServicePrincipalAttribute = "privilegedWorkloadIdentitiy"
+        [System.String]$CustomSecurityServicePrincipalAttribute = "privilegedWorkloadIdentity"
         ,
         [Parameter(Mandatory = $false)]
         [System.String]$CustomSecurityUserPawAttribute = "associatedSecureAdminWorkstation"
@@ -49,8 +49,10 @@ function Get-EntraOpsPrivilegedEntraObject {
         [System.String]$CustomSecurityUserWorkAccountAttribute = "associatedWorkAccount"
     )
 
+    $StopwatchTotal = [System.Diagnostics.Stopwatch]::StartNew()
+    
     try {
-        $ObjectDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId") -OutputType PSObject
+        $ObjectDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($AadObjectId)?`$select=id,displayName,userPrincipalName,userType,isAssignableToRole,isManagementRestricted,onPremisesSyncEnabled,passwordPolicies" -OutputType PSObject
     } catch {
         $ObjectDetails = $null
         Write-Verbose "No object has been found with Id: $AadObjectId"
@@ -67,16 +69,20 @@ function Get-EntraOpsPrivilegedEntraObject {
     [System.Collections.ArrayList]$AssignedAdministrativeUnits = @()    
 
     #region Calculate object details common for all object types and protection by RMAU membership
+    $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
     Write-Verbose -Message "Lookup for $($ObjectDetails.'@odata.type') - $($ObjectDetails.displayName) $($AadObjectId)"
     try {
-        $ObjectMemberships = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/transitiveMemberOf") -OutputType PSObject)
+        $ObjectDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($AadObjectId)?`$select=id,displayName,userPrincipalName,userType,isAssignableToRole,isManagementRestricted,onPremisesSyncEnabled,passwordPolicies" -OutputType PSObject
         $RestrictedManagementByRMAU = $($ObjectDetails.isManagementRestricted)
     } catch {
         Write-Warning "No group or role assignment status available"
     }
+    $StopwatchRegion.Stop()
+    Write-Verbose "[Performance] Object details and RMAU protection: $($StopwatchRegion.ElapsedMilliseconds)ms"
     #endregion
 
     #region Calculate protection by AAD Role assignment or eligibility (available only for user and group objects)
+    $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
     if ( $ObjectDetails.'@odata.type' -in @('#microsoft.graph.user', '#microsoft.graph.group') ) {
         $AadRolesActive = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$AadObjectId'" -ConsistencyLevel "eventual")
         $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
@@ -84,15 +90,19 @@ function Get-EntraOpsPrivilegedEntraObject {
     } else {
         $RestrictedManagementByAadRole = $false
     }
+    $StopwatchRegion.Stop()
+    Write-Verbose "[Performance] AAD Role protection check: $($StopwatchRegion.ElapsedMilliseconds)ms"
     #endregion
 
     switch ( $ObjectDetails.'@odata.type' ) {
         #region User object details
         '#microsoft.graph.user' {
+            $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
 
             # odata type by directoryObject includes value of user which could be either user or agentUser
             $ObjectType = 'user'
-            $UserDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AadObjectId)" -OutputType PSObject
+            # Combine initial query with customSecurityAttributes to reduce API calls
+            $UserDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AadObjectId)?`$select=id,userPrincipalName,userType,displayName,customSecurityAttributes,identityParent" -OutputType PSObject
             $IdentityParent = $($UserDetails.identityParent).id
 
             if ($null -ne $UserDetails.'@odata.type') {
@@ -101,12 +111,16 @@ function Get-EntraOpsPrivilegedEntraObject {
                 $ObjectSubType = $UserDetails.UserType
             }
 
-            # Sponsors (using $expand for efficiency)
+            # Sponsors
             try {
-                Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+                Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$AadObjectId/sponsors?`$select=id" -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
             } catch {
                 Write-Warning "No sponsors supported for $($AadObjectId)"                
             }
+
+            # Owned Objects
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/ownedObjects?`$select=id") -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }            
+
 
             # User Sign-in Name
             $ObjectSignInName = $ObjectDetails.UserPrincipalName
@@ -115,9 +129,9 @@ function Get-EntraOpsPrivilegedEntraObject {
                 $OutsideOfAadTenant = $True
             } else { $OutsideOfAadTenant = $False }
 
-            # Object Classification
+            # Object Classification (already retrieved in initial query)
             try {
-                $ObjectCustomSec = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$($AAdObjectId)" + '?$select=customSecurityAttributes') -OutputType PSObject).customSecurityAttributes.$($CustomSecurityUserAttribute)
+                $ObjectCustomSec = $UserDetails.customSecurityAttributes.$($CustomSecurityUserAttribute)
             } catch {
                 Write-Warning "No custom security attribute for $($AadObjectId)"
             }
@@ -126,7 +140,7 @@ function Get-EntraOpsPrivilegedEntraObject {
 
             # Administrative Unit Assignments
             $RestrictedManagementByRAG = $ObjectMemberships.isAssignableToRole -contains $true
-            Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName | ForEach-Object { $AssignedAdministrativeUnits.Add($_) | out-null }
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit?`$select=id,displayName" -OutputType PSObject | Select-Object id, displayName | ForEach-Object { $AssignedAdministrativeUnits.Add($_) | out-null }
 
             # Relation between PAW and user
             if ($null -ne $ObjectCustomSec.$($CustomSecurityUserPawAttribute)) {
@@ -162,12 +176,16 @@ function Get-EntraOpsPrivilegedEntraObject {
             
             # Device Ownership of Privileged User
             Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/ownedDevices" + '?$select=id') -OutputType PSObject | ForEach-Object { $DeviceOwner.Add($_.id) | out-null }
+            
+            $StopwatchRegion.Stop()
+            Write-Verbose "[Performance] User object details: $($StopwatchRegion.ElapsedMilliseconds)ms"
         }
         #endregion
 
 
         #region Group object details
         '#microsoft.graph.group' {
+            $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
             $ObjectType = 'group'
             if ($ObjectDetails.isAssignableToRole -eq $True) {
                 $ObjectSubType = "Role-assignable"
@@ -182,24 +200,45 @@ function Get-EntraOpsPrivilegedEntraObject {
             $AdminTierLevel = ""
             $AdminTierLevelName = ""
 
+            # Owners
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/groups/$AadObjectId/owners?`$select=id" -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
+
             # Administrative Unit Assignments
-            Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/groups/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName | ForEach-Object { $AssignedAdministrativeUnits.Add($_) | out-null }
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/groups/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit?`$select=id,displayName" -OutputType PSObject | Select-Object id, displayName | ForEach-Object { $AssignedAdministrativeUnits.Add($_) | out-null }
+            
+            $StopwatchRegion.Stop()
+            Write-Verbose "[Performance] Group object details: $($StopwatchRegion.ElapsedMilliseconds)ms"
         }
         #endregion
 
         #region Service Principal object details
         '#microsoft.graph.servicePrincipal' {
-            $SPObject = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/serviceprincipals/$($AAdObjectId)" -OutputType PSObject
+            $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
+            # Combine initial query with customSecurityAttributes to reduce API calls
+            $SPObject = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/serviceprincipals/$($AAdObjectId)?`$select=id,appId,servicePrincipalType,appOwnerOrganizationId,customSecurityAttributes,agentAppId" -OutputType PSObject
             $ObjectSignInName = $SPObject.appId
             $ObjectType = 'servicePrincipal'
             $ObjectSubType = $SPObject.ServicePrincipalType
 
+            #region Collect Owners and Owned Objects
+            $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
+
+            # Owners
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$AadObjectId/owners?`$select=id") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
+
+            # Owned Objects
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$AadObjectId/ownedObjects?`$select=id") -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }            
+
+            $StopwatchRegion.Stop()
+            Write-Verbose "[Performance] Owners and owned objects collection: $($StopwatchRegion.ElapsedMilliseconds)ms"
+            #endregion
+
             # Restricted by Role Assignale Groups does not apply
             $RestrictedManagementByRAG = $false
 
-            # Details of classified object from custom security attribute
+            # Details of classified object from custom security attribute (already retrieved in initial query)
             try {
-                $ObjectCustomSec = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$($AAdObjectId)" + '?$select=customSecurityAttributes') -OutputType PSObject).customSecurityAttributes.$($CustomSecurityServicePrincipalAttribute)
+                $ObjectCustomSec = $SPObject.customSecurityAttributes.$($CustomSecurityServicePrincipalAttribute)
             } catch {
                 Write-Warning "No custom security attribute for $($AadObjectId)"
             }
@@ -222,22 +261,29 @@ function Get-EntraOpsPrivilegedEntraObject {
 
                 $OutsideOfAadTenant = ($AgentIdentityBlueprintPrincipalObject.AppOwnerOrganizationId -ne $TenantId)
 
-                # Sponsors (using $expand for efficiency)
+                # Sponsors
                 try {
-                    Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$($AadObjectId)/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+                    Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/serviceprincipals/$($AadObjectId)/sponsors?`$select=id" -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
                 } catch {
                     Write-Warning "No sponsors supported for $($AadObjectId)"
                 }
 
             }
             #endregion
+            
+            $StopwatchRegion.Stop()
+            Write-Verbose "[Performance] Service Principal object details: $($StopwatchRegion.ElapsedMilliseconds)ms"
         }
         #endregion
 
         #region Application object details
         '#microsoft.graph.application' {
-            $AppObject = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/applications/$($AAdObjectId)" -OutputType PSObject
-            $SPObject = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/serviceprincipals(appId='$($AppObject.appId)')" -OutputType PSObject
+            $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
+            # Use $select to minimize data transfer
+            $AppObject = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/applications/$($AAdObjectId)?`$select=id,appId,displayName" -OutputType PSObject
+            # Combine service principal query with customSecurityAttributes to reduce API calls
+            $SPObject = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/serviceprincipals(appId='$($AppObject.appId)')?`$select=id,customSecurityAttributes" -OutputType PSObject
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/applications/$AadObjectId/owners?`$select=id") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
             $ObjectSignInName = $AppObject.appId
             $ObjectType = 'application'
             $ObjectSubType = ""
@@ -245,9 +291,9 @@ function Get-EntraOpsPrivilegedEntraObject {
             # Administrative Units and Restricted Management does not apply to service principals
             $RestrictedManagementByRAG = $false
 
-            # Details of classified object from custom security attribute
+            # Details of classified object from custom security attribute (already retrieved in SP query)
             try {
-                $ObjectCustomSec = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$($SPObject.Id)" + '?$select=customSecurityAttributes') -OutputType PSObject).customSecurityAttributes.$($CustomSecurityServicePrincipalAttribute)
+                $ObjectCustomSec = $SPObject.customSecurityAttributes.$($CustomSecurityServicePrincipalAttribute)
             } catch {
                 Write-Warning "No custom security attribute for $($AadObjectId)"
             }
@@ -255,8 +301,11 @@ function Get-EntraOpsPrivilegedEntraObject {
             $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique adminTierLevelName).AdminTierLevelName
             $OutsideOfAadTenant = $False
             if ($null -ne $SPObject) {
-                Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/servicePrincipals/$($SPObject.id)/ownedObjects" -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
+                Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/servicePrincipals/$($SPObject.id)/ownedObjects?`$select=id" -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
             }
+            
+            $StopwatchRegion.Stop()
+            Write-Verbose "[Performance] Application object details: $($StopwatchRegion.ElapsedMilliseconds)ms"
             #endregion
         }
         #endregion
@@ -274,31 +323,18 @@ function Get-EntraOpsPrivilegedEntraObject {
     }
 
     #region Collect assigned administrative units for unsupported object types
+    $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
     if ($ObjectType -notin @("user", "group", "devices")) {
         # Administrative Unit Assignments
         $Body = @{
             securityEnabledOnly = "false"
         } | ConvertTo-Json
         $AssignedAdminUnitIds = Invoke-EntraOpsMsGraphQuery -Method POST -Body $Body -Uri "/beta/directoryObjects/$($AAdObjectId)/getMemberObjects" -OutputType PSObject -DisableCache
-        $AllAdminUnitIds = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/administrativeunits" -OutputType PSObject            
+        $AllAdminUnitIds = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/administrativeunits?`$select=id,displayName" -OutputType PSObject            
         $AllAdminUnitIds | Where-object { $_.Id -in $AssignedAdminUnitIds } | select-object id, displayName | ForEach-Object { $AssignedAdministrativeUnits.Add($_) | out-null }
     }
-    #endregion
-
-    #region Collect Owners and Owned Objects
-
-    # Owners for non-user objects (since owners are not existent for user objects)
-    if ($ObjectType -ne "user") {
-        try {
-            # Use $expand to fetch owners with main object call is not possible for directoryObjects, so keep separate call
-            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/owners?`$select=id") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
-        } catch {
-            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/owners") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
-        }
-    }
-    # Owned Objects
-    Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$AadObjectId/ownedObjects" -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
-
+    $StopwatchRegion.Stop()
+    Write-Verbose "[Performance] Administrative units collection: $($StopwatchRegion.ElapsedMilliseconds)ms"
     #endregion
 
     # Set empty arrays to avoid null values for arrays in schema
@@ -322,6 +358,9 @@ function Get-EntraOpsPrivilegedEntraObject {
     }
 
     if ($null -ne $ObjectDetails) {
+        $StopwatchTotal.Stop()
+        Write-Verbose "[Performance] Total execution time: $($StopwatchTotal.ElapsedMilliseconds)ms"
+        
         [PSCustomObject]@{
             'ObjectId'                      = $ObjectDetails.Id
             'ObjectType'                    = $ObjectType
