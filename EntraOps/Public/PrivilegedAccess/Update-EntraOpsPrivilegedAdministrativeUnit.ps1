@@ -110,8 +110,9 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
         if ($PrivilegedEamCount -gt 0) { Write-Warning "Numbers of objects without classification: $PrivilegedEamCount" }
         $PrivilegedEamClassifiedObjects = $PrivilegedEam | where-object { $_.Classification.AdminTierLevel -notcontains $null -and $_.RoleSystem -eq $RbacSystem }
 
+        $TierLevelIndex = 0
         foreach ($TierLevel in $PrivilegedEamClassifications) {
-            $TierLevelIndex = [Array]::IndexOf($PrivilegedEamClassifications, $TierLevel) + 1
+            $TierLevelIndex++
             Write-Progress -Activity "Updating Administrative Units" -Status "$RbacSystem - Processing tier $TierLevelIndex of $($PrivilegedEamClassifications.Count): Tier$($TierLevel.EAMTierLevelTagValue)-$($TierLevel.EAMTierLevelName)" -PercentComplete (($TierLevelIndex / $PrivilegedEamClassifications.Count) * 100)
             
             $AdminUnitId = $null
