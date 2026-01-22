@@ -218,7 +218,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
     # Optimization: Collect all unique ObjectIds and batch resolve details
     $UniqueObjects = $AppRoleAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
-    $UniqueObjectIds = $UniqueObjects.ObjectId
+    $UniqueObjectIds = @($UniqueObjects.ObjectId)
     
     Write-Host "Resolving details for $($UniqueObjectIds.Count) unique objects..."
     $ObjectDetailsCache = @{}

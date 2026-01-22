@@ -103,11 +103,9 @@ function Get-EntraOpsPrivilegedEntraObject {
 
             # Sponsors (using $expand for efficiency)
             try {
-                $UserWithSponsors = Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId?`$expand=sponsors(`$select=id)") -OutputType PSObject
-                $UserWithSponsors.sponsors | ForEach-Object { $Sponsors.Add($_.id) | out-null }
-            } catch {
-                # Fallback if $expand not supported
                 Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/users/$AadObjectId/sponsors") -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+            } catch {
+                Write-Warning "No sponsors supported for $($AadObjectId)"                
             }
 
             # User Sign-in Name
@@ -257,7 +255,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique adminTierLevelName).AdminTierLevelName
             $OutsideOfAadTenant = $False
             if ($null -ne $SPObject) {
-                Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$($SPObject.id)/ownedObjects" + '?$select=id') -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
+                Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/servicePrincipals/$($SPObject.id)/ownedObjects" -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
             }
             #endregion
         }
@@ -298,8 +296,8 @@ function Get-EntraOpsPrivilegedEntraObject {
             Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/owners") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
         }
     }
-    # Owned Objects (already using $select)
-    Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$AadObjectId/ownedObjects" + '?$select=id') -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
+    # Owned Objects
+    Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$AadObjectId/ownedObjects" -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
 
     #endregion
 

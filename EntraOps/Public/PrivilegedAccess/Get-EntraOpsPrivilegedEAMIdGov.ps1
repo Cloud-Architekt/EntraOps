@@ -259,7 +259,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
 
     # Optimization: Collect all unique ObjectIds and batch resolve details
     $UniqueObjects = $IdGovRbacAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
-    $UniqueObjectIds = $UniqueObjects.ObjectId
+    $UniqueObjectIds = @($UniqueObjects.ObjectId)
     
     Write-Host "Resolving details for $($UniqueObjectIds.Count) unique objects..."
     $ObjectDetailsCache = @{}
