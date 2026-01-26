@@ -109,8 +109,10 @@ function Get-EntraOpsPrivilegedEamIdGov {
                             $ClassifiedObject = Get-Content -Path $ClassificationSource -ErrorAction SilentlyContinue | ConvertFrom-Json -Depth 10 | Where-Object { $_.ObjectId -eq $AssignedCatalogResource.originId }
                             if ($null -ne $($ClassifiedObject.Classification)) {
                                 $MatchedRbacClassification = $ClassifiedObject.Classification
-                                $MatchedRbacClassification | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)" -Force
-                                $MatchedClassificationToCatalogResources.Add($MatchedRbacClassification) | Out-Null
+                                foreach ($ClassItem in $MatchedRbacClassification) {
+                                    $ClassItem | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)" -Force
+                                    $MatchedClassificationToCatalogResources.Add($ClassItem) | Out-Null
+                                }
                             } else {
                                 Write-Verbose "No classification for $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in $RbacSystem or file $ClassificationSource is missing!"
                             }
@@ -149,27 +151,48 @@ function Get-EntraOpsPrivilegedEamIdGov {
                         $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                     } 'OAuthApplication' {
                         Write-Verbose -Message "Classifying assigned catalog object $($AssignedCatalogResource.displayName) from origin system $($AssignedCatalogResource.originSystem) by Graph API App roles"
-                        $Classification = foreach ($AppRoleScope in $AssignedCatalogResource.accessPackageResourceRoles) {
-                            $AppRoleClassification = ($AppRolesClassification | Where-Object { $_.TierLevelDefinition.RoleDefinitionActions -eq $AppRoleScope.displayName -and $_.TierLevelDefinition.ResourceAppId -eq $AssignedCatalogResource.originId }) | Select-Object EAMTierLevelName, EAMTierLevelTagValue
-                            $AppRoleService = ($AppRolesClassification.TierLevelDefinition | Where-Object { $_.RoleDefinitionActions -eq $AppRoleScope.displayName -and $_.ResourceAppId -eq $AssignedCatalogResource.originId }) | Select-Object Service
-                            if ($Null -ne $AppRoleClassification) {
-                                [PSCustomObject]@{
-                                    'AdminTierLevel'     = $AppRoleClassification.EAMTierLevelTagValue
-                                    'AdminTierLevelName' = $AppRoleClassification.EAMTierLevelName
-                                    'Service'            = $AppRoleService.Service
+                        
+                        # Optimization: Build hashtable lookup for App Role classifications
+                        $AppRoleClassLookup = @{}
+                        foreach ($AppRoleClass in $AppRolesClassification) {
+                            foreach ($RoleDef in $AppRoleClass.TierLevelDefinition) {
+                                # Create lookup entry for each individual role action
+                                foreach ($RoleAction in $RoleDef.RoleDefinitionActions) {
+                                    $key = "$($RoleDef.ResourceAppId)|$($RoleAction)"
+                                    if (-not $AppRoleClassLookup.ContainsKey($key)) {
+                                        $AppRoleClassLookup[$key] = @{
+                                            EAMTierLevelName = $AppRoleClass.EAMTierLevelName
+                                            EAMTierLevelTagValue = $AppRoleClass.EAMTierLevelTagValue
+                                            Service = $RoleDef.Service
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        foreach ($AppRoleScope in $AssignedCatalogResource.accessPackageResourceRoles) {
+                            $lookupKey = "$($AssignedCatalogResource.originId)|$($AppRoleScope.displayName)"
+                            $AppRoleMatch = $AppRoleClassLookup[$lookupKey]
+                            
+                            if ($null -ne $AppRoleMatch) {
+                                $Classification = [PSCustomObject]@{
+                                    'AdminTierLevel'     = $AppRoleMatch.EAMTierLevelTagValue
+                                    'AdminTierLevelName' = $AppRoleMatch.EAMTierLevelName
+                                    'Service'            = $AppRoleMatch.Service
                                     'TaggedBy'           = "Assigned$($AssignedCatalogResource.originSystem)Resource"
                                 }
+                                $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                             } else {
                                 Write-Warning "No classification for app role $($AppRoleScope.displayName) of application $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in App Roles classification!"
-                                [PSCustomObject]@{
+                                $Classification = [PSCustomObject]@{
                                     'AdminTierLevel'     = "Unclassified"
                                     'AdminTierLevelName' = "Unclassified"
                                     'Service'            = "Unclassified"
                                     'TaggedBy'           = "Assigned$($AssignedCatalogResource.originSystem)Resource"
                                 }
+                                $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                             }
                         }
-                        $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                     } default { Write-Warning "Origin system $($AssignedCatalogResource.originSystem) not supported for classification!" }
                 }                
             }
@@ -245,7 +268,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
         $IdGovRbacAssignment = $IdGovRbacAssignment | Select-Object -ExcludeProperty Classification
         $ClassificationCollection = @()
         $ClassificationCollection += ($IdGovRbacClassificationsByAssignedObjects | Where-Object { $_.RoleAssignmentScopeId -eq $IdGovRbacAssignment.RoleAssignmentScopeId }).Classification
-        $ClassificationCollection += ($IdGovRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScope -eq $IdGovRbacAssignment.RoleAssignmentScope -and $_.RoleDefinitionId -eq $IdGovRbacAssignment.RoleDefinitionId }).Classification
+        $ClassificationCollection += ($IdGovRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $IdGovRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $IdGovRbacAssignment.RoleDefinitionId }).Classification
         $Classification = @()
         $Classification += $ClassificationCollection | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy | Sort-Object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $IdGovRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force

@@ -4,6 +4,7 @@
 
 .DESCRIPTION
     Get a list in schema of EntraOps with all privileged principals in Entra ID and assigned roles and classifications.
+    Supports parallel processing (PowerShell 7+) using Microsoft Graph SDK's process-level authentication context.
 
 .PARAMETER TenantId
     Tenant ID of the Microsoft Entra ID tenant. Default is the current tenant ID.
@@ -16,6 +17,26 @@
 
 .PARAMETER GlobalExclusion
     Use global exclusion list for classification. Default is $true. Global exclusion list is stored in "./Classification/Global.json".
+
+.PARAMETER EnableParallelProcessing
+    Enable parallel processing for object detail resolution. Default is $true. 
+    Requires PowerShell 7+ and Microsoft Graph SDK authentication (not UseAzPwshOnly mode).
+    Leverages MgGraph's process-level authentication context - no re-authentication needed in parallel threads.
+
+.PARAMETER ParallelThrottleLimit
+    Maximum number of parallel threads. Default is 10. Adjust based on API rate limits and system resources.
+
+.EXAMPLE
+    Get privileged principals with automatic parallel processing (PowerShell 7+)
+    Get-EntraOpsPrivilegedEamEntraId
+
+.EXAMPLE
+    Disable parallel processing for sequential execution
+    Get-EntraOpsPrivilegedEamEntraId -EnableParallelProcessing $false
+
+.EXAMPLE
+    Use parallel processing with reduced throttle limit to avoid API throttling
+    Get-EntraOpsPrivilegedEamEntraId -ParallelThrottleLimit 5
 #>
 
 function Get-EntraOpsPrivilegedEamEntraId {
@@ -33,6 +54,12 @@ function Get-EntraOpsPrivilegedEamEntraId {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$GlobalExclusion = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$EnableParallelProcessing = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Int32]$ParallelThrottleLimit = 10
     )
 
     # Configuration for batch processing
@@ -157,10 +184,34 @@ function Get-EntraOpsPrivilegedEamEntraId {
         # Get role actions for role definition using hashtable lookup
         $AadRoleActions = $RoleActionsLookup["$($CurrentRoleDefinitionName)"]
 
-        # Check if RBAC scope is listed in JSON by wildcard in RoleAssignmentScopeName
+        # Check if RBAC scope is listed in JSON by wildcard or exact match in RoleAssignmentScopeName
         $MatchedClassificationByScope = [System.Collections.Generic.List[object]]::new()
         foreach ($Classification in $AadResourcesByClassificationJSON) {
-            if ($AadRoleScope -like $Classification.RoleAssignmentScopeName -and $AadRoleScope -notin $Classification.ExcludedRoleAssignmentScopeName) {
+            # Skip if either scope is null
+            if ($null -eq $AadRoleScope -or $null -eq $Classification.RoleAssignmentScopeName) {
+                continue
+            }
+            
+            # Test if scope matches using -like for wildcard support
+            $ScopeMatches = $AadRoleScope -like $Classification.RoleAssignmentScopeName
+            
+            if (-not $ScopeMatches) {
+                continue
+            }
+            
+            # Check exclusions using -like for wildcard/pattern matching in exclusions
+            $ScopeExcluded = $false
+            if ($null -ne $Classification.ExcludedRoleAssignmentScopeName) {
+                foreach ($ExcludedScope in $Classification.ExcludedRoleAssignmentScopeName) {
+                    # Use -like to support wildcards in exclusions AND exact matches
+                    if (($AadRoleScope -like $ExcludedScope) -or ($ExcludedScope -like $AadRoleScope)) {
+                        $ScopeExcluded = $true
+                        break
+                    }
+                }
+            }
+            
+            if (-not $ScopeExcluded) {
                 $MatchedClassificationByScope.Add($Classification)
             }
         }
@@ -236,28 +287,164 @@ function Get-EntraOpsPrivilegedEamEntraId {
     Write-Host "Resolving details for $($UniqueObjectIds.Count) unique objects..."
     $ObjectDetailsCache = @{}
     
-    # Batch resolution with progress reporting
-    for ($i = 0; $i -lt $UniqueObjectIds.Count; $i++) {
-        $ObjectId = $UniqueObjectIds[$i]
+    # Determine if parallel processing is viable
+    # Requirements: PowerShell 7+, dataset >= 20 objects, NOT using UseAzPwshOnly mode
+    $IsPowerShell7 = $PSVersionTable.PSVersion.Major -ge 7
+    $HasSufficientObjects = $UniqueObjectIds.Count -ge 20
+    $IsUsingMgGraphSDK = -not $Global:UseAzPwshOnly
+    $UseParallel = $EnableParallelProcessing -and $IsPowerShell7 -and $HasSufficientObjects -and $IsUsingMgGraphSDK
+    
+    if ($UseParallel) {
+        Write-Host "Using parallel processing with $ParallelThrottleLimit threads (Microsoft Graph SDK authentication)..."
+        Write-Verbose "MgGraph authentication context is process-scoped and will be accessible in parallel runspaces"
         
-        # Update progress more frequently for better UX (every 10 items or 5%, whichever is less frequent)
-        $ProgressInterval = [Math]::Max(10, [Math]::Floor($UniqueObjectIds.Count / 20))
-        if (($i % $ProgressInterval) -eq 0 -or $i -eq ($UniqueObjectIds.Count - 1)) {
-            $PercentComplete = [math]::Round(($i / $UniqueObjectIds.Count) * 100, 0)
-            Write-Progress -Activity "Resolving Object Details" -Status "Processing object $($i + 1) of $($UniqueObjectIds.Count)" -PercentComplete $PercentComplete
-            if ($VerbosePreference -ne 'SilentlyContinue') {
-                Write-Verbose "Processing object $($i + 1) of $($UniqueObjectIds.Count)..."
+        # Verify MgGraph connection exists before starting parallel processing
+        $MgContext = Get-MgContext
+        if ($null -eq $MgContext) {
+            Write-Warning "Microsoft Graph is not connected. Falling back to sequential processing."
+            $UseParallel = $false
+        } else {
+            Write-Verbose "MgGraph Context: TenantId=$($MgContext.TenantId), Scopes=$($MgContext.Scopes -join ', ')"
+            
+            # Import module in current scope to ensure it's available
+            Import-Module Microsoft.Graph.Authentication -ErrorAction SilentlyContinue
+            
+            # Prepare module paths for parallel runspaces
+            $EntraOpsModulePath = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+            $MgGraphModulePath = (Get-Module Microsoft.Graph.Authentication).Path
+            
+            # Capture global variables needed by Get-EntraOpsPrivilegedEntraObject
+            $LocalEntraOpsConfig = $Global:EntraOpsConfig
+            $LocalEntraOpsBaseFolder = $Global:EntraOpsBaseFolder
+            
+            try {
+                # Execute parallel processing
+                # Key insight: MgGraph SDK maintains process-level auth that parallel runspaces inherit
+                # No re-authentication needed - Get-MgContext works in parallel threads!
+                $ParallelResults = $UniqueObjects | ForEach-Object -ThrottleLimit $ParallelThrottleLimit -Parallel {
+                    $obj = $_
+                    $ObjectId = $obj.ObjectId
+                    $LocalTenantId = $using:TenantId
+                    $LocalEntraOpsPath = $using:EntraOpsModulePath
+                    $LocalMgGraphPath = $using:MgGraphModulePath
+                    
+                    try {
+                        # Import Microsoft.Graph.Authentication in parallel runspace
+                        # This gives access to Get-MgContext and Invoke-MgGraphRequest
+                        Import-Module $LocalMgGraphPath -ErrorAction Stop
+                        
+                        # Verify MgGraph context is accessible (it should be - process-scoped!)
+                        $ThreadMgContext = Get-MgContext
+                        if ($null -eq $ThreadMgContext) {
+                            throw "MgGraph context not available in parallel runspace"
+                        }
+                        
+                        # Import EntraOps module to get all functions
+                        $EntraOpsModuleManifest = Join-Path $LocalEntraOpsPath "EntraOps.psd1"
+                        if (Test-Path $EntraOpsModuleManifest) {
+                            $env:ENTRAOPS_NOWELCOME = $true
+                            Import-Module $EntraOpsModuleManifest -Force -ErrorAction Stop -WarningAction SilentlyContinue
+                        } else {
+                            throw "EntraOps module manifest not found at $EntraOpsModuleManifest"
+                        }
+                        
+                        # Initialize module session variable for caching in this runspace
+                        if (-not (Get-Variable -Name __EntraOpsSession -Scope Script -ErrorAction SilentlyContinue)) {
+                            $script:__EntraOpsSession = @{
+                                GraphCache = @{}
+                                CacheMetadata = @{}
+                            }
+                        }
+                        
+                        # Restore global variables in parallel runspace
+                        New-Variable -Name UseAzPwshOnly -Value $false -Scope Global -Force -ErrorAction SilentlyContinue
+                        New-Variable -Name EntraOpsConfig -Value $using:LocalEntraOpsConfig -Scope Global -Force -ErrorAction SilentlyContinue
+                        New-Variable -Name EntraOpsBaseFolder -Value $using:LocalEntraOpsBaseFolder -Scope Global -Force -ErrorAction SilentlyContinue
+                        
+                        # Get object details using MgGraph SDK - authentication already in place!
+                        $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $LocalTenantId
+                        
+                        [PSCustomObject]@{
+                            ObjectId = $ObjectId
+                            Details = $ObjectDetails
+                            Success = $true
+                            ThreadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
+                        }
+                    } catch {
+                        [PSCustomObject]@{
+                            ObjectId = $ObjectId
+                            Details = $null
+                            Success = $false
+                            Error = $_.Exception.Message
+                            ThreadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
+                        }
+                    }
+                }
+                
+                # Process parallel results and build cache
+                $SuccessCount = 0
+                $FailureCount = 0
+                $UsedThreads = @()
+                
+                foreach ($Result in $ParallelResults) {
+                    if ($Result.Success) {
+                        $ObjectDetailsCache[$Result.ObjectId] = $Result.Details
+                        $SuccessCount++
+                        if ($Result.ThreadId -notin $UsedThreads) { $UsedThreads += $Result.ThreadId }
+                    } else {
+                        Write-Warning "Failed to get details for object $($Result.ObjectId): $($Result.Error)"
+                        $ObjectDetailsCache[$Result.ObjectId] = $null
+                        $FailureCount++
+                    }
+                }
+                
+                Write-Host "Parallel processing completed: $SuccessCount successful, $FailureCount failed (used $($UsedThreads.Count) threads)"
+                
+            } catch {
+                Write-Warning "Parallel processing failed: $($_.Exception.Message). Falling back to sequential processing."
+                $UseParallel = $false
             }
         }
-        
-        try {
-            $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
-        } catch {
-            Write-Warning "Failed to get details for object $($ObjectId): $_"
-            $ObjectDetailsCache[$ObjectId] = $null
-        }
     }
-    Write-Progress -Activity "Resolving Object Details" -Completed
+    
+    # Sequential processing (fallback or when parallel is not viable)
+    if (-not $UseParallel) {
+        # Provide informative reason for sequential processing
+        if ($EnableParallelProcessing) {
+            $Reasons = @()
+            if (-not $IsPowerShell7) { $Reasons += "PowerShell 7+ required" }
+            if (-not $HasSufficientObjects) { $Reasons += "dataset too small (<20 objects)" }
+            if (-not $IsUsingMgGraphSDK) { $Reasons += "UseAzPwshOnly mode enabled (use MgGraph SDK for parallel support)" }
+            if ($Reasons.Count -gt 0) {
+                Write-Host "Using sequential processing: $($Reasons -join ', ')"
+            }
+        } else {
+            Write-Host "Using sequential processing (parallel disabled)..."
+        }
+        
+        # Batch resolution with progress reporting
+        for ($i = 0; $i -lt $UniqueObjectIds.Count; $i++) {
+            $ObjectId = $UniqueObjectIds[$i]
+            
+            # Update progress more frequently for better UX (every 10 items or 5%, whichever is less frequent)
+            $ProgressInterval = [Math]::Max(10, [Math]::Floor($UniqueObjectIds.Count / 20))
+            if (($i % $ProgressInterval) -eq 0 -or $i -eq ($UniqueObjectIds.Count - 1)) {
+                $PercentComplete = [math]::Round(($i / $UniqueObjectIds.Count) * 100, 0)
+                Write-Progress -Activity "Resolving Object Details" -Status "Processing object $($i + 1) of $($UniqueObjectIds.Count)" -PercentComplete $PercentComplete
+                if ($VerbosePreference -ne 'SilentlyContinue') {
+                    Write-Verbose "Processing object $($i + 1) of $($UniqueObjectIds.Count)..."
+                }
+            }
+            
+            try {
+                $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
+            } catch {
+                Write-Warning "Failed to get details for object $($ObjectId): $_"
+                $ObjectDetailsCache[$ObjectId] = $null
+            }
+        }
+        Write-Progress -Activity "Resolving Object Details" -Completed
+    }
 
     $AadRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
         if ($null -ne $_.ObjectId) {

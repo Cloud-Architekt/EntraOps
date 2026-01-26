@@ -81,13 +81,37 @@ function Invoke-EntraOpsMsGraphQuery {
     $isBatch = $Uri.EndsWith('$batch')
     $cacheKey = $Uri
     $isMethodGet = $Method -eq 'GET'
+    
+    # Determine if this is static reference data (longer TTL)
+    $IsStaticData = $Uri -match "roleDefinitions|directoryRoleTemplates|permissionGrants|appRoles|publishedPermissionScopes"
+    $CacheTTLSeconds = if ($IsStaticData) { $__EntraOpsSession.StaticDataCacheTTL } else { $__EntraOpsSession.DefaultCacheTTL }
 
     # Check if Cache can be used and data is available in cache
-    # Logic of caching Graph requests by Merill (Maester Framework)
+    # Enhanced logic with TTL support for improved cache management
+    $CacheIsValid = $false
     if (!$DisableCache -and !$isBatch -and $isInCache -and $isMethodGet) {
-        # Don't read from cache for batch requests.
-        Write-Verbose ("Using graph cache: $($cacheKey)")
-        $QueryResult = $__EntraOpsSession.GraphCache[$cacheKey]
+        # Check if cache entry has expired
+        if ($__EntraOpsSession.CacheMetadata.ContainsKey($cacheKey)) {
+            $CacheEntry = $__EntraOpsSession.CacheMetadata[$cacheKey]
+            $CurrentTime = [DateTime]::UtcNow
+            
+            if ($CurrentTime -lt $CacheEntry.ExpiryTime) {
+                $CacheIsValid = $true
+                $TimeRemaining = ($CacheEntry.ExpiryTime - $CurrentTime).TotalSeconds
+                Write-Verbose ("Using valid graph cache: $($cacheKey) (expires in $([Math]::Round($TimeRemaining, 0))s)")
+                $QueryResult = $__EntraOpsSession.GraphCache[$cacheKey]
+            } else {
+                Write-Verbose ("Cache expired for: $($cacheKey), fetching fresh data")
+                $__EntraOpsSession.GraphCache.Remove($cacheKey)
+                $__EntraOpsSession.CacheMetadata.Remove($cacheKey)
+                $isInCache = $false
+            }
+        } else {
+            # Legacy cache entry without metadata, use it but add metadata
+            Write-Verbose ("Using legacy graph cache (no TTL): $($cacheKey)")
+            $CacheIsValid = $true
+            $QueryResult = $__EntraOpsSession.GraphCache[$cacheKey]
+        }
     }
 
     if (!$QueryResult) {
@@ -163,13 +187,54 @@ function Invoke-EntraOpsMsGraphQuery {
                 Write-Warning "Failed to execute $($URI). Error: $($_.Exception.Message)"
             }
         }
-        # Updating cache
+        # Updating cache with TTL metadata
         if ($QueryResult -and !$isBatch -and $isMethodGet) {
+            $CurrentTime = [DateTime]::UtcNow
+            $ExpiryTime = $CurrentTime.AddSeconds($CacheTTLSeconds)
+            
             # Update cache
             if ($isInCache) {
                 $__EntraOpsSession.GraphCache[$cacheKey] = $QueryResult
             } else {
                 $__EntraOpsSession.GraphCache.Add($cacheKey, $QueryResult)
+            }
+            
+            # Update or add cache metadata with TTL
+            $CacheMetadataEntry = @{
+                Uri = $Uri
+                CachedTime = $CurrentTime
+                ExpiryTime = $ExpiryTime
+                TTLSeconds = $CacheTTLSeconds
+                IsStaticData = $IsStaticData
+                ResultCount = if ($QueryResult -is [System.Collections.ICollection]) { $QueryResult.Count } else { 1 }
+            }
+            
+            if ($__EntraOpsSession.CacheMetadata.ContainsKey($cacheKey)) {
+                $__EntraOpsSession.CacheMetadata[$cacheKey] = $CacheMetadataEntry
+            } else {
+                $__EntraOpsSession.CacheMetadata.Add($cacheKey, $CacheMetadataEntry)
+            }
+            
+            Write-Verbose "Cached result for $($cacheKey) (TTL: $($CacheTTLSeconds)s, Count: $($CacheMetadataEntry.ResultCount))"
+            
+            # Optionally persist static data to disk for cross-session caching
+            if ($IsStaticData -and (Test-Path $__EntraOpsSession.PersistentCachePath)) {
+                try {
+                    $CacheFileName = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($cacheKey)) + ".json"
+                    $CacheFilePath = Join-Path $__EntraOpsSession.PersistentCachePath $CacheFileName
+                    
+                    $PersistentCacheObject = @{
+                        Uri = $Uri
+                        CachedTime = $CurrentTime.ToString("o")
+                        ExpiryTime = $ExpiryTime.ToString("o")
+                        Data = $QueryResult
+                    }
+                    
+                    $PersistentCacheObject | ConvertTo-Json -Depth 10 -Compress | Out-File -FilePath $CacheFilePath -Force
+                    Write-Verbose "Persisted static data cache to: $CacheFileName"
+                } catch {
+                    Write-Verbose "Failed to persist cache to disk: $_"
+                }
             }
         }
     } else {

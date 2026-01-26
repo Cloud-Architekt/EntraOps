@@ -36,6 +36,12 @@ function Get-EntraOpsPrivilegedDefenderRoles {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$SampleMode = $False
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$EnableParallelProcessing = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Int32]$ParallelThrottleLimit = 10
     )
 
     # Set Error Action
@@ -48,6 +54,13 @@ function Get-EntraOpsPrivilegedDefenderRoles {
     } else {
         $DefenderRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleDefinitions?`$select=id,displayName,description,rolePermissions" -OutputType PSObject
         $DefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleAssignments?`$select=id,principalIds,roleDefinitionId,appScopeIds,directoryScopeIds" -OutputType PSObject
+    }
+    
+    # Optimization: Build Role Definition Lookup Hashtable for O(1) access
+    Write-Verbose "Building Role Definition Lookup Table..."
+    $RoleDefLookup = @{}
+    foreach ($RoleDef in $DefenderRoleDefinitions) {
+        $RoleDefLookup[$RoleDef.id] = $RoleDef
     }
     #endregion
 
@@ -76,7 +89,8 @@ function Get-EntraOpsPrivilegedDefenderRoles {
 
             foreach ($DefenderPrincipalRoleAssignment in $AllPrinicpalDefenderRoleAssignments) {
 
-                $Role = ($DefenderRoleDefinitions | where-object { $_.id -eq $DefenderPrincipalRoleAssignment.roleDefinitionId })
+                # Optimization: Use hashtable lookup instead of Where-Object for O(1) access
+                $Role = $RoleDefLookup[$DefenderPrincipalRoleAssignment.roleDefinitionId]
 
                 if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DefenderPrincipalRoleAssignment.id)" }
 

@@ -40,6 +40,7 @@ function Connect-EntraOps {
         [System.String]$AccountId
         ,
         [Parameter(Mandatory = $True)]
+        [ValidatePattern('^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$')]
         [System.String]$TenantName
         ,
         [Parameter(Mandatory = $False)]
@@ -60,11 +61,37 @@ function Connect-EntraOps {
         [Parameter(Mandatory = $False)]
         [ValidateScript({ Test-Path $_ })]
         [System.String]$ConfigFilePath
+        ,
+        [Parameter(Mandatory = $False)]
+        [switch]$NoWelcome
     )
 
     Process {
 
         $ErrorActionPreference = "Stop"
+
+        # Display welcome banner unless suppressed
+        if (-not $NoWelcome) {
+            $ModuleManifest = Import-PowerShellDataFile "$PSScriptRoot/../../EntraOps.psd1"
+            $PSEnvironment = "PowerShell " + ($PSVersionTable.PSEdition) + " " + ($PSVersionTable.PSVersion.ToString())
+            $ModuleVersion = $($ModuleManifest.ModuleVersion)
+
+            $Splash = @"
+ ______       _              ____
+|  ____|     | |            / __ \
+| |__   _ __ | |_ _ __ __ _| |  | |_ __  ___
+|  __| | '_ \| __| '__/ _`  | |  | | '_ \/ __|
+| |____| | | | |_| | | (_| | |__| | |_) \__ \
+|______|_| |_|\__|_|  \__,_|\____/| .__/|___/
+                                  | |
+                                  |_|
+
+Version $($ModuleVersion) on $($PSEnvironment)
+Community Project by Thomas Naunheim - www.entraops.com
+"@
+
+            Write-Host $Splash -ForegroundColor Blue
+        }
 
         #region Switch between Microsoft Graph SDK (Invoke-MgGraphRequest) and Azure PowerShell only in combination with Invoke-RestMethod
         if ($UseAzPwshOnly -eq $true) {
@@ -186,7 +213,8 @@ function Connect-EntraOps {
                         $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
                         Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
                     } catch {
-                        throw $_.Exception
+                        $ErrorMessage = if ($null -ne $_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
+                        throw "Failed to connect to Microsoft Graph using Azure access token: $ErrorMessage"
                     }
                 } else {
                     Write-Error -Message 'User or workload is not already authenticated. This authentication method is the default for EntraOps. Check "Get-Help Connect-EntraOps" to review the various options. Authenticated Azure PowerShell session is required for using "AlreadyAuthenticated" mode.'

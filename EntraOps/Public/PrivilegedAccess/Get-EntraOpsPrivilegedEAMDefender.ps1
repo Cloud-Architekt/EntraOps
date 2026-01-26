@@ -38,6 +38,12 @@ function Get-EntraOpsPrivilegedEamDefender {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$GlobalExclusion = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$EnableParallelProcessing = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Int32]$ParallelThrottleLimit = 10
     )
 
     # Configuration for batch processing
@@ -143,33 +149,13 @@ function Get-EntraOpsPrivilegedEamDefender {
 
     # Optimization: Collect all unique ObjectIds and batch resolve details
     $UniqueObjects = $DefenderRbacAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
-    $UniqueObjectIds = @($UniqueObjects.ObjectId)
     
-    Write-Host "Resolving details for $($UniqueObjectIds.Count) unique objects..."
-    $ObjectDetailsCache = @{}
-    
-    # Batch resolution with progress reporting
-    for ($i = 0; $i -lt $UniqueObjectIds.Count; $i++) {
-        $ObjectId = $UniqueObjectIds[$i]
-        
-        # Update progress more frequently for better UX (every 10 items or 5%, whichever is less frequent)
-        $ProgressInterval = [Math]::Max(10, [Math]::Floor($UniqueObjectIds.Count / 20))
-        if (($i % $ProgressInterval) -eq 0 -or $i -eq ($UniqueObjectIds.Count - 1)) {
-            $PercentComplete = [math]::Round(($i / $UniqueObjectIds.Count) * 100, 0)
-            Write-Progress -Activity "Resolving Object Details" -Status "Processing object $($i + 1) of $($UniqueObjectIds.Count)" -PercentComplete $PercentComplete
-            if ($VerbosePreference -ne 'SilentlyContinue') {
-                Write-Verbose "Processing object $($i + 1) of $($UniqueObjectIds.Count)..."
-            }
-        }
-        
-        try {
-            $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
-        } catch {
-            Write-Warning "Failed to get details for object $($ObjectId): $_"
-            $ObjectDetailsCache[$ObjectId] = $null
-        }
-    }
-    Write-Progress -Activity "Resolving Object Details" -Completed
+    # Use helper function for parallel/sequential object resolution
+    $ObjectDetailsCache = Invoke-EntraOpsParallelObjectResolution `
+        -UniqueObjects $UniqueObjects `
+        -TenantId $TenantId `
+        -EnableParallelProcessing $EnableParallelProcessing `
+        -ParallelThrottleLimit $ParallelThrottleLimit
 
     $DefenderRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
         if ($null -ne $_.ObjectId) {

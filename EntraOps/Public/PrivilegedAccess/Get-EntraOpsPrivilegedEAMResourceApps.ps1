@@ -4,6 +4,7 @@
 
 .DESCRIPTION
     Get a list in schema of EntraOps with all privileged principals in Resource Apps and assigned app roles and classifications.
+    Supports parallel processing (PowerShell 7+) using Microsoft Graph SDK's process-level authentication context.
 
 .PARAMETER TenantId
     Tenant ID of the Microsoft Entra ID tenant. Default is the current tenant ID.
@@ -16,6 +17,12 @@
 
 .PARAMETER GlobalExclusion
     Use global exclusion list for classification. Default is $true. Global exclusion list is stored in "./Classification/Global.json".
+
+.PARAMETER EnableParallelProcessing
+    Enable parallel processing for object detail resolution. Default is $true. Requires PowerShell 7+ and MgGraph SDK.
+
+.PARAMETER ParallelThrottleLimit
+    Maximum number of parallel threads. Default is 10.
 #>
 
 function Get-EntraOpsPrivilegedEamResourceApps {
@@ -33,6 +40,12 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$GlobalExclusion = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$EnableParallelProcessing = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Int32]$ParallelThrottleLimit = 10
     )
 
     # Configuration for batch processing
@@ -218,33 +231,13 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
     # Optimization: Collect all unique ObjectIds and batch resolve details
     $UniqueObjects = $AppRoleAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
-    $UniqueObjectIds = @($UniqueObjects.ObjectId)
     
-    Write-Host "Resolving details for $($UniqueObjectIds.Count) unique objects..."
-    $ObjectDetailsCache = @{}
-    
-    # Batch resolution with progress reporting
-    for ($i = 0; $i -lt $UniqueObjectIds.Count; $i++) {
-        $ObjectId = $UniqueObjectIds[$i]
-        
-        # Update progress more frequently for better UX (every 10 items or 5%, whichever is less frequent)
-        $ProgressInterval = [Math]::Max(10, [Math]::Floor($UniqueObjectIds.Count / 20))
-        if (($i % $ProgressInterval) -eq 0 -or $i -eq ($UniqueObjectIds.Count - 1)) {
-            $PercentComplete = [math]::Round(($i / $UniqueObjectIds.Count) * 100, 0)
-            Write-Progress -Activity "Resolving Object Details" -Status "Processing object $($i + 1) of $($UniqueObjectIds.Count)" -PercentComplete $PercentComplete
-            if ($VerbosePreference -ne 'SilentlyContinue') {
-                Write-Verbose "Processing object $($i + 1) of $($UniqueObjectIds.Count)..."
-            }
-        }
-        
-        try {
-            $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
-        } catch {
-            Write-Warning "Failed to get details for object $($ObjectId): $_"
-            $ObjectDetailsCache[$ObjectId] = $null
-        }
-    }
-    Write-Progress -Activity "Resolving Object Details" -Completed
+    # Use helper function for parallel/sequential object resolution
+    $ObjectDetailsCache = Invoke-EntraOpsParallelObjectResolution `
+        -UniqueObjects $UniqueObjects `
+        -TenantId $TenantId `
+        -EnableParallelProcessing $EnableParallelProcessing `
+        -ParallelThrottleLimit $ParallelThrottleLimit
 
     $AppRoleClassifiedSpObjects = $UniqueObjects | ForEach-Object {
         if ($null -ne $_.ObjectId) {

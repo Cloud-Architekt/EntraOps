@@ -334,13 +334,25 @@ function Get-EntraOpsPrivilegedEntraObject {
     #region Collect assigned administrative units for unsupported object types
     $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
     if ($ObjectType -notin @("user", "group", "devices")) {
-        # Administrative Unit Assignments
+        # Administrative Unit Assignments - Optimized with hashtable lookup
         $Body = @{
             securityEnabledOnly = "false"
         } | ConvertTo-Json
         $AssignedAdminUnitIds = Invoke-EntraOpsMsGraphQuery -Method POST -Body $Body -Uri "/beta/directoryObjects/$($AAdObjectId)/getMemberObjects" -OutputType PSObject -DisableCache
-        $AllAdminUnitIds = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/administrativeunits?`$select=id,displayName" -OutputType PSObject            
-        $AllAdminUnitIds | Where-object { $_.Id -in $AssignedAdminUnitIds } | select-object id, displayName | ForEach-Object { $AssignedAdministrativeUnits.Add($_) | out-null }
+        
+        # Optimization: Build hashtable lookup for O(1) access instead of O(N) Where-Object filtering
+        $AllAdminUnits = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/administrativeunits?`$select=id,displayName" -OutputType PSObject
+        $AdminUnitLookup = @{}
+        foreach ($AU in $AllAdminUnits) {
+            $AdminUnitLookup[$AU.id] = $AU
+        }
+        
+        # Use hashtable lookup for fast filtering
+        foreach ($AuId in $AssignedAdminUnitIds) {
+            if ($AdminUnitLookup.ContainsKey($AuId)) {
+                $AssignedAdministrativeUnits.Add($AdminUnitLookup[$AuId]) | out-null
+            }
+        }
     }
     $StopwatchRegion.Stop()
     Write-Verbose "[Performance] Administrative units collection: $($StopwatchRegion.ElapsedMilliseconds)ms"

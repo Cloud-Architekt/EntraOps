@@ -36,14 +36,15 @@ function Save-EntraOpsPrivilegedEAMJson {
         $EntraExportFolder = "$($DefaultFolderClassifiedEam)/EntraID"
 
         if ((Test-Path -path "$($EntraExportFolder)")) {
-            Remove-Item "$($EntraExportFolder)" -Force -Recurse
-            New-Item "$($EntraExportFolder)" -ItemType Directory -Force
+            Remove-Item "$($EntraExportFolder)" -Force -Recurse | Out-Null
+            New-Item "$($EntraExportFolder)" -ItemType Directory -Force | Out-Null
         } else {
-            New-Item "$($EntraExportFolder)" -ItemType Directory -Force
+            New-Item "$($EntraExportFolder)" -ItemType Directory -Force | Out-Null
         }
 
         $EamAzureAD = Get-EntraOpsPrivilegedEamEntraId
         $EamAzureAD = $EamAzureAD | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
+        $EamAzureAD = $EamAzureAD | sort-object ObjectDisplayName, ObjectType
         $EamAzureAD | Convertto-Json -Depth 10 | Out-File -Path "$($EntraExportFolder)/EntraID.json" -Force
         
         # Optimization: Create directories first
@@ -66,10 +67,10 @@ function Save-EntraOpsPrivilegedEAMJson {
         $ResAppExportFolder = "$($DefaultFolderClassifiedEam)/ResourceApps"
 
         if ((Test-Path -path "$($ResAppExportFolder)")) {
-            Remove-Item "$($ResAppExportFolder)" -Force -Recurse
-            New-Item "$($ResAppExportFolder)" -ItemType Directory -Force
+            Remove-Item "$($ResAppExportFolder)" -Force -Recurse | Out-Null
+            New-Item "$($ResAppExportFolder)" -ItemType Directory -Force | Out-Null
         } else {
-            New-Item "$($ResAppExportFolder)" -ItemType Directory -Force
+            New-Item "$($ResAppExportFolder)" -ItemType Directory -Force | Out-Null
         }
 
         $EamAzureAdResourceApps = Get-EntraOpsPrivilegedEamResourceApps
@@ -98,10 +99,10 @@ function Save-EntraOpsPrivilegedEAMJson {
         $EamDeviceMgmt = $EamDeviceMgmt | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
 
         if ((Test-Path -path "$($DevMgmtExportFolder)")) {
-            Remove-Item "$($DevMgmtExportFolder)" -Force -Recurse
-            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force
+            Remove-Item "$($DevMgmtExportFolder)" -Force -Recurse | Out-Null
+            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force | Out-Null
         } else {
-            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force
+            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force | Out-Null
         }
         $EamDeviceMgmt | Convertto-Json -Depth 10 | Out-File -Path "$($DevMgmtExportFolder)/DeviceManagement.json"
         
@@ -129,10 +130,10 @@ function Save-EntraOpsPrivilegedEAMJson {
         $EamIdGov = $EamIdGov | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
 
         if ((Test-Path -path "$($IdGovExportFolder)")) {
-            Remove-Item "$($IdGovExportFolder)" -Force -Recurse
-            New-Item "$($IdGovExportFolder)" -ItemType Directory -Force
+            Remove-Item "$($IdGovExportFolder)" -Force -Recurse | Out-Null
+            New-Item "$($IdGovExportFolder)" -ItemType Directory -Force | Out-Null
         } else {
-            New-Item "$($IdGovExportFolder)" -ItemType Directory -Force
+            New-Item "$($IdGovExportFolder)" -ItemType Directory -Force | Out-Null
         }
         $EamIdGov | Convertto-Json -Depth 10 | Out-File -Path "$($IdGovExportFolder)/IdentityGovernance.json"
         
@@ -159,10 +160,10 @@ function Save-EntraOpsPrivilegedEAMJson {
         $EamDefender = $EamDefender | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
 
         if ((Test-Path -path "$($DefenderExportFolder)")) {
-            Remove-Item "$($DefenderExportFolder)" -Force -Recurse
-            New-Item "$($DefenderExportFolder)" -ItemType Directory -Force
+            Remove-Item "$($DefenderExportFolder)" -Force -Recurse | Out-Null
+            New-Item "$($DefenderExportFolder)" -ItemType Directory -Force | Out-Null
         } else {
-            New-Item "$($DefenderExportFolder)" -ItemType Directory -Force
+            New-Item "$($DefenderExportFolder)" -ItemType Directory -Force | Out-Null
         }
         $EamDefender | Convertto-Json -Depth 10 | Out-File -Path "$($DefenderExportFolder)/Defender.json"
         
