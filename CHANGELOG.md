@@ -2,7 +2,7 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
-## [0.6.0] - 2026-01-17
+## [0.6.0] - 2026-01-28
 ### Added
 - Identify and classify API permissions as access package resources in catalogs
 - Update Control Plane scope on Administrative Units and assign RMAUs for Application and Service Principle objects
@@ -10,6 +10,12 @@ All essential changes on EntraOps will be documented in this changelog.
 - Support for Agent Identities in RBAC "ResourceApps"
 - Added workbook for Agent Identities
 - New Cmdlet `New-EntraOpsPrivilegedApplicationAdminDelegation` to assign custom and eligible role in scope of RMAU with Control Plane applications
+
+### Changed
+- Performance Enhancements by Parallelization and adding support for local caching
+- Define Custom Security Attributes for Privileged Users, Workload Identities and PAWs in EntraOps config
+- Updated version of Classification Templates from AzurePrivilegedIAM
+- Minor improvements in UI by adding progress bars
   
 ## [0.5.0] - 2025-12-10
 ### Added
