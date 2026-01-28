@@ -44,7 +44,10 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
 
     $FirstPartyApps = Invoke-WebRequest -UseBasicParsing -Method GET -Uri "https://raw.githubusercontent.com/merill/microsoft-info/main/_info/MicrosoftApps.json" | ConvertFrom-Json
 
+    $RbacSystemCounter = 0
     foreach ($RbacSystem in $RbacSystems) {
+        $RbacSystemCounter++
+        Write-Progress -Activity "Updating Administrative Units" -Status "Processing RBAC system $RbacSystemCounter of $($RbacSystems.Count): $RbacSystem" -PercentComplete (($RbacSystemCounter / $RbacSystems.Count) * 100)
 
         # Get EAM classification files
         if ($RbacSystem -eq "EntraID") {
@@ -107,7 +110,11 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
         if ($PrivilegedEamCount -gt 0) { Write-Warning "Numbers of objects without classification: $PrivilegedEamCount" }
         $PrivilegedEamClassifiedObjects = $PrivilegedEam | where-object { $_.Classification.AdminTierLevel -notcontains $null -and $_.RoleSystem -eq $RbacSystem }
 
+        $TierLevelIndex = 0
         foreach ($TierLevel in $PrivilegedEamClassifications) {
+            $TierLevelIndex++
+            Write-Progress -Activity "Updating Administrative Units" -Status "$RbacSystem - Processing tier $TierLevelIndex of $($PrivilegedEamClassifications.Count): Tier$($TierLevel.EAMTierLevelTagValue)-$($TierLevel.EAMTierLevelName)" -PercentComplete (($TierLevelIndex / $PrivilegedEamClassifications.Count) * 100)
+            
             $AdminUnitId = $null
             $AdminUnitName = "Tier" + $TierLevel.EAMTierLevelTagValue + "-" + $TierLevel.EAMTierLevelName + "." + $RbacSystem
             $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$AdminUnitName'" -DisableCache).id

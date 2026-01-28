@@ -38,7 +38,16 @@ function Get-EntraOpsPrivilegedEamDefender {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$GlobalExclusion = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$EnableParallelProcessing = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Int32]$ParallelThrottleLimit = 10
     )
+
+    # Configuration for batch processing
+    $BatchSize = 100  # Number of objects to process before showing progress
 
     # Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_Defender.json"
@@ -133,21 +142,54 @@ function Get-EntraOpsPrivilegedEamDefender {
     #endregion
 
     #region Apply classification to all assigned privileged users and groups in Device Management
-    Write-Host "Classifiying of all assigned privileged users and groups in Device Management..."
-    $DefenderRbacClassifiedObjects = $DefenderRbacAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
-        if ($null -ne $_.ObjectId) {
+    Write-Host "Classifying of all assigned privileged users and groups in Device Management..."
 
-            # Object types
+    # Optimization: Group assignments by ObjectId to avoid O(N^2) filtering
+    $DefenderRbacByObject = $DefenderRbacClassifications | Group-Object ObjectId -AsHashTable -AsString
+
+    # Optimization: Collect all unique ObjectIds and batch resolve details
+    $UniqueObjects = $DefenderRbacAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
+    
+    # Use helper function for parallel/sequential object resolution
+    $ObjectDetailsCache = Invoke-EntraOpsParallelObjectResolution `
+        -UniqueObjects $UniqueObjects `
+        -TenantId $TenantId `
+        -EnableParallelProcessing $EnableParallelProcessing `
+        -ParallelThrottleLimit $ParallelThrottleLimit
+
+    $DefenderRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
+        if ($null -ne $_.ObjectId) {
             $ObjectId = $_.ObjectId
-            $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
+            if ($VerbosePreference -ne 'SilentlyContinue') {
+                Write-Verbose -Message "Processing classifications for $($ObjectId)..."
+            }
+            
+            # Object types
+            $ObjectDetails = $ObjectDetailsCache[$ObjectId]
+            
+            # Skip if object details couldn't be retrieved
+            if ($null -eq $ObjectDetails) {
+                Write-Warning "Skipping object $ObjectId - failed to retrieve details"
+                return
+            }
 
             # RBAC Assignments
-            $DefenderRbacClassifiedAssignments = @()
-            $DefenderRbacClassifiedAssignments += ($DefenderRbacClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" })
+            $DefenderRbacClassifiedAssignments = $DefenderRbacByObject[$ObjectId]
 
-            # Classification
-            $Classification = @()
-            $Classification += (($DefenderRbacClassifiedAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service) | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+            # Classification - use hashtable for unique aggregation
+            $UniqueClassificationsHash = @{}
+            foreach ($Assignment in $DefenderRbacClassifiedAssignments) {
+                if ($null -ne $Assignment.Classification) {
+                    foreach ($ClassItem in $Assignment.Classification) {
+                        $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                        if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                            $UniqueClassificationsHash[$key] = $ClassItem
+                        }
+                    }
+                }
+            }
+            
+            $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
             if ($Classification.Count -eq 0) {
                 $Classification += [PSCustomObject]@{
                     'AdminTierLevel'     = "Unclassified"
@@ -183,5 +225,10 @@ function Get-EntraOpsPrivilegedEamDefender {
         }
     }
     #endregion
-    $DefenderRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
+    
+    Write-Host "Applying global exclusions and finalizing results..."
+    $FilteredDefenderObjects = $DefenderRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
+    
+    Write-Host "Completed processing $($FilteredDefenderObjects.Count) privileged objects."
+    $FilteredDefenderObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 }

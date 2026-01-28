@@ -197,7 +197,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
     #region Privileged Service Principals
     Write-Output "Identify directory role scope of service principals and application objects..."
     $PrivilegedServicePrincipals = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" }
-    if ($PrivilegedServicePrincipals.Count -gt "0") {
+    if ($PrivilegedServicePrincipals.Count -gt 0) {
         # Get list of object-level role assignment scope which includes Control Plane Service Principals
         $ScopeNameServicePrincipalObject = $PrivilegedServicePrincipals | ForEach-Object { "/$($_.ObjectId)" }
 
@@ -214,7 +214,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
             }
         }
 
-        $PrivilegedServicePrincipalWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" -and $null -ne $_.AssignedAdministrativeUnits }
+        $PrivilegedServicePrincipalWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" -and $null -ne $_.AssignedAdministrativeUnits.id }
         $PrivilegedServicePrincipalWithAU = $PrivilegedServicePrincipalWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
 
         # Always add also directory level assignment scope because of missing protection of service principal by RAG, AAD Role or RMAU assignment

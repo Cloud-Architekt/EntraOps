@@ -186,6 +186,12 @@ function New-EntraOpsConfigFile {
             FilterObjectType                          = ("User", "Group")
             RbacSystems                               = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement")
         }
+        CustomSecurityAttributes                      = [ordered]@{
+            PrivilegedUserAttribute                   = "privilegedUser"
+            PrivilegedUserPawAttribute                = "associatedSecureAdminWorkstation"
+            PrivilegedServicePrincipalAttribute       = "privilegedWorkloadIdentitiy"            
+            UserWorkAccountAttribute                  = "associatedWorkAccount"
+        }        
     }
     #endregion
 

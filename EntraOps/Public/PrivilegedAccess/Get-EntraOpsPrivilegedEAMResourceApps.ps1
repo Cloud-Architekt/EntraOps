@@ -4,6 +4,7 @@
 
 .DESCRIPTION
     Get a list in schema of EntraOps with all privileged principals in Resource Apps and assigned app roles and classifications.
+    Supports parallel processing (PowerShell 7+) using Microsoft Graph SDK's process-level authentication context.
 
 .PARAMETER TenantId
     Tenant ID of the Microsoft Entra ID tenant. Default is the current tenant ID.
@@ -16,6 +17,12 @@
 
 .PARAMETER GlobalExclusion
     Use global exclusion list for classification. Default is $true. Global exclusion list is stored in "./Classification/Global.json".
+
+.PARAMETER EnableParallelProcessing
+    Enable parallel processing for object detail resolution. Default is $true. Requires PowerShell 7+ and MgGraph SDK.
+
+.PARAMETER ParallelThrottleLimit
+    Maximum number of parallel threads. Default is 10.
 #>
 
 function Get-EntraOpsPrivilegedEamResourceApps {
@@ -33,7 +40,16 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$GlobalExclusion = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$EnableParallelProcessing = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Int32]$ParallelThrottleLimit = 10
     )
+
+    # Configuration for batch processing
+    $BatchSize = 100  # Number of objects to process before showing progress
 
     #region Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_AppRoles.json"
@@ -69,7 +85,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         # Check if role action and scope exists in JSON definition
         $AppRoleInJsonDefinition = @()
         $AppRoleInJsonDefinition = foreach ($RoleDefinitionName in $AppRoleAssignment.RoleDefinitionName) {
-            $AppRoleByClassificationJSON | Where-Object { ($_.RoleDefinitionActions -eq $RoleDefinitionName -or $RoleDefinitionName -like $_.RoleDefinitionActions) -and $Classification.ExcludedRoleDefinitionActions -ne $RoleDefinitionName }
+            $AppRoleByClassificationJSON | Where-Object { ($_.RoleDefinitionActions -eq $RoleDefinitionName -or $RoleDefinitionName -like $_.RoleDefinitionActions) -and $_.ExcludedRoleDefinitionActions -ne $RoleDefinitionName }
         }
 
         $Classification = @()
@@ -106,7 +122,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     $AppRoleClassifications = foreach ($AppRoleAssignment in $AppRoleAssignments) {
         $AppRoleAssignment = $AppRoleAssignment | Select-Object -ExcludeProperty Classification
         $Classification = @()
-        $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScope -eq $AppRoleAssignment.RoleAssignmentScope -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
+        $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $AppRoleAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
         if ($ClassificationCollection.Classification.Count -gt 0) {
             $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         }
@@ -140,7 +156,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentType" -NotePropertyValue "Inheritable" -Force
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "RoleAssignmentSubType" -NotePropertyValue "AllAllowed" -Force
                     $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectDisplayName" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.displayName)" -Force
-                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectId" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.displayName)" -Force                        
+                    $InheritableResourceAppPermission | Add-Member -NotePropertyName "TransitiveByObjectId" -NotePropertyValue "$($AgentIdentityBlueprintPrincipal.id)" -Force                        
                     $InheritableResourceAppPermission
                 } elseif ($AgentIdentityResourceAppPermission.inheritableScopes.kind -eq "enumerated") {
                     $RoleAssignmentScopeId = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=appId eq '$($AgentIdentityResourceAppPermission.resourceAppId)'" | select-object -ExpandProperty id
@@ -212,12 +228,32 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
     #region Add classification and details of Service Principals to output
     Write-Host "Classifying of all assigned privileged app roles to service principals..."
-    $AppRoleClassifiedSpObjects = $AppRoleAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
-        if ($null -ne $_.ObjectId) {
 
-            # Object types
+    # Optimization: Collect all unique ObjectIds and batch resolve details
+    $UniqueObjects = $AppRoleAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
+    
+    # Use helper function for parallel/sequential object resolution
+    $ObjectDetailsCache = Invoke-EntraOpsParallelObjectResolution `
+        -UniqueObjects $UniqueObjects `
+        -TenantId $TenantId `
+        -EnableParallelProcessing $EnableParallelProcessing `
+        -ParallelThrottleLimit $ParallelThrottleLimit
+
+    $AppRoleClassifiedSpObjects = $UniqueObjects | ForEach-Object {
+        if ($null -ne $_.ObjectId) {
             $ObjectId = $_.ObjectId
-            $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
+            if ($VerbosePreference -ne 'SilentlyContinue') {
+                Write-Verbose -Message "Processing classifications for $($ObjectId)..."
+            }
+            
+            # Object types
+            $ObjectDetails = $ObjectDetailsCache[$ObjectId]
+            
+            # Skip if object details couldn't be retrieved
+            if ($null -eq $ObjectDetails) {
+                Write-Warning "Skipping object $ObjectId - failed to retrieve details"
+                return
+            }
 
             # Role Assignments
             $AppRoleAssignments = @()
@@ -230,17 +266,29 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
             }
 
-            $AppRoleClassification = $($AppRoleAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service
-
-            # Classification
-            $Classification = @()
-            $Classification += $AppRoleClassification | Sort-Object AdminTierLevel, AdminTierLevelName, Service
-            if ($Classification.Count -eq 0) {
-                $Classification += [PSCustomObject]@{
-                    'AdminTierLevel'     = "Unclassified"
-                    'AdminTierLevelName' = "Unclassified"
-                    'Service'            = "Unclassified"
+            # Classification - use hashtable for unique aggregation
+            $UniqueClassificationsHash = @{}
+            foreach ($Assignment in $AppRoleAssignments) {
+                if ($null -ne $Assignment.Classification) {
+                    foreach ($ClassItem in $Assignment.Classification) {
+                        $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                        if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                            $UniqueClassificationsHash[$key] = $ClassItem
+                        }
+                    }
                 }
+            }
+            
+            $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+
+            if ($Classification.Count -eq 0) {
+                $Classification = @(
+                    [PSCustomObject]@{
+                        'AdminTierLevel'     = "Unclassified"
+                        'AdminTierLevelName' = "Unclassified"
+                        'Service'            = "Unclassified"
+                    }
+                )
             }
 
             [PSCustomObject]@{
@@ -283,8 +331,11 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     }    
     #endregion       
 
+    Write-Host "Applying global exclusions and finalizing results..."
     $AppRoleClassifiedObjects = $AppRoleClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
-    $AppRoleClassifiedObjects | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
+    
+    Write-Host "Completed processing $($AppRoleClassifiedObjects.Count) privileged objects."
+    $AppRoleClassifiedObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 
 }
 

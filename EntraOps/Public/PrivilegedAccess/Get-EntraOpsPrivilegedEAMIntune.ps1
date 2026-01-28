@@ -42,7 +42,16 @@ function Get-EntraOpsPrivilegedEamIntune {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$GlobalExclusion = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$EnableParallelProcessing = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Int32]$ParallelThrottleLimit = 10
     )
+
+    # Configuration for batch processing
+    $BatchSize = 100  # Number of objects to process before showing progress
 
     # Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_DeviceManagement.json"
@@ -107,11 +116,21 @@ function Get-EntraOpsPrivilegedEamIntune {
 
                 Write-Host "Checking Device ID in Associated PAW Device custom attribute in Intune..."
                 try {
-                    if ($ClassifiedPrivilegedPawUser.AssociatedPawDevice.Count -gt "0") {
-                        $DeviceIds = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices?`$filter=azureADDeviceId+eq+'$($ClassifiedPrivilegedPawUser.AssociatedPawDevice)'" -OutputType PSObject).id
-                        if ($Null -ne $DeviceIds) {      
-                            $Devices += Foreach ($DeviceId in $DeviceIds) {
-                                (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
+                    if ($ClassifiedPrivilegedPawUser.AssociatedPawDevice.Count -gt 0) {
+                        $DeviceIds = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices?`$filter=azureADDeviceId+eq+'$($ClassifiedPrivilegedPawUser.AssociatedPawDevice)'&`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject).id
+                        if ($Null -ne $DeviceIds) {
+                            # Parallelize device lookups for better performance
+                            if ($DeviceIds.Count -gt 3) {
+                                $Devices += $DeviceIds | ForEach-Object -Parallel {
+                                    $ModulePath = $using:PSScriptRoot
+                                    Import-Module "$ModulePath/../../EntraOps.psm1" -Force -WarningAction SilentlyContinue
+                                    (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($_)?`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject)
+                                } -ThrottleLimit 10
+                            } else {
+                                # For small counts, sequential is fine
+                                $Devices += Foreach ($DeviceId in $DeviceIds) {
+                                    (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)?`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject)
+                                }
                             }                           
                         } else {
                             Write-Output "No device for Entra ID DeviceId $($ClassifiedPrivilegedPawUser.AssociatedPawDevice) of $($ClassifiedPrivilegedPawUser.ObjectDisplayName) found in Intune!"
@@ -246,21 +265,54 @@ function Get-EntraOpsPrivilegedEamIntune {
     #endregion
 
     #region Apply classification to all assigned privileged users and groups in Device Management
-    Write-Host "Classifiying of all assigned privileged users and groups in Device Management..."
-    $DeviceMgmtRbacClassifiedObjects = $DeviceMgmtRbacAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
-        if ($null -ne $_.ObjectId) {
+    Write-Host "Classifying of all assigned privileged users and groups in Device Management..."
 
-            # Object types
+    # Optimization: Group assignments by ObjectId to avoid O(N^2) filtering
+    $DeviceMgmtRbacByObject = $DeviceMgmtRbacClassifications | Group-Object ObjectId -AsHashTable -AsString
+
+    # Optimization: Collect all unique ObjectIds and batch resolve details
+    $UniqueObjects = $DeviceMgmtRbacAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
+    
+    # Use helper function for parallel/sequential object resolution
+    $ObjectDetailsCache = Invoke-EntraOpsParallelObjectResolution `
+        -UniqueObjects $UniqueObjects `
+        -TenantId $TenantId `
+        -EnableParallelProcessing $EnableParallelProcessing `
+        -ParallelThrottleLimit $ParallelThrottleLimit
+
+    $DeviceMgmtRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
+        if ($null -ne $_.ObjectId) {
             $ObjectId = $_.ObjectId
-            $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
+            if ($VerbosePreference -ne 'SilentlyContinue') {
+                Write-Verbose -Message "Processing classifications for $($ObjectId)..."
+            }
+            
+            # Object types
+            $ObjectDetails = $ObjectDetailsCache[$ObjectId]
+            
+            # Skip if object details couldn't be retrieved
+            if ($null -eq $ObjectDetails) {
+                Write-Warning "Skipping object $ObjectId - failed to retrieve details"
+                return
+            }
 
             # RBAC Assignments
-            $DeviceMgmtRbacClassifiedAssignments = @()
-            $DeviceMgmtRbacClassifiedAssignments += ($DeviceMgmtRbacClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" })
+            $DeviceMgmtRbacClassifiedAssignments = $DeviceMgmtRbacByObject[$ObjectId]
 
-            # Classification
-            $Classification = @()
-            $Classification += (($DeviceMgmtRbacClassifiedAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service) | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+            # Classification - use hashtable for unique aggregation
+            $UniqueClassificationsHash = @{}
+            foreach ($Assignment in $DeviceMgmtRbacClassifiedAssignments) {
+                if ($null -ne $Assignment.Classification) {
+                    foreach ($ClassItem in $Assignment.Classification) {
+                        $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                        if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                            $UniqueClassificationsHash[$key] = $ClassItem
+                        }
+                    }
+                }
+            }
+            
+            $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
             if ($Classification.Count -eq 0) {
                 $Classification += [PSCustomObject]@{
                     'AdminTierLevel'     = "Unclassified"
@@ -296,5 +348,10 @@ function Get-EntraOpsPrivilegedEamIntune {
         }
     }
     #endregion
-    $DeviceMgmtRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
+    
+    Write-Host "Applying global exclusions and finalizing results..."
+    $FilteredIntuneObjects = $DeviceMgmtRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
+    
+    Write-Host "Completed processing $($FilteredIntuneObjects.Count) privileged objects."
+    $FilteredIntuneObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 }

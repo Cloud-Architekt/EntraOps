@@ -49,6 +49,9 @@ function Get-EntraOpsPrivilegedEamIdGov {
         [System.Boolean]$GlobalExclusion = $true
     )
 
+    # Configuration for batch processing
+    $BatchSize = 100  # Number of objects to process before showing progress
+
     # Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_IdentityGovernance.json"
     if (Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)/$($ClassificationFileName)") {
@@ -106,8 +109,10 @@ function Get-EntraOpsPrivilegedEamIdGov {
                             $ClassifiedObject = Get-Content -Path $ClassificationSource -ErrorAction SilentlyContinue | ConvertFrom-Json -Depth 10 | Where-Object { $_.ObjectId -eq $AssignedCatalogResource.originId }
                             if ($null -ne $($ClassifiedObject.Classification)) {
                                 $MatchedRbacClassification = $ClassifiedObject.Classification
-                                $MatchedRbacClassification | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)" -Force
-                                $MatchedClassificationToCatalogResources.Add($MatchedRbacClassification) | Out-Null
+                                foreach ($ClassItem in $MatchedRbacClassification) {
+                                    $ClassItem | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)" -Force
+                                    $MatchedClassificationToCatalogResources.Add($ClassItem) | Out-Null
+                                }
                             } else {
                                 Write-Verbose "No classification for $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in $RbacSystem or file $ClassificationSource is missing!"
                             }
@@ -146,27 +151,48 @@ function Get-EntraOpsPrivilegedEamIdGov {
                         $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                     } 'OAuthApplication' {
                         Write-Verbose -Message "Classifying assigned catalog object $($AssignedCatalogResource.displayName) from origin system $($AssignedCatalogResource.originSystem) by Graph API App roles"
-                        $Classification = foreach ($AppRoleScope in $AssignedCatalogResource.accessPackageResourceRoles) {
-                            $AppRoleClassification = ($AppRolesClassification | Where-Object { $_.TierLevelDefinition.RoleDefinitionActions -eq $AppRoleScope.displayName -and $_.TierLevelDefinition.ResourceAppId -eq $AssignedCatalogResource.originId }) | Select-Object EAMTierLevelName, EAMTierLevelTagValue
-                            $AppRoleService = ($AppRolesClassification.TierLevelDefinition | Where-Object { $_.RoleDefinitionActions -eq $AppRoleScope.displayName -and $_.ResourceAppId -eq $AssignedCatalogResource.originId }) | Select-Object Service
-                            if ($Null -ne $AppRoleClassification) {
-                                [PSCustomObject]@{
-                                    'AdminTierLevel'     = $AppRoleClassification.EAMTierLevelTagValue
-                                    'AdminTierLevelName' = $AppRoleClassification.EAMTierLevelName
-                                    'Service'            = $AppRoleService.Service
+                        
+                        # Optimization: Build hashtable lookup for App Role classifications
+                        $AppRoleClassLookup = @{}
+                        foreach ($AppRoleClass in $AppRolesClassification) {
+                            foreach ($RoleDef in $AppRoleClass.TierLevelDefinition) {
+                                # Create lookup entry for each individual role action
+                                foreach ($RoleAction in $RoleDef.RoleDefinitionActions) {
+                                    $key = "$($RoleDef.ResourceAppId)|$($RoleAction)"
+                                    if (-not $AppRoleClassLookup.ContainsKey($key)) {
+                                        $AppRoleClassLookup[$key] = @{
+                                            EAMTierLevelName = $AppRoleClass.EAMTierLevelName
+                                            EAMTierLevelTagValue = $AppRoleClass.EAMTierLevelTagValue
+                                            Service = $RoleDef.Service
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        foreach ($AppRoleScope in $AssignedCatalogResource.accessPackageResourceRoles) {
+                            $lookupKey = "$($AssignedCatalogResource.originId)|$($AppRoleScope.displayName)"
+                            $AppRoleMatch = $AppRoleClassLookup[$lookupKey]
+                            
+                            if ($null -ne $AppRoleMatch) {
+                                $Classification = [PSCustomObject]@{
+                                    'AdminTierLevel'     = $AppRoleMatch.EAMTierLevelTagValue
+                                    'AdminTierLevelName' = $AppRoleMatch.EAMTierLevelName
+                                    'Service'            = $AppRoleMatch.Service
                                     'TaggedBy'           = "Assigned$($AssignedCatalogResource.originSystem)Resource"
                                 }
+                                $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                             } else {
                                 Write-Warning "No classification for app role $($AppRoleScope.displayName) of application $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in App Roles classification!"
-                                [PSCustomObject]@{
+                                $Classification = [PSCustomObject]@{
                                     'AdminTierLevel'     = "Unclassified"
                                     'AdminTierLevelName' = "Unclassified"
                                     'Service'            = "Unclassified"
                                     'TaggedBy'           = "Assigned$($AssignedCatalogResource.originSystem)Resource"
                                 }
+                                $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                             }
                         }
-                        $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                     } default { Write-Warning "Origin system $($AssignedCatalogResource.originSystem) not supported for classification!" }
                 }                
             }
@@ -242,35 +268,88 @@ function Get-EntraOpsPrivilegedEamIdGov {
         $IdGovRbacAssignment = $IdGovRbacAssignment | Select-Object -ExcludeProperty Classification
         $ClassificationCollection = @()
         $ClassificationCollection += ($IdGovRbacClassificationsByAssignedObjects | Where-Object { $_.RoleAssignmentScopeId -eq $IdGovRbacAssignment.RoleAssignmentScopeId }).Classification
-        $ClassificationCollection += ($IdGovRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScope -eq $IdGovRbacAssignment.RoleAssignmentScope -and $_.RoleDefinitionId -eq $IdGovRbacAssignment.RoleDefinitionId }).Classification
+        $ClassificationCollection += ($IdGovRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $IdGovRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $IdGovRbacAssignment.RoleDefinitionId }).Classification
         $Classification = @()
         $Classification += $ClassificationCollection | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy | Sort-Object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $IdGovRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $IdGovRbacAssignment
     }
 
-    Write-Host "Classifiying of all assigned privileged users and groups in Identity Governance..."
-    $IdGovRbacClassifiedObjects = $IdGovRbacAssignments | select-object -Unique ObjectId, ObjectType | ForEach-Object {
-        if ($null -ne $_.ObjectId) {
+    Write-Host "Classifying of all assigned privileged users and groups in Identity Governance..."
 
-            # Object types
+    # Optimization: Group assignments by ObjectId to avoid O(N^2) filtering
+    $IdGovRbacByObject = $IdGovRbacClassifications | Group-Object ObjectId -AsHashTable -AsString
+
+    # Optimization: Collect all unique ObjectIds and batch resolve details
+    $UniqueObjects = $IdGovRbacAssignments | Select-Object -Unique ObjectId, ObjectType | Where-Object { $null -ne $_.ObjectId }
+    $UniqueObjectIds = @($UniqueObjects.ObjectId)
+    
+    Write-Host "Resolving details for $($UniqueObjectIds.Count) unique objects..."
+    $ObjectDetailsCache = @{}
+    
+    # Batch resolution with progress reporting
+    for ($i = 0; $i -lt $UniqueObjectIds.Count; $i++) {
+        $ObjectId = $UniqueObjectIds[$i]
+        
+        # Update progress more frequently for better UX (every 10 items or 5%, whichever is less frequent)
+        $ProgressInterval = [Math]::Max(10, [Math]::Floor($UniqueObjectIds.Count / 20))
+        if (($i % $ProgressInterval) -eq 0 -or $i -eq ($UniqueObjectIds.Count - 1)) {
+            $PercentComplete = [math]::Round(($i / $UniqueObjectIds.Count) * 100, 0)
+            Write-Progress -Activity "Resolving Object Details" -Status "Processing object $($i + 1) of $($UniqueObjectIds.Count)" -PercentComplete $PercentComplete
+            if ($VerbosePreference -ne 'SilentlyContinue') {
+                Write-Verbose "Processing object $($i + 1) of $($UniqueObjectIds.Count)..."
+            }
+        }
+        
+        try {
+            $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
+        } catch {
+            Write-Warning "Failed to get details for object $($ObjectId): $_"
+            $ObjectDetailsCache[$ObjectId] = $null
+        }
+    }
+    Write-Progress -Activity "Resolving Object Details" -Completed
+
+    $IdGovRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
+        if ($null -ne $_.ObjectId) {
             $ObjectId = $_.ObjectId
-            $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
+            if ($VerbosePreference -ne 'SilentlyContinue') {
+                Write-Verbose -Message "Processing classifications for $($ObjectId)..."
+            }
+            
+            # Object types
+            $ObjectDetails = $ObjectDetailsCache[$ObjectId]
+            
+            # Skip if object details couldn't be retrieved
+            if ($null -eq $ObjectDetails) {
+                Write-Warning "Skipping object $ObjectId - failed to retrieve details"
+                return
+            }
 
             # RBAC Assignments
-            $IdGovRbacClassifiedAssignments = @()
-            $IdGovRbacClassifiedAssignments += ($IdGovRbacClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" })
-            $IdGovRbacClassification = $($IdGovRbacClassifiedAssignments).Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service | Sort-Object AdminTierLevel, AdminTierLevelName, Service
-
-            # Classification
-            $Classification = @()
-            $Classification += $IdGovRbacClassification
-            if ($Classification.Count -eq 0) {
-                $Classification += [PSCustomObject]@{
-                    'AdminTierLevel'     = "Unclassified"
-                    'AdminTierLevelName' = "Unclassified"
-                    'Service'            = "Unclassified"
+            $IdGovRbacClassifiedAssignments = $IdGovRbacByObject[$ObjectId]
+            
+            # Classification - use hashtable for unique aggregation
+            $UniqueClassificationsHash = @{}
+            foreach ($Assignment in $IdGovRbacClassifiedAssignments) {
+                if ($null -ne $Assignment.Classification) {
+                    foreach ($ClassItem in $Assignment.Classification) {
+                        $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                        if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                            $UniqueClassificationsHash[$key] = $ClassItem
+                        }
+                    }
                 }
+            }
+            
+            $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+            
+            if ($Classification.Count -eq 0) {
+                $Classification = @([PSCustomObject]@{
+                        'AdminTierLevel'     = "Unclassified"
+                        'AdminTierLevelName' = "Unclassified"
+                        'Service'            = "Unclassified"
+                    })
             }
 
             [PSCustomObject]@{
@@ -299,6 +378,10 @@ function Get-EntraOpsPrivilegedEamIdGov {
             }
         }
     }
+    
+    Write-Host "Applying global exclusions and finalizing results..."
     $IdGovRbacClassifiedObjects = $IdGovRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
-    $IdGovRbacClassifiedObjects | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
+    
+    Write-Host "Completed processing $($IdGovRbacClassifiedObjects.Count) privileged objects."
+    $IdGovRbacClassifiedObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 }

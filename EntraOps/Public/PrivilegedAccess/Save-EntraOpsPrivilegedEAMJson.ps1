@@ -33,126 +33,152 @@ function Save-EntraOpsPrivilegedEAMJson {
 
     #region Entra ID
     if ($RbacSystems -contains "EntraID") {
-        $ExportFolder = "$($DefaultFolderClassifiedEam)/EntraID"
+        $EntraExportFolder = "$($DefaultFolderClassifiedEam)/EntraID"
 
-        if ((Test-Path -path "$($ExportFolder)")) {
-            Remove-Item "$($ExportFolder)" -Force -Recurse
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
+        if ((Test-Path -path "$($EntraExportFolder)")) {
+            Remove-Item "$($EntraExportFolder)" -Force -Recurse | Out-Null
+            New-Item "$($EntraExportFolder)" -ItemType Directory -Force | Out-Null
         } else {
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
+            New-Item "$($EntraExportFolder)" -ItemType Directory -Force | Out-Null
         }
 
         $EamAzureAD = Get-EntraOpsPrivilegedEamEntraId
         $EamAzureAD = $EamAzureAD | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
-        $EamAzureAD | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/EntraID.json" -Force
-        foreach ($PrivilegedObject in $EamAzureAD) {
-            $ObjectType = $PrivilegedObject.ObjectType
-            $SingleJSONExportPath = "$($ExportFolder)/$ObjectType"
-            If (!(test-path $SingleJSONExportPath)) {
-                New-Item -ItemType Directory -Force -Path $SingleJSONExportPath
-            }
-            $PrivilegedObject | Convertto-Json -Depth 10 | Out-File -Path "$SingleJSONExportPath/$($PrivilegedObject.ObjectId).json" -Force
+        $EamAzureAD = $EamAzureAD | sort-object ObjectDisplayName, ObjectType
+        $EamAzureAD | Convertto-Json -Depth 10 | Out-File -Path "$($EntraExportFolder)/EntraID.json" -Force
+        
+        # Optimization: Create directories first
+        $EamAzureAD | Group-Object ObjectType | ForEach-Object {
+             $Dir = "$($EntraExportFolder)/$($_.Name)"
+             if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
         }
+
+        # Optimization: Parallel File Write
+        $EamAzureAD | ForEach-Object -Parallel {
+            $Obj = $_
+            $Path = "$using:EntraExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+        } -ThrottleLimit 50
     }
     #endregion
 
     #region Entra Resource Apps
     if ($RbacSystems -contains "ResourceApps") {
-        $ExportFolder = "$($DefaultFolderClassifiedEam)/ResourceApps"
+        $ResAppExportFolder = "$($DefaultFolderClassifiedEam)/ResourceApps"
 
-        if ((Test-Path -path "$($ExportFolder)")) {
-            Remove-Item "$($ExportFolder)" -Force -Recurse
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
+        if ((Test-Path -path "$($ResAppExportFolder)")) {
+            Remove-Item "$($ResAppExportFolder)" -Force -Recurse | Out-Null
+            New-Item "$($ResAppExportFolder)" -ItemType Directory -Force | Out-Null
         } else {
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
+            New-Item "$($ResAppExportFolder)" -ItemType Directory -Force | Out-Null
         }
 
         $EamAzureAdResourceApps = Get-EntraOpsPrivilegedEamResourceApps
         $EamAzureAdResourceApps = $EamAzureAdResourceApps | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
-        $EamAzureAdResourceApps | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/ResourceApps.json"
-        foreach ($PrivilegedObject in $EamAzureAdResourceApps) {
-            $ObjectType = $PrivilegedObject.ObjectType
-            $SingleJSONExportPath = "$($ExportFolder)/$ObjectType"
-            If (!(test-path $SingleJSONExportPath)) {
-                New-Item -ItemType Directory -Force -Path $SingleJSONExportPath
-            }
-            $PrivilegedObject | Convertto-Json -Depth 10 | Out-File -Path "$SingleJSONExportPath/$($PrivilegedObject.ObjectId).json" -Force
+        $EamAzureAdResourceApps | Convertto-Json -Depth 10 | Out-File -Path "$($ResAppExportFolder)/ResourceApps.json"
+
+        # Optimization: Create directories first
+        $EamAzureAdResourceApps | Group-Object ObjectType | ForEach-Object {
+             $Dir = "$($ResAppExportFolder)/$($_.Name)"
+             if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
         }
+
+        # Optimization: Parallel File Write
+        $EamAzureAdResourceApps | ForEach-Object -Parallel {
+            $Obj = $_
+            $Path = "$using:ResAppExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+        } -ThrottleLimit 50
     }
     #endregion
 
     #region Device Management
     if ($RbacSystems -contains "DeviceManagement") {
-        $ExportFolder = "$($DefaultFolderClassifiedEam)/DeviceManagement"
+        $DevMgmtExportFolder = "$($DefaultFolderClassifiedEam)/DeviceManagement"
         $EamDeviceMgmt = Get-EntraOpsPrivilegedEAMIntune
         $EamDeviceMgmt = $EamDeviceMgmt | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
 
-        if ((Test-Path -path "$($ExportFolder)")) {
-            Remove-Item "$($ExportFolder)" -Force -Recurse
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
+        if ((Test-Path -path "$($DevMgmtExportFolder)")) {
+            Remove-Item "$($DevMgmtExportFolder)" -Force -Recurse | Out-Null
+            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force | Out-Null
         } else {
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
+            New-Item "$($DevMgmtExportFolder)" -ItemType Directory -Force | Out-Null
         }
-        $EamDeviceMgmt | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/DeviceManagement.json"
-        foreach ($PrivilegedObject in $EamDeviceMgmt) {
-            $ObjectType = $PrivilegedObject.ObjectType
-            $SingleJSONExportPath = "$($ExportFolder)/$ObjectType"
-            If (!(test-path $SingleJSONExportPath)) {
-                New-Item -ItemType Directory -Force -Path $SingleJSONExportPath
-            }
-            $PrivilegedObject | Convertto-Json -Depth 10 | Out-File -Path "$SingleJSONExportPath/$($PrivilegedObject.ObjectId).json" -Force
+        $EamDeviceMgmt | Convertto-Json -Depth 10 | Out-File -Path "$($DevMgmtExportFolder)/DeviceManagement.json"
+        
+        # Optimization: Create directories first
+        $EamDeviceMgmt | Group-Object ObjectType | ForEach-Object {
+             $Dir = "$($DevMgmtExportFolder)/$($_.Name)"
+             if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
         }
+
+        # Optimization: Parallel File Write
+        $EamDeviceMgmt | ForEach-Object -Parallel {
+            $Obj = $_
+            $Path = "$using:DevMgmtExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+        } -ThrottleLimit 50
     }
     #endregion
 
     #region Identity Governance
     if ($RbacSystems -contains "IdentityGovernance") {
-        $ExportFolder = "$($DefaultFolderClassifiedEam)/IdentityGovernance"
+        $IdGovExportFolder = "$($DefaultFolderClassifiedEam)/IdentityGovernance"
 
         $EamIdGov = Get-EntraOpsPrivilegedEAMIdGov
         $EamIdGov | Measure-Object
         $EamIdGov = $EamIdGov | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
 
-        if ((Test-Path -path "$($ExportFolder)")) {
-            Remove-Item "$($ExportFolder)" -Force -Recurse
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
+        if ((Test-Path -path "$($IdGovExportFolder)")) {
+            Remove-Item "$($IdGovExportFolder)" -Force -Recurse | Out-Null
+            New-Item "$($IdGovExportFolder)" -ItemType Directory -Force | Out-Null
         } else {
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
+            New-Item "$($IdGovExportFolder)" -ItemType Directory -Force | Out-Null
         }
-        $EamIdGov | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/IdentityGovernance.json"
-        foreach ($PrivilegedObject in $EamIdGov) {
-            $ObjectType = $PrivilegedObject.ObjectType
-            $SingleJSONExportPath = "$($ExportFolder)/$ObjectType"
-            If (!(test-path $SingleJSONExportPath)) {
-                New-Item -ItemType Directory -Force -Path $SingleJSONExportPath
-            }
-            $PrivilegedObject | Convertto-Json -Depth 10 | Out-File -Path "$SingleJSONExportPath/$($PrivilegedObject.ObjectId).json" -Force
+        $EamIdGov | Convertto-Json -Depth 10 | Out-File -Path "$($IdGovExportFolder)/IdentityGovernance.json"
+        
+        # Optimization: Create directories first
+        $EamIdGov | Group-Object ObjectType | ForEach-Object {
+             $Dir = "$($IdGovExportFolder)/$($_.Name)"
+             if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
         }
+
+        # Optimization: Parallel File Write
+        $EamIdGov | ForEach-Object -Parallel {
+            $Obj = $_
+            $Path = "$using:IdGovExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+        } -ThrottleLimit 50
     }
     #endregion
     #region Defender
     if ($RbacSystems -contains "Defender") {
-        $ExportFolder = "$($DefaultFolderClassifiedEam)/Defender"
+        $DefenderExportFolder = "$($DefaultFolderClassifiedEam)/Defender"
 
         $EamDefender = Get-EntraOpsPrivilegedEAMDefender
         $EamDefender | Measure-Object
         $EamDefender = $EamDefender | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
 
-        if ((Test-Path -path "$($ExportFolder)")) {
-            Remove-Item "$($ExportFolder)" -Force -Recurse
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
+        if ((Test-Path -path "$($DefenderExportFolder)")) {
+            Remove-Item "$($DefenderExportFolder)" -Force -Recurse | Out-Null
+            New-Item "$($DefenderExportFolder)" -ItemType Directory -Force | Out-Null
         } else {
-            New-Item "$($ExportFolder)" -ItemType Directory -Force
+            New-Item "$($DefenderExportFolder)" -ItemType Directory -Force | Out-Null
         }
-        $EamDefender | Convertto-Json -Depth 10 | Out-File -Path "$($ExportFolder)/Defender.json"
-        foreach ($PrivilegedObject in $EamDefender) {
-            $ObjectType = $PrivilegedObject.ObjectType
-            $SingleJSONExportPath = "$($ExportFolder)/$ObjectType"
-            If (!(test-path $SingleJSONExportPath)) {
-                New-Item -ItemType Directory -Force -Path $SingleJSONExportPath
-            }
-            $PrivilegedObject | Convertto-Json -Depth 10 | Out-File -Path "$SingleJSONExportPath/$($PrivilegedObject.ObjectId).json" -Force
+        $EamDefender | Convertto-Json -Depth 10 | Out-File -Path "$($DefenderExportFolder)/Defender.json"
+        
+        # Optimization: Create directories first
+        $EamDefender | Group-Object ObjectType | ForEach-Object {
+             $Dir = "$($DefenderExportFolder)/$($_.Name)"
+             if (!(Test-Path $Dir)) { New-Item -ItemType Directory -Force -Path $Dir | Out-Null }
         }
+
+        # Optimization: Parallel File Write
+        $EamDefender | ForEach-Object -Parallel {
+            $Obj = $_
+            $Path = "$using:DefenderExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
+            $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+        } -ThrottleLimit 50
     }
     #endregion
 }
