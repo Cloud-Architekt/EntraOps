@@ -36,6 +36,9 @@ function Get-EntraOpsPrivilegedDeviceRoles {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$SampleMode = $False
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Collections.Generic.List[psobject]]$WarningMessages
     )
 
     # Set Error Action
@@ -178,7 +181,13 @@ function Get-EntraOpsPrivilegedDeviceRoles {
                     }
                 }
             } else {
-                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                if ($null -ne $WarningMessages) {
+                    $WarningMessages.Add([PSCustomObject]@{
+                            Type    = "Empty Group"
+                            Message = "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                            Target  = $RbacAssignmentByGroup.ObjectId
+                        })
+                }
             }
 
             $DeviceMgmtTransitiveRbacAssignments.Add($TransitiveMember) | Out-Null

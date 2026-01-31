@@ -23,6 +23,9 @@
 .PARAMETER CustomSecurityUserWorkAccountAttribute
     Custom security attribute for user object to get relation to work account. Default will be set by parameter in EntraOpsConfig.json file.
 
+.PARAMETER XdrHunting
+    Boolean to indicate if ThreatHunting.Read.All permission is granted for current session to get associated work account from XDR data. Default is set by scope of MgGraph.
+
 .EXAMPLE
     Details of privileged object by using ObjectId
     Get-EntraOpsPrivilegedEntraObject -AadObjectId "bdf10e92-30c7-4cc8-93e7-2982ea6cf371"
@@ -47,12 +50,34 @@ function Get-EntraOpsPrivilegedEntraObject {
         ,        
         [Parameter(Mandatory = $false)]
         [System.String]$CustomSecurityUserWorkAccountAttribute = $EntraOpsConfig.CustomSecurityAttributes.UserWorkAccountAttribute
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$XdrHunting = $(if ($Global:XdrAvdHuntingAccess -is [bool]) { $Global:XdrAvdHuntingAccess } else { $false })
+        ,
+        [Parameter(Mandatory = $false)]
+        [PSObject]$InputObject
     )
 
     $StopwatchTotal = [System.Diagnostics.Stopwatch]::StartNew()
     
     try {
-        $ObjectDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($AadObjectId)?`$select=id,displayName,userPrincipalName,userType,isAssignableToRole,isManagementRestricted,onPremisesSyncEnabled,passwordPolicies" -OutputType PSObject
+        $ObjectDetails = $null
+        
+        # Smart Fallback: Use InputObject if available and valid (contains critical properties)
+        if ($null -ne $InputObject) {
+            # Check for critical property usually missing in v1.0 but present in beta
+            if ($null -ne $InputObject.isManagementRestricted) {
+                $ObjectDetails = $InputObject
+                Write-Verbose "Using pre-fetched object details for $AadObjectId (Skipped API call)"
+            } else {
+                Write-Verbose "InputObject provided but missing critical 'isManagementRestricted' property. Falling back to API fetch."
+            }
+        }
+        
+        # Fallback to API call if object details are still null
+        if ($null -eq $ObjectDetails) {
+            $ObjectDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($AadObjectId)?`$select=id,displayName,userPrincipalName,userType,isAssignableToRole,isManagementRestricted,onPremisesSyncEnabled,passwordPolicies" -OutputType PSObject
+        }
     } catch {
         $ObjectDetails = $null
         Write-Verbose "No object has been found with Id: $AadObjectId"
@@ -70,10 +95,11 @@ function Get-EntraOpsPrivilegedEntraObject {
 
     #region Calculate object details common for all object types and protection by RMAU membership
     $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
-    Write-Verbose -Message "Lookup for $($ObjectDetails.'@odata.type') - $($ObjectDetails.displayName) $($AadObjectId)"
     try {
-        $ObjectDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($AadObjectId)?`$select=id,displayName,userPrincipalName,userType,isAssignableToRole,isManagementRestricted,onPremisesSyncEnabled,passwordPolicies" -OutputType PSObject
-        $RestrictedManagementByRMAU = $($ObjectDetails.isManagementRestricted)
+        if ($null -ne $ObjectDetails) {
+            Write-Verbose -Message "Lookup for $($ObjectDetails.'@odata.type') - $($ObjectDetails.displayName) $($AadObjectId)"
+            $RestrictedManagementByRMAU = $($ObjectDetails.isManagementRestricted)
+        }
     } catch {
         Write-Warning "No group or role assignment status available"
     }
@@ -157,7 +183,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             }
             if ($null -ne $ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute)) {
                 $ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute) | ForEach-Object { $WorkAccount.Add($_) | out-null }                
-            } else {
+            } elseif ( $XdrHunting -eq $true ) {
                 try {
                     $IdentityAccountQuery = "
                         IdentityAccountInfo
@@ -181,6 +207,8 @@ function Get-EntraOpsPrivilegedEntraObject {
                 } catch {
                     Write-Warning "Query for associated work account failed for $($AadObjectId): $($_.Exception.Message)"
                 }
+            } else {
+                Write-Verbose "Custom Security Attribute not present and XDR Hunting permission not granted, skipping associated work account lookup for $($AadObjectId)"
             }
             
             # Device Ownership of Privileged User
@@ -376,6 +404,24 @@ function Get-EntraOpsPrivilegedEntraObject {
     # Make sure that first character is uppercase
     if (![string]::IsNullOrEmpty($ObjectSubType)) {
         $ObjectSubType = $ObjectSubType.Substring(0, 1).ToUpper() + $ObjectSubType.Substring(1)
+    }
+
+    # Sort lists for deterministic output
+    if ($Owners.Count -gt 0) { $Owners.Sort() }
+    if ($Sponsors.Count -gt 0) { $Sponsors.Sort() }
+    if ($ObjectOwner.Count -gt 0) { $ObjectOwner.Sort() }
+    if ($DeviceOwner.Count -gt 0) { $DeviceOwner.Sort() }
+    if ($WorkAccount.Count -gt 0) { $WorkAccount.Sort() }
+    if ($PawDevice.Count -gt 0) { $PawDevice.Sort() }
+    
+    # Sort AssignedAdministrativeUnits by displayName then id if it contains items
+    if ($AssignedAdministrativeUnits.Count -gt 0) {
+        $SortedUnits = $AssignedAdministrativeUnits | Sort-Object displayName, id
+        if ($SortedUnits -is [System.Collections.ArrayList]) {
+            $AssignedAdministrativeUnits = $SortedUnits
+        } else {
+            $AssignedAdministrativeUnits = [System.Collections.ArrayList]@($SortedUnits)
+        }
     }
 
     if ($null -ne $ObjectDetails) {

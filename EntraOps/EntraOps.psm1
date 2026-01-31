@@ -19,12 +19,27 @@ Export-ModuleMember -Function $Public.Basename
 # Update Clear-ModuleVariable function in internal/Clear-ModuleVariable.ps1 if you add new variables here
 # This function has been adopted from the Maester Framework and has been originally written by Merill Fernando
 # Enhanced caching with TTL (Time-To-Live) and metadata for performance optimization
+
+# Determine cross-platform user cache path following XDG and OS standards
+if ($IsWindows -or $env:OS -match 'Windows_NT') {
+    # Windows: %LOCALAPPDATA%\EntraOps (e.g. C:\Users\...\AppData\Local\EntraOps)
+    $CacheRoot = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::LocalApplicationData)
+} elseif ($IsMacOS -or ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::OSX))) {
+    # macOS: ~/Library/Caches/EntraOps
+    $CacheRoot = Join-Path $HOME "Library/Caches"
+} else {
+    # Linux: $XDG_CACHE_HOME/EntraOps or ~/.cache/EntraOps
+    $CacheRoot = if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME } else { Join-Path $HOME ".cache" }
+}
+
+$PersistentCachePath = Join-Path $CacheRoot "EntraOps"
+
 $__EntraOpsSession = @{
-    GraphCache = @{}
-    CacheMetadata = @{}
-    PersistentCachePath = (Join-Path $PSScriptRoot ".cache")
-    DefaultCacheTTL = 300  # Default 5 minutes for dynamic data
-    StaticDataCacheTTL = 3600  # 1 hour for static reference data (role definitions, etc.)
+    GraphCache          = @{}
+    CacheMetadata       = @{}
+    PersistentCachePath = $PersistentCachePath
+    DefaultCacheTTL     = 3600  # Default 1 hour for dynamic data
+    StaticDataCacheTTL  = 3600  # 1 hour for static reference data (role definitions, etc.)
 }
 New-Variable -Name __EntraOpsSession -Value $__EntraOpsSession -Scope Script -Force
 

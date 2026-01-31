@@ -39,6 +39,87 @@ function Invoke-EntraOpsParallelObjectResolution {
     )
     
     $UniqueObjectIds = @($UniqueObjects.ObjectId)
+    
+    #region Pre-fetch objects by type for massive performance improvement (Recommendation 2)
+    # Standardized cache population using batch requests
+    Write-Host "Pre-fetching object details to populate cache..."
+    $PreFetchStats = @{ PreFetchedCount = 0; FailedCount = 0 }
+    
+    # Use beta endpoint to match Get-EntraOpsPrivilegedEntraObject expectations
+    # We fetch ALL properties required by the consumer function in the batch call
+    $PropsToSelect = "id,displayName,userPrincipalName,userType,isAssignableToRole,isManagementRestricted,onPremisesSyncEnabled,passwordPolicies"
+    
+    # Reduce batch size from 1000 to 100 to prevent 504 Gateway Timeouts
+    $BatchSize = 100
+    $TotalBatches = [Math]::Ceiling($UniqueObjectIds.Count / $BatchSize)
+    $CurrentBatch = 0
+    
+    try {
+        # Split into smaller batches to avoid Gateway Timeout (504)
+        for ($i = 0; $i -lt $UniqueObjectIds.Count; $i += $BatchSize) {
+            $CurrentBatch++
+            $Batch = $UniqueObjectIds[$i..([Math]::Min($i + $BatchSize - 1, $UniqueObjectIds.Count - 1))]
+            
+            # Show progress for large datasets
+            if ($TotalBatches -gt 1) {
+                $PercentComplete = [Math]::Round(($CurrentBatch / $TotalBatches) * 100, 0)
+                Write-Progress -Activity "Pre-fetching Object Details" -Status "Batch $CurrentBatch of $TotalBatches ($($Batch.Count) objects)" -PercentComplete $PercentComplete -Id 50
+            }
+            
+            $Body = @{
+                ids = $Batch
+                types = @('user', 'group', 'servicePrincipal')
+            } | ConvertTo-Json
+            
+            $Uri = "/beta/directoryObjects/getByIds?`$select=$PropsToSelect"
+            
+            try {
+                $PreFetchedObjects = Invoke-EntraOpsMsGraphQuery -Method POST -Uri $Uri -Body $Body -OutputType PSObject
+                
+                # POPULATE CACHE: Key objects so Get-EntraOpsPrivilegedEntraObject finds them
+                if ($PreFetchedObjects) {
+                    $PreFetchedObjects = @($PreFetchedObjects) # Ensure array
+                    $PreFetchStats.PreFetchedCount += $PreFetchedObjects.Count
+                    
+                    foreach ($Obj in $PreFetchedObjects) {
+                        # Construct the exact cache key the consumer function will use
+                        $CacheKey = "/beta/directoryObjects/$($Obj.id)?`$select=$PropsToSelect"
+                        
+                        if (-not $__EntraOpsSession.GraphCache.ContainsKey($CacheKey)) {
+                            $__EntraOpsSession.GraphCache[$CacheKey] = $Obj
+                            
+                            # Add valid metadata to prevent expiration checks from failing
+                            $__EntraOpsSession.CacheMetadata[$CacheKey] = @{
+                                Uri = $CacheKey
+                                CachedTime = [DateTime]::UtcNow
+                                ExpiryTime = [DateTime]::UtcNow.AddSeconds($__EntraOpsSession.DefaultCacheTTL)
+                                ResultCount = 1
+                            }
+                        }
+                    }
+                }
+            } catch {
+                Write-Warning "Batch $CurrentBatch failed: $($_.Exception.Message)"
+                $PreFetchStats.FailedCount += $Batch.Count
+            }
+            
+            # Longer anti-throttle delay to prevent 504 errors (increased from 200ms to 500ms)
+            if ($i + $BatchSize -lt $UniqueObjectIds.Count) { 
+                Start-Sleep -Milliseconds 500 
+            }
+        }
+        
+        if ($TotalBatches -gt 1) {
+            Write-Progress -Activity "Pre-fetching Object Details" -Completed -Id 50
+        }
+    } catch {
+        Write-Warning "Pre-fetch failed: $($_.Exception.Message)"
+        $PreFetchStats.FailedCount += $UniqueObjectIds.Count
+    }
+    
+    Write-Host "Pre-fetch complete: $($PreFetchStats.PreFetchedCount) objects cached, $($PreFetchStats.FailedCount) failed."
+    #endregion
+    
     Write-Host "Resolving details for $($UniqueObjectIds.Count) unique objects..."
     $ObjectDetailsCache = @{}
     

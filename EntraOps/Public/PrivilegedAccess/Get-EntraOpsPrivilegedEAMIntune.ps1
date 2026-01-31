@@ -18,7 +18,7 @@
     Use global exclusion list for classification. Default is $true. Global exclusion list is stored in "./Classification/Global.json".
 #>
 
-function Get-EntraOpsPrivilegedEamIntune {
+function Get-EntraOpsPrivilegedEAMIntune {
     [cmdletbinding()]
     param (
         [Parameter(Mandatory = $false)]
@@ -52,6 +52,7 @@ function Get-EntraOpsPrivilegedEamIntune {
 
     # Configuration for batch processing
     $BatchSize = 100  # Number of objects to process before showing progress
+    $WarningMessages = New-Object -TypeName "System.Collections.Generic.List[psobject]"
 
     # Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_DeviceManagement.json"
@@ -64,12 +65,19 @@ function Get-EntraOpsPrivilegedEamIntune {
     }
 
     #region Get all role assignments and global exclusions
-    Write-Host "Getting Device Management Roles (for Microsoft Intune)..."
+    #region Stage 1: Fetch Device Management Roles
+    $Stage1Start = Get-Date
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "  Stage 1/5: Fetching Device Management Roles" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "Retrieving Intune device management role assignments and definitions..." -ForegroundColor Gray
+    Write-Progress -Activity "Stage 1/5: Fetching Device Management Roles" -Status "Loading role assignments and global exclusions..." -PercentComplete 10
 
     if ($SampleMode -ne $True) {
-        $DeviceMgmtRbacAssignments = Get-EntraOpsPrivilegedDeviceRoles -TenantId $TenantId
+        $DeviceMgmtRbacAssignments = Get-EntraOpsPrivilegedDeviceRoles -TenantId $TenantId -WarningMessages $WarningMessages
     } else {
-        Write-Warning "Currently not supported!"
+        $WarningMessages.Add([PSCustomObject]@{Type = "Stage1"; Message = "SampleMode currently not supported!"})
     }
 
     if ($GlobalExclusion -eq $true) {
@@ -77,10 +85,22 @@ function Get-EntraOpsPrivilegedEamIntune {
     } else {
         $GlobalExclusionList = $null
     }
+    
+    $Stage1Duration = ((Get-Date) - $Stage1Start).TotalSeconds
+    Write-Host "✓ Stage 1 completed in $([Math]::Round($Stage1Duration, 2)) seconds ($($DeviceMgmtRbacAssignments.Count) role assignments retrieved)" -ForegroundColor Green
+    Write-Progress -Activity "Stage 1/5: Fetching Device Management Roles" -Completed
     #endregion
 
     #region Get scope tages and assignments
-    Write-Host "Getting scope and tags in relation to ..."
+    #region Stage 2: Fetch Scope Tags
+    $Stage2Start = Get-Date
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "  Stage 2/5: Fetching Scope Tags" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "Retrieving role scope tags and their assignments for Intune device management..." -ForegroundColor Gray
+    Write-Progress -Activity "Stage 2/5: Fetching Scope Tags" -Status "Loading scope tags and assignments..." -PercentComplete 20
+    
     $ScopeTags = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri https://graph.microsoft.com/beta/deviceManagement/roleScopeTags -OutputType PSObject)
     # In research, replacement of the workaround solution (see blow) by using Get-MgBetaDeviceManagementDeviceCategory?
 
@@ -94,14 +114,26 @@ function Get-EntraOpsPrivilegedEamIntune {
                     'AssignmentId' = $AssignmentId.Replace("_0", "")
                 }
             } else {
-                Write-Warning "No assignments for $($ScopeTag.DisplayName) - $($ScopeTag.Id)"
+                $WarningMessages.Add([PSCustomObject]@{Type = "Stage2"; Message = "No assignments for $($ScopeTag.DisplayName) - $($ScopeTag.Id)"})
             }
         }
     }
+    
+    $Stage2Duration = ((Get-Date) - $Stage2Start).TotalSeconds
+    Write-Host "✓ Stage 2 completed in $([Math]::Round($Stage2Duration, 2)) seconds ($($ScopeTags.Count) scope tags retrieved)" -ForegroundColor Green
+    Write-Progress -Activity "Stage 2/5: Fetching Scope Tags" -Completed
     #endregion
 
     #region Classify all Device Management assignments by classification of assigned objects and their privileged in other RBAC systems
     if ($ApplyClassificationByAssignedObjects -eq $true) {
+        #region Stage 3: Classify PAW Devices (Optional)
+        $Stage3Start = Get-Date
+        Write-Host ""
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+        Write-Host "  Stage 3/5: Classifying PAW Devices (Optional)" -ForegroundColor Cyan
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+        Write-Host "Analyzing privileged user PAW devices and applying inherited classifications from other RBAC systems..." -ForegroundColor Gray
+        Write-Progress -Activity "Stage 3/5: Classifying PAW Devices" -Status "Loading privileged user devices..." -PercentComplete 35
 
         # Get scope for classification of privileged users and PAW devices
         Write-Host "Getting Intune Device ID and details of classified privileged users to build classification for PAW devices..."
@@ -150,11 +182,11 @@ function Get-EntraOpsPrivilegedEamIntune {
                                 (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
                             } 
                         } else {
-                            Write-Warning "No device for $($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName) found in Intune! $($_)"
+                             $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device for $($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName) found in Intune! $($_)"})
                         }
                     }
                 } catch {
-                    Write-Warning "No device Entra ID Device found for $($ClassifiedPrivilegedPawUser.ObjectDisplayName) - $($ClassifiedPrivilegedPawUser.ObjectId) in Intune"
+                    $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device Entra ID Device found for $($ClassifiedPrivilegedPawUser.ObjectDisplayName) - $($ClassifiedPrivilegedPawUser.ObjectId) in Intune"})
                 }
                 # Summarize all devices of classified privileged user
                 $Devices = $Devices | Where-Object { $_.id -ne $null } | Select-Object -Unique *
@@ -187,7 +219,7 @@ function Get-EntraOpsPrivilegedEamIntune {
                 $DeviceMgmtRbacAssignment.Classification | ForEach-Object { $_ | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "AssignedDeviceObjects" -Force }
             }
             if ($Classification.count -eq "0") {
-                Write-Warning "No classification found for $($DeviceMgmtRbacAssignment.RoleDefinitionId) with scope $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId)!"
+                $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No classification found for $($DeviceMgmtRbacAssignment.RoleDefinitionId) with scope $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId)!"})
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
             }
             $DeviceMgmtRbacAssignment
@@ -198,7 +230,29 @@ function Get-EntraOpsPrivilegedEamIntune {
     #endregion
 
     #region Check if RBAC role action and scope is defined in JSON classification
-    Write-Host "Checking if RBAC role action and scope is defined in JSON classification..."
+    #region Stage 4: Classify Role Actions
+    $Stage4Start = Get-Date
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "  Stage 4/5: Classifying Role Actions" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "Checking if RBAC role action and scope is defined in JSON classification..." -ForegroundColor Gray
+    Write-Progress -Activity "Stage 4/5: Classifying Role Actions" -Status "Mapping JSON classifications..." -PercentComplete 60
+
+    # Optimization: Pre-fetch all role definitions to avoid N+1 API calls
+    $IntuneRoleDefinitionsCache = @{}
+    if ($SampleMode -ne $True) {
+        Write-Host "Pre-fetching all Intune role definitions..." -ForegroundColor Gray
+        $AllIntuneRoles = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/roleManagement/deviceManagement/roleDefinitions" -OutputType PSObject
+        foreach ($Role in $AllIntuneRoles) {
+            if ($null -ne $Role.id) {
+                # Ensure ID is string for consistent lookup
+                $IntuneRoleDefinitionsCache["$($Role.id)"] = $Role
+            }
+        }
+        Write-Host "Cached $($IntuneRoleDefinitionsCache.Count) role definitions." -ForegroundColor Gray
+    }
+
     $IntuneResourcesByClassificationJSON = Expand-EntraOpsPrivilegedEAMJsonFile -FilePath $IntuneClassificationFilePath | select-object EAMTierLevelName, EAMTierLevelTagValue, Category, Service, RoleAssignmentScopeName, ExcludedRoleAssignmentScopeName, RoleDefinitionActions, ExcludedRoleDefinitionActions
     $DeviceMgmtRbacClassificationsByJSON = @()
     $DeviceMgmtRbacClassificationsByJSON += foreach ($DeviceMgmtRbacAssignment in $DeviceMgmtRbacAssignments | Select-Object -Unique RoleDefinitionId, RoleAssignmentScopeId) {
@@ -207,9 +261,9 @@ function Get-EntraOpsPrivilegedEamIntune {
         }
         # Role actions are defined for scope and role definition contains an action of the role, otherwise all role actions within role assignment scope will be applied
         if ($SampleMode -eq $True) {
-            Write-Warning "Currently not supported!"
+            $WarningMessages.Add([PSCustomObject]@{Type = "Stage4"; Message = "SampleMode currently not supported!"})
         } else {
-            $IntuneRoleActions = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri https://graph.microsoft.com/beta/roleManagement/deviceManagement/roleDefinitions -OutputType PSObject) | Where-Object { $_.Id -eq "$($DeviceMgmtRbacAssignment.RoleDefinitionId)" }
+             $IntuneRoleActions = $IntuneRoleDefinitionsCache["$($DeviceMgmtRbacAssignment.RoleDefinitionId)"]
         }
 
         $MatchedClassificationByScope = @()
@@ -262,10 +316,20 @@ function Get-EntraOpsPrivilegedEamIntune {
         $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DeviceMgmtRbacAssignment
     }
+    
+    $Stage4Duration = ((Get-Date) - $Stage4Start).TotalSeconds
+    Write-Host "✓ Stage 4 completed in $([Math]::Round($Stage4Duration, 2)) seconds ($($DeviceMgmtRbacClassifications.Count) role assignments classified)" -ForegroundColor Green
+    Write-Progress -Activity "Stage 4/5: Classifying Role Actions" -Completed
     #endregion
 
     #region Apply classification to all assigned privileged users and groups in Device Management
-    Write-Host "Classifying of all assigned privileged users and groups in Device Management..."
+    #region Stage 5: Resolve and Finalize Objects
+    $Stage5Start = Get-Date
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "  Stage 5/5: Resolving Object Details and Finalizing" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "Enriching principals with detailed attributes and applying exclusions..." -ForegroundColor Gray
 
     # Optimization: Group assignments by ObjectId to avoid O(N^2) filtering
     $DeviceMgmtRbacByObject = $DeviceMgmtRbacClassifications | Group-Object ObjectId -AsHashTable -AsString
@@ -336,7 +400,7 @@ function Get-EntraOpsPrivilegedEamIntune {
                 'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                 'RoleSystem'                    = "DeviceManagement"
                 'Classification'                = $Classification
-                'RoleAssignments'               = $DeviceMgmtRbacClassifiedAssignments
+                'RoleAssignments'               = @($DeviceMgmtRbacClassifiedAssignments | Sort-Object RoleAssignmentId)
                 'Sponsors'                      = $ObjectDetails.Sponsors
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -353,5 +417,31 @@ function Get-EntraOpsPrivilegedEamIntune {
     $FilteredIntuneObjects = $DeviceMgmtRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
     
     Write-Host "Completed processing $($FilteredIntuneObjects.Count) privileged objects."
+
+    # Display Warning Summary
+    if ($WarningMessages.Count -gt 0) {
+        Write-Host ""
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+        Write-Host "  ⚠ Warnings Summary" -ForegroundColor Yellow
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+        
+        # Group by Type first, then by distinct message within each type
+        $GroupedByType = $WarningMessages | Group-Object Type
+        foreach ($TypeGroup in $GroupedByType) {
+            Write-Host "  $($TypeGroup.Name):" -ForegroundColor Yellow
+            
+            # Group messages by distinct message pattern to avoid duplicates
+            $GroupedByMessage = $TypeGroup.Group | Group-Object Message
+            foreach ($MessageGroup in $GroupedByMessage) {
+                if ($MessageGroup.Count -eq 1) {
+                    Write-Host "    - $($MessageGroup.Name)" -ForegroundColor DarkYellow
+                } else {
+                    Write-Host "    - $($MessageGroup.Name) [$($MessageGroup.Count) occurrences]" -ForegroundColor DarkYellow
+                }
+            }
+        }
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+    }
+
     $FilteredIntuneObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 }

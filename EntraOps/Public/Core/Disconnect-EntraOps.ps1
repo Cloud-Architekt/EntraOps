@@ -34,7 +34,7 @@ function Disconnect-EntraOps {
         [boolean]$ClearGraphCache = $false
         ,
         [Parameter(Mandatory = $false)]
-        [string]$MgGraphCacheFolder = '$env:USERPROFILE\.graph'
+        [string]$MgGraphCacheFolder = "$env:USERPROFILE\.graph"
         ,
         [Parameter(Mandatory = $false)]
         [ValidateSet("All", "Memory", "Persistent", "Expired")]
@@ -43,7 +43,7 @@ function Disconnect-EntraOps {
 
     # Disconnect from Azure PowerShell
     Write-Verbose "Disconnecting from Azure PowerShell..."
-    Disconnect-AzAccount | Out-Null
+    Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
     Clear-AzContext -Scope Process -Force
 
     # Clear EntraOps cache (memory and/or persistent based on parameter)
@@ -51,10 +51,17 @@ function Disconnect-EntraOps {
     Clear-EntraOpsCache -CacheType $ClearEntraOpsCache
 
     # Disconnect from Microsoft Graph SDK if connected
-    $MgContext = Get-MgContext
+    $MgContext = Get-MgContext -ErrorAction SilentlyContinue
     if ($null -ne $MgContext) {
         Write-Verbose "Disconnecting from Microsoft Graph..."
-        Disconnect-MgGraph | Out-Null
+        try {
+            Disconnect-MgGraph -ErrorAction Stop | Out-Null
+        } catch {
+            # Suppress SessionNotInitialized errors as the session may have already been cleared
+            if ($_.Exception.Message -notmatch "SessionNotInitialized") {
+                Write-Warning "Failed to disconnect from Microsoft Graph: $_"
+            }
+        }
         
         # Optionally delete Microsoft Graph SDK cache folder
         if ($ClearGraphCache -eq $true -and (Test-Path $MgGraphCacheFolder)) {

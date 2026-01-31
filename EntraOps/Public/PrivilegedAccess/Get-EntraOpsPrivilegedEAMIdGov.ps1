@@ -51,6 +51,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
 
     # Configuration for batch processing
     $BatchSize = 100  # Number of objects to process before showing progress
+    $WarningMessages = New-Object -TypeName "System.Collections.Generic.List[psobject]"
 
     # Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_IdentityGovernance.json"
@@ -69,12 +70,19 @@ function Get-EntraOpsPrivilegedEamIdGov {
     $AppRolesClassification = Get-Content -Path $($FolderClassification + "Templates/Classification_AppRoles.json") | ConvertFrom-Json -Depth 10
 
     # Get all role assignments and global exclusions
-    Write-Host "Getting Microsoft Entra ID Governance information..."
+    #region Stage 1: Fetch Identity Governance Assignments
+    $Stage1Start = Get-Date
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "  Stage 1/4: Fetching Identity Governance Assignments" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "Retrieving Identity Governance role assignments, catalogs, and access packages..." -ForegroundColor Gray
+    Write-Progress -Activity "Stage 1/4: Fetching Identity Governance" -Status "Loading role assignments and global exclusions..." -PercentComplete 10
 
     if ($SampleMode -ne $True) {
-        $IdGovRbacAssignments = Get-EntraOpsPrivilegedIdGovRoles -TenantId $TenantId
+        $IdGovRbacAssignments = Get-EntraOpsPrivilegedIdGovRoles -TenantId $TenantId -WarningMessages $WarningMessages
     } else {
-        Write-Warning "Currently not supported!"
+        $WarningMessages.Add([PSCustomObject]@{Type = "Stage1"; Message = "SampleMode currently not supported!" })
     }
 
     if ($GlobalExclusion -eq $true) {
@@ -82,10 +90,65 @@ function Get-EntraOpsPrivilegedEamIdGov {
     } else {
         $GlobalExclusionList = $null
     }
+    
+    $Stage1Duration = ((Get-Date) - $Stage1Start).TotalSeconds
+    Write-Host "✓ Stage 1 completed in $([Math]::Round($Stage1Duration, 2)) seconds ($($IdGovRbacAssignments.Count) role assignments retrieved)" -ForegroundColor Green
+    Write-Progress -Activity "Stage 1/4: Fetching Identity Governance" -Completed
     #endregion
 
     #region Classification of assignments
-    Write-Host "Classifiying of all Identity Governance assignments by classification of assigned and classified catalog objects"
+    #region Stage 2: Classify Catalog Objects
+    $Stage2Start = Get-Date
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "  Stage 2/4: Classifying Catalog Objects" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "Analyzing assigned catalog resources (groups, directory roles, app roles) and matching classifications..." -ForegroundColor Gray
+    Write-Progress -Activity "Stage 2/4: Classifying Catalog Objects" -Status "Processing catalog resources..." -PercentComplete 25
+    
+    # Optimization: Pre-load classification files into memory to avoid N+1 File I/O
+    $ClassificationCache = @{}
+    foreach ($RbacSystem in $FilterClassifiedRbacs) {
+        $ClassificationSource = $FolderClassifiedObjects + $RbacSystem + "/" + $RbacSystem + ".json"
+        if (Test-Path $ClassificationSource) {
+            Write-Verbose "Pre-loading classification file from $ClassificationSource..."
+            try {
+                $ClassificationCache[$RbacSystem] = Get-Content -Path $ClassificationSource -ErrorAction SilentlyContinue | ConvertFrom-Json -Depth 10
+            } catch {
+                $WarningMessages.Add([PSCustomObject]@{Type = "Stage2"; Message = "Failed to load classification file $($ClassificationSource): $_" })
+            }
+        }
+    }
+    # Pre-load EntraID roles specifically for DirectoryRole lookups
+    $EntraIdClassificationSource = $FolderClassifiedObjects + "EntraID/EntraID.json"
+    if (Test-Path $EntraIdClassificationSource) {
+        try {
+            $ClassificationCache["EntraIDRoles"] = (Get-Content -Path $EntraIdClassificationSource | ConvertFrom-Json -Depth 10).RoleAssignments
+        } catch {
+            $WarningMessages.Add([PSCustomObject]@{Type = "Stage2"; Message = "Failed to load EntraID classification: $_" })
+        }
+    }
+
+    # Optimization: Build hashtable lookup for App Role classifications
+    $AppRoleClassLookup = @{}
+    foreach ($AppRoleClass in $AppRolesClassification) {
+        foreach ($RoleDef in $AppRoleClass.TierLevelDefinition) {
+            foreach ($RoleAction in $RoleDef.RoleDefinitionActions) {
+                $key = "$($RoleDef.ResourceAppId)|$($RoleAction)"
+                if (-not $AppRoleClassLookup.ContainsKey($key)) {
+                    $AppRoleClassLookup[$key] = @{
+                        EAMTierLevelName     = $AppRoleClass.EAMTierLevelName
+                        EAMTierLevelTagValue = $AppRoleClass.EAMTierLevelTagValue
+                        Service              = $RoleDef.Service
+                    }
+                }
+            }
+        }
+    }
+
+    # Warning Collection
+    $WarningMessages = New-Object System.Collections.Generic.List[psobject]
+
     $IdGovRbacScopes = $IdGovRbacAssignments | Select-Object -Unique RoleAssignmentScopeId
     $IdGovRbacClassificationsByAssignedObjects = New-Object System.Collections.Generic.List[psobject]
     foreach ($IdGovRbacScope in $IdGovRbacScopes) {
@@ -95,7 +158,32 @@ function Get-EntraOpsPrivilegedEamIdGov {
         if ($CurrentRoleAssignmentScope -like "/AccessPackageCatalog/*") {
             # Get all objects assigned to Access Package Catalog
             $AccessPackageCatalogId = $CurrentRoleAssignmentScope.Replace("/AccessPackageCatalog/", "")
-            $AssignedCatalogResources = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageCatalogs/$($AccessPackageCatalogId)/accessPackageResources?`$expand=accessPackageResourceScopes,accessPackageResourceRoles" -ConsistencyLevel "eventual" | Where-Object { $null -ne $_.originId }
+            
+            # Suppress warnings for expected 404s (Deleted Catalogs)
+            try {
+                $RawCatalogResources = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageCatalogs/$($AccessPackageCatalogId)/accessPackageResources?`$expand=accessPackageResourceScopes,accessPackageResourceRoles" -ConsistencyLevel "eventual" -WarningAction SilentlyContinue
+                
+                if ($null -eq $RawCatalogResources) {
+                    # Log warning if catalog not found (Invoke-EntraOpsMsGraphQuery returns null on failure)
+                    $WarningMessages.Add([PSCustomObject]@{
+                            Type    = "CatalogResolution"
+                            Message = "Access Package Catalog $AccessPackageCatalogId not found (likely deleted)."
+                            Target  = $AccessPackageCatalogId
+                        })
+                    $AssignedCatalogResources = @()
+                } else {
+                    $AssignedCatalogResources = $RawCatalogResources | Where-Object { $null -ne $_.originId }
+                }
+            } catch {
+                # Catch script errors
+                $WarningMessages.Add([PSCustomObject]@{
+                        Type    = "CatalogResolutionError"
+                        Message = "Error resolving catalog ${AccessPackageCatalogId}: $($_.Exception.Message)"
+                        Target  = $AccessPackageCatalogId
+                    })
+                $AssignedCatalogResources = @()
+            }
+            
             Write-Verbose -Message "Found $($AssignedCatalogResources.Count) assigned catalog resources in catalog $($AccessPackageCatalogId)"
             $MatchedClassificationToCatalogResources = New-Object System.Collections.Generic.List[psobject]
             foreach ($AssignedCatalogResource in $AssignedCatalogResources) {
@@ -105,31 +193,45 @@ function Get-EntraOpsPrivilegedEamIdGov {
                     'AadGroup' {
                         Write-Verbose -Message "Classifying assigned catalog object $($AssignedCatalogResource.displayName) from origin system $($AssignedCatalogResource.originSystem) by $FilterClassifiedRbacs"
                         foreach ($RbacSystem in $FilterClassifiedRbacs) {
-                            $ClassificationSource = $FolderClassifiedObjects + $RbacSystem + "/" + $RbacSystem + ".json"
-                            $ClassifiedObject = Get-Content -Path $ClassificationSource -ErrorAction SilentlyContinue | ConvertFrom-Json -Depth 10 | Where-Object { $_.ObjectId -eq $AssignedCatalogResource.originId }
-                            if ($null -ne $($ClassifiedObject.Classification)) {
-                                $MatchedRbacClassification = $ClassifiedObject.Classification
-                                foreach ($ClassItem in $MatchedRbacClassification) {
-                                    $ClassItem | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)" -Force
-                                    $MatchedClassificationToCatalogResources.Add($ClassItem) | Out-Null
+                            # Optimization: Use In-Memory Cache
+                            if ($ClassificationCache.ContainsKey($RbacSystem)) {
+                                $ClassifiedObject = $ClassificationCache[$RbacSystem] | Where-Object { $_.ObjectId -eq $AssignedCatalogResource.originId }
+                                if ($null -ne $($ClassifiedObject.Classification)) {
+                                    $MatchedRbacClassification = $ClassifiedObject.Classification
+                                    foreach ($ClassItem in $MatchedRbacClassification) {
+                                        $ClassItem | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)" -Force
+                                        $MatchedClassificationToCatalogResources.Add($ClassItem) | Out-Null
+                                    }
+                                } else {
+                                    Write-Verbose "No classification for $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in $RbacSystem"
                                 }
-                            } else {
-                                Write-Verbose "No classification for $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in $RbacSystem or file $ClassificationSource is missing!"
                             }
                         }
                     } 'DirectoryRole' {
                         Write-Verbose -Message "Classifying assigned catalog object $($AssignedCatalogResource.displayName) from origin system $($AssignedCatalogResource.originSystem) by EntraID"
-                        $ClassificationSource = $FolderClassifiedObjects + "EntraID/EntraID.json"
-                        # Get classification from EntraID roles only on root scope, as directory roles can be only assigned in Entitlement Management on root scope
+                        # Get classification from EntraID roles only on root scope
                         if ($AssignedCatalogResource.accessPackageResourceScopes.isRootScope -ne $true) {
                             Write-Verbose -Message "Assigned catalog resource scope is root scope, get classification from EntraID roles"
                         } else {
-                            Write-Warning "Assigned catalog resource scope is not root scope, directory roles are currently only supported on root scope!"
+                            $WarningMessages.Add([PSCustomObject]@{
+                                    Type    = "Scope Limitation"
+                                    Message = "Assigned catalog resource scope is not root scope, directory roles are currently only supported on root scope!"
+                                    Target  = $AssignedCatalogResource.displayName
+                                })
                         }
-                        $AllRbacClassification = (Get-Content -Path $ClassificationSource -ErrorAction SilentlyContinue | ConvertFrom-Json -Depth 10).RoleAssignments
-                        $Classification = ($AllRbacClassification | Where-Object { $_.RoleAssignmentScopeId -eq "/" -and $_.RoleDefinitionId -eq $AssignedCatalogResource.originId } | Select-Object -First 1).Classification
+                        
+                        # Optimization: Use In-Memory Cache for Directory Roles
+                        $Classification = $null
+                        if ($ClassificationCache.ContainsKey("EntraIDRoles")) {
+                            $Classification = ($ClassificationCache["EntraIDRoles"] | Where-Object { $_.RoleAssignmentScopeId -eq "/" -and $_.RoleDefinitionId -eq $AssignedCatalogResource.originId } | Select-Object -First 1).Classification
+                        }
+
                         if ($Null -eq $Classification) {
-                            Write-Warning "No classification for $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in EntraID or file $ClassificationSource is missing! Fallback to default classification from AzurePrivilegedIAM repository."
+                            $WarningMessages.Add([PSCustomObject]@{
+                                    Type    = "Default Classification Fallback"
+                                    Message = "No classification for $($AssignedCatalogResource.displayName) ($($AssignedCatalogResource.id)) found in EntraID! Fallback to default."
+                                    Target  = $AssignedCatalogResource.displayName
+                                })
                             $DefaultRoleClassification = ($EntraRolesDefaultClassification | Where-Object { $_.RoleId -eq $AssignedCatalogResource.originId } | Select-Object -First 1).RolePermissions | Select-Object -Unique EAMTierLevelTagValue, EAMTierLevelName, Category
                             $Classification = $DefaultRoleClassification | foreach-object {
                                 [PSCustomObject]@{
@@ -140,7 +242,11 @@ function Get-EntraOpsPrivilegedEamIdGov {
                             }
                         }
                         if ($Null -eq $Classification.AdminTierLevel) {
-                            Write-Warning "No default classification for $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in AzurePrivilegedIAM repository!"
+                            $WarningMessages.Add([PSCustomObject]@{
+                                    Type    = "Unclassified Resource"
+                                    Message = "No default classification for $($AssignedCatalogResource.displayName) ($($AssignedCatalogResource.id)) found!"
+                                    Target  = $AssignedCatalogResource.displayName
+                                })
                             $Classification = [PSCustomObject]@{
                                 'AdminTierLevel'     = "Unclassified"
                                 'AdminTierLevelName' = "Unclassified"
@@ -151,24 +257,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
                         $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                     } 'OAuthApplication' {
                         Write-Verbose -Message "Classifying assigned catalog object $($AssignedCatalogResource.displayName) from origin system $($AssignedCatalogResource.originSystem) by Graph API App roles"
-                        
-                        # Optimization: Build hashtable lookup for App Role classifications
-                        $AppRoleClassLookup = @{}
-                        foreach ($AppRoleClass in $AppRolesClassification) {
-                            foreach ($RoleDef in $AppRoleClass.TierLevelDefinition) {
-                                # Create lookup entry for each individual role action
-                                foreach ($RoleAction in $RoleDef.RoleDefinitionActions) {
-                                    $key = "$($RoleDef.ResourceAppId)|$($RoleAction)"
-                                    if (-not $AppRoleClassLookup.ContainsKey($key)) {
-                                        $AppRoleClassLookup[$key] = @{
-                                            EAMTierLevelName = $AppRoleClass.EAMTierLevelName
-                                            EAMTierLevelTagValue = $AppRoleClass.EAMTierLevelTagValue
-                                            Service = $RoleDef.Service
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        # Optimization: Already implemented lookups in previous step
                         
                         foreach ($AppRoleScope in $AssignedCatalogResource.accessPackageResourceRoles) {
                             $lookupKey = "$($AssignedCatalogResource.originId)|$($AppRoleScope.displayName)"
@@ -183,7 +272,11 @@ function Get-EntraOpsPrivilegedEamIdGov {
                                 }
                                 $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                             } else {
-                                Write-Warning "No classification for app role $($AppRoleScope.displayName) of application $($AssignedCatalogResource.displayName) $($AssignedCatalogResource.id) found in App Roles classification!"
+                                $WarningMessages.Add([PSCustomObject]@{
+                                        Type    = "Unclassified App Role"
+                                        Message = "No classification for app role $($AppRoleScope.displayName) of application $($AssignedCatalogResource.displayName)"
+                                        Target  = $AssignedCatalogResource.displayName
+                                    })
                                 $Classification = [PSCustomObject]@{
                                     'AdminTierLevel'     = "Unclassified"
                                     'AdminTierLevelName' = "Unclassified"
@@ -193,11 +286,21 @@ function Get-EntraOpsPrivilegedEamIdGov {
                                 $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                             }
                         }
-                    } default { Write-Warning "Origin system $($AssignedCatalogResource.originSystem) not supported for classification!" }
+                    } default { 
+                        $WarningMessages.Add([PSCustomObject]@{
+                                Type    = "Unknown Origin System"
+                                Message = "Origin system $($AssignedCatalogResource.originSystem) not supported for classification!"
+                                Target  = $AssignedCatalogResource.originSystem
+                            })
+                    }
                 }                
             }
         } elseif ($CurrentRoleAssignmentScope -eq "/") {
-            Write-Warning "Skipping root scope, currently only delegated roles of catalog creator and connected organization admin available."
+            $WarningMessages.Add([PSCustomObject]@{
+                    Type    = "Scope Limitation"
+                    Message = "Skipping root scope, currently only delegated roles of catalog creator and connected organization admin available."
+                    Target  = "Root Scope"
+                })
         } else {
             Write-Error "Invalid scope $CurrentRoleAssignmentScopeId"
         }
@@ -211,18 +314,61 @@ function Get-EntraOpsPrivilegedEamIdGov {
             $IdGovRbacClassificationsByAssignedObjects.Add($IdGovRbacClassificationsByAssignedObject) | Out-Null
         }
     }
+    
+    $Stage2Duration = ((Get-Date) - $Stage2Start).TotalSeconds
+    Write-Host "✓ Stage 2 completed in $([Math]::Round($Stage2Duration, 2)) seconds ($($IdGovRbacClassificationsByAssignedObjects.Count) catalog scopes classified)" -ForegroundColor Green
+    Write-Progress -Activity "Stage 2/4: Classifying Catalog Objects" -Completed
     #endregion
 
-    Write-Host "Checking if RBAC role action and scope is defined in JSON classification..."
+    #region Stage 3: Classify Role Actions
+    $Stage3Start = Get-Date
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "  Stage 3/4: Classifying Role Actions" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "Matching role definitions and actions against JSON classification rules..." -ForegroundColor Gray
+    Write-Progress -Activity "Stage 3/4: Classifying Role Actions" -Status "Reading classification file and matching role actions..." -PercentComplete 50
     $IdGovResourcesByClassificationJSON = Expand-EntraOpsPrivilegedEAMJsonFile -FilePath "$($IdGovClassificationFilePath)" | select-object EAMTierLevelName, EAMTierLevelTagValue, Category, Service, RoleAssignmentScopeName, ExcludedRoleAssignmentScopeName, RoleDefinitionActions, ExcludedRoleDefinitionActions
     $IdGovRbacClassificationsByJSON = @()
-    $IdGovRbacClassificationsByJSON += foreach ($IdGovRbacAssignment in $IdGovRbacAssignments | Select-Object -Unique RoleDefinitionId, RoleAssignmentScopeId) {
+
+    # Optimization: Pre-fetch all Entitlement Management role definitions
+    $IdGovRoleDefinitionsCache = @{}
+    try {
+        if ($SampleMode -ne $True) {
+            Write-Verbose "Pre-fetching all Identity Governance role definitions..."
+            $AllIdGovRoles = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/EntitlementManagement/roleDefinitions" -OutputType PSObject
+            foreach ($Role in $AllIdGovRoles) {
+                $IdGovRoleDefinitionsCache[$Role.Id] = $Role
+            }
+        }
+    } catch {
+        $WarningMessages.Add([PSCustomObject]@{
+                Type    = "Pre-fetch Failure"
+                Message = "Failed to pre-fetch Identity Governance role definitions: $_"
+                Target  = "Role Definitions"
+            })
+    }
+
+    $UniqueRoleDefs = $IdGovRbacAssignments | Select-Object -Unique RoleDefinitionId, RoleAssignmentScopeId
+    $ProcessedCount = 0
+    $TotalCount = $UniqueRoleDefs.Count
+
+    $IdGovRbacClassificationsByJSON += foreach ($IdGovRbacAssignment in $UniqueRoleDefs) {
+        $ProcessedCount++
+        if ($ProcessedCount % 10 -eq 0) {
+            Write-Progress -Activity "Stage 3/4: Classifying Role Actions" -Status "Classifying role definition $ProcessedCount of $TotalCount" -PercentComplete (50 + ($ProcessedCount / $TotalCount * 20))
+        }
 
         # Role actions are defined for scope and role definition contains an action of the role, otherwise all role actions within role assignment scope will be applied
         if ($SampleMode -eq $True) {
-            Write-Warning "Currently not supported!"
+            # Removed redundant warning
         } else {
-            $IdGovRoleActions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/EntitlementManagement/roleDefinitions" | Where-Object { $_.Id -eq "$($IdGovRbacAssignment.RoleDefinitionId)" }
+            # Optimization: Use In-Memory Cache
+            if ($IdGovRoleDefinitionsCache.ContainsKey("$($IdGovRbacAssignment.RoleDefinitionId)")) {
+                $IdGovRoleActions = $IdGovRoleDefinitionsCache["$($IdGovRbacAssignment.RoleDefinitionId)"]
+            } else {
+                $IdGovRoleActions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/EntitlementManagement/roleDefinitions" | Where-Object { $_.Id -eq "$($IdGovRbacAssignment.RoleDefinitionId)" }
+            }
         }
 
         $MatchedClassificationByScope = @()
@@ -274,8 +420,19 @@ function Get-EntraOpsPrivilegedEamIdGov {
         $IdGovRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $IdGovRbacAssignment
     }
+    
+    $Stage3Duration = ((Get-Date) - $Stage3Start).TotalSeconds
+    Write-Host "✓ Stage 3 completed in $([Math]::Round($Stage3Duration, 2)) seconds ($($IdGovRbacClassifications.Count) role assignments classified)" -ForegroundColor Green
+    Write-Progress -Activity "Stage 3/4: Classifying Role Actions" -Completed
+    #endregion
 
-    Write-Host "Classifying of all assigned privileged users and groups in Identity Governance..."
+    #region Stage 4: Resolve and Finalize Objects
+    $Stage4Start = Get-Date
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "  Stage 4/4: Resolving Object Details and Finalizing" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "Enriching principals with detailed attributes and applying exclusions..." -ForegroundColor Gray
 
     # Optimization: Group assignments by ObjectId to avoid O(N^2) filtering
     $IdGovRbacByObject = $IdGovRbacClassifications | Group-Object ObjectId -AsHashTable -AsString
@@ -304,7 +461,11 @@ function Get-EntraOpsPrivilegedEamIdGov {
         try {
             $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId
         } catch {
-            Write-Warning "Failed to get details for object $($ObjectId): $_"
+            $WarningMessages.Add([PSCustomObject]@{
+                    Type    = "Skipping Object"
+                    Message = "Failed to get details for object $($ObjectId): $_"
+                    Target  = $ObjectId
+                })
             $ObjectDetailsCache[$ObjectId] = $null
         }
     }
@@ -322,7 +483,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
             
             # Skip if object details couldn't be retrieved
             if ($null -eq $ObjectDetails) {
-                Write-Warning "Skipping object $ObjectId - failed to retrieve details"
+                # Warning already added in cache population
                 return
             }
 
@@ -367,7 +528,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
                 'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                 'RoleSystem'                    = "IdentityGovernance"
                 'Classification'                = $Classification
-                'RoleAssignments'               = $IdGovRbacClassifiedAssignments
+                'RoleAssignments'               = @($IdGovRbacClassifiedAssignments | Sort-Object RoleAssignmentId)
                 'Sponsors'                      = $ObjectDetails.Sponsors
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -379,9 +540,47 @@ function Get-EntraOpsPrivilegedEamIdGov {
         }
     }
     
-    Write-Host "Applying global exclusions and finalizing results..."
+    Write-Progress -Activity "Stage 4/4: Finalizing Results" -Status "Applying global exclusions and sorting..." -PercentComplete 90
     $IdGovRbacClassifiedObjects = $IdGovRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
+
+    $Stage4Duration = ((Get-Date) - $Stage4Start).TotalSeconds
+    $TotalDuration = ((Get-Date) - $Stage1Start).TotalSeconds
     
-    Write-Host "Completed processing $($IdGovRbacClassifiedObjects.Count) privileged objects."
+    Write-Progress -Activity "Stage 4/4: Finalizing Results" -Completed
+    Write-Host "✓ Stage 4 completed in $([Math]::Round($Stage4Duration, 2)) seconds ($($IdGovRbacClassifiedObjects.Count) privileged objects after exclusions)" -ForegroundColor Green
+
+    # Display Warning Summary
+    if ($WarningMessages.Count -gt 0) {
+        Write-Host ""
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+        Write-Host "  ⚠ Warnings Summary" -ForegroundColor Yellow
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+        
+        # Group by Type first, then by distinct message within each type
+        $GroupedByType = $WarningMessages | Group-Object Type
+        foreach ($TypeGroup in $GroupedByType) {
+            Write-Host "  $($TypeGroup.Name):" -ForegroundColor Yellow
+            
+            # Group messages by distinct message pattern to avoid duplicates
+            $GroupedByMessage = $TypeGroup.Group | Group-Object Message
+            foreach ($MessageGroup in $GroupedByMessage) {
+                if ($MessageGroup.Count -eq 1) {
+                    Write-Host "    - $($MessageGroup.Name)" -ForegroundColor DarkYellow
+                } else {
+                    Write-Host "    - $($MessageGroup.Name) [$($MessageGroup.Count) occurrences]" -ForegroundColor DarkYellow
+                }
+            }
+        }
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+    }
+
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Green
+    Write-Host "  ✓ All Stages Completed Successfully" -ForegroundColor Green
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Green
+    Write-Host "Total execution time: $([Math]::Round($TotalDuration, 2)) seconds" -ForegroundColor Gray
+    Write-Host "Final result: $($IdGovRbacClassifiedObjects.Count) privileged objects ready for export" -ForegroundColor Gray
+    #endregion
+    
     $IdGovRbacClassifiedObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 }

@@ -19,6 +19,7 @@ function Get-EntraOpsEntraObject {
     [cmdletbinding()]
     param (
         [Parameter(Mandatory = $True)]
+        [ValidatePattern('^([0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})$')]
         [System.String]$AadObjectId
         ,
         [Parameter(Mandatory = $false)]
@@ -26,18 +27,40 @@ function Get-EntraOpsEntraObject {
     )
 
     try {
-        $ObjectDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/directoryObjects/$($AadObjectId)") -OutputType PSObject
+        # Optimization: Use getByIds to fetch all details in a single call (N+1 fix)
+        # We request properties for all potential types (User, Group, ServicePrincipal)
+        $Body = @{
+            ids = @($AadObjectId)
+            types = @('user', 'group', 'servicePrincipal')
+        } | ConvertTo-Json
+
+        $Uri = "/beta/directoryObjects/getByIds?`$select=id,displayName,userPrincipalName,onPremisesSyncEnabled,servicePrincipalType,isAssignableToRole,userType,appOwnerOrganizationId,createdDateTime,accountEnabled,groupTypes,mailEnabled,securityEnabled"
+        
+        $Result = Invoke-EntraOpsMsGraphQuery -Method POST -Uri $Uri -Body $Body -OutputType PSObject
+        $ObjectDetails = if ($Result -is [array]) { $Result[0] } else { $Result }
+        
+        if ($null -eq $ObjectDetails) {
+             throw "ResourceNotFound: Object $AadObjectId not returned by getByIds"
+        }
     }
     catch {
-        $ObjectDetails = $null
-        Write-Warning "No object has been found with Id: $AadObjectId"
-        Write-Error $_.Exception.Message
+        # Resiliency: Differentiate between "Object Not Found" (404) and connectivity/auth errors.
+        # Fail fast on connectivity errors rather than returning null.
+        if ($_.Exception.Message -match "ResourceNotFound" -or $_.Exception.Message -match "Request_ResourceNotFound" -or $_.Exception.Message -match "404") {
+            $ObjectDetails = $null
+            # User Output: Ensure 'Warning' streams are reserved for actionable issues.
+            Write-Verbose "No object has been found with Id: $AadObjectId (404 Not Found)"
+        }
+        else {
+            throw $_
+        }
     }
 
     if ($ObjectDetails.'@odata.type' -eq '#microsoft.graph.servicePrincipal') {
-        $SPObject = Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$($AadObjectId)") -OutputType PSObject
+        # Optimized: Details already fetched via getByIds
+        $SPObject = $ObjectDetails
         $ObjectType = 'servicePrincipal'
-        $ObjectSubType = $SPObject.ServicePrincipalType
+        $ObjectSubType = $SPObject.servicePrincipalType
         $RestrictedManagementByRAG = $false
     }
     elseif ($ObjectDetails.'@odata.type' -eq '#microsoft.graph.group') {

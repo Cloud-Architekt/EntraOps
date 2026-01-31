@@ -103,7 +103,12 @@ Community Project by Thomas Naunheim - www.entraops.com
                 ModuleName    = 'Microsoft.Graph.Authentication'
                 ModuleVersion = '2.0.0'
             }
-            $RequiredCoreModules | ForEach-Object { Install-EntraOpsRequiredModule -ModuleName $_.ModuleName -MinimalVersion $_.ModuleVersion }
+            # Recommendation 1: Validate module availability before installation check
+            $RequiredCoreModules | ForEach-Object {
+                 if (-not (Get-Module -Name $_.ModuleName)) {
+                    Install-EntraOpsRequiredModule -ModuleName $_.ModuleName -MinimalVersion $_.ModuleVersion
+                 }
+            }
 
             $Scopes = @(
                 "AdministrativeUnit.Read.All",
@@ -199,6 +204,10 @@ Community Project by Thomas Naunheim - www.entraops.com
                 }
             }
             AlreadyAuthenticated {
+                # Recommendation 2: Optimize context retrieval to avoid redundant cmdlet calls
+                $CurrentAzContext = Get-AzContext
+                $CurrentMgContext = Get-MgContext
+
                 if ($AccountId -and $MsGraphAccessToken -and $AzArmAccessToken) {
                     Connect-AzAccount -AccountId $AccountId -AccessToken $AzArmAccessToken -Tenant $TenantName
 
@@ -208,7 +217,15 @@ Community Project by Thomas Naunheim - www.entraops.com
                         $SecureMsGraphAccessToken = $MsGraphAccessToken | ConvertTo-SecureString -AsPlainText -Force
                         Connect-MgGraph -AccessToken $SecureMsGraphAccessToken -NoWelcome
                     }
-                } elseif ($Null -ne (Get-AzContext).Tenant.Id) {
+                } elseif ($Null -ne $CurrentAzContext.Tenant.Id -and $Null -ne $CurrentMgContext.TenantId) {
+                    try {
+                        $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
+                        Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
+                    } catch {
+                        $ErrorMessage = if ($null -ne $_.Exception.Message) { $_.Exception.Message } else { $_.ToString() }
+                        throw "Failed to connect to Microsoft Graph using Azure access token: $ErrorMessage"
+                    }                    
+                } elseif ($Null -ne $CurrentAzContext.Tenant.Id) {
                     try {
                         $SecureAccessToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -AsSecureString).Token
                         Connect-MgGraph -AccessToken $SecureAccessToken -ErrorAction Stop -NoWelcome
@@ -224,22 +241,26 @@ Community Project by Thomas Naunheim - www.entraops.com
         #endregion
 
         #region Summary of established connection to ARM and Microsoft Graph API
+         # Recommendation 3: Optimize context retrieval and verbose output generation
         if ($UseAzPwshOnly -eq $true) {
             Write-Verbose -Message "Connected to Azure Management"
             $AzContext = Get-AzContext | Select-Object Account, Tenant, TokenCache
-            Write-Verbose $($AzContext)
+            Write-Verbose ($AzContext | Out-String)
         } else {
             Write-Verbose -Message "Connected to Azure Management"
             $AzContext = Get-AzContext | Select-Object Account, Tenant, TokenCache
-            Write-Verbose $($AzContext)
+            Write-Verbose ($AzContext | Out-String)
 
+            # Retrieve MG context once
+            $MgContextRaw = Get-MgContext
+            
             Write-Verbose -Message "Connected to Microsoft Graph"
-            $MgContext = Get-MgContext | Select-Object ClientId, TenantId, AppName, ContextScope
-            Write-Verbose -Message $($MgContext)
+            $MgContext = $MgContextRaw | Select-Object ClientId, TenantId, AppName, ContextScope
+            Write-Verbose -Message ($MgContext | Out-String)
 
             Write-Verbose "Scoped permissions in Microsoft Graph"
-            $MgScopes = (Get-MgContext).Scopes
-            Write-Verbose -Message $($MgScopes | Out-String)
+            $MgScopes = $MgContextRaw.Scopes
+            Write-Verbose -Message ($MgScopes | Out-String)
         }
         #endregion
 
@@ -267,6 +288,7 @@ Community Project by Thomas Naunheim - www.entraops.com
         #region Set global variables
         New-Variable -Name TenantIdContext -Value $TenantId -Scope Global -Force
         New-Variable -Name TenantNameContext -Value $TenantName -Scope Global -Force
+        New-Variable -Name XdrAvdHuntingAccess -Value ((Get-MgContext).Scopes -contains "ThreatHunting.Read.All2") -Scope Global -Force
         if ($MultiTenantRepo -eq $true) {
             New-Variable -Name DefaultFolderClassification -Value "$EntraOpsBaseFolder/Classification/$($TenantName)/" -Scope Global -Force
             New-Variable -Name DefaultFolderClassifiedEam -Value "$EntraOpsBaseFolder/PrivilegedEAM/$($TenantName)/" -Scope Global -Force

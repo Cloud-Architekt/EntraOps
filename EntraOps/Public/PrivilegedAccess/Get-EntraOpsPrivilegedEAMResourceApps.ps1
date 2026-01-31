@@ -50,6 +50,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
     # Configuration for batch processing
     $BatchSize = 100  # Number of objects to process before showing progress
+    $WarningMessages = New-Object -TypeName "System.Collections.Generic.List[psobject]"
 
     #region Check if classification file custom and/or template file exists, choose custom template for tenant if available
     $ClassificationFileName = "Classification_AppRoles.json"
@@ -66,9 +67,9 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
     #region Get all role assignments and global exclusions
     if ($SampleMode -ne $True) {
-        $AppRoleAssignments = Get-EntraOpsPrivilegedAppRoles -TenantId $TenantId
+        $AppRoleAssignments = Get-EntraOpsPrivilegedAppRoles -TenantId $TenantId -WarningMessages $WarningMessages
     } else {
-        Write-Warning "Currently not supported!"
+        $WarningMessages.Add([PSCustomObject]@{Type = "SampleMode"; Message = "SampleMode currently not supported!"})
     }
     if ($GlobalExclusion -eq $true) {
         $GlobalExclusionList = (Get-Content -Path "$DefaultFolderClassification/Global.json" | ConvertFrom-Json -Depth 10).ExcludedPrincipalId
@@ -144,7 +145,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         $AgentIdentityBlueprintPrincipalAppRoles = $AppRoleClassifications | where-object { $_.ObjectId -eq $AgentIdentityBlueprintPrincipal.Id }
 
         if ( $AgentIdentityBlueprintPrincipal.appOwnerOrganizationId -ne $TenantId ) {
-            Write-Warning "Skipping Agent Identity Blueprint Principal: $($AgentIdentityBlueprintPrincipal.displayName) ($($AgentIdentityBlueprintPrincipal.id)) as it belongs to multi-tenant app without visibility of inheritable permissions: $($AgentIdentityBlueprintPrincipal.appOwnerOrganizationId)"
+            $WarningMessages.Add([PSCustomObject]@{Type = "AgentIdentity-MultiTenant"; Message = "Skipping Agent Identity Blueprint Principal: $($AgentIdentityBlueprintPrincipal.displayName) ($($AgentIdentityBlueprintPrincipal.id)) as it belongs to multi-tenant app without visibility of inheritable permissions: $($AgentIdentityBlueprintPrincipal.appOwnerOrganizationId)"; Target = $AgentIdentityBlueprintPrincipal.id})
             $inheritablePermissionScopes = $null
             continue
         } else {
@@ -170,7 +171,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 } elseif ($null -eq $AgentIdentityResourceAppPermission.inheritableScopes.kind) {
                     Write-Verbose "No inheritable scopes defined for Agent Identity $($AgentIdentityBlueprintPrincipal.displayName) Resource App Permission: $($AgentIdentityResourceAppPermission.id)"
                 } else {
-                    Write-Warning "Unknown inheritableScopes.kind: $($AgentIdentityResourceAppPermission.inheritableScopes.kind)"
+                    $WarningMessages.Add([PSCustomObject]@{Type = "AgentIdentity-UnknownScope"; Message = "Unknown inheritableScopes.kind: $($AgentIdentityResourceAppPermission.inheritableScopes.kind)"})
                 }
             }
             #endregion
@@ -210,7 +211,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                         'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                         'RoleSystem'                    = "ResourceApps"
                         'Classification'                = $Classification
-                        'RoleAssignments'               = $inheritablePermissionScopes
+                        'RoleAssignments'               = @($inheritablePermissionScopes | Sort-Object RoleAssignmentId)
                         'Sponsors'                      = $ObjectDetails.Sponsors
                         'Owners'                        = $ObjectDetails.Owners
                         'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -251,7 +252,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
             
             # Skip if object details couldn't be retrieved
             if ($null -eq $ObjectDetails) {
-                Write-Warning "Skipping object $ObjectId - failed to retrieve details"
+                $WarningMessages.Add([PSCustomObject]@{Type = "SkippedObject"; Message = "Skipping object $ObjectId - failed to retrieve details"; Target = $ObjectId})
                 return
             }
 
@@ -306,7 +307,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                 'RoleSystem'                    = "ResourceApps"
                 'Classification'                = $Classification
-                'RoleAssignments'               = $AppRoleAssignments
+                'RoleAssignments'               = @($AppRoleAssignments | Sort-Object RoleAssignmentId)
                 'Sponsors'                      = $ObjectDetails.Sponsors
                 'Owners'                        = $ObjectDetails.Owners
                 'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -335,6 +336,32 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     $AppRoleClassifiedObjects = $AppRoleClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }
     
     Write-Host "Completed processing $($AppRoleClassifiedObjects.Count) privileged objects."
+
+    # Display Warning Summary
+    if ($WarningMessages.Count -gt 0) {
+        Write-Host ""
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+        Write-Host "  ⚠ Warnings Summary" -ForegroundColor Yellow
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+        
+        # Group by Type first, then by distinct message within each type
+        $GroupedByType = $WarningMessages | Group-Object Type
+        foreach ($TypeGroup in $GroupedByType) {
+            Write-Host "  $($TypeGroup.Name):" -ForegroundColor Yellow
+            
+            # Group messages by distinct message pattern to avoid duplicates
+            $GroupedByMessage = $TypeGroup.Group | Group-Object Message
+            foreach ($MessageGroup in $GroupedByMessage) {
+                if ($MessageGroup.Count -eq 1) {
+                    Write-Host "    - $($MessageGroup.Name)" -ForegroundColor DarkYellow
+                } else {
+                    Write-Host "    - $($MessageGroup.Name) [$($MessageGroup.Count) occurrences]" -ForegroundColor DarkYellow
+                }
+            }
+        }
+        Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+    }
+
     $AppRoleClassifiedObjects | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId } | Sort-Object ObjectAdminTierLevel, ObjectDisplayName
 
 }

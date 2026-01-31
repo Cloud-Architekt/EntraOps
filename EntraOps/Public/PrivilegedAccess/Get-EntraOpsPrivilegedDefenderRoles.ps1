@@ -42,6 +42,9 @@ function Get-EntraOpsPrivilegedDefenderRoles {
         ,
         [Parameter(Mandatory = $false)]
         [System.Int32]$ParallelThrottleLimit = 10
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Collections.Generic.List[psobject]]$WarningMessages
     )
 
     # Set Error Action
@@ -82,7 +85,16 @@ function Get-EntraOpsPrivilegedDefenderRoles {
                 $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($Principal)" -OutputType PSObject
                 $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
             } catch {
-                Write-Warning "Issue to resolve directory object $Principal! $($_.Exception.Message)"
+                $WarningMessage = "Issue to resolve directory object $Principal! $($_.Exception.Message)"
+                if ($null -ne $WarningMessages) {
+                    $WarningMessages.Add([PSCustomObject]@{
+                            Timestamp = (Get-Date)
+                            Type      = "ObjectResolutionError"
+                            ObjectId  = $Principal
+                            Message   = $WarningMessage
+                        })
+                }
+                Write-Warning $WarningMessage
             }
 
             $AllPrinicpalDefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/RoleAssignments?$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual" -OutputType PSObject
@@ -92,7 +104,18 @@ function Get-EntraOpsPrivilegedDefenderRoles {
                 # Optimization: Use hashtable lookup instead of Where-Object for O(1) access
                 $Role = $RoleDefLookup[$DefenderPrincipalRoleAssignment.roleDefinitionId]
 
-                if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DefenderPrincipalRoleAssignment.id)" }
+                if ($null -eq $Role) {
+                    $WarningMessage = "Role definition is empty or does not exist for Role Assignment $($DefenderPrincipalRoleAssignment.id)"
+                    if ($null -ne $WarningMessages) {
+                        $WarningMessages.Add([PSCustomObject]@{
+                                Timestamp = (Get-Date)
+                                Type      = "RoleDefinitionError"
+                                ObjectId  = $DefenderPrincipalRoleAssignment.id
+                                Message   = $WarningMessage
+                            })
+                    }
+                    Write-Warning $WarningMessage
+                }
 
                 if ( [string]::IsNullOrEmpty($DefenderPrincipalRoleAssignment.directoryScopeIds) ) {
                     # Directory Scope Id is null if the role is assigned to all devices or all users, only scoping on both object types includes "/" as directoryScopeId
@@ -197,7 +220,13 @@ function Get-EntraOpsPrivilegedDefenderRoles {
                     }
                 }
             } else {
-                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                if ($null -ne $WarningMessages) {
+                    $WarningMessages.Add([PSCustomObject]@{
+                            Type    = "Empty Group"
+                            Message = "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                            Target  = $RbacAssignmentByGroup.ObjectId
+                        })
+                }
             }
 
             $DefenderTransitiveRbacAssignments.Add($TransitiveMember) | Out-Null
