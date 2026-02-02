@@ -288,7 +288,7 @@ Community Project by Thomas Naunheim - www.entraops.com
         #region Set global variables
         New-Variable -Name TenantIdContext -Value $TenantId -Scope Global -Force
         New-Variable -Name TenantNameContext -Value $TenantName -Scope Global -Force
-        New-Variable -Name XdrAvdHuntingAccess -Value ((Get-MgContext).Scopes -contains "ThreatHunting.Read.All2") -Scope Global -Force
+        New-Variable -Name XdrAvdHuntingAccess -Value ((Get-MgContext).Scopes -contains "ThreatHunting.Read.All") -Scope Global -Force
         if ($MultiTenantRepo -eq $true) {
             New-Variable -Name DefaultFolderClassification -Value "$EntraOpsBaseFolder/Classification/$($TenantName)/" -Scope Global -Force
             New-Variable -Name DefaultFolderClassifiedEam -Value "$EntraOpsBaseFolder/PrivilegedEAM/$($TenantName)/" -Scope Global -Force
@@ -300,4 +300,5 @@ Community Project by Thomas Naunheim - www.entraops.com
         }
         #endregion
     }
+
 }
