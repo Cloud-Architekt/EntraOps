@@ -197,12 +197,26 @@ function Update-EntraOpsClassificationControlPlaneScope {
     #region Privileged Service Principals
     Write-Output "Identify directory role scope of service principals and application objects..."
     $PrivilegedServicePrincipals = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" }
-    if ($PrivilegedServicePrincipals.Count -gt 0) {
+    $PrivilegedApplicationObjects = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "application" }
+    
+    if ($PrivilegedServicePrincipals.Count -gt 0 -or $PrivilegedApplicationObjects.Count -gt 0) {
         # Get list of object-level role assignment scope which includes Control Plane Service Principals
         $ScopeNameServicePrincipalObject = $PrivilegedServicePrincipals | ForEach-Object { "/$($_.ObjectId)" }
 
         # Get current tenant ID to identify single-tenant apps
         $CurrentTenantId = (Get-AzContext).Tenant.Id
+
+        # Initialize array for application object scopes
+        $ScopeNameApplicationObject = @()
+
+        # Process direct application objects from EntraOps
+        if ($PrivilegedApplicationObjects.Count -gt 0) {
+            Write-Verbose "Processing $($PrivilegedApplicationObjects.Count) direct application objects from EntraOps..."
+            foreach ($AppObj in $PrivilegedApplicationObjects) {
+                $ScopeNameApplicationObject += "/$($AppObj.ObjectId)"
+                Write-Verbose "Added application object: $($AppObj.ObjectId) - $($AppObj.ObjectDisplayName)"
+            }
+        }
 
         # Filter for applications only (exclude managed identities and other types)
         $PrivilegedApplications = $PrivilegedServicePrincipals | Where-Object { $_.ObjectSubType -eq "Application" }
@@ -225,7 +239,6 @@ function Update-EntraOpsClassificationControlPlaneScope {
 
         # Get application object IDs only for single-tenant apps owned by current tenant
         # Managed identities and multi-tenant apps are automatically excluded
-        $ScopeNameApplicationObject = @()
         foreach ($App in $PrivilegedApplications) {
             $SpDetails = $AppOwnershipInfo[$App.ObjectId]
             
