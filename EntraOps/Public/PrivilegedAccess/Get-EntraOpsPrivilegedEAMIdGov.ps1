@@ -223,7 +223,10 @@ function Get-EntraOpsPrivilegedEamIdGov {
                         # Optimization: Use In-Memory Cache for Directory Roles
                         $Classification = $null
                         if ($ClassificationCache.ContainsKey("EntraIDRoles")) {
-                            $Classification = ($ClassificationCache["EntraIDRoles"] | Where-Object { $_.RoleAssignmentScopeId -eq "/" -and $_.RoleDefinitionId -eq $AssignedCatalogResource.originId } | Select-Object -First 1).Classification
+                            $MatchedRole = $ClassificationCache["EntraIDRoles"] | Where-Object { $_.RoleAssignmentScopeId -eq "/" -and $_.RoleDefinitionId -eq $AssignedCatalogResource.originId } | Select-Object -First 1
+                            if ($null -ne $MatchedRole) {
+                                $Classification = $MatchedRole.Classification
+                            }
                         }
 
                         if ($Null -eq $Classification) {
@@ -232,12 +235,15 @@ function Get-EntraOpsPrivilegedEamIdGov {
                                     Message = "No classification for $($AssignedCatalogResource.displayName) ($($AssignedCatalogResource.id)) found in EntraID! Fallback to default."
                                     Target  = $AssignedCatalogResource.displayName
                                 })
-                            $DefaultRoleClassification = ($EntraRolesDefaultClassification | Where-Object { $_.RoleId -eq $AssignedCatalogResource.originId } | Select-Object -First 1).RolePermissions | Select-Object -Unique EAMTierLevelTagValue, EAMTierLevelName, Category
-                            $Classification = $DefaultRoleClassification | foreach-object {
-                                [PSCustomObject]@{
-                                    'AdminTierLevel'     = $_.EAMTierLevelTagValue
-                                    'AdminTierLevelName' = $_.EAMTierLevelName
-                                    'Service'            = $_.Category | Select-Object -First 1
+                            $MatchedDefaultRole = $EntraRolesDefaultClassification | Where-Object { $_.RoleId -eq $AssignedCatalogResource.originId } | Select-Object -First 1
+                            if ($null -ne $MatchedDefaultRole -and $null -ne $MatchedDefaultRole.RolePermissions) {
+                                $DefaultRoleClassification = $MatchedDefaultRole.RolePermissions | Select-Object -Unique EAMTierLevelTagValue, EAMTierLevelName, Category
+                                $Classification = $DefaultRoleClassification | foreach-object {
+                                    [PSCustomObject]@{
+                                        'AdminTierLevel'     = $_.EAMTierLevelTagValue
+                                        'AdminTierLevelName' = $_.EAMTierLevelName
+                                        'Service'            = $_.Category | Select-Object -First 1
+                                    }
                                 }
                             }
                         }

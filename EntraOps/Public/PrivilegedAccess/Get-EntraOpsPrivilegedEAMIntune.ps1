@@ -77,7 +77,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
     if ($SampleMode -ne $True) {
         $DeviceMgmtRbacAssignments = Get-EntraOpsPrivilegedDeviceRoles -TenantId $TenantId -WarningMessages $WarningMessages
     } else {
-        $WarningMessages.Add([PSCustomObject]@{Type = "Stage1"; Message = "SampleMode currently not supported!"})
+        $WarningMessages.Add([PSCustomObject]@{Type = "Stage1"; Message = "SampleMode currently not supported!" })
     }
 
     if ($GlobalExclusion -eq $true) {
@@ -114,7 +114,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                     'AssignmentId' = $AssignmentId.Replace("_0", "")
                 }
             } else {
-                $WarningMessages.Add([PSCustomObject]@{Type = "Stage2"; Message = "No assignments for $($ScopeTag.DisplayName) - $($ScopeTag.Id)"})
+                $WarningMessages.Add([PSCustomObject]@{Type = "Stage2"; Message = "No assignments for $($ScopeTag.DisplayName) - $($ScopeTag.Id)" })
             }
         }
     }
@@ -182,11 +182,11 @@ function Get-EntraOpsPrivilegedEAMIntune {
                                 (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
                             } 
                         } else {
-                             $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device for $($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName) found in Intune! $($_)"})
+                            $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device for $($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName) found in Intune! $($_)" })
                         }
                     }
                 } catch {
-                    $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device Entra ID Device found for $($ClassifiedPrivilegedPawUser.ObjectDisplayName) - $($ClassifiedPrivilegedPawUser.ObjectId) in Intune"})
+                    $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device Entra ID Device found for $($ClassifiedPrivilegedPawUser.ObjectDisplayName) - $($ClassifiedPrivilegedPawUser.ObjectId) in Intune" })
                 }
                 # Summarize all devices of classified privileged user
                 $Devices = $Devices | Where-Object { $_.id -ne $null } | Select-Object -Unique *
@@ -199,7 +199,8 @@ function Get-EntraOpsPrivilegedEAMIntune {
         Write-Host "Correlate ScopeTagName and AssignmentId..."
         $ClassifiedScopeTagsAssignments = @()
         $ClassifiedScopeTagsAssignments = foreach ($ScopeTagsAssignment in $ScopeTagsAssignments) {
-            $DeviceClassifications = ($MatchedClassificationPawDevices | Where-Object { $_.roleScopeTagIds -contains $ScopeTagsAssignment.ScopeTagId } | Select-Object -Unique *).Classification | Select-Object -Unique *
+            $MatchedDevices = $MatchedClassificationPawDevices | Where-Object { $_.roleScopeTagIds -contains $ScopeTagsAssignment.ScopeTagId } | Select-Object -Unique *
+            $DeviceClassifications = if ($null -ne $MatchedDevices) { $MatchedDevices.Classification | Select-Object -Unique * } else { @() }
             $ScopeTagsAssignment | Add-Member -NotePropertyName Classification -NotePropertyValue $DeviceClassifications -Force
             $ScopeTagsAssignment
         }        
@@ -219,7 +220,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                 $DeviceMgmtRbacAssignment.Classification | ForEach-Object { $_ | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "AssignedDeviceObjects" -Force }
             }
             if ($Classification.count -eq "0") {
-                $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No classification found for $($DeviceMgmtRbacAssignment.RoleDefinitionId) with scope $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId)!"})
+                $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No classification found for $($DeviceMgmtRbacAssignment.RoleDefinitionId) with scope $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId)!" })
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
             }
             $DeviceMgmtRbacAssignment
@@ -261,9 +262,9 @@ function Get-EntraOpsPrivilegedEAMIntune {
         }
         # Role actions are defined for scope and role definition contains an action of the role, otherwise all role actions within role assignment scope will be applied
         if ($SampleMode -eq $True) {
-            $WarningMessages.Add([PSCustomObject]@{Type = "Stage4"; Message = "SampleMode currently not supported!"})
+            $WarningMessages.Add([PSCustomObject]@{Type = "Stage4"; Message = "SampleMode currently not supported!" })
         } else {
-             $IntuneRoleActions = $IntuneRoleDefinitionsCache["$($DeviceMgmtRbacAssignment.RoleDefinitionId)"]
+            $IntuneRoleActions = $IntuneRoleDefinitionsCache["$($DeviceMgmtRbacAssignment.RoleDefinitionId)"]
         }
 
         $MatchedClassificationByScope = @()
