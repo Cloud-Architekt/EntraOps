@@ -232,7 +232,90 @@ function Get-EntraOpsPrivilegedEamDefender {
         -EnableParallelProcessing $EnableParallelProcessing `
         -ParallelThrottleLimit $ParallelThrottleLimit
 
-    $DefenderRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
+    # Determine if parallel processing is viable for classification aggregation
+    $IsPowerShell7 = $PSVersionTable.PSVersion.Major -ge 7
+    $HasSufficientObjects = $UniqueObjects.Count -ge 50
+    $UseParallelForClassification = $EnableParallelProcessing -and $IsPowerShell7 -and $HasSufficientObjects
+    
+    if ($UseParallelForClassification) {
+        $SyncObjectDetailsCache = [System.Collections.Hashtable]::Synchronized($ObjectDetailsCache)
+        $SyncDefenderRbacByObject = [System.Collections.Hashtable]::Synchronized($DefenderRbacByObject)
+        
+        $ClassificationThrottleLimit = [Math]::Min($ParallelThrottleLimit * 2, 100)
+        Write-Host "Using parallel classification processing with $ClassificationThrottleLimit threads for $($UniqueObjects.Count) objects..." -ForegroundColor Yellow
+        
+        $DefenderRbacClassifiedObjects = $UniqueObjects | ForEach-Object -ThrottleLimit $ClassificationThrottleLimit -Parallel {
+            $obj = $_
+            $ObjectId = $obj.ObjectId
+            
+            if ($null -ne $ObjectId) {
+                $SharedDetailsCache = $using:SyncObjectDetailsCache
+                $SharedRbacByObject = $using:SyncDefenderRbacByObject
+                
+                $ObjectDetails = $SharedDetailsCache[$ObjectId]
+                
+                if ($null -eq $ObjectDetails) {
+                    Write-Verbose "Skipping object $ObjectId - failed to retrieve details"
+                    return
+                }
+
+                $DefenderRbacClassifiedAssignments = $SharedRbacByObject[$ObjectId]
+
+                $UniqueClassificationsHash = @{}
+                foreach ($Assignment in $DefenderRbacClassifiedAssignments) {
+                    if ($null -ne $Assignment.Classification) {
+                        foreach ($ClassItem in $Assignment.Classification) {
+                            $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                            if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                                $UniqueClassificationsHash[$key] = $ClassItem
+                            }
+                        }
+                    }
+                }
+                
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                if ($Classification.Count -eq 0) {
+                    $Classification += [PSCustomObject]@{
+                        'AdminTierLevel'     = "Unclassified"
+                        'AdminTierLevelName' = "Unclassified"
+                        'Service'            = "Unclassified"
+                    }
+                }
+
+                [PSCustomObject]@{
+                    'ObjectId'                      = $ObjectId
+                    'ObjectType'                    = $ObjectDetails.ObjectType.ToLower()
+                    'ObjectSubType'                 = $ObjectDetails.ObjectSubType
+                    'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
+                    'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
+                    'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
+                    'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
+                    'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
+                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
+                    'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
+                    'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
+                    'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                    'RoleSystem'                    = "Defender"
+                    'Classification'                = $Classification
+                    'RoleAssignments'               = @($DefenderRbacClassifiedAssignments | Sort-Object RoleAssignmentId)
+                    'Sponsors'                      = $ObjectDetails.Sponsors
+                    'Owners'                        = $ObjectDetails.Owners
+                    'OwnedObjects'                  = $ObjectDetails.OwnedObjects
+                    'OwnedDevices'                  = $ObjectDetails.OwnedDevices
+                    'IdentityParent'                = $ObjectDetails.IdentityParent
+                    'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
+                    'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                }
+            }
+        }
+    } else {
+        if ($EnableParallelProcessing -and $IsPowerShell7) {
+            Write-Host "Using sequential classification processing (dataset too small: $($UniqueObjects.Count) objects)" -ForegroundColor Yellow
+        } else {
+            Write-Host "Using sequential classification processing..." -ForegroundColor Yellow
+        }
+        
+        $DefenderRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
         if ($null -ne $_.ObjectId) {
             $ObjectId = $_.ObjectId
             if ($VerbosePreference -ne 'SilentlyContinue') {
@@ -301,6 +384,7 @@ function Get-EntraOpsPrivilegedEamDefender {
                 'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
                 'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
             }
+        }
         }
     }
     #endregion
