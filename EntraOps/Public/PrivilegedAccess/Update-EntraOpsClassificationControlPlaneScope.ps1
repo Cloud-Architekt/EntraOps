@@ -230,9 +230,15 @@ function Update-EntraOpsClassificationControlPlaneScope {
         if ($SpObjectIds.Count -gt 0) {
             Write-Verbose "Fetching ownership information for $($SpObjectIds.Count) service principals..."
             foreach ($SpId in $SpObjectIds) {
-                $SpDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/v1.0/servicePrincipals/$SpId?`$select=id,appId,appOwnerOrganizationId,servicePrincipalType" -OutputType PSObject -ErrorAction SilentlyContinue
-                if ($null -ne $SpDetails) {
-                    $AppOwnershipInfo[$SpId] = $SpDetails
+                $Uri = "/v1.0/servicePrincipals/$($SpId)?`$select=id,appId,appOwnerOrganizationId,servicePrincipalType"
+                try {
+                    $SpDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri $Uri -OutputType PSObject
+                    if ($null -ne $SpDetails) {
+                        $AppOwnershipInfo[$SpId] = $SpDetails
+                        Write-Verbose "Fetched service principal details for: $SpId"
+                    }
+                } catch {
+                    Write-Warning "Failed to fetch service principal details for $SpId : $_"
                 }
             }
         }
@@ -247,14 +253,27 @@ function Update-EntraOpsClassificationControlPlaneScope {
                 $SpDetails.servicePrincipalType -ne "ManagedIdentity" -and 
                 $SpDetails.appOwnerOrganizationId -eq $CurrentTenantId) {
                 
-                $AppObject = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/v1.0/applications(appId='$($SpDetails.appId)')?`$select=id,appId" -OutputType PSObject -ErrorAction SilentlyContinue
-                if ($null -ne $AppObject.Id) {
-                    $ScopeNameApplicationObject += "/$($AppObject.id)"
-                    Write-Verbose "Added application object for single-tenant app: $($SpDetails.appId)"
+                try {
+                    $AppUri = "/v1.0/applications?`$filter=appId eq '$($SpDetails.appId)'&`$select=id,appId"
+                    $AppObjects = Invoke-EntraOpsMsGraphQuery -Method Get -Uri $AppUri -OutputType PSObject
+                    
+                    if ($null -ne $AppObjects) {
+                        # Handle both single object and collection responses
+                        $AppObjectList = if ($AppObjects -is [System.Collections.IEnumerable] -and $AppObjects -isnot [string]) { $AppObjects } else { @($AppObjects) }
+                        
+                        foreach ($AppObject in $AppObjectList) {
+                            if ($null -ne $AppObject.id) {
+                                $ScopeNameApplicationObject += "/$($AppObject.id)"
+                                Write-Verbose "Added application object for single-tenant app: $($SpDetails.appId) with ID: $($AppObject.id)"
+                            }
+                        }
+                    }
+                } catch {
+                    Write-Warning "Failed to fetch application object for appId $($SpDetails.appId) : $_"
                 }
             } else {
                 if ($null -ne $SpDetails) {
-                    Write-Verbose "Skipping app $($SpDetails.appId) - Type: $($SpDetails.servicePrincipalType), Owner: $($SpDetails.appOwnerOrganizationId)"
+                    Write-Verbose "Skipping app $($SpDetails.appId) - Type: $($SpDetails.servicePrincipalType), Owner: $($SpDetails.appOwnerOrganizationId), CurrentTenant: $CurrentTenantId"
                 }
             }
         }
