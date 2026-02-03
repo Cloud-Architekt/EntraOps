@@ -120,20 +120,11 @@ function Get-EntraOpsPrivilegedEntraObject {
     $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
     if ( $ObjectDetails.'@odata.type' -in @('#microsoft.graph.user', '#microsoft.graph.group') ) {
         # Check active role assignments
+
         $AadRolesActive = @(Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$($AadObjectId)'" -ConsistencyLevel "eventual")
         
         # Check eligible role assignments - use API filter for direct assignments
-        $AadRolesEligible = @(Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules?$count=true&`$filter=principalId eq '$($AadObjectId)'" -ConsistencyLevel "eventual")
-        
-        # Also check for eligible assignments through group membership (transitive)
-        if ($ObjectMemberships.Count -gt 0) {
-            foreach ($MembershipId in $ObjectMemberships.id) {
-                $TransitiveEligible = @(Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules?$count=true&`$filter=principalId eq '$($MembershipId)'" -ConsistencyLevel "eventual")
-                if ($TransitiveEligible.Count -gt 0) {
-                    $AadRolesEligible += $TransitiveEligible
-                }
-            }
-        }
+        $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
         
         # Set protection flag based on count of active or eligible roles
         $RestrictedManagementByAadRole = ($AadRolesActive.Count -gt 0 -or $AadRolesEligible.Count -gt 0)
