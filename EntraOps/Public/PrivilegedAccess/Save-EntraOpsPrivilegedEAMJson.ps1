@@ -365,11 +365,12 @@ function Save-EntraOpsPrivilegedEAMJson {
                 Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
                 Write-Host ""
             }
-        } finally {
-            # Restore original TTL values
-            $__EntraOpsSession.DefaultCacheTTL = $OriginalDefaultTTL
-            $__EntraOpsSession.StaticDataCacheTTL = $OriginalStaticTTL
-        
-            Write-Verbose "Cache TTL restored to original values: Default=$([Math]::Round($OriginalDefaultTTL / 3600, 1))h, Static=$([Math]::Round($OriginalStaticTTL / 3600, 1))h"
         }
+    } finally {
+        # Restore original TTL values
+        $__EntraOpsSession.DefaultCacheTTL = $OriginalDefaultTTL
+        $__EntraOpsSession.StaticDataCacheTTL = $OriginalStaticTTL
+    
+        Write-Verbose "Cache TTL restored to original values: Default=$([Math]::Round($OriginalDefaultTTL / 3600, 1))h, Static=$([Math]::Round($OriginalStaticTTL / 3600, 1))h"
     }
+}
