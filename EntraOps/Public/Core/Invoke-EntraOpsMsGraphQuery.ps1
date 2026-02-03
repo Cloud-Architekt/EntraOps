@@ -153,7 +153,7 @@ function Invoke-EntraOpsMsGraphQuery {
         $QueryRequest = @()
         $QueryResult = New-Object System.Collections.Generic.List[Object]
 
-        if ($UseAzPwshOnly -eq $True -and $null -ne $MsGraphAccessToken) {
+        if ($UseInvokeRestMethodOnly -eq $True -and $null -ne $MsGraphAccessToken) {
             Write-Verbose -Message "Using Invoke-RestMethod Cmdlet"
             $AccessToken = $MsGraphAccessToken
             $HeaderParams.Add('Authorization', "Bearer $($AccessToken)")

@@ -48,7 +48,12 @@ function Disconnect-EntraOps {
 
     # Clear EntraOps cache (memory and/or persistent based on parameter)
     Write-Verbose "Clearing EntraOps cache (Type: $ClearEntraOpsCache)..."
-    Clear-EntraOpsCache -CacheType $ClearEntraOpsCache
+    try {
+        Clear-EntraOpsCache -CacheType $ClearEntraOpsCache
+    } catch {
+        Write-Warning "Failed to clear EntraOps cache: $_"
+    }
+
 
     # Disconnect from Microsoft Graph SDK if connected
     $MgContext = Get-MgContext -ErrorAction SilentlyContinue
@@ -70,5 +75,68 @@ function Disconnect-EntraOps {
         }
     }
     
-    Write-Host "Successfully disconnected from EntraOps session" -ForegroundColor Green
+    #region Validation: Verify all disconnections and cache clearing
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "  ✓ Disconnect Validation" -ForegroundColor Cyan
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    
+    # Validate Azure disconnection
+    $AzContextCheck = Get-AzContext -ErrorAction SilentlyContinue
+    if ($null -eq $AzContextCheck) {
+        Write-Host "  ✓ Azure Account        : Disconnected" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ Azure Account        : Still connected (Account: $($AzContextCheck.Account))" -ForegroundColor Yellow
+    }
+    
+    # Validate Microsoft Graph disconnection
+    $MgContextCheck = Get-MgContext -ErrorAction SilentlyContinue
+    if ($null -eq $MgContextCheck) {
+        Write-Host "  ✓ Microsoft Graph      : Disconnected" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ Microsoft Graph      : Still connected (TenantId: $($MgContextCheck.TenantId))" -ForegroundColor Yellow
+    }
+    
+    # Validate EntraOps cache clearing
+    $MemoryCacheCount = if ($__EntraOpsSession.GraphCache) { $__EntraOpsSession.GraphCache.Count } else { 0 }
+    $MemoryCacheMetadataCount = if ($__EntraOpsSession.CacheMetadata) { $__EntraOpsSession.CacheMetadata.Count } else { 0 }
+    
+    if ($MemoryCacheCount -eq 0 -and $MemoryCacheMetadataCount -eq 0) {
+        Write-Host "  ✓ Memory Cache         : Cleared (0 entries)" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ Memory Cache         : $MemoryCacheCount entries, $MemoryCacheMetadataCount metadata" -ForegroundColor Yellow
+    }
+    
+    # Validate persistent cache (if cleared)
+    if ($ClearEntraOpsCache -in @("All", "Persistent")) {
+        if (Test-Path $__EntraOpsSession.PersistentCachePath) {
+            $PersistentFiles = Get-ChildItem -Path $__EntraOpsSession.PersistentCachePath -Filter "*.json" -ErrorAction SilentlyContinue
+            $PersistentCount = $PersistentFiles.Count
+            
+            if ($PersistentCount -eq 0) {
+                Write-Host "  ✓ Persistent Cache     : Cleared (0 files)" -ForegroundColor Green
+            } else {
+                Write-Host "  ⚠ Persistent Cache     : $PersistentCount files remaining" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  ✓ Persistent Cache     : Directory removed" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  ℹ Persistent Cache     : Not cleared (CacheType: $ClearEntraOpsCache)" -ForegroundColor Gray
+    }
+    
+    # Overall status
+    $AllCleared = ($null -eq $AzContextCheck) -and ($null -eq $MgContextCheck) -and ($MemoryCacheCount -eq 0) -and ($MemoryCacheMetadataCount -eq 0)
+    
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    if ($AllCleared) {
+        Write-Host "  ✓ Successfully disconnected from EntraOps session" -ForegroundColor Green
+        Write-Host "    All connections closed and cache cleared" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ Disconnection completed with warnings" -ForegroundColor Yellow
+        Write-Host "    Review the status above for details" -ForegroundColor Yellow
+    }
+    Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host ""
+    #endregion
 }
