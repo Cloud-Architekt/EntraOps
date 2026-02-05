@@ -153,11 +153,17 @@ function Get-EntraOpsPrivilegedEAMIntune {
                         if ($Null -ne $DeviceIds) {
                             # Parallelize device lookups for better performance
                             if ($DeviceIds.Count -gt 3) {
-                                $Devices += $DeviceIds | ForEach-Object -Parallel {
+                                $ParallelDevices = $DeviceIds | ForEach-Object -Parallel {
                                     $ModulePath = $using:PSScriptRoot
                                     Import-Module "$ModulePath/../../EntraOps.psm1" -Force -WarningAction SilentlyContinue
                                     (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($_)?`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject)
                                 } -ThrottleLimit 10
+                                
+                                if ($ParallelDevices.Count -lt $DeviceIds.Count) {
+                                    $WarningMessages.Add([PSCustomObject]@{Type = "Stage3-Parallel"; Message = "Parallel device lookup returned fewer objects ($($ParallelDevices.Count)) than expected ($($DeviceIds.Count))" })
+                                    Write-Warning "Parallel device lookup returned fewer objects ($($ParallelDevices.Count)) than expected ($($DeviceIds.Count))"
+                                }
+                                $Devices += $ParallelDevices
                             } else {
                                 # For small counts, sequential is fine
                                 $Devices += Foreach ($DeviceId in $DeviceIds) {

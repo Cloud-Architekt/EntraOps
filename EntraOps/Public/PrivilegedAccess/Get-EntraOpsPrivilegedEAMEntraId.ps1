@@ -719,6 +719,11 @@ function Get-EntraOpsPrivilegedEamEntraId {
                 }
                 
                 Write-Host "Parallel processing completed: $SuccessCount successful, $FailureCount failed (used $($UsedThreads.Count) threads)"
+
+                if ($ParallelResults.Count -ne $TotalObjects) {
+                    $WarningMessages.Add([PSCustomObject]@{Type = "Stage5-Parallel"; Message = "Parallel processing returns mismatch count of objects. Expected: $TotalObjects, Actual: $($ParallelResults.Count)" })
+                    Write-Warning "Parallel processing returns mismatch count of objects. Expected: $TotalObjects, Actual: $($ParallelResults.Count)"
+                }
                 
                 # Copy synchronized cache back to main session for persistence
                 # This ensures cache is available for subsequent calls
@@ -895,6 +900,13 @@ function Get-EntraOpsPrivilegedEamEntraId {
                     'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
                 }
             }
+        }
+
+        if ($AadRbacClassifiedObjects.Count -ne $UniqueObjects.Count) {
+            # Verify if any objects were skipped
+            $SkippedCount = $UniqueObjects.Count - $AadRbacClassifiedObjects.Count
+            $WarningMessages.Add([PSCustomObject]@{Type = "Stage6-Classification-Parallel"; Message = "Parallel classification skipped $SkippedCount objects (likely due to missing details)." })
+            Write-Warning "Parallel classification processing skipped $SkippedCount objects. This is usually caused by failures in Stage 5 (Object Resolution). Check logs for details."
         }
     } else {
         # Sequential processing (fallback)

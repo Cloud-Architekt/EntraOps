@@ -123,7 +123,15 @@ function Save-EntraOpsPrivilegedEAMJson {
             $EamAzureAD = Get-EntraOpsPrivilegedEAMEntraId
 
             if ($null -ne $EamAzureAD -and $EamAzureAD.Count -gt 0) {
+                # Pre-filter check
+                $OriginalCount = $EamAzureAD.Count
                 $EamAzureAD = $EamAzureAD | where-object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId }
+                $FilteredCount = $EamAzureAD.Count
+                
+                if ($FilteredCount -ne $OriginalCount) {
+                    Write-Warning "Filtered out $($OriginalCount - $FilteredCount) objects with null ObjectType or ObjectId before saving."
+                }
+
                 $EamAzureAD = $EamAzureAD | sort-object ObjectDisplayName, ObjectType
                 $EamAzureAD | Convertto-Json -Depth 10 | Out-File -Path "$($EntraExportFolder)/EntraID.json" -Force
             
@@ -134,11 +142,22 @@ function Save-EntraOpsPrivilegedEAMJson {
                 }
 
                 # Optimization: Parallel File Write
-                $EamAzureAD | ForEach-Object -Parallel {
+                $Results = $EamAzureAD | ForEach-Object -Parallel {
                     $Obj = $_
                     $Path = "$using:EntraExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                    $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+                    try {
+                        $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force -ErrorAction Stop
+                        $true
+                    } catch {
+                        Write-Warning "Failed to save file for $($Obj.ObjectId): $_"
+                        $false
+                    }
                 } -ThrottleLimit 50
+
+                $SuccessCount = ($Results | Where-Object { $_ -eq $true }).Count
+                if ($SuccessCount -ne $EamAzureAD.Count) {
+                    Write-Warning "Parallel file write had failures. Expected: $($EamAzureAD.Count), Success: $SuccessCount"
+                }
             } else {
                 Write-Warning "Result for Entra ID is empty because of an issue or empty entries in the RBAC system."
             }
@@ -184,11 +203,22 @@ function Save-EntraOpsPrivilegedEAMJson {
                 }
 
                 # Optimization: Parallel File Write
-                $EamAzureAdResourceApps | ForEach-Object -Parallel {
+                $Results = $EamAzureAdResourceApps | ForEach-Object -Parallel {
                     $Obj = $_
                     $Path = "$using:ResAppExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                    $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+                    try {
+                        $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force -ErrorAction Stop
+                        $true
+                    } catch {
+                        Write-Warning "Failed to save file for $($Obj.ObjectId): $_"
+                        $false
+                    }
                 } -ThrottleLimit 50
+
+                $SuccessCount = ($Results | Where-Object { $_ -eq $true }).Count
+                if ($SuccessCount -ne $EamAzureAdResourceApps.Count) {
+                    Write-Warning "Parallel file write had failures. Expected: $($EamAzureAdResourceApps.Count), Success: $SuccessCount"
+                }
             } else {
                 Write-Warning "Result for Resource Apps is empty because of an issue or empty entries in the RBAC system."
             }
@@ -234,11 +264,22 @@ function Save-EntraOpsPrivilegedEAMJson {
                 }
 
                 # Optimization: Parallel File Write
-                $EamDeviceMgmt | ForEach-Object -Parallel {
+                $Results = $EamDeviceMgmt | ForEach-Object -Parallel {
                     $Obj = $_
                     $Path = "$using:DevMgmtExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                    $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+                    try {
+                        $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force -ErrorAction Stop
+                        $true
+                    } catch {
+                        Write-Warning "Failed to save file for $($Obj.ObjectId): $_"
+                        $false
+                    }
                 } -ThrottleLimit 50
+
+                $SuccessCount = ($Results | Where-Object { $_ -eq $true }).Count
+                if ($SuccessCount -ne $EamDeviceMgmt.Count) {
+                    Write-Warning "Parallel file write had failures. Expected: $($EamDeviceMgmt.Count), Success: $SuccessCount"
+                }
             } else {
                 Write-Warning "Result for Device Management (Intune) is empty because of an issue or empty entries in the RBAC system."
             }
@@ -285,11 +326,22 @@ function Save-EntraOpsPrivilegedEAMJson {
                 }
 
                 # Optimization: Parallel File Write
-                $EamIdGov | ForEach-Object -Parallel {
+                $Results = $EamIdGov | ForEach-Object -Parallel {
                     $Obj = $_
                     $Path = "$using:IdGovExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                    $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+                    try {
+                        $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force -ErrorAction Stop
+                        $true
+                    } catch {
+                        Write-Warning "Failed to save file for $($Obj.ObjectId): $_"
+                        $false
+                    }
                 } -ThrottleLimit 50
+
+                $SuccessCount = ($Results | Where-Object { $_ -eq $true }).Count
+                if ($SuccessCount -ne $EamIdGov.Count) {
+                    Write-Warning "Parallel file write had failures. Expected: $($EamIdGov.Count), Success: $SuccessCount"
+                }
             } else {
                 Write-Warning "Result for Identity Governance is empty because of an issue or empty entries in the RBAC system."
             }
@@ -335,11 +387,22 @@ function Save-EntraOpsPrivilegedEAMJson {
                 }
 
                 # Optimization: Parallel File Write
-                $EamDefender | ForEach-Object -Parallel {
+                $Results = $EamDefender | ForEach-Object -Parallel {
                     $Obj = $_
                     $Path = "$using:DefenderExportFolder/$($Obj.ObjectType)/$($Obj.ObjectId).json"
-                    $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force
+                    try {
+                        $Obj | Convertto-Json -Depth 10 | Out-File -Path $Path -Force -ErrorAction Stop
+                        $true
+                    } catch {
+                        Write-Warning "Failed to save file for $($Obj.ObjectId): $_"
+                        $false
+                    }
                 } -ThrottleLimit 50
+
+                $SuccessCount = ($Results | Where-Object { $_ -eq $true }).Count
+                if ($SuccessCount -ne $EamDefender.Count) {
+                    Write-Warning "Parallel file write had failures. Expected: $($EamDefender.Count), Success: $SuccessCount"
+                }
             } else {
                 Write-Warning "Result for Defender is empty because of an issue or empty entries in the RBAC system."
             }

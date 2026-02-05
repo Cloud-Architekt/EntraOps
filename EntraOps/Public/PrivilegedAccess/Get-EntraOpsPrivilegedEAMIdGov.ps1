@@ -553,6 +553,11 @@ function Get-EntraOpsPrivilegedEamIdGov {
                 }
             }
         }
+
+        if ($IdGovRbacClassifiedObjects.Count -ne $UniqueObjects.Count) {
+             $WarningMessages.Add([PSCustomObject]@{Type = "Stage-Classification-Parallel"; Message = "Parallel classification returned fewer objects than expected. Expected: $($UniqueObjects.Count), Actual: $($IdGovRbacClassifiedObjects.Count)" })
+             Write-Warning "Parallel classification returned fewer objects than expected. Expected: $($UniqueObjects.Count), Actual: $($IdGovRbacClassifiedObjects.Count)"
+        }
     } else {
         if ($EnableParallelProcessing -and $IsPowerShell7) {
             Write-Host "Using sequential classification processing (dataset too small: $($UniqueObjects.Count) objects)" -ForegroundColor Yellow
