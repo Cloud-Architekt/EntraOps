@@ -108,10 +108,10 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $AadRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleDefinitions?`$select=id,displayName,description,rolePermissions,isBuiltIn,IsPrivileged,templateId"
         # Recommendation: Optimize Payload - Role Assignments (id, principalId, roleDefinitionId, directoryScopeId)
         $AadRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleAssignments?`$select=id,principalId,roleDefinitionId,directoryScopeId"
-        # Recommendation: Server-Side Filtering (OData) for Eligible Assignments
-        $AadEligibleRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules?`$filter=memberType eq 'Direct' and status eq 'Provisioned'&`$select=id,principalId,roleDefinitionId,directoryScopeId,memberType,status"
+        # Filter will be applied in code where we have more control
+        $AadEligibleRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules?`$select=id,principalId,roleDefinitionId,directoryScopeId,memberType,status"
         # Fetch PIM assignment schedules early (used later for enrichment)
-        $AadRoleAssignmentsByPim = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$select=id,roleDefinitionId,assignmentType,endDateTime,startDateTime" -OutputType PSObject
+        $AadRoleAssignmentsByPim = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$select=id,roleDefinitionId,assignmentType,endDateTime,startDateTime,roleAssignmentOriginId" -OutputType PSObject
         Write-Verbose "Parallel data fetch complete"
 
         # Validate essential data was retrieved
@@ -193,9 +193,13 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         }
     }
     
-    # Early filtering: Only process Direct + Provisioned eligible assignments
-    $EligibleToProcess = $AadEligibleRoleAssignments
-    Write-Verbose "Filtered to $($EligibleToProcess.Count) eligible assignments to process (Direct + Provisioned)"
+    # Apply filtering in code for better visibility and control
+    # Note: Including all status types to prevent missing assignments
+    $EligibleToProcess = $AadEligibleRoleAssignments | Where-Object { 
+        $_.memberType -eq 'Direct' -and 
+        ($_.status -eq 'Provisioned' -or $_.status -eq 'Accepted')
+    }
+    Write-Verbose "Processing $($EligibleToProcess.Count) eligible assignments (Direct members with Provisioned/Accepted status) out of $($AadEligibleRoleAssignments.Count) total eligible assignments"
     
     foreach ($AadRoleAssignment in $EligibleToProcess) {
         if ($AadRoleAssignment.principalId) { 
@@ -526,6 +530,9 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 # Fallback if odata.type is missing (should not happen on Graph objects)
                 Write-Verbose "Object type missing for $Principal"
             }
+        } else {
+            # Create placeholder for unresolved principal to keep assignment visible
+            $ObjectType = "Unknown"
         }
         
         # Resolve Role
@@ -580,7 +587,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
 
         # Pre-compute string operations
         $ObjectTypeLower = $ObjectType.ToLower()
-
+        
         [pscustomobject]@{
             RoleAssignmentId                = $AadPrincipalRoleAssignment.Id
             RoleName                        = $RoleDefinitionName
@@ -593,7 +600,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             RoleAssignmentScopeName         = $RoleAssignmentScopeName
             RoleAssignmentType              = "Direct"
             RoleAssignmentSubType           = ""
-            ObjectDisplayName               = if ($PrincipalProfile) { $PrincipalProfile.displayName } else { $Principal }
+            ObjectDisplayName               = if ($PrincipalProfile) { $PrincipalProfile.displayName } else { "[Unresolved: $Principal]" }
             ObjectId                        = $Principal
             ObjectType                      = $ObjectTypeLower
             TransitiveByObjectId            = $null
@@ -658,6 +665,8 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             if ($PrincipalProfile.'@odata.type') {
                 $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
             }
+        } else {
+            $ObjectType = "Unknown"
         }
 
         # Resolve Role
@@ -725,7 +734,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             RoleAssignmentScopeName         = $RoleAssignmentScopeName
             RoleAssignmentType              = "Direct"
             RoleAssignmentSubType           = ""
-            ObjectDisplayName               = if ($PrincipalProfile) { $PrincipalProfile.displayName } else { $Principal }
+            ObjectDisplayName               = if ($PrincipalProfile) { $PrincipalProfile.displayName } else { "[Unresolved: $Principal]" }
             ObjectId                        = $Principal
             ObjectType                      = $ObjectTypeLower
             TransitiveByObjectId            = $null
@@ -742,37 +751,52 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     $AadActiveRoleAssignments = $AadRoleAssignmentsByPim | Where-Object { $_.assignmentType -eq 'Activated' }
     $AadTimeBoundedRoleAssignments = $AadRoleAssignmentsByPim | Where-Object { $_.assignmentType -eq 'Assigned' -and $null -ne $_.endDateTime }
 
-    # Build hashtable lookups for O(1) performance instead of -in operator O(N)
+    # Fixed: Build hashtable lookups correctly - separate lookups for assignment IDs vs origin IDs
     $ActiveAssignmentLookup = @{}
-    $ActiveAssignmentOriginLookup = @{}
+    $ActiveOriginToAssignmentMap = @{}
     foreach ($ActiveAssignment in $AadActiveRoleAssignments) {
-        if ($ActiveAssignment.id) { $ActiveAssignmentLookup[$ActiveAssignment.id] = $true }
-        if ($ActiveAssignment.RoleAssignmentOriginId) { $ActiveAssignmentOriginLookup[$ActiveAssignment.RoleAssignmentOriginId] = $true }
+        if ($ActiveAssignment.id) { 
+            $ActiveAssignmentLookup[$ActiveAssignment.id] = $true 
+        }
+        # Map origin ID to assignment ID for proper lookup
+        if ($ActiveAssignment.roleAssignmentOriginId -and $ActiveAssignment.id) { 
+            $ActiveOriginToAssignmentMap[$ActiveAssignment.roleAssignmentOriginId] = $ActiveAssignment.id
+        }
     }
     
     $TimeBoundedAssignmentLookup = @{}
-    $TimeBoundedOriginLookup = @{}
+    $TimeBoundedOriginToAssignmentMap = @{}
     foreach ($TimeBoundedAssignment in $AadTimeBoundedRoleAssignments) {
-        if ($TimeBoundedAssignment.id) { $TimeBoundedAssignmentLookup[$TimeBoundedAssignment.id] = $true }
-        if ($TimeBoundedAssignment.RoleAssignmentOriginId) { $TimeBoundedOriginLookup[$TimeBoundedAssignment.RoleAssignmentOriginId] = $true }
+        if ($TimeBoundedAssignment.id) { 
+            $TimeBoundedAssignmentLookup[$TimeBoundedAssignment.id] = $true 
+        }
+        # Map origin ID to assignment ID for proper lookup
+        if ($TimeBoundedAssignment.roleAssignmentOriginId -and $TimeBoundedAssignment.id) { 
+            $TimeBoundedOriginToAssignmentMap[$TimeBoundedAssignment.roleAssignmentOriginId] = $TimeBoundedAssignment.id
+        }
     }
 
     $AadPermanentRoleAssignmentsWithEnrichment = foreach ($AadRbacActiveAndPermanentAssignment in $AadRbacActiveAndPermanentAssignments) {
         $AssignmentId = $AadRbacActiveAndPermanentAssignment.RoleAssignmentId
         
-        if ($ActiveAssignmentLookup.ContainsKey($AssignmentId) -and $ActiveAssignmentOriginLookup.ContainsKey($AssignmentId)) {
+        # Check if this assignment ID represents an activated eligible assignment
+        if ($ActiveAssignmentLookup.ContainsKey($AssignmentId)) {
             $AadRbacActiveAndPermanentAssignment.RoleAssignmentPIMRelated = $True
             $AadRbacActiveAndPermanentAssignment.RoleAssignmentPIMAssignmentType = "Activated"
-        } elseif ($TimeBoundedAssignmentLookup.ContainsKey($AssignmentId) -and $TimeBoundedOriginLookup.ContainsKey($AssignmentId)) {
+            Write-Verbose "Marked assignment ${AssignmentId} as Activated"
+        } elseif ($TimeBoundedAssignmentLookup.ContainsKey($AssignmentId)) {
             $AadRbacActiveAndPermanentAssignment.RoleAssignmentPIMRelated = $True
             $AadRbacActiveAndPermanentAssignment.RoleAssignmentPIMAssignmentType = "TimeBounded"
+            Write-Verbose "Marked assignment ${AssignmentId} as TimeBounded"
         } else {
-            Write-Verbose "Permanent assignment $($AadRbacActiveAndPermanentAssignment.RoleAssignmentId): No active or eligible assignment detected"
+            Write-Verbose "Permanent assignment ${AssignmentId} - No active or eligible assignment detected"
         }
         $AadRbacActiveAndPermanentAssignment
     }
 
-    $AadPermanentRoleAssignments = $AadPermanentRoleAssignmentsWithEnrichment | Where-Object { $_.RoleAssignmentPIMAssignmentType -ne "Activated" }
+    # Fixed: Include activated assignments in output (with proper flag) instead of excluding them
+    # This ensures all current role assignments are visible
+    $AadPermanentRoleAssignments = $AadPermanentRoleAssignmentsWithEnrichment
     #endregion
 
     # Summarize results with direct permanent (excl.s activated roles) and eligible role assignments
@@ -819,7 +843,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                     # Pre-compute string operations
                     $MemberObjectType = $_.'@odata.type'.Replace("#microsoft.graph.", "").ToLower()
                     
-                    [pscustomobject]@{
+                    $TransitiveMember = [pscustomobject]@{
                         RoleAssignmentId                = $RbacAssignmentByGroup.RoleAssignmentId
                         RoleName                        = $RbacAssignmentByGroup.RoleName
                         RoleId                          = $RbacAssignmentByGroup.RoleId
@@ -837,12 +861,15 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                         TransitiveByObjectId            = $RbacAssignmentByGroup.ObjectId
                         TransitiveByObjectDisplayName   = $_.GroupObjectDisplayName
                     }
+                    $AadRbacTransitiveAssignments.Add($TransitiveMember) | Out-Null
                 }
             } else {
+                # Keep empty group assignments visible (they still have the role, even if no members)
+                Write-Verbose "Empty group $($RbacAssignmentByGroup.ObjectId) with role assignment - keeping group assignment in output"
                 if ($WarningMessages) {
                     $WarningMessages.Add([PSCustomObject]@{
                             Type    = "Empty Group"
-                            Message = "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                            Message = "Empty group $($RbacAssignmentByGroup.ObjectId) - no transitive assignments created"
                             Target  = $RbacAssignmentByGroup.ObjectId
                         })
                 }
