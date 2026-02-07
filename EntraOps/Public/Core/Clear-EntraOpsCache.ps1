@@ -57,18 +57,38 @@ function Clear-EntraOpsCache {
     
     switch ($CacheType) {
         "Expired" {
-            # Memory cache clearing logic remains same
-            # Persistent cache clearing logic
-            if (Test-Path $__EntraOpsSession.PersistentCachePath) {
-                # Only clear expired if we can read metadata... logic handles memory primarily for exact expiry?
-                # Actually Expired mainly targets memory in current impl, persistent expiration is checked on load. 
-                # But let's look at the existing logic.
-                # Existing logic iterates session keys.
+            Write-Verbose "Clearing expired cache entries matching pattern: $Pattern"
+            $CurrentTime = [DateTime]::UtcNow
+            $KeysToRemove = @()
+            
+            foreach ($Key in $__EntraOpsSession.GraphCache.Keys) {
+                if ($Key -like $Pattern -and $__EntraOpsSession.CacheMetadata.ContainsKey($Key)) {
+                    $ExpiryTime = $__EntraOpsSession.CacheMetadata[$Key].ExpiryTime
+                    if ($CurrentTime -gt $ExpiryTime) {
+                        $KeysToRemove += $Key
+                    }
+                }
             }
-            # ...
+            
+            foreach ($Key in $KeysToRemove) {
+                $__EntraOpsSession.GraphCache.Remove($Key)
+                $__EntraOpsSession.CacheMetadata.Remove($Key)
+                $ClearedCount++
+            }
+            Write-Verbose "Cleared $ClearedCount expired cache entries"
         }
         
-        # ... logic for Memory ...
+        "Memory" {
+            Write-Verbose "Clearing memory cache matching pattern: $Pattern"
+            $KeysToRemove = @($__EntraOpsSession.GraphCache.Keys | Where-Object { $_ -like $Pattern })
+            
+            foreach ($Key in $KeysToRemove) {
+                $__EntraOpsSession.GraphCache.Remove($Key)
+                $__EntraOpsSession.CacheMetadata.Remove($Key)
+                $ClearedCount++
+            }
+            Write-Verbose "Cleared $ClearedCount memory cache entries"
+        }
 
         "Persistent" {
             Write-Verbose "Clearing persistent cache files matching pattern: $Pattern"
