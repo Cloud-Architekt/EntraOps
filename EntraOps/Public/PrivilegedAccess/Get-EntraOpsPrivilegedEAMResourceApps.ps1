@@ -69,7 +69,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     if ($SampleMode -ne $True) {
         $AppRoleAssignments = Get-EntraOpsPrivilegedAppRoles -TenantId $TenantId -WarningMessages $WarningMessages
     } else {
-        $WarningMessages.Add([PSCustomObject]@{Type = "SampleMode"; Message = "SampleMode currently not supported!"})
+        $WarningMessages.Add([PSCustomObject]@{Type = "SampleMode"; Message = "SampleMode currently not supported!" })
     }
     if ($GlobalExclusion -eq $true) {
         $GlobalExclusionList = (Get-Content -Path "$DefaultFolderClassification/Global.json" | ConvertFrom-Json -Depth 10).ExcludedPrincipalId
@@ -145,7 +145,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         $AgentIdentityBlueprintPrincipalAppRoles = $AppRoleClassifications | where-object { $_.ObjectId -eq $AgentIdentityBlueprintPrincipal.Id }
 
         if ( $AgentIdentityBlueprintPrincipal.appOwnerOrganizationId -ne $TenantId ) {
-            $WarningMessages.Add([PSCustomObject]@{Type = "AgentIdentity-MultiTenant"; Message = "Skipping Agent Identity Blueprint Principal: $($AgentIdentityBlueprintPrincipal.displayName) ($($AgentIdentityBlueprintPrincipal.id)) as it belongs to multi-tenant app without visibility of inheritable permissions: $($AgentIdentityBlueprintPrincipal.appOwnerOrganizationId)"; Target = $AgentIdentityBlueprintPrincipal.id})
+            $WarningMessages.Add([PSCustomObject]@{Type = "AgentIdentity-MultiTenant"; Message = "Skipping Agent Identity Blueprint Principal: $($AgentIdentityBlueprintPrincipal.displayName) ($($AgentIdentityBlueprintPrincipal.id)) as it belongs to multi-tenant app without visibility of inheritable permissions: $($AgentIdentityBlueprintPrincipal.appOwnerOrganizationId)"; Target = $AgentIdentityBlueprintPrincipal.id })
             $inheritablePermissionScopes = $null
             continue
         } else {
@@ -171,7 +171,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 } elseif ($null -eq $AgentIdentityResourceAppPermission.inheritableScopes.kind) {
                     Write-Verbose "No inheritable scopes defined for Agent Identity $($AgentIdentityBlueprintPrincipal.displayName) Resource App Permission: $($AgentIdentityResourceAppPermission.id)"
                 } else {
-                    $WarningMessages.Add([PSCustomObject]@{Type = "AgentIdentity-UnknownScope"; Message = "Unknown inheritableScopes.kind: $($AgentIdentityResourceAppPermission.inheritableScopes.kind)"})
+                    $WarningMessages.Add([PSCustomObject]@{Type = "AgentIdentity-UnknownScope"; Message = "Unknown inheritableScopes.kind: $($AgentIdentityResourceAppPermission.inheritableScopes.kind)" })
                 }
             }
             #endregion
@@ -240,80 +240,186 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         -EnableParallelProcessing $EnableParallelProcessing `
         -ParallelThrottleLimit $ParallelThrottleLimit
 
-    $AppRoleClassifiedSpObjects = $UniqueObjects | ForEach-Object {
-        if ($null -ne $_.ObjectId) {
-            $ObjectId = $_.ObjectId
-            if ($VerbosePreference -ne 'SilentlyContinue') {
-                Write-Verbose -Message "Processing classifications for $($ObjectId)..."
-            }
+    # Group assignments by ObjectId for fast lookup
+    $AppRoleByObject = $AppRoleClassifications | Group-Object ObjectId -AsHashTable -AsString
+
+    # Determine if parallel processing is viable for classification aggregation
+    $IsPowerShell7 = $PSVersionTable.PSVersion.Major -ge 7
+    $HasSufficientObjects = $UniqueObjects.Count -ge 50
+    $UseParallelForClassification = $EnableParallelProcessing -and $IsPowerShell7 -and $HasSufficientObjects
+    
+    if ($UseParallelForClassification) {
+        # Convert hashtables to synchronized versions for thread-safe access
+        $SyncObjectDetailsCache = [System.Collections.Hashtable]::Synchronized($ObjectDetailsCache)
+        $SyncAppRoleByObject = [System.Collections.Hashtable]::Synchronized($AppRoleByObject)
+        $SyncAgentIdObjects = if ($null -ne $AppRoleClassifiedAgentIdObjectsByParentId) { 
+            [System.Collections.Hashtable]::Synchronized(($AppRoleClassifiedAgentIdObjectsByParentId | Group-Object ObjectId -AsHashTable -AsString))
+        } else { @{} }
+        
+        $ClassificationThrottleLimit = [Math]::Min($ParallelThrottleLimit * 2, 100)
+        Write-Host "Using parallel classification processing with $ClassificationThrottleLimit threads for $($UniqueObjects.Count) objects..." -ForegroundColor Yellow
+        
+        $AppRoleClassifiedSpObjects = $UniqueObjects | ForEach-Object -ThrottleLimit $ClassificationThrottleLimit -Parallel {
+            $obj = $_
+            $ObjectId = $obj.ObjectId
             
-            # Object types
-            $ObjectDetails = $ObjectDetailsCache[$ObjectId]
-            
-            # Skip if object details couldn't be retrieved
-            if ($null -eq $ObjectDetails) {
-                $WarningMessages.Add([PSCustomObject]@{Type = "SkippedObject"; Message = "Skipping object $ObjectId - failed to retrieve details"; Target = $ObjectId})
-                return
-            }
+            if ($null -ne $ObjectId) {
+                $SharedDetailsCache = $using:SyncObjectDetailsCache
+                $SharedAppRoleByObject = $using:SyncAppRoleByObject
+                $SharedAgentIdObjects = $using:SyncAgentIdObjects
+                
+                $ObjectDetails = $SharedDetailsCache[$ObjectId]
+                
+                if ($null -eq $ObjectDetails) {
+                    Write-Verbose "Skipping object $ObjectId - failed to retrieve details"
+                    return
+                }
 
-            # Role Assignments
-            $AppRoleAssignments = @()
+                # Role Assignments
+                $AppRoleAssignments = @()
+                
+                if ($SharedAgentIdObjects.ContainsKey($ObjectId)) {
+                    $AppRoleAssignments += $SharedAppRoleByObject[$ObjectId] | Select-Object -Unique *
+                    $AppRoleAssignments += $SharedAgentIdObjects[$ObjectId].RoleAssignments
+                } else {
+                    $AppRoleAssignments += $SharedAppRoleByObject[$ObjectId] | Select-Object -Unique *
+                }
 
-            if ($ObjectId -in $AppRoleClassifiedAgentIdObjects.ObjectId) {
-                # Merge classifications and role assignments if service principal has inheritable permissions by agent blueprint and assigned app roles
-                $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
-                $AppRoleAssignments += $AppRoleClassifiedAgentIdObjects | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -ExpandProperty RoleAssignments
-            } else {
-                $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
-            }
-
-            # Classification - use hashtable for unique aggregation
-            $UniqueClassificationsHash = @{}
-            foreach ($Assignment in $AppRoleAssignments) {
-                if ($null -ne $Assignment.Classification) {
-                    foreach ($ClassItem in $Assignment.Classification) {
-                        $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
-                        if (-not $UniqueClassificationsHash.ContainsKey($key)) {
-                            $UniqueClassificationsHash[$key] = $ClassItem
+                # Classification - use hashtable for unique aggregation
+                $UniqueClassificationsHash = @{}
+                foreach ($Assignment in $AppRoleAssignments) {
+                    if ($null -ne $Assignment.Classification) {
+                        foreach ($ClassItem in $Assignment.Classification) {
+                            $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                            if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                                $UniqueClassificationsHash[$key] = $ClassItem
+                            }
                         }
                     }
                 }
+                
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+
+                if ($Classification.Count -eq 0) {
+                    $Classification = @([PSCustomObject]@{
+                            'AdminTierLevel'     = "Unclassified"
+                            'AdminTierLevelName' = "Unclassified"
+                            'Service'            = "Unclassified"
+                        })
+                }
+
+                [PSCustomObject]@{
+                    'ObjectId'                      = $ObjectId
+                    'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
+                    'ObjectSubType'                 = $ObjectDetails.ObjectSubType
+                    'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
+                    'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
+                    'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
+                    'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
+                    'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
+                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
+                    'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
+                    'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
+                    'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                    'RoleSystem'                    = "ResourceApps"
+                    'Classification'                = $Classification
+                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object RoleAssignmentId)
+                    'Sponsors'                      = $ObjectDetails.Sponsors
+                    'Owners'                        = $ObjectDetails.Owners
+                    'OwnedObjects'                  = $ObjectDetails.OwnedObjects
+                    'OwnedDevices'                  = $ObjectDetails.OwnedDevices
+                    'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
+                    'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                }
             }
+        }
+
+        if ($AppRoleClassifiedSpObjects.Count -ne $UniqueObjects.Count) {
+            $WarningMessages.Add([PSCustomObject]@{Type = "Stage-Classification-Parallel"; Message = "Parallel classification returned fewer objects than expected. Expected: $($UniqueObjects.Count), Actual: $($AppRoleClassifiedSpObjects.Count)" })
+            Write-Warning "Parallel classification returned fewer objects than expected. Expected: $($UniqueObjects.Count), Actual: $($AppRoleClassifiedSpObjects.Count)"
+        }
+    } else {
+        if ($EnableParallelProcessing -and $IsPowerShell7) {
+            Write-Host "Using sequential classification processing (dataset too small: $($UniqueObjects.Count) objects)" -ForegroundColor Yellow
+        } else {
+            Write-Host "Using sequential classification processing..." -ForegroundColor Yellow
+        }
+        
+        $AppRoleClassifiedSpObjects = $UniqueObjects | ForEach-Object {
+            if ($null -ne $_.ObjectId) {
+                $ObjectId = $_.ObjectId
+                if ($VerbosePreference -ne 'SilentlyContinue') {
+                    Write-Verbose -Message "Processing classifications for $($ObjectId)..."
+                }
             
-            $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                # Object types
+                $ObjectDetails = $ObjectDetailsCache[$ObjectId]
+            
+                # Skip if object details couldn't be retrieved
+                if ($null -eq $ObjectDetails) {
+                    $WarningMessages.Add([PSCustomObject]@{Type = "SkippedObject"; Message = "Skipping object $ObjectId - failed to retrieve details"; Target = $ObjectId })
+                    return
+                }
 
-            if ($Classification.Count -eq 0) {
-                $Classification = @(
-                    [PSCustomObject]@{
-                        'AdminTierLevel'     = "Unclassified"
-                        'AdminTierLevelName' = "Unclassified"
-                        'Service'            = "Unclassified"
+                # Role Assignments
+                $AppRoleAssignments = @()
+
+                if ($ObjectId -in $AppRoleClassifiedAgentIdObjects.ObjectId) {
+                    # Merge classifications and role assignments if service principal has inheritable permissions by agent blueprint and assigned app roles
+                    $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
+                    $AppRoleAssignments += $AppRoleClassifiedAgentIdObjects | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -ExpandProperty RoleAssignments
+                } else {
+                    $AppRoleAssignments += $AppRoleClassifications | Where-Object { $_.ObjectId -eq "$ObjectId" } | select-object -Unique *
+                }
+
+                # Classification - use hashtable for unique aggregation
+                $UniqueClassificationsHash = @{}
+                foreach ($Assignment in $AppRoleAssignments) {
+                    if ($null -ne $Assignment.Classification) {
+                        foreach ($ClassItem in $Assignment.Classification) {
+                            $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                            if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                                $UniqueClassificationsHash[$key] = $ClassItem
+                            }
+                        }
                     }
-                )
-            }
+                }
+            
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
 
-            [PSCustomObject]@{
-                'ObjectId'                      = $ObjectId
-                'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
-                'ObjectSubType'                 = $ObjectDetails.ObjectSubType
-                'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
-                'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
-                'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
-                'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
-                'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
-                'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
-                'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
-                'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
-                'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
-                'RoleSystem'                    = "ResourceApps"
-                'Classification'                = $Classification
-                'RoleAssignments'               = @($AppRoleAssignments | Sort-Object RoleAssignmentId)
-                'Sponsors'                      = $ObjectDetails.Sponsors
-                'Owners'                        = $ObjectDetails.Owners
-                'OwnedObjects'                  = $ObjectDetails.OwnedObjects
-                'OwnedDevices'                  = $ObjectDetails.OwnedDevices
-                'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
-                'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                if ($Classification.Count -eq 0) {
+                    $Classification = @(
+                        [PSCustomObject]@{
+                            'AdminTierLevel'     = "Unclassified"
+                            'AdminTierLevelName' = "Unclassified"
+                            'Service'            = "Unclassified"
+                        }
+                    )
+                }
+
+                [PSCustomObject]@{
+                    'ObjectId'                      = $ObjectId
+                    'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
+                    'ObjectSubType'                 = $ObjectDetails.ObjectSubType
+                    'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
+                    'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
+                    'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
+                    'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
+                    'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
+                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
+                    'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
+                    'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
+                    'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                    'RoleSystem'                    = "ResourceApps"
+                    'Classification'                = $Classification
+                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object RoleAssignmentId)
+                    'Sponsors'                      = $ObjectDetails.Sponsors
+                    'Owners'                        = $ObjectDetails.Owners
+                    'OwnedObjects'                  = $ObjectDetails.OwnedObjects
+                    'OwnedDevices'                  = $ObjectDetails.OwnedDevices
+                    'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
+                    'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                }
             }
         }
     }

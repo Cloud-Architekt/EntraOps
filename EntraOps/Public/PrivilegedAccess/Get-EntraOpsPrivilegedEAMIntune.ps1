@@ -77,7 +77,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
     if ($SampleMode -ne $True) {
         $DeviceMgmtRbacAssignments = Get-EntraOpsPrivilegedDeviceRoles -TenantId $TenantId -WarningMessages $WarningMessages
     } else {
-        $WarningMessages.Add([PSCustomObject]@{Type = "Stage1"; Message = "SampleMode currently not supported!"})
+        $WarningMessages.Add([PSCustomObject]@{Type = "Stage1"; Message = "SampleMode currently not supported!" })
     }
 
     if ($GlobalExclusion -eq $true) {
@@ -114,7 +114,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                     'AssignmentId' = $AssignmentId.Replace("_0", "")
                 }
             } else {
-                $WarningMessages.Add([PSCustomObject]@{Type = "Stage2"; Message = "No assignments for $($ScopeTag.DisplayName) - $($ScopeTag.Id)"})
+                $WarningMessages.Add([PSCustomObject]@{Type = "Stage2"; Message = "No assignments for $($ScopeTag.DisplayName) - $($ScopeTag.Id)" })
             }
         }
     }
@@ -153,11 +153,17 @@ function Get-EntraOpsPrivilegedEAMIntune {
                         if ($Null -ne $DeviceIds) {
                             # Parallelize device lookups for better performance
                             if ($DeviceIds.Count -gt 3) {
-                                $Devices += $DeviceIds | ForEach-Object -Parallel {
+                                $ParallelDevices = $DeviceIds | ForEach-Object -Parallel {
                                     $ModulePath = $using:PSScriptRoot
                                     Import-Module "$ModulePath/../../EntraOps.psm1" -Force -WarningAction SilentlyContinue
                                     (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($_)?`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject)
                                 } -ThrottleLimit 10
+                                
+                                if ($ParallelDevices.Count -lt $DeviceIds.Count) {
+                                    $WarningMessages.Add([PSCustomObject]@{Type = "Stage3-Parallel"; Message = "Parallel device lookup returned fewer objects ($($ParallelDevices.Count)) than expected ($($DeviceIds.Count))" })
+                                    Write-Warning "Parallel device lookup returned fewer objects ($($ParallelDevices.Count)) than expected ($($DeviceIds.Count))"
+                                }
+                                $Devices += $ParallelDevices
                             } else {
                                 # For small counts, sequential is fine
                                 $Devices += Foreach ($DeviceId in $DeviceIds) {
@@ -182,11 +188,11 @@ function Get-EntraOpsPrivilegedEAMIntune {
                                 (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
                             } 
                         } else {
-                             $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device for $($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName) found in Intune! $($_)"})
+                            $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device for $($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName) found in Intune! $($_)" })
                         }
                     }
                 } catch {
-                    $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device Entra ID Device found for $($ClassifiedPrivilegedPawUser.ObjectDisplayName) - $($ClassifiedPrivilegedPawUser.ObjectId) in Intune"})
+                    $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device Entra ID Device found for $($ClassifiedPrivilegedPawUser.ObjectDisplayName) - $($ClassifiedPrivilegedPawUser.ObjectId) in Intune" })
                 }
                 # Summarize all devices of classified privileged user
                 $Devices = $Devices | Where-Object { $_.id -ne $null } | Select-Object -Unique *
@@ -199,7 +205,8 @@ function Get-EntraOpsPrivilegedEAMIntune {
         Write-Host "Correlate ScopeTagName and AssignmentId..."
         $ClassifiedScopeTagsAssignments = @()
         $ClassifiedScopeTagsAssignments = foreach ($ScopeTagsAssignment in $ScopeTagsAssignments) {
-            $DeviceClassifications = ($MatchedClassificationPawDevices | Where-Object { $_.roleScopeTagIds -contains $ScopeTagsAssignment.ScopeTagId } | Select-Object -Unique *).Classification | Select-Object -Unique *
+            $MatchedDevices = $MatchedClassificationPawDevices | Where-Object { $_.roleScopeTagIds -contains $ScopeTagsAssignment.ScopeTagId } | Select-Object -Unique *
+            $DeviceClassifications = if ($null -ne $MatchedDevices) { $MatchedDevices.Classification | Select-Object -Unique * } else { @() }
             $ScopeTagsAssignment | Add-Member -NotePropertyName Classification -NotePropertyValue $DeviceClassifications -Force
             $ScopeTagsAssignment
         }        
@@ -219,7 +226,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                 $DeviceMgmtRbacAssignment.Classification | ForEach-Object { $_ | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "AssignedDeviceObjects" -Force }
             }
             if ($Classification.count -eq "0") {
-                $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No classification found for $($DeviceMgmtRbacAssignment.RoleDefinitionId) with scope $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId)!"})
+                $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No classification found for $($DeviceMgmtRbacAssignment.RoleDefinitionId) with scope $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId)!" })
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
             }
             $DeviceMgmtRbacAssignment
@@ -261,9 +268,9 @@ function Get-EntraOpsPrivilegedEAMIntune {
         }
         # Role actions are defined for scope and role definition contains an action of the role, otherwise all role actions within role assignment scope will be applied
         if ($SampleMode -eq $True) {
-            $WarningMessages.Add([PSCustomObject]@{Type = "Stage4"; Message = "SampleMode currently not supported!"})
+            $WarningMessages.Add([PSCustomObject]@{Type = "Stage4"; Message = "SampleMode currently not supported!" })
         } else {
-             $IntuneRoleActions = $IntuneRoleDefinitionsCache["$($DeviceMgmtRbacAssignment.RoleDefinitionId)"]
+            $IntuneRoleActions = $IntuneRoleDefinitionsCache["$($DeviceMgmtRbacAssignment.RoleDefinitionId)"]
         }
 
         $MatchedClassificationByScope = @()
@@ -344,70 +351,154 @@ function Get-EntraOpsPrivilegedEAMIntune {
         -EnableParallelProcessing $EnableParallelProcessing `
         -ParallelThrottleLimit $ParallelThrottleLimit
 
-    $DeviceMgmtRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
-        if ($null -ne $_.ObjectId) {
-            $ObjectId = $_.ObjectId
-            if ($VerbosePreference -ne 'SilentlyContinue') {
-                Write-Verbose -Message "Processing classifications for $($ObjectId)..."
-            }
+    # Determine if parallel processing is viable for classification aggregation
+    $IsPowerShell7 = $PSVersionTable.PSVersion.Major -ge 7
+    $HasSufficientObjects = $UniqueObjects.Count -ge 50
+    $UseParallelForClassification = $EnableParallelProcessing -and $IsPowerShell7 -and $HasSufficientObjects
+    
+    if ($UseParallelForClassification) {
+        $SyncObjectDetailsCache = [System.Collections.Hashtable]::Synchronized($ObjectDetailsCache)
+        $SyncDeviceMgmtRbacByObject = [System.Collections.Hashtable]::Synchronized($DeviceMgmtRbacByObject)
+        
+        $ClassificationThrottleLimit = [Math]::Min($ParallelThrottleLimit * 2, 100)
+        Write-Host "Using parallel classification processing with $ClassificationThrottleLimit threads for $($UniqueObjects.Count) objects..." -ForegroundColor Yellow
+        
+        $DeviceMgmtRbacClassifiedObjects = $UniqueObjects | ForEach-Object -ThrottleLimit $ClassificationThrottleLimit -Parallel {
+            $obj = $_
+            $ObjectId = $obj.ObjectId
             
-            # Object types
-            $ObjectDetails = $ObjectDetailsCache[$ObjectId]
-            
-            # Skip if object details couldn't be retrieved
-            if ($null -eq $ObjectDetails) {
-                Write-Warning "Skipping object $ObjectId - failed to retrieve details"
-                return
-            }
+            if ($null -ne $ObjectId) {
+                $SharedDetailsCache = $using:SyncObjectDetailsCache
+                $SharedRbacByObject = $using:SyncDeviceMgmtRbacByObject
+                
+                $ObjectDetails = $SharedDetailsCache[$ObjectId]
+                
+                if ($null -eq $ObjectDetails) {
+                    Write-Verbose "Skipping object $ObjectId - failed to retrieve details"
+                    return
+                }
 
-            # RBAC Assignments
-            $DeviceMgmtRbacClassifiedAssignments = $DeviceMgmtRbacByObject[$ObjectId]
+                $DeviceMgmtRbacClassifiedAssignments = $SharedRbacByObject[$ObjectId]
 
-            # Classification - use hashtable for unique aggregation
-            $UniqueClassificationsHash = @{}
-            foreach ($Assignment in $DeviceMgmtRbacClassifiedAssignments) {
-                if ($null -ne $Assignment.Classification) {
-                    foreach ($ClassItem in $Assignment.Classification) {
-                        $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
-                        if (-not $UniqueClassificationsHash.ContainsKey($key)) {
-                            $UniqueClassificationsHash[$key] = $ClassItem
+                $UniqueClassificationsHash = @{}
+                foreach ($Assignment in $DeviceMgmtRbacClassifiedAssignments) {
+                    if ($null -ne $Assignment.Classification) {
+                        foreach ($ClassItem in $Assignment.Classification) {
+                            $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                            if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                                $UniqueClassificationsHash[$key] = $ClassItem
+                            }
                         }
                     }
                 }
-            }
-            
-            $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
-            if ($Classification.Count -eq 0) {
-                $Classification += [PSCustomObject]@{
-                    'AdminTierLevel'     = "Unclassified"
-                    'AdminTierLevelName' = "Unclassified"
-                    'Service'            = "Unclassified"
+                
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                if ($Classification.Count -eq 0) {
+                    $Classification = @([PSCustomObject]@{
+                            'AdminTierLevel'     = "Unclassified"
+                            'AdminTierLevelName' = "Unclassified"
+                            'Service'            = "Unclassified"
+                        })
+                }
+
+                [PSCustomObject]@{
+                    'ObjectId'                      = $ObjectId
+                    'ObjectType'                    = $ObjectDetails.ObjectType.ToLower()
+                    'ObjectSubType'                 = $ObjectDetails.ObjectSubType
+                    'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
+                    'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
+                    'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
+                    'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
+                    'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
+                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
+                    'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
+                    'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
+                    'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                    'RoleSystem'                    = "DeviceManagement"
+                    'Classification'                = $Classification
+                    'RoleAssignments'               = @($DeviceMgmtRbacClassifiedAssignments | Sort-Object RoleAssignmentId)
+                    'Sponsors'                      = $ObjectDetails.Sponsors
+                    'Owners'                        = $ObjectDetails.Owners
+                    'OwnedObjects'                  = $ObjectDetails.OwnedObjects
+                    'OwnedDevices'                  = $ObjectDetails.OwnedDevices
+                    'IdentityParent'                = $ObjectDetails.IdentityParent
+                    'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
+                    'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
                 }
             }
+        }
+    } else {
+        if ($EnableParallelProcessing -and $IsPowerShell7) {
+            Write-Host "Using sequential classification processing (dataset too small: $($UniqueObjects.Count) objects)" -ForegroundColor Yellow
+        } else {
+            Write-Host "Using sequential classification processing..." -ForegroundColor Yellow
+        }
+        
+        $DeviceMgmtRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
+            if ($null -ne $_.ObjectId) {
+                $ObjectId = $_.ObjectId
+                if ($VerbosePreference -ne 'SilentlyContinue') {
+                    Write-Verbose -Message "Processing classifications for $($ObjectId)..."
+                }
+            
+                # Object types
+                $ObjectDetails = $ObjectDetailsCache[$ObjectId]
+            
+                # Skip if object details couldn't be retrieved
+                if ($null -eq $ObjectDetails) {
+                    Write-Warning "Skipping object $ObjectId - failed to retrieve details"
+                    return
+                }
 
-            [PSCustomObject]@{
-                'ObjectId'                      = $ObjectId
-                'ObjectType'                    = $ObjectDetails.ObjectType.ToLower()
-                'ObjectSubType'                 = $ObjectDetails.ObjectSubType
-                'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
-                'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
-                'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
-                'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
-                'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
-                'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
-                'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
-                'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
-                'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
-                'RoleSystem'                    = "DeviceManagement"
-                'Classification'                = $Classification
-                'RoleAssignments'               = @($DeviceMgmtRbacClassifiedAssignments | Sort-Object RoleAssignmentId)
-                'Sponsors'                      = $ObjectDetails.Sponsors
-                'Owners'                        = $ObjectDetails.Owners
-                'OwnedObjects'                  = $ObjectDetails.OwnedObjects
-                'OwnedDevices'                  = $ObjectDetails.OwnedDevices
-                'IdentityParent'                = $ObjectDetails.IdentityParent                
-                'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
-                'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                # RBAC Assignments
+                $DeviceMgmtRbacClassifiedAssignments = $DeviceMgmtRbacByObject[$ObjectId]
+
+                # Classification - use hashtable for unique aggregation
+                $UniqueClassificationsHash = @{}
+                foreach ($Assignment in $DeviceMgmtRbacClassifiedAssignments) {
+                    if ($null -ne $Assignment.Classification) {
+                        foreach ($ClassItem in $Assignment.Classification) {
+                            $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                            if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                                $UniqueClassificationsHash[$key] = $ClassItem
+                            }
+                        }
+                    }
+                }
+            
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                if ($Classification.Count -eq 0) {
+                    $Classification += [PSCustomObject]@{
+                        'AdminTierLevel'     = "Unclassified"
+                        'AdminTierLevelName' = "Unclassified"
+                        'Service'            = "Unclassified"
+                    }
+                }
+
+                [PSCustomObject]@{
+                    'ObjectId'                      = $ObjectId
+                    'ObjectType'                    = $ObjectDetails.ObjectType.ToLower()
+                    'ObjectSubType'                 = $ObjectDetails.ObjectSubType
+                    'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
+                    'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
+                    'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
+                    'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
+                    'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
+                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
+                    'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
+                    'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
+                    'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                    'RoleSystem'                    = "DeviceManagement"
+                    'Classification'                = $Classification
+                    'RoleAssignments'               = @($DeviceMgmtRbacClassifiedAssignments | Sort-Object RoleAssignmentId)
+                    'Sponsors'                      = $ObjectDetails.Sponsors
+                    'Owners'                        = $ObjectDetails.Owners
+                    'OwnedObjects'                  = $ObjectDetails.OwnedObjects
+                    'OwnedDevices'                  = $ObjectDetails.OwnedDevices
+                    'IdentityParent'                = $ObjectDetails.IdentityParent                
+                    'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
+                    'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                }
             }
         }
     }

@@ -223,7 +223,10 @@ function Get-EntraOpsPrivilegedEamIdGov {
                         # Optimization: Use In-Memory Cache for Directory Roles
                         $Classification = $null
                         if ($ClassificationCache.ContainsKey("EntraIDRoles")) {
-                            $Classification = ($ClassificationCache["EntraIDRoles"] | Where-Object { $_.RoleAssignmentScopeId -eq "/" -and $_.RoleDefinitionId -eq $AssignedCatalogResource.originId } | Select-Object -First 1).Classification
+                            $MatchedRole = $ClassificationCache["EntraIDRoles"] | Where-Object { $_.RoleAssignmentScopeId -eq "/" -and $_.RoleDefinitionId -eq $AssignedCatalogResource.originId } | Select-Object -First 1
+                            if ($null -ne $MatchedRole) {
+                                $Classification = $MatchedRole.Classification
+                            }
                         }
 
                         if ($Null -eq $Classification) {
@@ -232,12 +235,15 @@ function Get-EntraOpsPrivilegedEamIdGov {
                                     Message = "No classification for $($AssignedCatalogResource.displayName) ($($AssignedCatalogResource.id)) found in EntraID! Fallback to default."
                                     Target  = $AssignedCatalogResource.displayName
                                 })
-                            $DefaultRoleClassification = ($EntraRolesDefaultClassification | Where-Object { $_.RoleId -eq $AssignedCatalogResource.originId } | Select-Object -First 1).RolePermissions | Select-Object -Unique EAMTierLevelTagValue, EAMTierLevelName, Category
-                            $Classification = $DefaultRoleClassification | foreach-object {
-                                [PSCustomObject]@{
-                                    'AdminTierLevel'     = $_.EAMTierLevelTagValue
-                                    'AdminTierLevelName' = $_.EAMTierLevelName
-                                    'Service'            = $_.Category | Select-Object -First 1
+                            $MatchedDefaultRole = $EntraRolesDefaultClassification | Where-Object { $_.RoleId -eq $AssignedCatalogResource.originId } | Select-Object -First 1
+                            if ($null -ne $MatchedDefaultRole -and $null -ne $MatchedDefaultRole.RolePermissions) {
+                                $DefaultRoleClassification = $MatchedDefaultRole.RolePermissions | Select-Object -Unique EAMTierLevelTagValue, EAMTierLevelName, Category
+                                $Classification = $DefaultRoleClassification | foreach-object {
+                                    [PSCustomObject]@{
+                                        'AdminTierLevel'     = $_.EAMTierLevelTagValue
+                                        'AdminTierLevelName' = $_.EAMTierLevelName
+                                        'Service'            = $_.Category | Select-Object -First 1
+                                    }
                                 }
                             }
                         }
@@ -471,71 +477,160 @@ function Get-EntraOpsPrivilegedEamIdGov {
     }
     Write-Progress -Activity "Resolving Object Details" -Completed
 
-    $IdGovRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
-        if ($null -ne $_.ObjectId) {
-            $ObjectId = $_.ObjectId
-            if ($VerbosePreference -ne 'SilentlyContinue') {
-                Write-Verbose -Message "Processing classifications for $($ObjectId)..."
-            }
+    # Determine if parallel processing is viable for classification aggregation
+    $IsPowerShell7 = $PSVersionTable.PSVersion.Major -ge 7
+    $HasSufficientObjects = $UniqueObjects.Count -ge 50
+    $UseParallelForClassification = $EnableParallelProcessing -and $IsPowerShell7 -and $HasSufficientObjects
+    
+    if ($UseParallelForClassification) {
+        $SyncObjectDetailsCache = [System.Collections.Hashtable]::Synchronized($ObjectDetailsCache)
+        $SyncIdGovRbacByObject = [System.Collections.Hashtable]::Synchronized($IdGovRbacByObject)
+        
+        $ClassificationThrottleLimit = [Math]::Min($ParallelThrottleLimit, 100)
+        Write-Host "Using parallel classification processing with $ClassificationThrottleLimit threads for $($UniqueObjects.Count) objects..." -ForegroundColor Yellow
+        
+        $IdGovRbacClassifiedObjects = $UniqueObjects | ForEach-Object -ThrottleLimit $ClassificationThrottleLimit -Parallel {
+            $obj = $_
+            $ObjectId = $obj.ObjectId
             
-            # Object types
-            $ObjectDetails = $ObjectDetailsCache[$ObjectId]
-            
-            # Skip if object details couldn't be retrieved
-            if ($null -eq $ObjectDetails) {
-                # Warning already added in cache population
-                return
-            }
+            if ($null -ne $ObjectId) {
+                $SharedDetailsCache = $using:SyncObjectDetailsCache
+                $SharedRbacByObject = $using:SyncIdGovRbacByObject
+                
+                $ObjectDetails = $SharedDetailsCache[$ObjectId]
+                
+                if ($null -eq $ObjectDetails) {
+                    return
+                }
 
-            # RBAC Assignments
-            $IdGovRbacClassifiedAssignments = $IdGovRbacByObject[$ObjectId]
-            
-            # Classification - use hashtable for unique aggregation
-            $UniqueClassificationsHash = @{}
-            foreach ($Assignment in $IdGovRbacClassifiedAssignments) {
-                if ($null -ne $Assignment.Classification) {
-                    foreach ($ClassItem in $Assignment.Classification) {
-                        $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
-                        if (-not $UniqueClassificationsHash.ContainsKey($key)) {
-                            $UniqueClassificationsHash[$key] = $ClassItem
+                $IdGovRbacClassifiedAssignments = $SharedRbacByObject[$ObjectId]
+                
+                $UniqueClassificationsHash = @{}
+                foreach ($Assignment in $IdGovRbacClassifiedAssignments) {
+                    if ($null -ne $Assignment.Classification) {
+                        foreach ($ClassItem in $Assignment.Classification) {
+                            $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                            if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                                $UniqueClassificationsHash[$key] = $ClassItem
+                            }
                         }
                     }
                 }
-            }
-            
-            $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
-            
-            if ($Classification.Count -eq 0) {
-                $Classification = @([PSCustomObject]@{
-                        'AdminTierLevel'     = "Unclassified"
-                        'AdminTierLevelName' = "Unclassified"
-                        'Service'            = "Unclassified"
-                    })
-            }
+                
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                
+                if ($Classification.Count -eq 0) {
+                    $Classification = @([PSCustomObject]@{
+                            'AdminTierLevel'     = "Unclassified"
+                            'AdminTierLevelName' = "Unclassified"
+                            'Service'            = "Unclassified"
+                        })
+                }
 
-            [PSCustomObject]@{
-                'ObjectId'                      = $ObjectId
-                'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
-                'ObjectSubType'                 = $ObjectDetails.ObjectSubType
-                'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
-                'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
-                'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
-                'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
-                'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
-                'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
-                'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
-                'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
-                'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
-                'RoleSystem'                    = "IdentityGovernance"
-                'Classification'                = $Classification
-                'RoleAssignments'               = @($IdGovRbacClassifiedAssignments | Sort-Object RoleAssignmentId)
-                'Sponsors'                      = $ObjectDetails.Sponsors
-                'Owners'                        = $ObjectDetails.Owners
-                'OwnedObjects'                  = $ObjectDetails.OwnedObjects
-                'OwnedDevices'                  = $ObjectDetails.OwnedDevices
-                'IdentityParent'                = $ObjectDetails.IdentityParent                
-                'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
-                'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                [PSCustomObject]@{
+                    'ObjectId'                      = $ObjectId
+                    'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
+                    'ObjectSubType'                 = $ObjectDetails.ObjectSubType
+                    'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
+                    'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
+                    'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
+                    'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
+                    'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
+                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
+                    'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
+                    'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
+                    'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                    'RoleSystem'                    = "IdentityGovernance"
+                    'Classification'                = $Classification
+                    'RoleAssignments'               = @($IdGovRbacClassifiedAssignments | Sort-Object RoleAssignmentId)
+                    'Sponsors'                      = $ObjectDetails.Sponsors
+                    'Owners'                        = $ObjectDetails.Owners
+                    'OwnedObjects'                  = $ObjectDetails.OwnedObjects
+                    'OwnedDevices'                  = $ObjectDetails.OwnedDevices
+                    'IdentityParent'                = $ObjectDetails.IdentityParent
+                    'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
+                    'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                }
+            }
+        }
+
+        if ($IdGovRbacClassifiedObjects.Count -ne $UniqueObjects.Count) {
+             $WarningMessages.Add([PSCustomObject]@{Type = "Stage-Classification-Parallel"; Message = "Parallel classification returned fewer objects than expected. Expected: $($UniqueObjects.Count), Actual: $($IdGovRbacClassifiedObjects.Count)" })
+             Write-Warning "Parallel classification returned fewer objects than expected. Expected: $($UniqueObjects.Count), Actual: $($IdGovRbacClassifiedObjects.Count)"
+        }
+    } else {
+        if ($EnableParallelProcessing -and $IsPowerShell7) {
+            Write-Host "Using sequential classification processing (dataset too small: $($UniqueObjects.Count) objects)" -ForegroundColor Yellow
+        } else {
+            Write-Host "Using sequential classification processing..." -ForegroundColor Yellow
+        }
+        
+        $IdGovRbacClassifiedObjects = $UniqueObjects | ForEach-Object {
+            if ($null -ne $_.ObjectId) {
+                $ObjectId = $_.ObjectId
+                if ($VerbosePreference -ne 'SilentlyContinue') {
+                    Write-Verbose -Message "Processing classifications for $($ObjectId)..."
+                }
+            
+                # Object types
+                $ObjectDetails = $ObjectDetailsCache[$ObjectId]
+            
+                # Skip if object details couldn't be retrieved
+                if ($null -eq $ObjectDetails) {
+                    # Warning already added in cache population
+                    return
+                }
+
+                # RBAC Assignments
+                $IdGovRbacClassifiedAssignments = $IdGovRbacByObject[$ObjectId]
+            
+                # Classification - use hashtable for unique aggregation
+                $UniqueClassificationsHash = @{}
+                foreach ($Assignment in $IdGovRbacClassifiedAssignments) {
+                    if ($null -ne $Assignment.Classification) {
+                        foreach ($ClassItem in $Assignment.Classification) {
+                            $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
+                            if (-not $UniqueClassificationsHash.ContainsKey($key)) {
+                                $UniqueClassificationsHash[$key] = $ClassItem
+                            }
+                        }
+                    }
+                }
+            
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+            
+                if ($Classification.Count -eq 0) {
+                    $Classification = @([PSCustomObject]@{
+                            'AdminTierLevel'     = "Unclassified"
+                            'AdminTierLevelName' = "Unclassified"
+                            'Service'            = "Unclassified"
+                        })
+                }
+
+                [PSCustomObject]@{
+                    'ObjectId'                      = $ObjectId
+                    'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
+                    'ObjectSubType'                 = $ObjectDetails.ObjectSubType
+                    'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
+                    'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
+                    'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
+                    'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
+                    'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
+                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
+                    'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
+                    'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
+                    'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                    'RoleSystem'                    = "IdentityGovernance"
+                    'Classification'                = $Classification
+                    'RoleAssignments'               = @($IdGovRbacClassifiedAssignments | Sort-Object RoleAssignmentId)
+                    'Sponsors'                      = $ObjectDetails.Sponsors
+                    'Owners'                        = $ObjectDetails.Owners
+                    'OwnedObjects'                  = $ObjectDetails.OwnedObjects
+                    'OwnedDevices'                  = $ObjectDetails.OwnedDevices
+                    'IdentityParent'                = $ObjectDetails.IdentityParent                
+                    'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
+                    'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                }
             }
         }
     }

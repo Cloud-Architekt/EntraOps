@@ -197,20 +197,84 @@ function Update-EntraOpsClassificationControlPlaneScope {
     #region Privileged Service Principals
     Write-Output "Identify directory role scope of service principals and application objects..."
     $PrivilegedServicePrincipals = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" }
-    if ($PrivilegedServicePrincipals.Count -gt 0) {
+    $PrivilegedApplicationObjects = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "application" }
+    
+    if ($PrivilegedServicePrincipals.Count -gt 0 -or $PrivilegedApplicationObjects.Count -gt 0) {
         # Get list of object-level role assignment scope which includes Control Plane Service Principals
         $ScopeNameServicePrincipalObject = $PrivilegedServicePrincipals | ForEach-Object { "/$($_.ObjectId)" }
 
-        # Get list of AppIds for service principals stored in ObjectUserPrincipalName (in *PrivilegedEAM results) or ObjectSignInName (in *PrivilegedEntraObject results)
-        $AppIds = @()
-        $AppIds += ($PrivilegedServicePrincipals | Where-Object { $null -ne $_.ObjectUserPrincipalName -and $_.ObjectSubType -eq "Application" }).ObjectUserPrincipalName
-        $AppIds += ($PrivilegedServicePrincipals | Where-Object { $null -ne $_.ObjectSignInName -and $_.ObjectSubType -eq "Application" }).ObjectSignInName
+        # Get current tenant ID to identify single-tenant apps
+        $CurrentTenantId = (Get-AzContext).Tenant.Id
 
-        # Get application object IDs for service principals because directory role assignments can be assigned to application objects
-        $ScopeNameApplicationObject = $AppIds | ForEach-Object {
-            $AppObject = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/v1.0/applications(appId='$($_)')?`$select=id,appId" -OutputType PSObject)
-            if ($null -ne $AppObject.Id) {
-                "/$($AppObject.id)"
+        # Initialize array for application object scopes
+        $ScopeNameApplicationObject = @()
+
+        # Process direct application objects from EntraOps
+        if ($PrivilegedApplicationObjects.Count -gt 0) {
+            Write-Verbose "Processing $($PrivilegedApplicationObjects.Count) direct application objects from EntraOps..."
+            foreach ($AppObj in $PrivilegedApplicationObjects) {
+                $ScopeNameApplicationObject += "/$($AppObj.ObjectId)"
+                Write-Verbose "Added application object: $($AppObj.ObjectId) - $($AppObj.ObjectDisplayName)"
+            }
+        }
+
+        # Filter for applications only (exclude managed identities and other types)
+        $PrivilegedApplications = $PrivilegedServicePrincipals | Where-Object { $_.ObjectSubType -eq "Application" }
+        
+        # Get unique service principal object IDs for batch lookup
+        $SpObjectIds = $PrivilegedApplications.ObjectId | Select-Object -Unique
+        
+        # Batch fetch service principal details for all at once to check appOwnerOrganizationId
+        # This is much more efficient than individual requests
+        $AppOwnershipInfo = @{}
+        if ($SpObjectIds.Count -gt 0) {
+            Write-Verbose "Fetching ownership information for $($SpObjectIds.Count) service principals..."
+            foreach ($SpId in $SpObjectIds) {
+                $Uri = "/v1.0/servicePrincipals/$($SpId)?`$select=id,appId,appOwnerOrganizationId,servicePrincipalType"
+                try {
+                    $SpDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri $Uri -OutputType PSObject
+                    if ($null -ne $SpDetails) {
+                        $AppOwnershipInfo[$SpId] = $SpDetails
+                        Write-Verbose "Fetched service principal details for: $SpId"
+                    }
+                } catch {
+                    Write-Warning "Failed to fetch service principal details for $SpId : $_"
+                }
+            }
+        }
+
+        # Get application object IDs only for single-tenant apps owned by current tenant
+        # Managed identities and multi-tenant apps are automatically excluded
+        foreach ($App in $PrivilegedApplications) {
+            $SpDetails = $AppOwnershipInfo[$App.ObjectId]
+            
+            # Only process if we have details and it's owned by current tenant (single-tenant app)
+            if ($null -ne $SpDetails -and 
+                $SpDetails.servicePrincipalType -ne "ManagedIdentity" -and 
+                $SpDetails.appOwnerOrganizationId -eq $CurrentTenantId) {
+                
+                try {
+                    $AppUri = "/v1.0/applications?`$filter=appId eq '$($SpDetails.appId)'&`$select=id,appId"
+                    $AppObjects = Invoke-EntraOpsMsGraphQuery -Method Get -Uri $AppUri -OutputType PSObject
+                    
+                    if ($null -ne $AppObjects) {
+                        # Handle both single object and collection responses
+                        $AppObjectList = if ($AppObjects -is [System.Collections.IEnumerable] -and $AppObjects -isnot [string]) { $AppObjects } else { @($AppObjects) }
+                        
+                        foreach ($AppObject in $AppObjectList) {
+                            if ($null -ne $AppObject.id) {
+                                $ScopeNameApplicationObject += "/$($AppObject.id)"
+                                Write-Verbose "Added application object for single-tenant app: $($SpDetails.appId) with ID: $($AppObject.id)"
+                            }
+                        }
+                    }
+                } catch {
+                    Write-Warning "Failed to fetch application object for appId $($SpDetails.appId) : $_"
+                }
+            } else {
+                if ($null -ne $SpDetails) {
+                    Write-Verbose "Skipping app $($SpDetails.appId) - Type: $($SpDetails.servicePrincipalType), Owner: $($SpDetails.appOwnerOrganizationId), CurrentTenant: $CurrentTenantId"
+                }
             }
         }
 

@@ -119,9 +119,19 @@ function Get-EntraOpsPrivilegedEntraObject {
     #region Calculate protection by AAD Role assignment or eligibility (available only for user and group objects)
     $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
     if ( $ObjectDetails.'@odata.type' -in @('#microsoft.graph.user', '#microsoft.graph.group') ) {
-        $AadRolesActive = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$($AadObjectId)'" -ConsistencyLevel "eventual")
+        # Check active role assignments
+
+        $AadRolesActive = @(Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$($AadObjectId)'" -ConsistencyLevel "eventual")
+        
+        # Check eligible role assignments - use API filter for direct assignments
         $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
-        $RestrictedManagementByAadRole = ($null -ne $AadRolesActive.id -or $null -ne $AadRolesEligible.id)
+        
+        # Set protection flag based on count of active or eligible roles
+        $RestrictedManagementByAadRole = ($AadRolesActive.Count -gt 0 -or $AadRolesEligible.Count -gt 0)
+        
+        if ($RestrictedManagementByAadRole) {
+            Write-Verbose "Object protected by AAD Role: Active=$($AadRolesActive.Count), Eligible=$($AadRolesEligible.Count)"
+        }
     } else {
         $RestrictedManagementByAadRole = $false
     }
