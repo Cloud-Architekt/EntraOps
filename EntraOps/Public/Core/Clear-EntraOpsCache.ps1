@@ -61,7 +61,7 @@ function Clear-EntraOpsCache {
             $CurrentTime = [DateTime]::UtcNow
             $KeysToRemove = @()
             
-            foreach ($Key in $__EntraOpsSession.GraphCache.Keys) {
+            foreach ($Key in @($__EntraOpsSession.GraphCache.Keys)) {
                 if ($Key -like $Pattern -and $__EntraOpsSession.CacheMetadata.ContainsKey($Key)) {
                     $ExpiryTime = $__EntraOpsSession.CacheMetadata[$Key].ExpiryTime
                     if ($CurrentTime -gt $ExpiryTime) {
