@@ -67,10 +67,9 @@ function Push-EntraOpsLogsIngestionAPI {
 
     Write-Verbose "Ingesting to Log Analytics Custom Log Table '$($TableName)'"
     Write-Verbose " DataCollectionRuleSubscriptionId '$($DataCollectionRuleSubscriptionId)'"
-    Write-Verbose " DataCollectionRuleResourceGroup '$($DataCollectionRuleResourceGroup)'"
+    Write-Verbose " DataCollectionRuleResourceGroup '$($DataCollectionResourceGroupName)'"
     Write-Verbose " DataCollectionRuleName: '$($DataCollectionRuleName)'"
     Write-Verbose " LogAnalyticsCustomLogTableName: '$($TableName)'"
-    Write-Verbose " ThrottleLimitMonitor: '$($ThrottleLimitMonitor)'"
 
     # Authentication
     $AccessToken = (Get-AzAccessToken -ResourceUrl "https://monitor.azure.com/" -AsSecureString).Token

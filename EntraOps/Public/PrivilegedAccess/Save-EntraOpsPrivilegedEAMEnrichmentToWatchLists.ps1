@@ -269,7 +269,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
                 $Tags.Add("EntraOps") | Out-Null
                 $Tags.Add("XSPM") | Out-Null
                 $Tags.Add("Automated Enrichment") | Out-Null
-                foreach ($Tag in $CriticalResource.Tags) {
+                foreach ($Tag in $HighValueAsset.Tags) {
                     $Tags.Add( $Tag ) | Out-Null
                 }
 

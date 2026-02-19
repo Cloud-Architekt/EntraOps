@@ -29,6 +29,9 @@
 .PARAMETER RbacSystems
     Array of RBAC systems to be processed. Default is Azure, AzureBilling, EntraID, IdentityGovernance, DeviceManagement, ResourceApps.
 
+.PARAMETER SkipUploadSaveLocal
+    Skip upload to Sentinel and save WatchList locally. Default is false.
+
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to WatchList in Microsoft Sentinel Workspace defined in parameter.
     Save-EntraOpsPrivilegedEAMWatchLists -SentinelSubscriptionId "3f72a077-c32a-423c-8503-41b93d3b0737" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
@@ -70,9 +73,14 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         [Parameter(Mandatory = $False)]
         [ValidateSet("None", "ManagedIdentityAssignedResourceId", "All", "WorkloadIdentityAttackPaths", "WorkloadIdentityInfo", "WorkloadIdentityRecommendations")]
         [object]$WatchListWorkloadIdentity = "None"
+        ,
+        [Parameter(Mandatory = $False)]
+        [boolean]$SkipUploadSaveLocal = $false        
     )
 
-    Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment
+    if ( -not $SkipUploadSaveLocal ) {
+        Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment        
+    }
     $NewPrincipalsWatchlistItems = New-Object System.Collections.ArrayList
     $NewRoleAssignmentsWatchlistItems = New-Object System.Collections.ArrayList
     foreach ($Rbac in $RbacSystems) {
@@ -90,7 +98,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     "ObjectType"                    = $Privilege.ObjectType
                     "ObjectSubType"                 = $Privilege.ObjectSubType
                     "ObjectDisplayName"             = $Privilege.ObjectDisplayName
-                    "ObjectUserPrincipalName"       = $Privilege.ObjectDisplayName
+                    "ObjectUserPrincipalName"       = $Privilege.ObjectUserPrincipalName
                     "ObjectAdminTierLevel"          = $Privilege.ObjectAdminTierLevel
                     "ObjectAdminTierLevelName"      = $Privilege.ObjectAdminTierLevelName
                     "OnPremSynchronized"            = $Privilege.OnPremSynchronized
@@ -104,6 +112,7 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     "Sponsors"                      = $Privilege.Sponsors | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "OwnedObjects"                  = $Privilege.OwnedObjects | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "OwnedDevices"                  = $Privilege.OwnedDevices | ConvertTo-Json -Depth 10 -Compress -AsArray
+                    "IdentityParent"                = $Privilege.IdentityParent
                     "AssociatedWorkAccount"         = $Privilege.AssociatedWorkAccount | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "AssociatedPawDevice"           = $Privilege.AssociatedPawDevice | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "Tags"                          = @("$($Rbac)", "Privileged Principal", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress
@@ -143,8 +152,10 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
             DefaultDuration          = "P14D"
             ReplaceExistingWatchlist = $true
         }
-        New-GkSeAzSentinelWatchlist @Parameters -Verbose
-        Remove-Item -Path $WatchListPath -Force
+        if ( -not $SkipUploadSaveLocal ) {
+            New-GkSeAzSentinelWatchlist @Parameters -Verbose
+            Remove-Item -Path $WatchListPath -Force            
+        }
     }
 
     if ( ![string]::IsNullOrEmpty($NewRoleAssignmentsWatchlistItems) ) {
@@ -162,8 +173,10 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
             DefaultDuration          = "P14D"
             ReplaceExistingWatchlist = $true
         }
-        New-GkSeAzSentinelWatchlist @Parameters -Verbose
-        Remove-Item -Path $WatchListPath -Force
+        if ( -not $SkipUploadSaveLocal ) {
+            New-GkSeAzSentinelWatchlist @Parameters -Verbose
+            Remove-Item -Path $WatchListPath -Force      
+        }
     }
 
     if ($WatchListTemplates -notcontains "None") {
@@ -175,9 +188,10 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
             RbacSystems               = $RbacSystems
 
         }
-        Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists @Parameters
+        if ( -not $SkipUploadSaveLocal ) {
+            Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists @Parameters 
+        }        
     }
-
     if ($WatchListWorkloadIdentity -notcontains "None") {
         $Parameters = @{
             SentinelSubscriptionId    = $SentinelSubscriptionId
@@ -186,6 +200,9 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
             WatchLists                = $WatchListWorkloadIdentity
 
         }
-        Save-EntraOpsWorkloadIdentityEnrichmentWatchLists @Parameters
+
+        if ( -not $SkipUploadSaveLocal ) {
+            Save-EntraOpsWorkloadIdentityEnrichmentWatchLists @Parameters
+        }                
     }
 }

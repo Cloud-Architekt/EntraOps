@@ -19,7 +19,19 @@
           "AgentCollection.ReadWrite.All",
           "AgentCollection.ReadWrite.ManagedBy",
           "AgentInstance.ReadWrite.All",
-          "AgentInstance.ReadWrite.ManagedBy"
+          "AgentInstance.ReadWrite.ManagedBy",
+          "AgentIdentity.DeleteRestore.All",
+          "AgentIdentity.EnableDisable.All",
+          "AgentIdentity.ReadWrite.All",
+          "AgentIdentityBlueprint.AddRemoveCreds.All",
+          "AgentIdentityBlueprint.DeleteRestore.All",
+          "AgentIdentityBlueprint.ReadWrite.All",
+          "AgentIdentityBlueprint.UpdateAuthProperties.All",
+          "AgentIdentityBlueprint.UpdateBranding.All",
+          "AgentIdentityBlueprintPrincipal.DeleteRestore.All",
+          "AgentIdentityBlueprintPrincipal.EnableDisable.All",
+          "AgentIdentityBlueprintPrincipal.ReadWrite.All",
+          "AgentIdUser.ReadWrite.All"
         ]
       },
       {
@@ -45,19 +57,6 @@
           "Policy.ReadWrite.PermissionGrant",
           "ServicePrincipalEndpoint.ReadWrite.All",
           "Synchronization.ReadWrite.All"
-        ]
-      },
-      {
-        "Category": "Microsoft.Graph",
-        "Service": "Agent Identity",
-        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
-        "ResourceScope": "Application",
-        "RoleAssignmentScopeName": [
-          "/"
-        ],
-        "RoleDefinitionActions": [
-          "AgentApplication.Create",
-          "AgentIdentity.Create"
         ]
       },
       {
@@ -466,6 +465,22 @@
     "EAMTierLevelTagValue": "1",
     "TierLevelDefinition": [
       {
+        "Category": "Microsoft.Graph",
+        "Service": "Agent Identity",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "AgentApplication.Create",
+          "AgentIdentity.Create.All",
+          "AgentIdentity.Create",
+          "AgentIdentityBlueprint.Create",
+          "AgentIdentityBlueprintPrincipal.Create"
+        ]
+      },
+      {
         "Category": "Microsoft.Intune",
         "Service": "Certificate Management",
         "ResourceAppId": "c161e42e-d4df-4a3d-9b42-e7a3c31f59d4",
@@ -610,6 +625,7 @@
           "MultiTenantOrganization.ReadBasic.All",
           "OrgContact.Read.All",
           "PartnerBilling.Read.All",
+          "SentimentSurvey.Export.All",
           "User-LifeCycleInfo.Read.All"
         ]
       },
@@ -1011,6 +1027,9 @@
           "AgentCard.Read.All",
           "AgentCardManifest.Read.All",
           "AgentCollection.Read.All",
+          "AgentIdentity.Read.All",
+          "AgentIdentityBlueprint.Read.All",
+          "AgentIdentityBlueprintPrincipal.Read.All",
           "AgentInstance.Read.All",
           "AdministrativeUnit.Read.All",
           "Application.Read.All",
@@ -1056,10 +1075,16 @@
         "RoleDefinitionActions": [
           "Calendars.Read.Shared",
           "Calendars.ReadBasic",
+          "ChannelMessage.Send",
           "Device.Read",
+          "Directory.AccessAsUser.All",
+          "Files.ReadWrite",
           "email",
+          "offline_access",
           "openid",
           "profile",
+          "user_impersonation",
+          "User.Read",
           "User.ReadBasic.All"
         ]
       },
@@ -1073,6 +1098,19 @@
         ],
         "RoleDefinitionActions": [
           "User.Invite.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
+        "Service": "Agent Identity",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "AgentIdUser.ReadWrite.IdentityParentedBy",
+          "AgentIdentity.CreateAsManager"
         ]
       },
       {

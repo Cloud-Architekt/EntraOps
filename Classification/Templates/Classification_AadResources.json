@@ -95,6 +95,7 @@
           "microsoft.directory/domains/federationConfiguration/create",
           "microsoft.directory/domains/federationConfiguration/delete",
           "microsoft.directory/hybridAuthenticationPolicy/allProperties/allTasks",
+          "microsoft.directory/onPasswordSubmitCustomAuthenticationExtension/allProperties/allTasks",
           "microsoft.directory/organization/strongAuthentication/allTasks",
           "microsoft.directory/passwordHashSync/allProperties/allTasks",
           "microsoft.directory/userCredentialPolicies/basic/update",
@@ -102,6 +103,20 @@
           "microsoft.directory/userCredentialPolicies/delete",
           "microsoft.directory/userCredentialPolicies/owners/update",
           "microsoft.directory/userCredentialPolicies/tenantDefault/update"
+        ]
+      },
+      {
+        "Category": "Microsoft.AzureAD",
+        "Service": "Backup and Recovery",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "microsoft.directory/backup/preview/cancel",
+          "microsoft.directory/backup/preview/create",
+          "microsoft.directory/backup/recovery/cancel",
+          "microsoft.directory/backup/recovery/create",
+          "microsoft.directory/backup/standard/read"
         ]
       },
       {
@@ -878,6 +893,7 @@
           "microsoft.teams/callQuality/standard/read",
           "microsoft.teams/devices/standard/read",
           "microsoft.teams/meetings/allProperties/allTasks",
+          "microsoft.teams/policies/externalAccessPolicy/allTasks",
           "microsoft.teams/voice/allProperties/allTasks"
         ]
       },

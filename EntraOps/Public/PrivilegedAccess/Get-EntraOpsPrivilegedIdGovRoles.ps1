@@ -36,6 +36,9 @@ function Get-EntraOpsPrivilegedIdGovRoles {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$SampleMode = $False
+        ,
+        [Parameter(Mandatory = $False)]
+        [System.Collections.Generic.List[psobject]]$WarningMessages
     )
 
     # Set Error Action
@@ -46,19 +49,34 @@ function Get-EntraOpsPrivilegedIdGovRoles {
     if ($SampleMode -eq $True) {
         Write-Warning "Not supported yet!"
     } else {
-        $ElmRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/roleDefinitions"
-        $ElmRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/roleAssignments"
+        $ElmRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/roleDefinitions?`$select=id,displayName,description"
+        $ElmRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/roleAssignments?`$select=id,principalId,roleDefinitionId,appScopeId"
     }
 
     $ElmRoleAssignmentPrincipals = ($ElmRoleAssignments | select-object principalId -Unique).principalId
+    Write-Host "Processing $($ElmRoleAssignmentPrincipals.Count) Identity Governance role principals..."
+    $PrincipalCounter = 0
     $ElmRbacAssignments = foreach ($Principal in $ElmRoleAssignmentPrincipals) {
+        $PrincipalCounter++
+        if (($PrincipalCounter % 10) -eq 0 -or $PrincipalCounter -eq $ElmRoleAssignmentPrincipals.Count) {
+            $PercentComplete = [math]::Round(($PrincipalCounter / $ElmRoleAssignmentPrincipals.Count) * 100, 0)
+            Write-Progress -Activity "Processing IdGov Role Principals" -Status "Processing principal $PrincipalCounter of $($ElmRoleAssignmentPrincipals.Count)" -PercentComplete $PercentComplete
+        }
         Write-Verbose "Get identity information from permanent member $Principal"
         try {
             $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($Principal)" -OutputType PSObject
             $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
-        }
-        catch {
-            Write-Warning "Issue to resolve directory object $Principal! $($_.Exception.Message)"
+        } catch {
+            $WarningMessage = "Issue to resolve directory object $Principal! $($_.Exception.Message)"
+            if ($null -ne $WarningMessages) {
+                $WarningMessages.Add([pscustomobject]@{
+                        Timestamp = (Get-Date)
+                        Type      = "ObjectResolutionError"
+                        ObjectId  = $Principal
+                        Message   = $WarningMessage
+                    })
+            }
+            Write-Warning $WarningMessage
         }
 
         $AllPrinicpalElmRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/entitlementManagement/RoleAssignments?$count=true&`$filter=principalId eq '$Principal'" -ConsistencyLevel "eventual"
@@ -70,11 +88,23 @@ function Get-EntraOpsPrivilegedIdGovRoles {
                     $AccessPackageDisplayName = "Directory"
                 } else {
                     $CatalogId = $($ElmPrincipalRoleAssignment.appScopeId).Replace("/AccessPackageCatalog/", "")
-                    $AccessPackageDisplayName = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageCatalogs/$($CatalogId)" -OutputType PSObject).displayName
+                    $CatalogObj = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageCatalogs/$($CatalogId)" -OutputType PSObject -WarningAction SilentlyContinue
+                    if ($null -ne $CatalogObj) {
+                        $AccessPackageDisplayName = $CatalogObj.displayName
+                    } else {
+                        $AccessPackageDisplayName = "Invalid or deleted object"
+                        if ($null -ne $WarningMessages) {
+                            $WarningMessages.Add([pscustomobject]@{
+                                    Timestamp = (Get-Date)
+                                    Type      = "CatalogResolution"
+                                    ObjectId  = $CatalogId
+                                    Message   = "Access Package Catalog $CatalogId not found (likely deleted)."
+                                })
+                        }
+                    }
                 }
-            }
-            catch {
-                $AccessPackageDisplayName = "Unknown name"
+            } catch {
+                $AccessPackageDisplayName = "Invalid or deleted object"
             }
 
             [pscustomobject]@{
@@ -109,10 +139,10 @@ function Get-EntraOpsPrivilegedIdGovRoles {
             $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId)
             foreach ($TransitiveMember in $TransitiveMembers) {
                 $Member = [pscustomobject]@{
-                    displayName           = $TransitiveMember.displayName
-                    id                    = $TransitiveMember.id
-                    '@odata.type'         = $TransitiveMember.'@odata.type'
-                    RoleAssignmentSubType = $TransitiveMember.RoleAssignmentSubType
+                    displayName            = $TransitiveMember.displayName
+                    id                     = $TransitiveMember.id
+                    '@odata.type'          = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
                     GroupObjectDisplayName = $GroupObjectDisplayName
                     GroupObjectId          = $GroupWithRbacAssignment.ObjectId
                 }
@@ -125,9 +155,9 @@ function Get-EntraOpsPrivilegedIdGovRoles {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
-            if ($RbacAssignmentByNestedGroupMembers.Count -gt "0") {
+            if ($RbacAssignmentByNestedGroupMembers.Count -gt 0) {
                 $RbacAssignmentByNestedGroupMembers | foreach-object {
-                    [pscustomobject]@{
+                    $TransitiveAssignment = [pscustomobject]@{
                         RoleAssignmentId              = $RbacAssignmentByGroup.RoleAssignmentId
                         RoleAssignmentScopeId         = $RbacAssignmentByGroup.RoleAssignmentScopeId
                         RoleAssignmentScopeName       = $RbacAssignmentByGroup.RoleAssignmentScopeName
@@ -138,18 +168,24 @@ function Get-EntraOpsPrivilegedIdGovRoles {
                         RoleDefinitionName            = $RbacAssignmentByGroup.RoleDefinitionName
                         RoleDefinitionId              = $RbacAssignmentByGroup.RoleDefinitionId
                         RoleType                      = $RbacAssignmentByGroup.RoleType
-                        RoleIsPrivileged              = $Role.isPrivileged
+                        RoleIsPrivileged              = $RbacAssignmentByGroup.RoleIsPrivileged
                         ObjectId                      = $_.Id
                         ObjectType                    = $_.'@odata.type'.Replace('#microsoft.graph.', '').toLower()
                         TransitiveByObjectId          = $RbacAssignmentByGroup.ObjectId
-                        TransitiveByObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($RbacAssignmentByGroup.ObjectId)" -OutputType PSObject).displayName
+                        TransitiveByObjectDisplayName = $_.GroupObjectDisplayName
                     }
+                    $ElmRbacTransitiveAssignments.Add($TransitiveAssignment) | Out-Null
                 }
             } else {
-                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                if ($null -ne $WarningMessages) {
+                    $WarningMessages.Add([pscustomobject]@{
+                            Timestamp = (Get-Date)
+                            Type      = "EmptyGroup"
+                            ObjectId  = $RbacAssignmentByGroup.ObjectId
+                            Message   = "Group has no members or members could not be resolved."
+                        })
+                }
             }
-
-            $ElmRbacTransitiveAssignments.Add($TransitiveMember) | Out-Null
         }
     }
     #endregion

@@ -12,10 +12,10 @@
     RootModule           = 'EntraOps.psm1'
 
     # Version number of this module.
-    ModuleVersion        = '0.5.0'
+    ModuleVersion        = '0.6.0'
 
     # Supported PSEditions
-    CompatiblePSEditions = 'Core', 'Desktop'
+    CompatiblePSEditions = 'Core'
 
     # ID used to uniquely identify this module
     GUID                 = 'd3a09a4c-65cf-4fb1-b92e-b7702b66a715'
@@ -90,7 +90,58 @@
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
     FunctionsToExport    = @(
-        '*-EntraOps*'
+        'Clear-EntraOpsCache'
+        'Connect-EntraOps'
+        'Disconnect-EntraOps'
+        'Expand-EntraOpsPrivilegedEamJsonFile'
+        'Export-EntraOpsClassificationAppRoles'
+        'Export-EntraOpsClassificationDeviceManagementRoles'
+        'Export-EntraOpsClassificationDirectoryRoles'
+        'Get-EntraOpsCacheStatistics'
+        'Get-EntraOpsClassificationControlPlaneObjects'
+        'Get-EntraOpsEntraObject'
+        'Get-EntraOpsManagedIdentityAssignments'
+        'Get-EntraOpsPrivilegedAppRoles'
+        'Get-EntraOpsPrivilegedDefenderRoles'
+        'Get-EntraOpsPrivilegedDeviceRoles'
+        'Get-EntraOpsPrivilegedEAM'
+        'Get-EntraOpsPrivilegedEAMDefender'
+        'Get-EntraOpsPrivilegedEAMEntraId'
+        'Get-EntraOpsPrivilegedEAMIdGov'
+        'Get-EntraOpsPrivilegedEAMIntune'
+        'Get-EntraOpsPrivilegedEAMResourceApps'
+        'Get-EntraOpsPrivilegedEAMResourceAppsFirstParty'
+        'Get-EntraOpsPrivilegedEntraIdRoles'
+        'Get-EntraOpsPrivilegedEntraObject'
+        'Get-EntraOpsPrivilegedIdGovRoles'
+        'Get-EntraOpsPrivilegedTransitiveGroupMember'
+        'Get-EntraOpsWorkloadIdentityAttackPaths'
+        'Get-EntraOpsWorkloadIdentityInfo'
+        'Get-EntraOpsWorkloadIdentityRecommendations'
+        'Install-EntraOpsAllRequiredModules'
+        'Install-EntraOpsRequiredModule'
+        'Invoke-EntraOpsAzGraphQuery'
+        'Invoke-EntraOpsGraphSecurityQuery'
+        'Invoke-EntraOpsMsGraphQuery'
+        'New-EntraOpsConfigFile'
+        'New-EntraOpsPrivilegedAdministrativeUnit'
+        'New-EntraOpsPrivilegedConditionalAccessGroup'
+        'New-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
+        'New-EntraOpsWorkloadIdentity'
+        'Push-EntraOpsLogsIngestionAPI'
+        'Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists'
+        'Save-EntraOpsPrivilegedEAMInsightsCustomTable'
+        'Save-EntraOpsPrivilegedEAMJson'
+        'Save-EntraOpsPrivilegedEAMWatchLists'
+        'Save-EntraOpsWorkloadIdentityEnrichmentWatchLists'
+        'Save-EntraOpsWorkloadIdentityInfoWatchList'
+        'Update-EntraOps'
+        'Update-EntraOpsClassificationControlPlaneScope'
+        'Update-EntraOpsClassificationFiles'
+        'Update-EntraOpsPrivilegedAdministrativeUnit'
+        'Update-EntraOpsPrivilegedConditionalAccessGroup'
+        'Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
+        'Update-EntraOpsRequiredWorkflowParameters'
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.

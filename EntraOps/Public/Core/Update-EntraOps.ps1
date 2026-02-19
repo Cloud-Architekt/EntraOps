@@ -33,7 +33,8 @@ function Update-EntraOps {
     $ErrorActionPreference = "Stop"
 
     if ($null -ne $PersonalAccessToken) {
-        git clone -b $Branch https://$($PersonalAccessToken):@github.com/Cloud-Architekt/EntraOps.git $TemporaryUpdateFolder
+        $CloneUrl = "https://$($PersonalAccessToken):@github.com/Cloud-Architekt/EntraOps.git"
+        git clone -b $Branch $CloneUrl $TemporaryUpdateFolder
     }
     else {
         git clone -b $Branch https://github.com/Cloud-Architekt/EntraOps.git $TemporaryUpdateFolder

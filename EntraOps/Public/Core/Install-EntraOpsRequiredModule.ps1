@@ -26,10 +26,10 @@ function Install-EntraOpsRequiredModule {
         [string] $MinimalVersion
     )
 
-    $module = Get-Module -Name $ModuleName -ListAvailable |`
-        Where-Object { $null -eq $MinimalVersion -or $MinimalVersion -ge $_.Version } `
-    | Sort-Object Version `
-    | Select-Object -Last 1
+    $module = Get-Module -Name $ModuleName -ListAvailable |
+        Where-Object { $null -eq $MinimalVersion -or [version]$_.Version -ge [version]$MinimalVersion } |
+        Sort-Object Version |
+        Select-Object -Last 1
     if ($null -ne $module) {
         Write-Output ('Module {0} (v{1}) is available.' -f $ModuleName, $module.Version)
     }

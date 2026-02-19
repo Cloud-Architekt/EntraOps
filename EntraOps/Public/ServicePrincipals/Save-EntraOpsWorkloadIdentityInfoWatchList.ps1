@@ -217,6 +217,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
             ReplaceExistingWatchlist = $true
         }
         New-GkSeAzSentinelWatchlist @Param2
+        Remove-Item -Path $WatchListPath -Force -ErrorAction SilentlyContinue
     }
     #endregion
 }

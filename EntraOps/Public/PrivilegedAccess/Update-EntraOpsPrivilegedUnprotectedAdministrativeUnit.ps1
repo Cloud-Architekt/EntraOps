@@ -49,100 +49,216 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
             $_.RestrictedManagementByRMAU -ne $True -and `
             $_.ObjectType -in $FilterObjectType }
 
-
     # Get all unique AdminTierLevels which needs to be iterated for assigning objects to Conditional Access Target Groups
     $PrivilegedEamTierLevels = Get-ChildItem -Path "$($DefaultFolderClassification)/Templates" -File -Recurse -Exclude *.Param.json | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
     $SelectedPrivilegedEamTierLevels = $PrivilegedEamTierLevels | where-object { $_.EAMTierLevelName -in $ApplyToAccessTierLevel } | select-object -unique @{Name = 'AdminTierLevel'; Expression = 'EAMTierLevelTagValue' }, @{Name = 'AdminTierLevelName'; Expression = 'EAMTierLevelName' }
     #endregion
-    
+
+    # Summary tracking
+    $SyncSummary = [System.Collections.Generic.List[psobject]]::new()
+    $TotalAdded = 0
+    $TotalRemoved = 0
+    $TotalKept = 0
+    $WarningMessages = New-Object -TypeName "System.Collections.Generic.List[psobject]"
+
+    Write-Host ""
+    Write-Host "=========================================================" -ForegroundColor Cyan
+    Write-Host " EntraOps - Unprotected Objects RMAU Sync" -ForegroundColor Cyan
+    Write-Host " RBAC Systems : $($RbacSystems -join ', ')" -ForegroundColor Cyan
+    Write-Host " Access Tiers : $($ApplyToAccessTierLevel -join ', ')" -ForegroundColor Cyan
+    Write-Host " Object Types : $($FilterObjectType -join ', ')" -ForegroundColor Cyan
+    Write-Host " Unprotected  : $(@($UnprotectedPrivilegedUser).Count) objects identified across all tiers" -ForegroundColor Cyan
+    Write-Host "=========================================================" -ForegroundColor Cyan
+    Write-Host ""
 
     #region Assign all unprotected principals in Privileged EAM to restricted AUs or remove from RMAU if no longer privileged
     foreach ($TierLevel in $SelectedPrivilegedEamTierLevels) {
 
-        # Get Administrative Unit Id for related tier level
         $AdminUnitId = $null
         $AdminUnitName = "Tier" + $TierLevel.AdminTierLevel + "-" + $TierLevel.AdminTierLevelName + ".UnprotectedObjects"
-        $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$AdminUnitName'" -DisableCache -OutputType PSObject).id
+        $AuAdded = 0
+        $AuRemoved = 0
+        $AuKept = 0
+        $AuFailed = 0
+        $AuStatus = "OK"
 
+        Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+        Write-Host " AU: $AdminUnitName" -ForegroundColor DarkCyan
+        Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+
+        $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$AdminUnitName'" -DisableCache -OutputType PSObject).id
         if ($null -eq $AdminUnitId) {
-            throw "Can not find any AU with the name $AdminUnitName! Error: $_"
+            Write-Warning "  [SKIP] Could not find AU: $AdminUnitName"
+            $WarningMessages.Add([PSCustomObject]@{ Type = "AuNotFound"; Message = "Could not find AU: $AdminUnitName" })
+            $SyncSummary.Add([PSCustomObject]@{
+                    AdminUnit     = $AdminUnitName
+                    MembersBefore = "N/A"
+                    Added         = 0
+                    Removed       = 0
+                    Kept          = 0
+                    Failed        = 0
+                    Status        = "NOT FOUND"
+                })
+            continue
         }
 
-        # Get privileged object for related tier level
+        # Get privileged objects for this tier level
         $UnprotectedPrivilegedUserOnTierLevel = ($UnprotectedPrivilegedUser | Where-Object { $_.Classification.AdminTierLevel -contains $TierLevel.AdminTierLevel -and $_.Classification.AdminTierLevelName -contains $TierLevel.AdminTierLevelName })
         $CurrentAdminUnitMembers = @()
-        $CurrentAdminUnitMembers = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits/$($AdminUnitId)/members" -OutputType PSObject -DisableCache)
+        $CurrentAdminUnitMembers = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members" -OutputType PSObject -DisableCache)
 
-        # Check if AU members already exists
+        $CurrentMemberCount = @($CurrentAdminUnitMembers.Id).Count
+        $DesiredMemberCount = @($UnprotectedPrivilegedUserOnTierLevel.ObjectId).Count
+        Write-Host "  Current members : $CurrentMemberCount | Unprotected objects for tier: $DesiredMemberCount" -ForegroundColor Gray
+
+        # Case 1: AU is empty - add all unprotected objects
         if ($null -eq $CurrentAdminUnitMembers.Id) {
-            $UnprotectedPrivilegedUserOnTierLevel | foreach-object {
+            Write-Host "  AU is empty - adding all $DesiredMemberCount unprotected objects" -ForegroundColor Yellow
+            foreach ($PrivObj in $UnprotectedPrivilegedUserOnTierLevel) {
+                try {
+                    $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($PrivObj.ObjectId)" -OutputType PSObject -DisableCache
+                    $MemberType = $AdminUnitMember.'@odata.type'.Replace('#microsoft.graph.', '')
+                    Write-Host "  [+] ADD  [$MemberType] $($AdminUnitMember.displayName)" -ForegroundColor Green
 
-                $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($_.ObjectId)" -OutputType PSObject -DisableCache
-                $AdminUnitMemberObjectType = $AdminUnitMember.'@odata.type'.Replace('#microsoft.graph.', '')
-                Write-Verbose "Adding $($AdminUnitMemberObjectType) $($AdminUnitMember.displayName) to $($AdminUnitName)"
-
-                $OdataBody = @{
-                    '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($_.ObjectId)"
-                } | ConvertTo-Json
-
-                Invoke-EntraOpsMsGraphQuery -Method "POST" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -Body $OdataBody -OutputType PSObject
-            }
-        } elseif ($null -eq $UnprotectedPrivilegedUserOnTierLevel) {
-
-            # Keep user in RMAU if no other RMAU is protecting the user or user is no longer privileged
-            $CurrentAdminUnitMembers | ForEach-Object {
-
-                $AssignmentsToAUs = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/users/$($_.id)/memberOf/Microsoft.Graph.AdministrativeUnit" -OutputType PSObject -DisableCache).value
-                $AssignmentsToOtherRMAUs = $AssignmentsToAUs | Where-Object { $_.isMemberManagementRestricted -eq $True -and $_.id -ne $AdminUnitId }
-
-                if ($null -ne $AssignmentsToOtherRMAUs -or $_.id -notin $($PrivilegedEamObjects.ObjectId)) {
-                    $CurrentAdminUnitMembers | ForEach-Object {
-                        try {
-                            $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($_.Id)" -OutputType PSObject -DisableCache
-                            Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($_.Id)/`$ref" -OutputType PSObject -DisableCache
-                        } catch {
-                            Write-Warning "Removal for $($AdminUnitMember.displayName) has been failed!"
-                        }
-                    }
-                } else {
-                    Write-Warning "Object $($AdminUnitMember.displayName) will keep in RMAU because of missing protection by regular RMAU!"
+                    $OdataBody = @{
+                        '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($PrivObj.ObjectId)"
+                    } | ConvertTo-Json
+                    Invoke-EntraOpsMsGraphQuery -Method "POST" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -Body $OdataBody -OutputType PSObject
+                    $AuAdded++
+                } catch {
+                    Write-Warning "  [!] FAIL ADD $($PrivObj.ObjectId): $_"
+                    $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "FAIL ADD $($PrivObj.ObjectId) to $AdminUnitName`: $_" })
+                    $AuFailed++
                 }
             }
+
+            # Case 2: No unprotected objects at this tier - evaluate existing members for cleanup
+        } elseif ($null -eq $UnprotectedPrivilegedUserOnTierLevel) {
+            Write-Host "  No unprotected objects at this tier - evaluating $CurrentMemberCount existing members for removal" -ForegroundColor Yellow
+
+            foreach ($CurrentMember in $CurrentAdminUnitMembers) {
+                if ($CurrentMember.'@odata.type' -eq "#microsoft.graph.user") {
+                    $AssignmentsToAUs = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/users/$($CurrentMember.id)/memberOf/Microsoft.Graph.AdministrativeUnit" -OutputType PSObject -DisableCache).value
+                } elseif ($CurrentMember.'@odata.type' -eq "#microsoft.graph.group") {
+                    $AssignmentsToAUs = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/groups/$($CurrentMember.id)/memberOf/Microsoft.Graph.AdministrativeUnit" -OutputType PSObject -DisableCache).value
+                } else {
+                    Write-Warning "  [!] Unsupported object type $($CurrentMember.'@odata.type') - skipping"
+                    $WarningMessages.Add([PSCustomObject]@{ Type = "UnsupportedObjectType"; Message = "Unsupported object type $($CurrentMember.'@odata.type') in $AdminUnitName - skipped" })
+                    continue
+                }
+
+                $AssignmentsToOtherRMAUs = $AssignmentsToAUs | Where-Object { $_.isMemberManagementRestricted -eq $True -and $_.id -ne $AdminUnitId }
+                $MemberType = $CurrentMember.'@odata.type'.Replace('#microsoft.graph.', '')
+
+                if ($null -ne $AssignmentsToOtherRMAUs -or $CurrentMember.id -notin $PrivilegedEamObjects.ObjectId) {
+                    try {
+                        $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($CurrentMember.Id)" -OutputType PSObject -DisableCache
+                        Write-Host "  [-] REM  [$MemberType] $($AdminUnitMember.displayName) (now protected by another RMAU or no longer privileged)" -ForegroundColor Yellow
+                        Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($CurrentMember.Id)/`$ref" -OutputType PSObject -DisableCache
+                        $AuRemoved++
+                    } catch {
+                        Write-Warning "  [!] FAIL REMOVE $($CurrentMember.Id): $_"
+                        $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "FAIL REMOVE $($CurrentMember.Id) from $AdminUnitName`: $_" })
+                        $AuFailed++
+                    }
+                } else {
+                    Write-Host "  [~] KEEP [$MemberType] $($CurrentMember.displayName) (no other RMAU protecting this object)" -ForegroundColor DarkYellow
+                    $AuKept++
+                }
+            }
+
+            # Case 3: Delta sync - compare desired vs current
         } else {
-            Compare-Object $UnprotectedPrivilegedUserOnTierLevel.ObjectId $CurrentAdminUnitMembers.Id | ForEach-Object {
-                if ($_.SideIndicator -eq "=>") {
+            $Diff = Compare-Object $UnprotectedPrivilegedUserOnTierLevel.ObjectId $CurrentAdminUnitMembers.Id
+            $ToRemove = @($Diff | Where-Object { $_.SideIndicator -eq "=>" })
+            $ToAdd = @($Diff | Where-Object { $_.SideIndicator -eq "<=" })
 
-                    $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/directoryObjects/$($_.InputObject)" -OutputType PSObject
+            if ($Diff.Count -eq 0) {
+                Write-Host "  No changes required - AU is already in sync" -ForegroundColor DarkGreen
+            } else {
+                Write-Host "  Delta: +$($ToAdd.Count) to add  -$($ToRemove.Count) to remove" -ForegroundColor Yellow
+            }
 
-                    Write-Verbose "Check if $($_.InputObject) is member of other RMAUs, otherwise it would be also remove from UnprotectedObjects AU"
-                    $AssignmentsToOtherRMAUs = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/directoryObjects/$($_.InputObject)/memberOf/Microsoft.DirectoryServices.AdministrativeUnit" -OutputType PSObject `
+            # Process removals - check other RMAU protection first
+            foreach ($Entry in $ToRemove) {
+                try {
+                    $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($Entry.InputObject)" -OutputType PSObject
+                    $MemberType = $AdminUnitMember.'@odata.type'.Replace('#microsoft.graph.', '')
+
+                    Write-Verbose "  Checking if $($AdminUnitMember.displayName) is protected by another RMAU before removing"
+                    $AssignmentsToOtherRMAUs = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($Entry.InputObject)/memberOf/Microsoft.Graph.AdministrativeUnit" -OutputType PSObject `
                     | Where-Object { $_.isMemberManagementRestricted -eq $True -and $_.id -ne $AdminUnitId -and $_.displayName -notlike "*.UnprotectedObjects" }
 
                     if (![string]::IsNullOrEmpty($AssignmentsToOtherRMAUs.id)) {
-                        Write-Verbose "Removing $($AdminUnitMember.displayName) from $($AdminUnitName)"
-                        try {
-                            Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($_.InputObject)/`$ref" -OutputType PSObject
-                        } catch {
-                            Write-Warning "Removal for $($AdminUnitMember.displayName) has been failed!"
-                        }
+                        Write-Host "  [-] REM  [$MemberType] $($AdminUnitMember.displayName) (now protected by another RMAU)" -ForegroundColor Yellow
+                        Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($Entry.InputObject)/`$ref" -OutputType PSObject
+                        $AuRemoved++
                     } else {
-                        Write-Warning "Object $($AdminUnitMember.displayName) will keep in RMAU because of missing protection by other protection capability or RMAU!"
+                        Write-Host "  [~] KEEP [$MemberType] $($AdminUnitMember.displayName) (no other RMAU - keeping in UnprotectedObjects)" -ForegroundColor DarkYellow
+                        $AuKept++
                     }
-                } elseif ($_.SideIndicator -eq "<=") {
-                    try {
-                        $AdminUnitMember = (Get-MgDirectoryObject -DirectoryObjectId $_.InputObject)
-                        Write-Verbose "Adding $($AdminUnitMember.displayName) to $($AdminUnitName)"
+                } catch {
+                    Write-Warning "  [!] FAIL check/remove $($Entry.InputObject): $_"
+                    $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "FAIL check/remove $($Entry.InputObject) from $AdminUnitName`: $_" })
+                    $AuFailed++
+                }
+            }
 
-                        $OdataBody = @{
-                            '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($_.InputObject)"
-                        } | ConvertTo-Json
+            # Process additions
+            foreach ($Entry in $ToAdd) {
+                try {
+                    $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($Entry.InputObject)" -OutputType PSObject -DisableCache
+                    $MemberType = $AdminUnitMember.'@odata.type'.Replace('#microsoft.graph.', '')
+                    Write-Host "  [+] ADD  [$MemberType] $($AdminUnitMember.displayName)" -ForegroundColor Green
 
-                        Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -Body $OdataBody -OutputType PSObject
-                    } catch {
-                        Write-Warning "Duplicated entry for $($AdminUnitMember.displayName)"
-                    }
+                    $OdataBody = @{
+                        '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($Entry.InputObject)"
+                    } | ConvertTo-Json
+                    Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -Body $OdataBody -OutputType PSObject
+                    $AuAdded++
+                } catch {
+                    Write-Warning "  [!] FAIL ADD $($Entry.InputObject): $_"
+                    $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "FAIL ADD $($Entry.InputObject) to $AdminUnitName`: $_" })
+                    $AuFailed++
                 }
             }
         }
+
+        if ($AuFailed -gt 0) { $AuStatus = "ERRORS" }
+        $TotalAdded += $AuAdded
+        $TotalRemoved += $AuRemoved
+        $TotalKept += $AuKept
+
+        $SyncSummary.Add([PSCustomObject]@{
+                AdminUnit     = $AdminUnitName
+                MembersBefore = $CurrentMemberCount
+                Added         = $AuAdded
+                Removed       = $AuRemoved
+                Kept          = $AuKept
+                Failed        = $AuFailed
+                Status        = $AuStatus
+            })
     }
+
+    # Final summary
+    Write-Host ""
+    Write-Host "=========================================================" -ForegroundColor Cyan
+    Write-Host " Unprotected Objects RMAU Sync - Complete" -ForegroundColor Cyan
+    Write-Host "  Total added  : $TotalAdded" -ForegroundColor Green
+    Write-Host "  Total removed: $TotalRemoved" -ForegroundColor Yellow
+    if ($TotalKept -gt 0) {
+        Write-Host "  Kept (no other RMAU): $TotalKept" -ForegroundColor DarkYellow
+    }
+    if (($SyncSummary | Where-Object { $_.Failed -gt 0 }).Count -gt 0) {
+        Write-Host "  Failures     : $(($SyncSummary | Measure-Object -Property Failed -Sum).Sum)" -ForegroundColor Red
+    }
+    Write-Host "=========================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Show-EntraOpsWarningSummary -WarningMessages $WarningMessages
+    $SyncSummary | Format-Table -AutoSize -Property AdminUnit, MembersBefore,
+    @{Name = 'Added'; Expression = { $_.Added }; Align = 'Right' },
+    @{Name = 'Removed'; Expression = { $_.Removed }; Align = 'Right' },
+    @{Name = 'Kept'; Expression = { $_.Kept }; Align = 'Right' },
+    @{Name = 'Failed'; Expression = { $_.Failed }; Align = 'Right' },
+    Status
 }

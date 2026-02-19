@@ -75,7 +75,7 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
             Write-Verbose "Create CA target group for $($RbacSystem) - $($TierLevel.AdminTierLevelName)"
 
             $Name = "$GroupPrefix" + $TierLevel.AdminTierLevelName + "." + $($RbacSystem)
-            $Group = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/v1.0/groups?`$filter=DisplayName eq '$Name'" -OutputType PSObject -DisableCache)
+            $Group = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/v1.0/groups?`$filter=DisplayName eq '$Name'" -OutputType PSObject -DisableCache)
             if (-not $Group.id) {
 
                 $GroupParams = @{
@@ -91,11 +91,11 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
                 Write-Host "Creating Conditional Access Target Group $($Name)"
                 if ($AdminUnitName) {
                     try {
-                        $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($AdminUnitName)'" -DisableCache).id
+                        $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($AdminUnitName)'" -DisableCache).id
                         $CreatedGroupObject = Invoke-MgGraphRequest -Method "POST" -Body $GroupParams -Uri "https://graph.microsoft.com/beta/administrativeUnits/$($AdminUnitId)/members/" -ErrorAction Stop
                     }
                     catch {
-                        Write-Error "Can not create Group $($GroupParams.Name)! Error: $_"
+                        Write-Error "Can not create Group $($Name)! Error: $_"
                     }
                 }
                 else {
@@ -103,14 +103,14 @@ function New-EntraOpsPrivilegedConditionalAccessGroup {
                         $CreatedGroupObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $GroupParams -Uri "/beta/groups"
                     }
                     catch {
-                        Write-Error "Can not create Group $($GroupParams.Name)! Error: $_"
+                        Write-Error "Can not create Group $($Name)! Error: $_"
                     }
                 }
 
                 # Check if Security Group has been created successfully, wait for delay and retry if not available yet
                 Try {
                     Do { Start-Sleep -Seconds 1 }
-                    Until ($Group = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/groups/$($CreatedGroupObject.id)" -DisableCache))
+                    Until ($Group = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/groups/$($CreatedGroupObject.id)" -DisableCache))
                     Write-Host "$($Group.DisplayName) has been created successfully" -f Green
                 }
                 Catch {

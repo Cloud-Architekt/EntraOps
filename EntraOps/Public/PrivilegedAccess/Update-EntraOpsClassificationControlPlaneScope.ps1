@@ -116,119 +116,284 @@ function Update-EntraOpsClassificationControlPlaneScope {
     $DirectoryLevelAssignmentScope = @("/")
     $EntraIdRoleClassification = Get-Content -Path $EntraIdClassificationParameterFile
     $PrivilegedObjects = $PrivilegedObjects | sort-object ObjectType, ObjectDisplayName | Select-Object -Unique *
-    Write-Output "Identified privileged objects:"
-    $PrivilegedObjects | ForEach-Object {
-        
-        Write-Output "$($_.ObjectType.toLower()) - $($_.ObjectId) - $($_.ObjectDisplayName)"
+
+    Write-Host ""
+    Write-Host "=========================================================" -ForegroundColor Cyan
+    Write-Host " EntraOps - Control Plane Scope Classification Update" -ForegroundColor Cyan
+    Write-Host " Source : $PrivilegedObjectClassificationSource" -ForegroundColor Cyan
+    Write-Host " Objects identified: $(@($PrivilegedObjects).Count)" -ForegroundColor Cyan
+    Write-Host "=========================================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    # Summary table: objects grouped by source and type
+    Write-Host " Identified privileged objects by source:" -ForegroundColor White
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+    $PrivilegedObjects | Group-Object -Property { if ($_.Source) { $_.Source } else { $PrivilegedObjectClassificationSource } } | ForEach-Object {
+        $Source = $_.Name
+        Write-Host "  Source: $Source ($($_.Count) objects)" -ForegroundColor DarkCyan
+        $_.Group | Sort-Object ObjectType, ObjectDisplayName | ForEach-Object {
+            $Protection = @()
+            if ($_.RestrictedManagementByRAG -eq $True) { $Protection += "RAG" }
+            if ($_.RestrictedManagementByAadRole -eq $True) { $Protection += "AadRole" }
+            if ($_.RestrictedManagementByRMAU -eq $True) { $Protection += "RMAU" }
+            $ProtectionLabel = if ($Protection.Count -gt 0) { "[Protected: $($Protection -join ', ')]" } else { "[UNPROTECTED]" }
+            $Color = if ($Protection.Count -gt 0) { "DarkGreen" } else { "Yellow" }
+            Write-Host "    [$($_.ObjectType.ToLower())] $($_.ObjectDisplayName) ($($_.ObjectId)) $ProtectionLabel" -ForegroundColor $Color
+        }
     }
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host ""
+
+    # Track scope changes for final summary
+    $ScopeSummary = [System.Collections.Generic.List[psobject]]::new()
+    $WarningMessages = New-Object -TypeName "System.Collections.Generic.List[psobject]"
     #endregion   
 
 
     #region Privileged User
-    Write-Output "Identify directory role scope of privileged users..."
-    $PrivilegedUsersWithoutProtection = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and ($_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByAadRole -eq $False -and $RestrictedManagementByRMAU -eq $False) }
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host " Privileged Users" -ForegroundColor DarkCyan
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+    $PrivilegedUsersAll = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" })
+    $PrivilegedUsersWithoutProtection = @($PrivilegedUsersAll | Where-Object { $_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByAadRole -eq $False -and $_.RestrictedManagementByRMAU -eq $False })
+
+    Write-Host "  Total users  : $($PrivilegedUsersAll.Count)" -ForegroundColor Gray
+    Write-Host "  Unprotected  : $($PrivilegedUsersWithoutProtection.Count)" -ForegroundColor $(if ($PrivilegedUsersWithoutProtection.Count -gt 0) { 'Yellow' } else { 'DarkGreen' })
 
     # Include all Administrative Units because of Privileged Authentication Admin role assignment on (RM)AU level
     $PrivilegedUserWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.AssignedAdministrativeUnits }
     $ScopeNamePrivilegedUsers = $PrivilegedUserWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
-    if ($PrivilegedUsersWithoutProtection -gt "0") {
-        Write-Warning "Control Plane user without any protection, requires to avoid directory role assignments for user management!"
-        Write-Host $PrivilegedUsersWithoutProtection
+    if ($PrivilegedUsersWithoutProtection.Count -gt 0) {
+        Write-Warning "  Control Plane users without protection - directory scope required!"
+        $WarningMessages.Add([PSCustomObject]@{ Type = "UnprotectedUsers"; Message = "$($PrivilegedUsersWithoutProtection.Count) Control Plane user(s) without protection - directory scope required" })
+        $PrivilegedUsersWithoutProtection | ForEach-Object {
+            Write-Host "    [!] $($_.ObjectDisplayName) ($($_.ObjectId))" -ForegroundColor Yellow
+        }
         $ScopeNamePrivilegedUsers += $DirectoryLevelAssignmentScope
     }
 
     if ($null -ne $ScopeNamePrivilegedUsers) {
-        $ScopeNamePrivilegedUsersJSON = $ScopeNamePrivilegedUsers | Sort-Object | ConvertTo-Json
+        $ScopeNamePrivilegedUsers = @($ScopeNamePrivilegedUsers | Sort-Object -Unique)
+        Write-Host "  Scope entries added:" -ForegroundColor Gray
+        $ScopeNamePrivilegedUsers | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGreen }
+        $ScopeNamePrivilegedUsersJSON = $ScopeNamePrivilegedUsers | ConvertTo-Json
         $ScopeNamePrivilegedUsersJSON = $ScopeNamePrivilegedUsersJSON.Replace('[', '').Replace(']', '')
         $ScopeNamePrivilegedUsersJSON = $ScopeNamePrivilegedUsersJSON -creplace '\s+', ' '
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedUsers>', $ScopeNamePrivilegedUsersJSON)
+        $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'ScopeNamePrivilegedUsers'; Entries = $ScopeNamePrivilegedUsers.Count; IncludesDirectory = ($ScopeNamePrivilegedUsers -contains '/'); Status = 'Updated' })
     } else {
-        Write-Warning "No privileged user in scope of classification because of applied protections or restricted management! No requirement to set scope of Privileged User Management."
+        Write-Warning "  No privileged users require scope - placeholder cleared."
+        $WarningMessages.Add([PSCustomObject]@{ Type = "EmptyScope"; Message = "No privileged users require scope - ScopeNamePrivilegedUsers placeholder cleared" })
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedUsers>', '')
+        $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'ScopeNamePrivilegedUsers'; Entries = 0; IncludesDirectory = $false; Status = 'Cleared' })
     }
+    Write-Host ""
     #endregion
 
     #region Privileged Devices
-    Write-Output "Identify directory role scope of privileged devices..."
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host " Privileged Devices" -ForegroundColor DarkCyan
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
     $PrivilegedUsersWithDevices = ($PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.OwnedDevices }) | Select-Object -ExpandProperty OwnedDevices | Select-Object -Unique
+    Write-Host "  Devices owned by privileged users: $(@($PrivilegedUsersWithDevices).Count)" -ForegroundColor Gray
     $PrivilegedDevicesAUs = $PrivilegedUsersWithDevices | ForEach-Object {
         @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/devices/$($_)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName, isMemberManagementRestricted)
     }
-    $PrivilegedDevicesWithoutProtection = $PrivilegedDevicesAUs | Where-Object { $_.isMemberManagementRestricted -eq $False } | Select-Object -Unique id
+    $PrivilegedDevicesWithoutProtection = @($PrivilegedDevicesAUs | Where-Object { $_.isMemberManagementRestricted -eq $False } | Select-Object -Unique id)
     $ScopeNamePrivilegedDevices = $PrivilegedDevicesAUs | Where-Object { $_.isMemberManagementRestricted -eq $True } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
 
-    if ($PrivilegedDevicesWithoutProtection -gt "0") {
-        Write-Warning "Control Plane devices without any protection, requires to avoid directory role assignments for device object management!"
-        Write-Host $PrivilegedDevicesWithoutProtection
+    Write-Host "  Unprotected  : $($PrivilegedDevicesWithoutProtection.Count)" -ForegroundColor $(if ($PrivilegedDevicesWithoutProtection.Count -gt 0) { 'Yellow' } else { 'DarkGreen' })
+    if ($PrivilegedDevicesWithoutProtection.Count -gt 0) {
+        Write-Warning "  Control Plane devices without RMAU protection - directory scope required!"
+        $WarningMessages.Add([PSCustomObject]@{ Type = "UnprotectedDevices"; Message = "$($PrivilegedDevicesWithoutProtection.Count) Control Plane device(s) without RMAU protection - directory scope required" })
+        $PrivilegedDevicesWithoutProtection | ForEach-Object {
+            Write-Host "    [!] Device $($_.id)" -ForegroundColor Yellow
+        }
         $ScopeNamePrivilegedDevices += $DirectoryLevelAssignmentScope
     }
     if ($null -ne $ScopeNamePrivilegedDevices) {
-        $ScopeNamePrivilegedDevicesJSON = $ScopeNamePrivilegedDevices | Sort-Object | ConvertTo-Json
+        $ScopeNamePrivilegedDevices = @($ScopeNamePrivilegedDevices | Sort-Object -Unique)
+        Write-Host "  Scope entries added:" -ForegroundColor Gray
+        $ScopeNamePrivilegedDevices | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGreen }
+        $ScopeNamePrivilegedDevicesJSON = $ScopeNamePrivilegedDevices | ConvertTo-Json
         $ScopeNamePrivilegedDevicesJSON = $ScopeNamePrivilegedDevicesJSON.Replace('[', '').Replace(']', '')
         $ScopeNamePrivilegedDevicesJSON = $ScopeNamePrivilegedDevicesJSON -creplace '\s+', ' '
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedDevices>', $ScopeNamePrivilegedDevicesJSON)
+        $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'ScopeNamePrivilegedDevices'; Entries = $ScopeNamePrivilegedDevices.Count; IncludesDirectory = ($ScopeNamePrivilegedDevices -contains '/'); Status = 'Updated' })
     } else {
-        Write-Warning "No privileged device in scope of classification! It seems no privileged devices exists in this tenant.  No requirement to set scope of Privileged Device Management."
+        Write-Warning "  No privileged devices found - placeholder cleared."
+        $WarningMessages.Add([PSCustomObject]@{ Type = "EmptyScope"; Message = "No privileged devices found - ScopeNamePrivilegedDevices placeholder cleared" })
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedDevices>', '')
+        $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'ScopeNamePrivilegedDevices'; Entries = 0; IncludesDirectory = $false; Status = 'Cleared' })
     }
+    Write-Host ""
     #endregion
 
     #region Privileged Groups
-    Write-Output "Identify directory role scope of privileged groups..."
-    $PrivilegedGroupsWithoutProtection = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and ($_.RestrictedManagementByRAG -eq $false -and $RestrictedManagementByRMAU -eq $False) }
-    $PrivilegedGroupWithRMAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "group" -and $_.RestrictedManagementByRMAU -eq $True }
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host " Privileged Groups" -ForegroundColor DarkCyan
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+    $PrivilegedGroupsAll = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "group" })
+    $PrivilegedGroupsWithoutProtection = @($PrivilegedGroupsAll | Where-Object { $_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByRMAU -eq $False })
+    $PrivilegedGroupWithRMAU = @($PrivilegedGroupsAll | Where-Object { $_.RestrictedManagementByRMAU -eq $True })
+
+    Write-Host "  Total groups : $($PrivilegedGroupsAll.Count)" -ForegroundColor Gray
+    Write-Host "  Protected(RMAU): $($PrivilegedGroupWithRMAU.Count)" -ForegroundColor DarkGreen
+    Write-Host "  Unprotected  : $($PrivilegedGroupsWithoutProtection.Count)" -ForegroundColor $(if ($PrivilegedGroupsWithoutProtection.Count -gt 0) { 'Yellow' } else { 'DarkGreen' })
+
     $ScopeNamePrivilegedGroups = $PrivilegedGroupWithRMAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
-    if ($PrivilegedGroupsWithoutProtection -eq "0") {
-        Write-Warning "Control Plane group without any protection, requires to avoid directory role assignments for group management!"
+    if ($PrivilegedGroupsWithoutProtection.Count -gt 0) {
+        Write-Warning "  Control Plane groups without RMAU protection - directory scope required!"
+        $WarningMessages.Add([PSCustomObject]@{ Type = "UnprotectedGroups"; Message = "$($PrivilegedGroupsWithoutProtection.Count) Control Plane group(s) without RMAU protection - directory scope required" })
+        $PrivilegedGroupsWithoutProtection | ForEach-Object {
+            Write-Host "    [!] $($_.ObjectDisplayName) ($($_.ObjectId))" -ForegroundColor Yellow
+        }
         $ScopeNamePrivilegedGroups += $DirectoryLevelAssignmentScope
     }
     if ($null -ne $ScopeNamePrivilegedGroups) {
-        $ScopeNamePrivilegedGroupsJSON = $ScopeNamePrivilegedGroups | Sort-Object | ConvertTo-Json
+        $ScopeNamePrivilegedGroups = @($ScopeNamePrivilegedGroups | Sort-Object -Unique)
+        Write-Host "  Scope entries added:" -ForegroundColor Gray
+        $ScopeNamePrivilegedGroups | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGreen }
+        $ScopeNamePrivilegedGroupsJSON = $ScopeNamePrivilegedGroups | ConvertTo-Json
         $ScopeNamePrivilegedGroupsJSON = $ScopeNamePrivilegedGroupsJSON.Replace('[', '').Replace(']', '')
         $ScopeNamePrivilegedGroupsJSON = $ScopeNamePrivilegedGroupsJSON -creplace '\s+', ' '
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedGroups>', $ScopeNamePrivilegedGroupsJSON)
+        $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'ScopeNamePrivilegedGroups'; Entries = $ScopeNamePrivilegedGroups.Count; IncludesDirectory = ($ScopeNamePrivilegedGroups -contains '/'); Status = 'Updated' })
     } else {
-        Write-Warning "No privileged group in scope of classification because of applied protections or restricted management! No requirement to set scope of Privileged Group Management."
+        Write-Warning "  No privileged groups require scope - placeholder cleared."
+        $WarningMessages.Add([PSCustomObject]@{ Type = "EmptyScope"; Message = "No privileged groups require scope - ScopeNamePrivilegedGroups placeholder cleared" })
         $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedGroups>', '')
+        $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'ScopeNamePrivilegedGroups'; Entries = 0; IncludesDirectory = $false; Status = 'Cleared' })
     }
-
+    Write-Host ""
     #endregion
 
     #region Privileged Service Principals
-    Write-Output "Identify directory role scope of service principals and application objects..."
-    $PrivilegedServicePrincipals = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" }
-    if ($PrivilegedServicePrincipals.Count -gt "0") {
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host " Privileged Service Principals & Applications" -ForegroundColor DarkCyan
+    Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
+    $PrivilegedServicePrincipals = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" })
+    $PrivilegedApplicationObjects = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "application" })
+    Write-Host "  Service Principals : $($PrivilegedServicePrincipals.Count)" -ForegroundColor Gray
+    Write-Host "  Application objects: $($PrivilegedApplicationObjects.Count)" -ForegroundColor Gray
+    
+    if ($PrivilegedServicePrincipals.Count -gt 0 -or $PrivilegedApplicationObjects.Count -gt 0) {
         # Get list of object-level role assignment scope which includes Control Plane Service Principals
         $ScopeNameServicePrincipalObject = $PrivilegedServicePrincipals | ForEach-Object { "/$($_.ObjectId)" }
 
-        # Get list of AppIds for service principals stored in ObjectUserPrincipalName (in *PrivilegedEAM results) or ObjectSignInName (in *PrivilegedEntraObject results)
-        $AppIds = @()
-        $AppIds += ($PrivilegedServicePrincipals | Where-Object { $null -ne $_.ObjectUserPrincipalName -and $_.ObjectSubType -eq "Application" }).ObjectUserPrincipalName
-        $AppIds += ($PrivilegedServicePrincipals | Where-Object { $null -ne $_.ObjectSignInName -and $_.ObjectSubType -eq "Application" }).ObjectSignInName
+        # Get current tenant ID to identify single-tenant apps
+        $CurrentTenantId = (Get-AzContext).Tenant.Id
 
-        # Get application object IDs for service principals because directory role assignments can be assigned to application objects
-        $ScopeNameApplicationObject = $AppIds | ForEach-Object {
-            $AppObject = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/v1.0/applications(appId='$($_)')?`$select=id,appId" -OutputType PSObject)
-            if ($null -ne $AppObject.Id) {
-                "/$($AppObject.id)"
+        # Initialize array for application object scopes
+        $ScopeNameApplicationObject = @()
+
+        # Process direct application objects from EntraOps
+        if ($PrivilegedApplicationObjects.Count -gt 0) {
+            Write-Host "  Processing $($PrivilegedApplicationObjects.Count) direct application objects from EntraOps..." -ForegroundColor Gray
+            foreach ($AppObj in $PrivilegedApplicationObjects) {
+                $ScopeNameApplicationObject += "/$($AppObj.ObjectId)"
+                Write-Host "  [+] Direct app object: $($AppObj.ObjectDisplayName) -> /$($AppObj.ObjectId)" -ForegroundColor DarkGreen
             }
         }
 
-        # Always add also directory level assignment scope becuase of missing protection of service principal by RAG, AAD Role or RMAU assignment
-        $ScopeNamePrivilegedServicePrincipals = $ScopeNameServicePrincipalObject + $ScopeNameApplicationObject + $DirectoryLevelAssignmentScope
+        # Filter for applications only (exclude managed identities and other types)
+        $PrivilegedApplications = $PrivilegedServicePrincipals | Where-Object { $_.ObjectSubType -eq "Application" }
+        
+        # Get unique service principal object IDs for batch lookup
+        $SpObjectIds = $PrivilegedApplications.ObjectId | Select-Object -Unique
+        
+        # Batch fetch service principal details for all at once to check appOwnerOrganizationId
+        # This is much more efficient than individual requests
+        $AppOwnershipInfo = @{}
+        if ($SpObjectIds.Count -gt 0) {
+            Write-Verbose "Fetching ownership information for $($SpObjectIds.Count) service principals..."
+            foreach ($SpId in $SpObjectIds) {
+                $Uri = "/v1.0/servicePrincipals/$($SpId)?`$select=id,appId,appOwnerOrganizationId,servicePrincipalType"
+                try {
+                    $SpDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri $Uri -OutputType PSObject
+                    if ($null -ne $SpDetails) {
+                        $AppOwnershipInfo[$SpId] = $SpDetails
+                        Write-Verbose "Fetched service principal details for: $SpId"
+                    }
+                } catch {
+                    Write-Warning "Failed to fetch service principal details for $SpId : $_"
+                }
+            }
+        }
+
+        # Get application object IDs only for single-tenant apps owned by current tenant
+        # Managed identities and multi-tenant apps are automatically excluded
+        foreach ($App in $PrivilegedApplications) {
+            $SpDetails = $AppOwnershipInfo[$App.ObjectId]
+            
+            # Only process if we have details and it's owned by current tenant (single-tenant app)
+            if ($null -ne $SpDetails -and 
+                $SpDetails.servicePrincipalType -ne "ManagedIdentity" -and 
+                $SpDetails.appOwnerOrganizationId -eq $CurrentTenantId) {
+                
+                try {
+                    $AppUri = "/v1.0/applications?`$filter=appId eq '$($SpDetails.appId)'&`$select=id,appId"
+                    $AppObjects = Invoke-EntraOpsMsGraphQuery -Method Get -Uri $AppUri -OutputType PSObject
+                    
+                    if ($null -ne $AppObjects) {
+                        # Handle both single object and collection responses
+                        $AppObjectList = if ($AppObjects -is [System.Collections.IEnumerable] -and $AppObjects -isnot [string]) { $AppObjects } else { @($AppObjects) }
+                        
+                        foreach ($AppObject in $AppObjectList) {
+                            if ($null -ne $AppObject.id) {
+                                $ScopeNameApplicationObject += "/$($AppObject.id)"
+                                Write-Host "  [+] App object resolved: $($App.ObjectDisplayName) ($($SpDetails.appId)) -> /$($AppObject.id)" -ForegroundColor DarkGreen
+                            }
+                        }
+                    }
+                } catch {
+                    Write-Warning "  [!] Failed to fetch application object for appId $($SpDetails.appId): $_"
+                    $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "Failed to fetch application object for appId $($SpDetails.appId): $_" })
+                }
+            } else {
+                if ($null -ne $SpDetails) {
+                    Write-Host "  [~] Skipped: $($App.ObjectDisplayName) - Type: $($SpDetails.servicePrincipalType), Owner: $(if ($SpDetails.appOwnerOrganizationId -ne $CurrentTenantId) { 'External tenant' } else { $SpDetails.appOwnerOrganizationId })" -ForegroundColor DarkGray
+                }
+            }
+        }
+
+        $PrivilegedServicePrincipalWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" -and $null -ne $_.AssignedAdministrativeUnits.id }
+        $PrivilegedServicePrincipalWithAU = $PrivilegedServicePrincipalWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+
+        # Always add also directory level assignment scope because of missing protection of service principal by RAG, AAD Role or RMAU assignment
+        $ScopeNamePrivilegedServicePrincipals = $ScopeNameServicePrincipalObject + $ScopeNameApplicationObject + $DirectoryLevelAssignmentScope + $PrivilegedServicePrincipalWithAU
+
+        Write-Host "  Scope entries added:" -ForegroundColor Gray
+        $ScopeNamePrivilegedServicePrincipals | Sort-Object -Unique | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGreen }
     } else {
-        Write-Warning "No privileged applications found! It's still recommended to avoid (Cloud) Application on directory scope..."
-        $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedGroups>', '"/"')
+        Write-Warning "  No privileged applications found - defaulting to directory scope '/'"
+        $WarningMessages.Add([PSCustomObject]@{ Type = "EmptyScope"; Message = "No privileged applications found - ScopeNamePrivilegedServicePrincipals defaulting to directory scope '/'" })
+        $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedServicePrincipals>', '"/"')
+        $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'ScopeNamePrivilegedServicePrincipals'; Entries = 1; IncludesDirectory = $true; Status = 'Default(/)' })
     }
 
     if ($null -ne $ScopeNamePrivilegedServicePrincipals) {
-        $ScopeNamePrivilegedServicePrincipalsJSON = $ScopeNamePrivilegedServicePrincipals | Sort-Object | Select-Object -Unique | ConvertTo-Json
+        $ScopeNamePrivilegedServicePrincipals = @($ScopeNamePrivilegedServicePrincipals | Sort-Object -Unique)
+        $ScopeNamePrivilegedServicePrincipalsJSON = $ScopeNamePrivilegedServicePrincipals | ConvertTo-Json
         $ScopeNamePrivilegedServicePrincipalsJSON = $ScopeNamePrivilegedServicePrincipalsJSON.Replace('[', '').Replace(']', '')
         $ScopeNamePrivilegedServicePrincipalsJSON = $ScopeNamePrivilegedServicePrincipalsJSON -creplace '\s+', ' '
+        $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedServicePrincipals>', $ScopeNamePrivilegedServicePrincipalsJSON)
+        $ScopeSummary.Add([PSCustomObject]@{ Placeholder = 'ScopeNamePrivilegedServicePrincipals'; Entries = $ScopeNamePrivilegedServicePrincipals.Count; IncludesDirectory = ($ScopeNamePrivilegedServicePrincipals -contains '/'); Status = 'Updated' })
     }
-    $EntraIdRoleClassification = $EntraIdRoleClassification.replace('<ScopeNamePrivilegedServicePrincipals>', $ScopeNamePrivilegedServicePrincipalsJSON)
-
+    Write-Host ""
     #endregion
 
     $EntraIdRoleClassification = $EntraIdRoleClassification | ConvertFrom-Json -Depth 10 | ConvertTo-Json -Depth 10 | Out-File -FilePath $EntraIdCustomizedClassificationFile -Force
+
+    # Final summary
+    Write-Host "=========================================================" -ForegroundColor Cyan
+    Write-Host " Classification Update Complete" -ForegroundColor Cyan
+    Write-Host " Output file: $EntraIdCustomizedClassificationFile" -ForegroundColor Cyan
+    Write-Host "=========================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Show-EntraOpsWarningSummary -WarningMessages $WarningMessages
+    $ScopeSummary | Format-Table -AutoSize -Property Placeholder,
+    @{Name = 'ScopeEntries'; Expression = { $_.Entries }; Align = 'Right' },
+    @{Name = 'Dir(/)'; Expression = { if ($_.IncludesDirectory) { 'YES' } else { 'no' } }; Align = 'Center' },
+    Status
 }

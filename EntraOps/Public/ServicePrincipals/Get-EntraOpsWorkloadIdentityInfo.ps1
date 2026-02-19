@@ -17,7 +17,7 @@ function Get-EntraOpsWorkloadIdentityInfo {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $false)]
-        [System.String]$CustomSecurityServicePrincipalAttribute = "privilegedWorkloadIdentitiy"
+        [System.String]$CustomSecurityServicePrincipalAttribute = $EntraOpsConfig.CustomSecurityAttributes.PrivilegedServicePrincipalAttribute
     )
 
     # Global Variables
@@ -53,8 +53,7 @@ function Get-EntraOpsWorkloadIdentityInfo {
     try {
         $ProgressPreference = 'SilentlyContinue'
         $FirstPartyApps = Invoke-WebRequest -UseBasicParsing -Method GET -Uri "https://raw.githubusercontent.com/merill/microsoft-info/main/_info/MicrosoftApps.json" | ConvertFrom-Json
-    }
-    catch {
+    } catch {
         Write-Warning "Issue to query list of first party apps from GitHub - $($_.Exception)"
     }
 
@@ -77,23 +76,19 @@ function Get-EntraOpsWorkloadIdentityInfo {
                     TenantName = $KnownTenant.DefaultDomain
                     TenantId   = $KnownTenant.TenantId
                 }
-            }
-            elseif ($AppTenantId -eq "f8cdef31-a31e-4b4a-93e4-5f571e91255a") {
+            } elseif ($AppTenantId -eq "f8cdef31-a31e-4b4a-93e4-5f571e91255a") {
                 $Tenant = [PSCustomObject]@{
                     TenantName = "Microsoft"
                     TenantId   = $($AppTenantId)
                 }
-            }
-            elseif ($AppTenantId -eq "72f988bf-86f1-41af-91ab-2d7cd011db47") {
+            } elseif ($AppTenantId -eq "72f988bf-86f1-41af-91ab-2d7cd011db47") {
                 $Tenant = [PSCustomObject]@{
                     TenantName = "Microsoft"
                     TenantId   = $($AppTenantId)
                 }
-            }
-            elseif ($null -eq $AppTenantId) {
+            } elseif ($null -eq $AppTenantId) {
                 $Tenant = $null
-            }
-            else {
+            } else {
                 $Tenant = [PSCustomObject]@{
                     TenantName = "Unknown"
                     TenantId   = ($AppTenantId)
@@ -107,14 +102,13 @@ function Get-EntraOpsWorkloadIdentityInfo {
             Write-Verbose "Collecting data for $($ServicePrincipal.displayName)"
 
             # Custom Security Attributes
-            $ObjectCustomSec = (Invoke-MgGraphRequest -Method Get -Uri ("https://graph.microsoft.com/beta/servicePrincipals/$($ServicePrincipal.Id)" + '?$select=customSecurityAttributes') -OutputType PSObject).customSecurityAttributes.$($CustomSecurityServicePrincipalAttribute)
+            $ObjectCustomSec = (Invoke-MgGraphRequest -Method Get -Uri ("https://graph.microsoft.com/beta/servicePrincipals/$($ServicePrincipal.Id)" + '?$select=customSecurityAttributes') -OutputType PSObject).customSecurityAttributes.$($using:CustomSecurityServicePrincipalAttribute)
             if ($Null -eq $ObjectCustomSec) {
                 $adminTier = "Unclassified"
                 $adminTierLevelName = "Unclassified"
                 $service = "Unclassified"
                 $associatedWorkload = ""
-            }
-            else {
+            } else {
                 $adminTier = $ObjectCustomSec.adminTier
                 $adminTierLevelName = $ObjectCustomSec.adminTierLevelName
                 $AssociatedService = @()
@@ -129,16 +123,14 @@ function Get-EntraOpsWorkloadIdentityInfo {
                     TenantId   = $Null
                     TenantName = $Null
                 }
-            }
-            else {
+            } else {
                 $AppOwnerTenant = Get-AADTenantInformation -AppTenantId $ServicePrincipal.AppOwnerOrganizationId
             }           
 
             Write-Verbose "Query Application of ServicePrincipal `"$($ServicePrincipal.displayName)`""
             try {
                 $Application = $using:Applications | Where-Object appId -eq $ServicePrincipal.AppId
-            }
-            catch {
+            } catch {
                 Write-Verbose "Can not find app registration for $($ServicePrincipal.DisplayName)"
             }
 
@@ -157,8 +149,7 @@ function Get-EntraOpsWorkloadIdentityInfo {
                     }
                 }
                 $AssignedAppRoles = $SPRoleAssignments | ConvertTo-Json -Compress -AsArray
-            }
-            catch {
+            } catch {
                 Write-Error -Message $_.Exception
                 throw $_.Exception
             }
@@ -171,8 +162,7 @@ function Get-EntraOpsWorkloadIdentityInfo {
                     $ServicePrincipalOwnerships.Add($SpOwner.id) | Out-Null
                 }
                 $ServicePrincipalOwnerships = $ServicePrincipalOwnerships | ConvertTo-Json -Compress -AsArray
-            }
-            catch {
+            } catch {
                 Write-Error -Message $_.Exception
                 throw $_.Exception
             }
@@ -186,8 +176,7 @@ function Get-EntraOpsWorkloadIdentityInfo {
                         $AppOwnerships.Add($AppOwner.id) | Out-Null
                     }
                     $AppOwnerships = $AppOwnerships | ConvertTo-Json -Compress -AsArray
-                }
-                catch {
+                } catch {
                     Write-Error -Message $_.Exception
                     throw $_.Exception
                 }
@@ -201,8 +190,7 @@ function Get-EntraOpsWorkloadIdentityInfo {
                     $GroupMemberships.Add($GroupMembership) | Out-Null
                 }
                 $GroupMemberships = $GroupMemberships | ConvertTo-Json -Compress -AsArray
-            }
-            catch {
+            } catch {
                 Write-Error -Message $_.Exception
                 throw $_.Exception
             }
@@ -227,16 +215,14 @@ function Get-EntraOpsWorkloadIdentityInfo {
                     }
                 }
                 $AssignedRoles = $TransitiveRoleAssignments | ConvertTo-Json -Compress -AsArray
-            }
-            catch {
+            } catch {
                 Write-Error -Message $_.Exception
                 throw $_.Exception
             }
 
-            if ( $ServicePrincipal.AppId -in $FirstPartyApps.AppId ) {
+            if ( $ServicePrincipal.AppId -in $($using:FirstPartyApps).AppId ) {
                 $IsFirstPartyApp = $true
-            }
-            else {
+            } else {
                 $IsFirstPartyApp = $false
             }
 
@@ -269,8 +255,7 @@ function Get-EntraOpsWorkloadIdentityInfo {
                 }
                 ($using:NewWatchlistItems).Add( $CurrentItem ) | Out-Null
             }
-        }
-        catch {
+        } catch {
             Write-Warning "Could not add $($ServicePrincipal.displayName) - Error $($_.Exception)"
             Continue
         }

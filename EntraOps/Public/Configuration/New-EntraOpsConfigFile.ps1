@@ -53,7 +53,7 @@ function New-EntraOpsConfigFile {
         [string]$DevOpsPlatform = "GitHub",
 
         [Parameter(Mandatory = $false)]
-        [ValidateScript({ Test-Path $_ })]
+        [ValidateScript({ Test-Path (Split-Path $_ -Parent) })]
         [string]$ConfigFilePath = "$EntraOpsBasefolder/EntraOpsConfig.json",
 
         [Parameter(Mandatory = $false)]
@@ -184,15 +184,21 @@ function New-EntraOpsConfigFile {
             ApplyRmauAssignmentsForUnprotectedObjects = $ApplyRmauAssignmentsForUnprotectedObjects
             ApplyToAccessTierLevel                    = ("ControlPlane", "ManagementPlane")
             FilterObjectType                          = ("User", "Group")
-            RbacSystems                               = ("EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement")
+            RbacSystems                               = ("EntraID", "IdentityGovernance", "DeviceManagement")
         }
+        CustomSecurityAttributes                      = [ordered]@{
+            PrivilegedUserAttribute             = "privilegedUser"
+            PrivilegedUserPawAttribute          = "associatedSecureAdminWorkstation"
+            PrivilegedServicePrincipalAttribute = "privilegedWorkloadIdentitiy"            
+            UserWorkAccountAttribute            = "associatedWorkAccount"
+        }        
     }
     #endregion
 
     #region Write configuration file to disk
     try {
         Write-Output "Writing configuration file to $($ConfigFilePath)..."
-        $EnvConfigSchema | ConvertTo-Json | Out-File -Path $($ConfigFilePath)
+        $EnvConfigSchema | ConvertTo-Json -Depth 10 | Out-File -Path $($ConfigFilePath)
     } catch {
         Write-Error "Failed to write configuration file to $($ConfigFilePath). Error: $_"
     }

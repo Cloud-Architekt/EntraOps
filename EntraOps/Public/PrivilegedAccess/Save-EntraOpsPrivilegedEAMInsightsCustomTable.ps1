@@ -83,11 +83,17 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
 
             if ($EamFiles.Count -gt 0) {
                 Write-Host "Upload classification data for object type: $($ObjectType)"
+                $TotalBatches = [Math]::Ceiling($EamFiles.Count / 50)
             
                 # Loop through files in batches of 50 to avoid errors hitting the 1Mb file limit for DCRs
                 for ($i = 0; $i -lt $EamFiles.Count; $i += 50) {
-                    # Select the current batch of 50 files
-                    $Batch = $EamFiles[$i..([math]::Min($i + 49, $EamFiles.Count - 1))]
+                    $CurrentBatch = [Math]::Floor($i / 50) + 1
+                    $PercentComplete = [math]::Round(($CurrentBatch / $TotalBatches) * 100, 0)
+                    Write-Progress -Activity "Uploading to Custom Table" -Status "Processing batch $CurrentBatch of $TotalBatches for $ObjectType ($PercentComplete%)" -PercentComplete $PercentComplete
+                    
+                    # Select the current batch of 50 files (array slicing is inclusive, so i+49 gives 50 items)
+                    $EndIndex = [Math]::Min($i + 49, $EamFiles.Count - 1)
+                    $Batch = $EamFiles[$i..$EndIndex]
                 
                     # Process the batch
                     $EamSummary = @()
@@ -107,7 +113,7 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
                         Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId                
                     }
                     
-                    Write-Host "Processed batch of $($EamSummary.Count) files starting at index $i."
+                    Write-Host "Processed batch ${CurrentBatch}/${TotalBatches}: $($EamSummary.Count) files (starting at index $i)"
                 }
             }
         }

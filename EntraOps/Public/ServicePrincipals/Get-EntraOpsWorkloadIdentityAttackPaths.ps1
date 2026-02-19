@@ -10,11 +10,11 @@
     Get-EntraOpsManagedIdentityAssignments
 #>
 function Get-EntraOpsWorkloadIdentityAttackPaths {
-
-    [Parameter(Mandatory = $false)]
-    [ValidateSet("PSCustomObject", "WatchList")]
-    [string]$OutputType = "PSCustomObject"
-    ,    
+    param (
+        [Parameter(Mandatory = $false)]
+        [ValidateSet("PSCustomObject", "WatchList")]
+        [string]$OutputType = "PSCustomObject"
+    )
 
     $Query = 'securityresources
     | where type == "microsoft.security/attackpaths"
@@ -32,8 +32,7 @@ function Get-EntraOpsWorkloadIdentityAttackPaths {
         if ($OutputType -eq "WatchList") {
             $AttackPath.MitreTtp = $AttackPath.MitreTtp | ConvertFrom-Json -Depth 10 | ConvertTo-Json -Compress
             $AttackPath.Target = $AttackPath.Target | ConvertFrom-Json -Depth 10 | ConvertTo-Json -Compress
-        }
-        else {
+        } else {
             $AttackPath.MitreTtp = $AttackPath.MitreTtp | ConvertFrom-Json -Depth 10
             $AttackPath.Target = $AttackPath.Target | ConvertFrom-Json -Depth 10
         }

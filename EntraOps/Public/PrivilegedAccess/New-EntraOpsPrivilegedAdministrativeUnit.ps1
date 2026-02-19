@@ -49,7 +49,6 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
         } else {
             $ClassificationTemplateSubFolder = $RbacSystem
         }
-
         $ClassificationTemplates = "$DefaultFolderClassification/Templates/Classification_$($ClassificationTemplateSubFolder).json"
 
         $PrivilegedEamClassificationFiles = @()
@@ -60,7 +59,7 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
 
             #region Verify existing or create new (Restricted Management) Administrative Units
             $Name = "Tier" + $TierLevel.EAMTierLevelTagValue + "-" + $TierLevel.EAMTierLevelName + "." + $RbacSystem
-            $AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($Name)'" -OutputType PSObject -DisableCache).displayName
+            $AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($Name)'" -OutputType PSObject -DisableCache).displayName
             if (-not $AdministrativeUnit) {
                 Write-Host "Creating Administrative Unit $($Name)"
 
@@ -70,7 +69,10 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
                 }
 
                 # Create Administrative Unit (AU) or Restricted Management AU for related Tier level
-                if ($RestrictedAUMode -eq "All" -or ($RestrictedAUMode -eq "Selected" -and ($TierLevel.EAMTierLevelTagValue -ne "0") -and ($RbacSystem -ne "EntraID") -and ($RbacSystem -ne "IdentityGovernance"))) {
+                if ($RestrictedAUMode -eq "All" `
+                        -or ($RestrictedAUMode -eq "Selected" -and ($TierLevel.EAMTierLevelTagValue -ne "0") -and ($RbacSystem -ne "EntraID") -and ($RbacSystem -ne "IdentityGovernance") -and ($RBACSystem -ne "ResourceApps")) `
+                        -or ($RestrictedAUMode -eq "Selected" -and ($RbacSystem -eq "ResourceApps" -and ($TierLevel.EAMTierLevelTagValue -ne "1"))) `
+                ) {
                     $AuParams.IsMemberManagementRestricted = $true
                     $body = $AuParams | ConvertTo-Json -Depth 10
                     try {
@@ -91,7 +93,7 @@ function New-EntraOpsPrivilegedAdministrativeUnit {
                 # Check if AU has been created successfully, wait for delay and retry if not available yet
                 Try {
                     Do { Start-Sleep -Seconds 1 }
-                    Until ($AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits/$($CreatedAuObject.id)" -DisableCache))
+                    Until ($AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($CreatedAuObject.id)" -DisableCache))
                     Write-Host "$($AdministrativeUnit.displayName) has been created successfully" -f Green
                 } Catch {
                     Write-Warning "$($AuParams.DisplayName) not available yet"
