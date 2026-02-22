@@ -22,14 +22,14 @@
     - [Azure Resource Graph](#azure-resource-graph)
     - [Microsoft Security Exposure Management](#microsoft-security-exposure-management)
     - [Adjusted Control Plane Scope by using Restricted Management and Role Assignments](#adjusted-control-plane-scope-by-using-restricted-management-and-role-assignments)
-  - [Why were this classification chosen for the role?](#why-were-this-classification-chosen-for-the-role)
+  - [Why was this classification chosen for the role?](#why-was-this-classification-chosen-for-the-role)
   - [Update EntraOps PowerShell Module and CI/CD (GitHub Actions)](#update-entraops-powershell-module-and-cicd-github-actions)
   - [Changelog](#changelog)
   - [Disclaimer and License](#disclaimer-and-license)
 
 ## Introduction
 
-EntraOps is a personal research project to show capabilities for automated management of Microsoft Entra ID tenant at scale by using DevOps-approach. At this time, a PowerShell module and GitHub repository template is available to analyze privileges and use a (customizable) classification model to identify the sensitive of access (based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA)). The solution can be used on any platform which supports PowerShell Core. Therefore, you have the option to run EntraOps in DevOps, serverless or local environments.
+EntraOps is a personal research project to show capabilities for automated management of Microsoft Entra ID tenant at scale by using DevOps-approach. At this time, a PowerShell module and GitHub repository template is available to analyze privileges and use a (customizable) classification model to identify the sensitivity of access (based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA)). The solution can be used on any platform which supports PowerShell Core. Therefore, you have the option to run EntraOps in DevOps, serverless or local environments.
 
 ## Key features
 
@@ -48,7 +48,7 @@ Integration to customize Control Plane scope automatically by critical assets in
 
 - 📊 Build reports or queries on your classified privileges to identify "tier breach" on Microsoft's Enterprise Access Model or privilege escalation paths. Workbook template to visualize classification data of role assignments (identified by EntraOps) and objects (by using custom security attributes)
 
-- 🛡️ Automated assignment of privileged assets in Conditional Access Groups and Restricted Management Administrative Units (RMAU) to protect high-privileged assets from lower privileges and apply strong Zero Trust policies. Privileged users and groups without existing restricted management by assignment to Administrative Unit (AU), role-assignable group or Entra ID role will be automatically covered by assignmend to a RMAU (named "UnprotectedObjects").
+- 🛡️ Automated assignment of privileged assets in Conditional Access Groups and Restricted Management Administrative Units (RMAU) to protect high-privileged assets from lower privileges and apply strong Zero Trust policies. Privileged users and groups without existing restricted management by assignment to Administrative Unit (AU), role-assignable group or Entra ID role will be automatically covered by assignment to a RMAU (named "UnprotectedObjects").
 
 - 🕵️‍♂️ GitHub Custom Agents to identify and analyse privileged objects in EntraOps
   - EntraOps Report Agent: Applies Enterprise Access Model tiers and hygiene rules (cloud-only, no on-prem/guest for high privilege).
@@ -66,7 +66,7 @@ Currently the following RBAC systems are supported:
 - 🤖 Microsoft Graph App Roles
 - 🖥️ Microsoft Intune
 
-EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline and any automation/worker environment which supports  PowerShell Core. The automation to create a pipeline supports GitHub only yet.
+EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline and any automation/worker environment which supports PowerShell Core. The automation to create a pipeline supports GitHub only yet.
 
 ## Videos and demos of EntraOps Privileged EAM
 
@@ -260,7 +260,7 @@ Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us
 7. Create an application registration with required permissions (Global Admin role required and User Access Administrator). All necessary permissions on Microsoft Graph API permissions but also Azure RBAC roles for data collection and/or ingestion (if configured in `EntraOps.config`) will be added. Administrative Unit, based on the defined name in the config file (`AdminUnitName`) for Conditional Access Groups will be created to scoped delegation on Group Administrator if `ApplyConditionalAccessTargetGroups` has been enabled.
 
     ```powershell
-    New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential -GitHubOrg "<YourGitHubUser/Org>" -GitHubRepo "<YourRepoName (e.g., EntraOps-Contoso)> -FederatedEntityType "Branch" -FederatedEntityName "main"
+    New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential -GitHubOrg "<YourGitHubUser/Org>" -GitHubRepo "<YourRepoName (e.g., EntraOps-Contoso)>" -FederatedEntityType "Branch" -FederatedEntityName "main"
     ```
 
 8. Update GitHub workflow definition based on the definitions in EntraOps.config
@@ -369,14 +369,14 @@ Pre-requisite: EntraOps data has been ingested to WatchList or Custom Table and 
 You might want to classify privileged users on the target Enterprise Access Level and relation to user/device. By default, the following custom security attributes will be used to identify what is the purposed tiered level of the user or workload identity.
 
 - `privilegedUser`
-- `privilegedWorkloadIdentitiy`
+- `privilegedWorkloadIdentity`
 
 These attributes should be already set by the provisioning process. Check out the following blog posts to learn more about the integration:
 
 - [Automated Lifecycle Workflows for Privileged Identities with Azure AD Identity Governance](https://www.cloud-architekt.net/manage-privileged-identities-with-azuread-identity-governance/)
 - [Microsoft Entra Workload ID - Lifecycle Management and Operational Monitoring](https://www.cloud-architekt.net/entra-workload-id-lifecycle-management-monitoring/)
 
-The purpsoed tiered level of a user or workload identity will be visible as attribute `ObjectAdminTierLevel` and `ObjectAdminTierLevelName` in the EntraOps data of the user principal.
+The purposed tiered level of a user or workload identity will be visible as attribute `ObjectAdminTierLevel` and `ObjectAdminTierLevelName` in the EntraOps data of the user principal.
 
 In addition, custom security attributes will be also used to build a correlation between the privileged user and the associated PAW device and regular work account.
 
@@ -389,7 +389,7 @@ Permissions to read the custom security attributes needs to be granted manually 
 
 Microsoft Entra Identity Governance allows to [delegate and grant roles](https://learn.microsoft.com/en-us/entra/id-governance/entitlement-management-delegate) on catalog-level. There are two methods of classification of those delegations in EntraOps.
 
-- TaggedBy "`JSONwithAction`": Define the classification by scope and role in the classification template file ["Classification_IdentityGovernance.json"]("./Classification/Templates/Classification_IdentityGovernance.json") manually. The schema is like the other classification templates and offers flexible tagging for your classification of Tiered Administration Level and Service.
+- TaggedBy "`JSONwithAction`": Define the classification by scope and role in the classification template file [Classification_IdentityGovernance.json](./Classification/Templates/Classification_IdentityGovernance.json) manually. The schema is like the other classification templates and offers flexible tagging for your classification of Tiered Administration Level and Service.
 - TaggedBy "`AssignedCatalogObjects`": EntraOps is collecting the classification data of assigned resources in a catalog and applies the classification to the scope of the delegated role. This needs no further manual tagging and ensures that privileged or role-assignable groups will be identified in access packages and catalogs. Any delegation to this scope will get the `TierLevelDefinition` of the assigned resource.
 
 Example of Identity Governance role which has been classified by tagging of classification template file (JSON) and assigned objects:
@@ -554,13 +554,13 @@ As already described, any Entra ID role assignment on scope of the critical asse
 There are a couple of integrated protection capabilities for privileged assets in Entra ID to avoid management from lower privileged roles.
 For example, Restricted Management AUs to protect sensitive security groups from membership changes by Group Administrators or reset passwords of users with Entra ID roles by Helpdesk administrators. EntraOps identifies if the objects are protected by these features or only scoped delegations (excluding privileged assets) have been assigned. In this case, the scope of Control Plane will be automatically updated and customized on your environment. For example: Group Administrator on directory level are not classified as "Control Plane" if all privileged groups with assignments on Control Plane privileges are protected by RMAU or using role-assignable groups.
 
-## Why were this classification chosen for the role?
+## Why was this classification chosen for the role?
 
 Do you like to know which role action is why "Global Reader" has been classified as "Control Plane"? What is the definition of Microsoft's `isPrivileged` classification on the related role action? [AzEntraIdRoleActionsAdvertizer](https://www.azadvertizer.net/azEntraIdRoleActionsAdvertizer.html) and [AzEntraApiPermissionsAdvertizer](https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html) allows to have a visualized view which role or API permission is assigned to a role and what is the specific Administration Tier Level in EntraOps.
 
 _Enter the role definition name in the "used by Roles" and choose the desired tier level in "EntraOps TierLevel" to filter for the associated role action. In this case, read BitLocker keys are classified as "Control Plane" in EntraOps and also flagged as "isPrivileged" by Microsoft._
 <br>
-<a href="https://github.com/Cloud-Architekt/cloud-architekt.github.io/blob/master/assets/images/entraops/AzAdvertizer_IdentifyTierLevel.png" target="_blank"><img src="https://github.com/Cloud-Architekt/cloud-architekt.github.io/blob/master/assets/images/entraops/AzAdvertizer_IdentifyTierLevel.png" width="1000" /></a>
+<a href="https://cloud-architekt.github.io/assets/images/entraops/AzAdvertizer_IdentifyTierLevel.png" target="_blank"><img src="https://cloud-architekt.github.io/assets/images/entraops/AzAdvertizer_IdentifyTierLevel.png" width="1000" /></a>
 <br>
 
 ## Update EntraOps PowerShell Module and CI/CD (GitHub Actions)
