@@ -238,7 +238,7 @@ Choose private repository to keep data internal
 3. Import EntraOps PowerShell Module in PowerShell Core
 
     ```powershell
-    Import-Module ./EntraOps
+    Import-Module ./EntraOps/EntraOps
     ```
 
 4. Create a new EntraOps.config File and update the settings based on your parameters and use case
