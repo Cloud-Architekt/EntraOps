@@ -122,16 +122,28 @@ Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "cloudla
 
 ### Export and collecting EntraOps data
 
-Export all classification of privileged objects with assignments to Entra ID directory roles and Microsoft Graph API permissions in EntraOps
+Export all classification of privileged objects using `Save-EntraOpsPrivilegedEAMJson` (saves to JSON files) or `Get-EntraOpsPrivilegedEAM` (returns data in-memory).
+
+Both cmdlets process all supported RBAC systems by default. Use the `-RbacSystems` parameter to limit scope:
+
+- **EntraID** – [Entra ID directory roles](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/custom-overview) (built-in and custom roles)
+- **IdentityGovernance** – [Entra ID Governance](https://learn.microsoft.com/en-us/entra/id-governance/identity-governance-overview) (access packages, entitlement management)
+- **DeviceManagement** – [Microsoft Intune RBAC](https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/role-based-access-control) (device management roles)
+- **ResourceApps** – [Microsoft Graph API permissions and app roles](https://learn.microsoft.com/en-us/entra/identity-platform/permissions-consent-overview) (application permissions)
+- **Defender** – [Microsoft Defender XDR Unified RBAC](https://learn.microsoft.com/en-us/defender-xdr/manage-rbac) (security operations roles)
+
+**Option A** – Export RBAC systems to JSON files, then load one or more systems into a variable for filtering:
 
 ```powershell
-Save-EntraOpsPrivilegedEAMJson -RBACSystems @("EntraID", "ResourceApps")
+Save-EntraOpsPrivilegedEAMJson
+# Load exported EntraID data for filtering
+$EntraOpsData = Get-Content -Raw .\PrivilegedEAM\EntraID\EntraID.json | ConvertFrom-Json
 ```
 
-Save all Privileged Identities in Entra ID, Identity Governance and Resource Apps in a variable
+**Option B** – Load RBAC systems directly into a variable (no files saved):
 
 ```powershell
-$EntraOpsData = Get-EntraOpsPrivilegedEAM -RbacSystem ("EntraID", "IdentityGovernance","ResourceApps")
+$EntraOpsData = Get-EntraOpsPrivilegedEAM
 ```
 
 ### Filter on classification in EntraOps
