@@ -161,7 +161,7 @@ $EntraOpsData | Where-Object {$_.RoleSystem -eq "EntraID"} `
 Administrative Units with assigned privileged objects
 
 ```powershell
-$EntraIdRoles | Select-Object -ExpandProperty AssignedAdministrativeUnits `
+$EntraOpsData | Select-Object -ExpandProperty AssignedAdministrativeUnits `
 | Select-Object -Unique displayName | Sort-Object displayName
 ```
 
@@ -174,7 +174,7 @@ $EntraOpsData | Where-Object { $_.ObjectSubType -eq "Guest"}
 Hybrid identities with privileges (excl. Directory Synchronization Service Account)
 
 ```powershell
-$EntraIdRoles | Where-Object { $_.OnPremSynchronized -eq $true `
+$EntraOpsData | Where-Object { $_.OnPremSynchronized -eq $true `
   -and $_.RoleAssignments.RoleDefinitionName -notcontains "Directory Synchronization Accounts" }
 ```
 
