@@ -125,20 +125,21 @@ function Update-EntraOpsClassificationControlPlaneScope {
     Write-Host "=========================================================" -ForegroundColor Cyan
     Write-Host ""
 
-    # Summary table: objects grouped by source and type
+    # Summary table: unique objects with all contributing sources listed per object
     Write-Host " Identified privileged objects by source:" -ForegroundColor White
     Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
-    $PrivilegedObjects | Group-Object -Property { if ($_.Source) { $_.Source } else { $PrivilegedObjectClassificationSource } } | ForEach-Object {
-        $Source = $_.Name
-        Write-Host "  Source: $Source ($($_.Count) objects)" -ForegroundColor DarkCyan
-        $_.Group | Sort-Object ObjectType, ObjectDisplayName | ForEach-Object {
+    $PrivilegedObjects | Sort-Object ObjectType, ObjectDisplayName | Group-Object -Property ObjectType | Sort-Object Name | ForEach-Object {
+        Write-Host "  [$($_.Name)] ($($_.Count) object(s))" -ForegroundColor DarkCyan
+        $_.Group | Sort-Object ObjectDisplayName | ForEach-Object {
             $Protection = @()
             if ($_.RestrictedManagementByRAG -eq $True) { $Protection += "RAG" }
             if ($_.RestrictedManagementByAadRole -eq $True) { $Protection += "AadRole" }
             if ($_.RestrictedManagementByRMAU -eq $True) { $Protection += "RMAU" }
             $ProtectionLabel = if ($Protection.Count -gt 0) { "[Protected: $($Protection -join ', ')]" } else { "[UNPROTECTED]" }
             $Color = if ($Protection.Count -gt 0) { "DarkGreen" } else { "Yellow" }
-            Write-Host "    [$($_.ObjectType.ToLower())] $($_.ObjectDisplayName) ($($_.ObjectId)) $ProtectionLabel" -ForegroundColor $Color
+            $ObjSources = @($_.Classification.ClassificationSource | Select-Object -Unique | Sort-Object)
+            $ObjSourceLabel = if ($ObjSources.Count -gt 0) { $ObjSources -join ', ' } else { $PrivilegedObjectClassificationSource }
+            Write-Host "    $($_.ObjectDisplayName) ($($_.ObjectId)) | Source(s): $ObjSourceLabel | $ProtectionLabel" -ForegroundColor $Color
         }
     }
     Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
