@@ -79,7 +79,7 @@ function Save-EntraOpsEAMRbacSystemJson {
         Write-Warning "Filtered out $($OriginalCount - $FilteredCount) objects with null ObjectType or ObjectId before saving."
     }
 
-    $EamData = $EamData | Sort-Object ObjectDisplayName, ObjectType
+    $EamData = $EamData | Sort-Object ObjectDisplayName, ObjectType, ObjectId
 
     # Save aggregate JSON
     $EamData | ConvertTo-Json -Depth 10 | Out-File -Path "$ExportFolder/$AggregateFileName" -Force
