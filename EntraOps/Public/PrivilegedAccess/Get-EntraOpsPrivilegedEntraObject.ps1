@@ -119,16 +119,37 @@ function Get-EntraOpsPrivilegedEntraObject {
     #region Calculate protection by AAD Role assignment or eligibility (available only for user and group objects)
     $StopwatchRegion = [System.Diagnostics.Stopwatch]::StartNew()
     if ( $ObjectDetails.'@odata.type' -in @('#microsoft.graph.user', '#microsoft.graph.group') ) {
-        # Check active role assignments
 
-        $AadRolesActive = @(Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?$count=true&`$filter=principalId eq '$($AadObjectId)'" -ConsistencyLevel "eventual")
-        
-        # Check eligible role assignments - use API filter for direct assignments
-        $AadRolesEligible = (Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules") | Where-Object { $_.principalId -in $ObjectMemberships.id -or $_.principalId -eq $AadObjectId }
-        
+        if ( $ObjectDetails.'@odata.type' -eq '#microsoft.graph.group' ) {
+            # Only Role-assignable groups (isAssignableToRole = true) can hold directory role assignments.
+            # Regular security groups can never be assigned a directory role in Entra ID, so skip the
+            # API call entirely and set false directly to avoid a spurious result and wasted round-trip.
+            if ( $ObjectDetails.isAssignableToRole -eq $true ) {
+                # For groups: direct roleAssignments only.
+                # transitiveRoleAssignments expands upward through group membership, causing false positives
+                # when the group is merely a member of another group that holds a role assignment.
+                $AadRolesActiveResult = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleAssignments?`$filter=principalId eq '$($AadObjectId)'" -OutputType PSObject
+                $AadRolesEligibleResult = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules?`$filter=principalId eq '$($AadObjectId)'" -OutputType PSObject
+            } else {
+                $AadRolesActiveResult = $null
+                $AadRolesEligibleResult = $null
+            }
+        } else {
+            # For users: transitive is correct - role assignments inherited via group membership are real.
+            $AadRolesActiveResult = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/transitiveRoleAssignments?`$count=true&`$filter=principalId eq '$($AadObjectId)'" -ConsistencyLevel "eventual"
+            # Direct eligible role assignments to this object only, server-side filtered.
+            $AadRolesEligibleResult = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/directory/roleEligibilitySchedules?`$filter=principalId eq '$($AadObjectId)'" -OutputType PSObject
+        }
+        # Filter to real role assignment objects only - when the API returns empty results,
+        # Invoke-EntraOpsMsGraphQuery adds the response envelope (with @odata.context, value:[])
+        # as a single item instead of nothing. That envelope has no 'id', so checking $null -ne $_.id
+        # reliably excludes it while counting only genuine role assignment objects.
+        $AadRolesActive = @($AadRolesActiveResult | Where-Object { $null -ne $_.id })
+        $AadRolesEligible = @($AadRolesEligibleResult | Where-Object { $null -ne $_.id })
+
         # Set protection flag based on count of active or eligible roles
         $RestrictedManagementByAadRole = ($AadRolesActive.Count -gt 0 -or $AadRolesEligible.Count -gt 0)
-        
+
         if ($RestrictedManagementByAadRole) {
             Write-Verbose "Object protected by AAD Role: Active=$($AadRolesActive.Count), Eligible=$($AadRolesEligible.Count)"
         }
