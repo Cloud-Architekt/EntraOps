@@ -352,10 +352,12 @@ function Get-EntraOpsPrivilegedEamEntraId {
             $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "Apply classification for role $($CurrentAadRbacClassification.RoleDefinitionName) without role actions..." })
             $ControlPlaneRole = $ControlPlaneRolesLookup[$CurrentAadRbacClassification.RoleDefinitionId]
             $ClassifiedAadRbacRoleWithoutActions = [PSCustomObject]@{
-                'AdminTierLevel'     = "0"
-                'AdminTierLevelName' = "ControlPlane"
-                'Service'            = $ControlPlaneRole.Service
-                'TaggedBy'           = "ControlPlaneWithoutRoleActions"
+                'AdminTierLevel'             = "0"
+                'AdminTierLevelName'         = "ControlPlane"
+                'Service'                    = $ControlPlaneRole.Service
+                'TaggedBy'                   = "ControlPlaneWithoutRoleActions"
+                'TaggedByObjectIds'          = $null
+                'TaggedByObjectDisplayNames' = $null
             }
             $CurrentAadRbacClassification.Classification.Add($ClassifiedAadRbacRoleWithoutActions) | Out-Null
         }        
@@ -378,10 +380,12 @@ function Get-EntraOpsPrivilegedEamEntraId {
             $SortedClassifications = $UniqueClassifications.Values | Sort-Object EAMTierLevelTagValue, Service
             foreach ($Item in $SortedClassifications) {
                 $ClassifiedRoleAction = [PSCustomObject]@{
-                    'AdminTierLevel'     = $Item.EAMTierLevelTagValue
-                    'AdminTierLevelName' = $Item.EAMTierLevelName
-                    'Service'            = $Item.Service
-                    'TaggedBy'           = "JSONwithAction"
+                    'AdminTierLevel'             = $Item.EAMTierLevelTagValue
+                    'AdminTierLevelName'         = $Item.EAMTierLevelName
+                    'Service'                    = $Item.Service
+                    'TaggedBy'                   = "JSONwithAction"
+                    'TaggedByObjectIds'          = $null
+                    'TaggedByObjectDisplayNames' = $null
                 }
                 $CurrentAadRbacClassification.Classification.Add($ClassifiedRoleAction) | Out-Null
             }

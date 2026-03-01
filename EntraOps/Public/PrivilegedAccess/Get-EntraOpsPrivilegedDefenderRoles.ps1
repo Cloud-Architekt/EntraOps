@@ -158,6 +158,8 @@ function Get-EntraOpsPrivilegedDefenderRoles {
                             ObjectType                    = $ObjectType
                             TransitiveByObjectId          = ""
                             TransitiveByObjectDisplayName = ""
+                            TransitiveByNestingObjectIds          = $null
+                            TransitiveByNestingObjectDisplayNames = $null
                         }
                     }
                 }
@@ -186,12 +188,14 @@ function Get-EntraOpsPrivilegedDefenderRoles {
             $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($GroupWithRbacAssignment.ObjectId)" -OutputType PSObject).displayName
             foreach ($TransitiveMember in $TransitiveMembers) {
                 $Member = [pscustomobject]@{
-                    displayName            = $TransitiveMember.displayName
-                    id                     = $TransitiveMember.id
-                    '@odata.type'          = $TransitiveMember.'@odata.type'
-                    RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
-                    GroupObjectDisplayName = $GroupObjectDisplayName
-                    GroupObjectId          = $GroupWithRbacAssignment.ObjectId
+                    displayName               = $TransitiveMember.displayName
+                    id                        = $TransitiveMember.id
+                    '@odata.type'             = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType     = $TransitiveMember.RoleAssignmentSubType
+                    GroupObjectDisplayName    = $GroupObjectDisplayName
+                    GroupObjectId             = $GroupWithRbacAssignment.ObjectId
+                    NestingObjectIds          = $TransitiveMember.NestingObjectIds
+                    NestingObjectDisplayNames = $TransitiveMember.NestingObjectDisplayNames
                 }
                 $AllTransitiveMembers += $Member
             }
@@ -220,6 +224,8 @@ function Get-EntraOpsPrivilegedDefenderRoles {
                         ObjectType                    = $_.'@odata.type'.Replace("#microsoft.graph.", "").ToLower()
                         TransitiveByObjectId          = $RbacAssignmentByGroup.ObjectId
                         TransitiveByObjectDisplayName = $_.GroupObjectDisplayName
+                        TransitiveByNestingObjectIds          = $_.NestingObjectIds
+                        TransitiveByNestingObjectDisplayNames = $_.NestingObjectDisplayNames
                     }
                     $DefenderTransitiveRbacAssignments.Add($TransitiveAssignment) | Out-Null
                 }

@@ -154,10 +154,12 @@ function Get-EntraOpsPrivilegedEamDefender {
             $ClassifiedDefenderMgmtRbacRoleWithActions = $ClassifiedDefenderMgmtRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
             $Classification = $ClassifiedDefenderMgmtRbacRoleWithActions | ForEach-Object {
                 [PSCustomObject]@{
-                    'AdminTierLevel'     = $_.EAMTierLevelTagValue
-                    'AdminTierLevelName' = $_.EAMTierLevelName
-                    'Service'            = $_.Service
-                    'TaggedBy'           = "JSONwithAction"
+                    'AdminTierLevel'             = $_.EAMTierLevelTagValue
+                    'AdminTierLevelName'         = $_.EAMTierLevelName
+                    'Service'                    = $_.Service
+                    'TaggedBy'                   = "JSONwithAction"
+                    'TaggedByObjectIds'          = $null
+                    'TaggedByObjectDisplayNames' = $null
                 }
             }
 
@@ -196,7 +198,7 @@ function Get-EntraOpsPrivilegedEamDefender {
         $Classification = @()
         $Classification += ($DefenderRbacClassificationsByAssignedObjects | Where-Object { $_.RoleAssignmentScopeId -contains $DefenderRbacAssignment.RoleAssignmentScopeId }).Classification
         $Classification += ($DefenderRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -contains $DefenderRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $DefenderRbacAssignment.RoleDefinitionId }).Classification
-        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $DefenderRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DefenderRbacAssignment
     }

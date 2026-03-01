@@ -19,7 +19,13 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $True)]
-        [System.String]$GroupObjectId
+        [System.String]$GroupObjectId,
+
+        [Parameter(Mandatory = $False, DontShow)]
+        [string[]]$AncestorObjectIds = @(),
+
+        [Parameter(Mandatory = $False, DontShow)]
+        [string[]]$AncestorObjectDisplayNames = @()
     )
 
     # Check details for security group to identify synchronized groups
@@ -27,11 +33,14 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
         $GroupUri = "/beta/groups/$($GroupObjectId)?`$select=id,displayName,onPremisesSyncEnabled"
         $GroupDetails = Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $GroupUri -OutputType PSObject | select-object DisplayName, Id, onPremisesSyncEnabled
         Write-Verbose "Get transitive group members of $($GroupDetails.displayName)"
-    }
-    catch {
+    } catch {
         Write-Error $_
         throw "Group object with ID $($GroupObjectId) can not be found!"
     }
+
+    # Build the current nesting path by appending this group
+    $CurrentObjectIds = $AncestorObjectIds + @($GroupObjectId)
+    $CurrentObjectDisplayNames = $AncestorObjectDisplayNames + @($GroupDetails.displayName)
 
     # Check if group is synchronized from on-premises AD and otherwise check if group has member assignments in PIM for Groups
     if ($GroupDetails.onPremisesSyncEnabled -ne $true) {
@@ -39,13 +48,11 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
             Write-Verbose "Try to get identify if $($GroupDetails.displayName) has eligible or active users in PIM for Groups"
             $PimForGroupMembersUri = "/beta/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq `'$($GroupObjectId)`'&`$expand=principal"
             $PimForGroupMembers = (Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $PimForGroupMembersUri -OutputType PSObject)
-        }
-        catch {
+        } catch {
             Write-Error $_
             throw "Validation of Group object with ID $($GroupObjectId) on eligible or active assignment has been failed"
         }
-    }
-    else {
+    } else {
         Write-Verbose "Group $($GroupDetails.displayName) is synchronized from on-premises AD and can not be managed by PIM for Groups"
     }
 
@@ -79,6 +86,10 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
             $EligibleNestedPermanentMembersUri = "/beta/groups/$($_.id)/transitiveMembers?`$select=id,displayName,userPrincipalName"
             $EligibleNestedPermanentMember = Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $EligibleNestedPermanentMembersUri -OutputType PSObject
             $EligibleNestedPermanentMember | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Nested Eligible member" -Force
+            $NestedNestingIds = $CurrentObjectIds + @($_.id)
+            $NestedNestingNames = $CurrentObjectDisplayNames + @($_.displayName)
+            $EligibleNestedPermanentMember | Add-Member -MemberType NoteProperty -Name "NestingObjectIds" -Value $NestedNestingIds -Force
+            $EligibleNestedPermanentMember | Add-Member -MemberType NoteProperty -Name "NestingObjectDisplayNames" -Value $NestedNestingNames -Force
             $EligibleNestedPermanentMember | Where-Object { $null -ne $_.Id }
         }
 
@@ -98,7 +109,7 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
             do {
                 Write-Verbose "- Expand nesting for $($NestedMemberGroup.id)"
                 $NestedEligibleMembers = $($NestedMemberGroup) | foreach-object {
-                    $NestedEligibleMember = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $_.id
+                    $NestedEligibleMember = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $_.id -AncestorObjectIds $CurrentObjectIds -AncestorObjectDisplayNames $CurrentObjectDisplayNames
                     $NestedEligibleMember | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Nested Eligible group member" -Force
 
                     #Check if nested group is not already in the list
@@ -114,8 +125,7 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
 
         $AllGroupMembers += $TransitiveNestedEligibleMembers | Where-Object { $_.id -notin $AllGroupMembers.id }
 
-    }
-    else {
+    } else {
         # Permanent Transitive Member
         Write-Verbose "- Transitive permanent membership"
         $TransitivePermanentMembersUri = "/beta/groups/$($GroupObjectId)/transitiveMembers?`$select=id,displayName,userPrincipalName"
@@ -126,5 +136,14 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
         $AllGroupMembers += $TransitivePermanentMembers
     }
     #endregion
+
+    # Attach nesting path to members that don't already have it set (from recursive calls)
+    foreach ($m in $AllGroupMembers) {
+        if ($null -eq $m.NestingObjectIds) {
+            $m | Add-Member -MemberType NoteProperty -Name "NestingObjectIds" -Value $CurrentObjectIds -Force
+            $m | Add-Member -MemberType NoteProperty -Name "NestingObjectDisplayNames" -Value $CurrentObjectDisplayNames -Force
+        }
+    }
+
     return $AllGroupMembers
 }

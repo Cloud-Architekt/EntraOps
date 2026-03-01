@@ -590,6 +590,8 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             ObjectType                      = $ObjectTypeLower
             TransitiveByObjectId            = $null
             TransitiveByObjectDisplayName   = $null
+            TransitiveByNestingObjectIds          = $null
+            TransitiveByNestingObjectDisplayNames = $null
         }
     }
 
@@ -729,6 +731,8 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             ObjectType                      = $ObjectTypeLower
             TransitiveByObjectId            = $null
             TransitiveByObjectDisplayName   = $null
+            TransitiveByNestingObjectIds          = $null
+            TransitiveByNestingObjectDisplayNames = $null
         }
     }
     
@@ -816,12 +820,14 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId)
                 foreach ($TransitiveMember in $TransitiveMembers) {
                     $Member = [pscustomobject]@{
-                        displayName            = $TransitiveMember.displayName
-                        id                     = $TransitiveMember.id
-                        '@odata.type'          = $TransitiveMember.'@odata.type'
-                        RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
-                        GroupObjectDisplayName = $GroupWithRbacAssignment.ObjectDisplayName
-                        GroupObjectId          = $GroupWithRbacAssignment.ObjectId
+                        displayName              = $TransitiveMember.displayName
+                        id                       = $TransitiveMember.id
+                        '@odata.type'            = $TransitiveMember.'@odata.type'
+                        RoleAssignmentSubType    = $TransitiveMember.RoleAssignmentSubType
+                        GroupObjectDisplayName   = $GroupWithRbacAssignment.ObjectDisplayName
+                        GroupObjectId            = $GroupWithRbacAssignment.ObjectId
+                        NestingObjectIds          = $TransitiveMember.NestingObjectIds
+                        NestingObjectDisplayNames = $TransitiveMember.NestingObjectDisplayNames
                     }
                     $AllTransitiveMembers.Add($Member) | Out-Null
                 }
@@ -855,6 +861,8 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                         ObjectType                      = $MemberObjectType
                         TransitiveByObjectId            = $RbacAssignmentByGroup.ObjectId
                         TransitiveByObjectDisplayName   = $_.GroupObjectDisplayName
+                        TransitiveByNestingObjectIds          = $_.NestingObjectIds
+                        TransitiveByNestingObjectDisplayNames = $_.NestingObjectDisplayNames
                     }
                     $AadRbacTransitiveAssignments.Add($TransitiveMember) | Out-Null
                 }

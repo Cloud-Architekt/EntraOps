@@ -63,10 +63,12 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                         $ClassifiedAppRole += $AppRoleClassification | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Category
                         $Classification += $ClassifiedAppRole | ForEach-Object {
                             [PSCustomObject]@{
-                                'AdminTierLevel'     = $_.EAMTierLevelTagValue
-                                'AdminTierLevelName' = $_.EAMTierLevelName
-                                'Service'            = $_.Category
-                                'TaggedBy'           = "JSONwithAction"
+                                'AdminTierLevel'             = $_.EAMTierLevelTagValue
+                                'AdminTierLevelName'         = $_.EAMTierLevelName
+                                'Service'                    = $_.Category
+                                'TaggedBy'                   = "JSONwithAction"
+                                'TaggedByObjectIds'          = $null
+                                'TaggedByObjectDisplayNames' = $null
                             }
                         }
                     } else {
@@ -93,6 +95,8 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                         ObjectType                    = "serviceprincipal"
                         TransitiveByObjectId          = $null
                         TransitiveByObjectDisplayName = $null
+                        TransitiveByNestingObjectIds          = $null
+                        TransitiveByNestingObjectDisplayNames = $null
                     }
                 }
 

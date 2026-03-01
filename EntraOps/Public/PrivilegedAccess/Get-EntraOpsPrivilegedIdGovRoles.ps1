@@ -123,6 +123,8 @@ function Get-EntraOpsPrivilegedIdGovRoles {
                 ObjectType                    = $ObjectType.toLower()
                 TransitiveByObjectId          = ""
                 TransitiveByObjectDisplayName = ""
+                TransitiveByNestingObjectIds          = $null
+                TransitiveByNestingObjectDisplayNames = $null
             }
         }
     }
@@ -139,12 +141,14 @@ function Get-EntraOpsPrivilegedIdGovRoles {
             $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $($GroupWithRbacAssignment.ObjectId)
             foreach ($TransitiveMember in $TransitiveMembers) {
                 $Member = [pscustomobject]@{
-                    displayName            = $TransitiveMember.displayName
-                    id                     = $TransitiveMember.id
-                    '@odata.type'          = $TransitiveMember.'@odata.type'
-                    RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
-                    GroupObjectDisplayName = $GroupObjectDisplayName
-                    GroupObjectId          = $GroupWithRbacAssignment.ObjectId
+                    displayName               = $TransitiveMember.displayName
+                    id                        = $TransitiveMember.id
+                    '@odata.type'             = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType     = $TransitiveMember.RoleAssignmentSubType
+                    GroupObjectDisplayName    = $GroupObjectDisplayName
+                    GroupObjectId             = $GroupWithRbacAssignment.ObjectId
+                    NestingObjectIds          = $TransitiveMember.NestingObjectIds
+                    NestingObjectDisplayNames = $TransitiveMember.NestingObjectDisplayNames
                 }
                 $AllTransitiveMembers += $Member
             }
@@ -173,6 +177,8 @@ function Get-EntraOpsPrivilegedIdGovRoles {
                         ObjectType                    = $_.'@odata.type'.Replace('#microsoft.graph.', '').toLower()
                         TransitiveByObjectId          = $RbacAssignmentByGroup.ObjectId
                         TransitiveByObjectDisplayName = $_.GroupObjectDisplayName
+                        TransitiveByNestingObjectIds          = $_.NestingObjectIds
+                        TransitiveByNestingObjectDisplayNames = $_.NestingObjectDisplayNames
                     }
                     $ElmRbacTransitiveAssignments.Add($TransitiveAssignment) | Out-Null
                 }

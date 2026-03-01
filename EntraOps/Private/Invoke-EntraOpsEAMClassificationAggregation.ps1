@@ -102,7 +102,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     }
                 }
 
-                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
                 if ($Classification.Count -eq 0) {
                     $Classification = @([PSCustomObject]@{
                         'AdminTierLevel'     = "Unclassified"
@@ -188,7 +188,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     }
                 }
 
-                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
                 if ($Classification.Count -eq 0) {
                     $Classification = @([PSCustomObject]@{
                         'AdminTierLevel'     = "Unclassified"

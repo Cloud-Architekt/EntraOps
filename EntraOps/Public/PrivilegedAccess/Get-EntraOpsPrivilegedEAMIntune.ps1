@@ -145,14 +145,14 @@ function Get-EntraOpsPrivilegedEAMIntune {
                 Write-Host "Checking Device ID in Associated PAW Device custom attribute in Intune..."
                 try {
                     if ($ClassifiedPrivilegedPawUser.AssociatedPawDevice.Count -gt 0) {
-                        $DeviceIds = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices?`$filter=azureADDeviceId+eq+'$($ClassifiedPrivilegedPawUser.AssociatedPawDevice)'&`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject).id
+                        $DeviceIds = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices?`$filter=azureADDeviceId+eq+'$($ClassifiedPrivilegedPawUser.AssociatedPawDevice)'&`$select=id,userId,userPrincipalName,azureADDeviceId,deviceName,roleScopeTagIds" -OutputType PSObject).id
                         if ($Null -ne $DeviceIds) {
                             # Parallelize device lookups for better performance
                             if ($DeviceIds.Count -gt 3) {
                                 $ParallelDevices = $DeviceIds | ForEach-Object -Parallel {
                                     $ModulePath = $using:PSScriptRoot
                                     Import-Module "$ModulePath/../../EntraOps.psm1" -Force -WarningAction SilentlyContinue
-                                    (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($_)?`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject)
+                                    (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($_)?`$select=id,userId,userPrincipalName,azureADDeviceId,deviceName,roleScopeTagIds" -OutputType PSObject)
                                 } -ThrottleLimit 10
                                 
                                 if ($ParallelDevices.Count -lt $DeviceIds.Count) {
@@ -163,7 +163,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                             } else {
                                 # For small counts, sequential is fine
                                 $Devices += Foreach ($DeviceId in $DeviceIds) {
-                                    (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)?`$select=id,userId,userPrincipalName,azureADDeviceId,roleScopeTagIds" -OutputType PSObject)
+                                    (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)?`$select=id,userId,userPrincipalName,azureADDeviceId,deviceName,roleScopeTagIds" -OutputType PSObject)
                                 }
                             }                           
                         } else {
@@ -181,7 +181,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                         $DeviceIds = (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices?`$filter=userPrincipalName+eq+'$($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName)'" -OutputType PSObject).id
                         if ($Null -ne $DeviceIds) {
                             $Devices += Foreach ($DeviceId in $DeviceIds) {
-                                (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, roleScopeTagIds
+                                (Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/managedDevices/$($DeviceId)" -OutputType PSObject) | Select-Object id, userId, userPrincipalName, azureADDeviceId, deviceName, roleScopeTagIds
                             } 
                         } else {
                             $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No device for $($ClassifiedPrivilegedPawUser.ObjectUserPrincipalName) found in Intune! $($_)" })
@@ -203,7 +203,9 @@ function Get-EntraOpsPrivilegedEAMIntune {
         $ClassifiedScopeTagsAssignments = foreach ($ScopeTagsAssignment in $ScopeTagsAssignments) {
             $MatchedDevices = $MatchedClassificationPawDevices | Where-Object { $_.roleScopeTagIds -contains $ScopeTagsAssignment.ScopeTagId } | Select-Object -Unique *
             $DeviceClassifications = if ($null -ne $MatchedDevices) { $MatchedDevices.Classification | Select-Object -Unique * } else { @() }
-            $ScopeTagsAssignment | Add-Member -NotePropertyName Classification -NotePropertyValue $DeviceClassifications -Force
+            $ScopeTagsAssignment | Add-Member -NotePropertyName Classification     -NotePropertyValue $DeviceClassifications                                                          -Force
+            $ScopeTagsAssignment | Add-Member -NotePropertyName MatchedDeviceIds   -NotePropertyValue @($MatchedDevices.azureADDeviceId | Where-Object { $null -ne $_ })             -Force
+            $ScopeTagsAssignment | Add-Member -NotePropertyName MatchedDeviceNames -NotePropertyValue @($MatchedDevices.deviceName      | Where-Object { $null -ne $_ })             -Force
             $ScopeTagsAssignment
         }        
 
@@ -215,11 +217,24 @@ function Get-EntraOpsPrivilegedEAMIntune {
             if ($DeviceMgmtRbacAssignment.RoleAssignmentScopeId -eq "/") {
                 $Classification += ($MatchedClassificationPawDevices).Classification | Sort-Object AdminTierLevel | Select-Object -Unique *
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
-                $DeviceMgmtRbacAssignment.Classification | ForEach-Object { $_ | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "AssignedDeviceObjects" -Force }
+                $AllDeviceIds   = @($MatchedClassificationPawDevices.azureADDeviceId | Where-Object { $null -ne $_ } | Select-Object -Unique)
+                $AllDeviceNames = @($MatchedClassificationPawDevices.deviceName      | Where-Object { $null -ne $_ } | Select-Object -Unique)
+                $DeviceMgmtRbacAssignment.Classification | ForEach-Object {
+                    $_ | Add-Member -NotePropertyName "TaggedBy"                   -NotePropertyValue "AssignedDeviceObjects" -Force
+                    $_ | Add-Member -NotePropertyName "TaggedByObjectIds"          -NotePropertyValue $AllDeviceIds           -Force
+                    $_ | Add-Member -NotePropertyName "TaggedByObjectDisplayNames" -NotePropertyValue $AllDeviceNames         -Force
+                }
             } else {
                 $Classification += ($ClassifiedScopeTagsAssignments | Where-Object { $_.AssignmentId -eq $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId) }).Classification | Sort-Object AdminTierLevel | Select-Object -Unique *
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
-                $DeviceMgmtRbacAssignment.Classification | ForEach-Object { $_ | Add-Member -NotePropertyName "TaggedBy" -NotePropertyValue "AssignedDeviceObjects" -Force }
+                $MatchedScopeTagAssignment = $ClassifiedScopeTagsAssignments | Where-Object { $_.AssignmentId -eq $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId) }
+                $ScopeDeviceIds   = @($MatchedScopeTagAssignment.MatchedDeviceIds   | Where-Object { $null -ne $_ } | Select-Object -Unique)
+                $ScopeDeviceNames = @($MatchedScopeTagAssignment.MatchedDeviceNames | Where-Object { $null -ne $_ } | Select-Object -Unique)
+                $DeviceMgmtRbacAssignment.Classification | ForEach-Object {
+                    $_ | Add-Member -NotePropertyName "TaggedBy"                   -NotePropertyValue "AssignedDeviceObjects" -Force
+                    $_ | Add-Member -NotePropertyName "TaggedByObjectIds"          -NotePropertyValue $ScopeDeviceIds         -Force
+                    $_ | Add-Member -NotePropertyName "TaggedByObjectDisplayNames" -NotePropertyValue $ScopeDeviceNames       -Force
+                }
             }
             if ($Classification.count -eq "0") {
                 $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No classification found for $($DeviceMgmtRbacAssignment.RoleDefinitionId) with scope $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId)!" })
@@ -291,10 +306,12 @@ function Get-EntraOpsPrivilegedEAMIntune {
             $ClassifiedDeviceMgmtRbacRoleWithActions = $ClassifiedDeviceMgmtRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
             $Classification = $ClassifiedDeviceMgmtRbacRoleWithActions | ForEach-Object {
                 [PSCustomObject]@{
-                    'AdminTierLevel'     = $_.EAMTierLevelTagValue
-                    'AdminTierLevelName' = $_.EAMTierLevelName
-                    'Service'            = $_.Service
-                    'TaggedBy'           = "JSONwithAction"
+                    'AdminTierLevel'             = $_.EAMTierLevelTagValue
+                    'AdminTierLevelName'         = $_.EAMTierLevelName
+                    'Service'                    = $_.Service
+                    'TaggedBy'                   = "JSONwithAction"
+                    'TaggedByObjectIds'          = $null
+                    'TaggedByObjectDisplayNames' = $null
                 }
             }
 
@@ -315,7 +332,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
         $Classification = @()
         $Classification += ($DeviceMgmtRbacClassificationsByAssignedObjects | Where-Object { $_.RoleAssignmentScopeId -contains $DeviceMgmtRbacAssignment.RoleAssignmentScopeId }).Classification
         $Classification += ($DeviceMgmtRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -contains $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $DeviceMgmtRbacAssignment.RoleDefinitionId }).Classification
-        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DeviceMgmtRbacAssignment
     }
