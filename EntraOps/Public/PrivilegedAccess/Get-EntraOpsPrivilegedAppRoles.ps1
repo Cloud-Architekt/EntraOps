@@ -122,10 +122,12 @@ function Get-EntraOpsPrivilegedAppRoles {
                     RoleType                      = "Application"
                     RoleIsPrivileged              = ""
                     Classification                = $null
-                    ObjectId                      = $Sp.Id
-                    ObjectType                    = if ($Sp.principalType) { $Sp.principalType.ToLower() } else { "serviceprincipal" }
-                    TransitiveByObjectId          = $null
-                    TransitiveByObjectDisplayName = $null
+                    ObjectId                              = $Sp.Id
+                    ObjectType                            = if ($Sp.principalType) { $Sp.principalType.ToLower() } else { "serviceprincipal" }
+                    TransitiveByObjectId                  = $null
+                    TransitiveByObjectDisplayName         = $null
+                    TransitiveByNestingObjectIds          = $null
+                    TransitiveByNestingObjectDisplayNames = $null
                 }
             }
         }
@@ -186,10 +188,12 @@ function Get-EntraOpsPrivilegedAppRoles {
                         RoleType                      = "Delegated"
                         RoleIsPrivileged              = ""
                         Classification                = $null
-                        ObjectId                      = $Grant.clientId
-                        ObjectType                    = "serviceprincipal"
-                        TransitiveByObjectId          = $null
-                        TransitiveByObjectDisplayName = $null
+                        ObjectId                              = $Grant.clientId
+                        ObjectType                            = "serviceprincipal"
+                        TransitiveByObjectId                  = $null
+                        TransitiveByObjectDisplayName         = $null
+                        TransitiveByNestingObjectIds          = $null
+                        TransitiveByNestingObjectDisplayNames = $null
                     }
                 }
             }

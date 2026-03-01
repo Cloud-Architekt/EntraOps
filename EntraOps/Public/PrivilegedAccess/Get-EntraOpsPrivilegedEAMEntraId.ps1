@@ -167,10 +167,12 @@ function Get-EntraOpsPrivilegedEamEntraId {
             'RoleType'                      = $AadRbacAssignment.RoleType
             'RoleIsPrivileged'              = if ($null -eq $AadRbacAssignment.IsPrivileged) { $false } else { $AadRbacAssignment.IsPrivileged }
             'Classification'                = $null  # Will be set during classification processing
-            'ObjectId'                      = $AadRbacAssignment.ObjectId
-            'ObjectType'                    = $AadRbacAssignment.ObjectType
-            'TransitiveByObjectId'          = $AadRbacAssignment.TransitiveByObjectId
-            'TransitiveByObjectDisplayName' = $AadRbacAssignment.TransitiveByObjectDisplayName
+            'ObjectId'                            = $AadRbacAssignment.ObjectId
+            'ObjectType'                          = $AadRbacAssignment.ObjectType
+            'TransitiveByObjectId'                = $AadRbacAssignment.TransitiveByObjectId
+            'TransitiveByObjectDisplayName'       = $AadRbacAssignment.TransitiveByObjectDisplayName
+            'TransitiveByNestingObjectIds'         = $AadRbacAssignment.TransitiveByNestingObjectIds
+            'TransitiveByNestingObjectDisplayNames' = $AadRbacAssignment.TransitiveByNestingObjectDisplayNames
         }
     }
 
