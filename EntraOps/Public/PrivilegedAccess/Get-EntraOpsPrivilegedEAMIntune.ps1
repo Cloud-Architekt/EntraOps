@@ -236,6 +236,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                     $_ | Add-Member -NotePropertyName "TaggedByObjectDisplayNames" -NotePropertyValue $ScopeDeviceNames       -Force
                     $_ | Add-Member -NotePropertyName "TaggedByRoleSystem"         -NotePropertyValue $null                  -Force
                 }
+            }
             if ($Classification.count -eq "0") {
                 $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No classification found for $($DeviceMgmtRbacAssignment.RoleDefinitionId) with scope $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId)!" })
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
