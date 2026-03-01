@@ -69,6 +69,7 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                                 'TaggedBy'                   = "JSONwithAction"
                                 'TaggedByObjectIds'          = $null
                                 'TaggedByObjectDisplayNames' = $null
+                                'TaggedByRoleSystem'         = $null
                             }
                         }
                     } else {
@@ -76,6 +77,10 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                             'AdminTierLevel'     = "Unclassified"
                             'AdminTierLevelName' = "Unclassified"
                             'Service'            = "Unclassified"
+                            'TaggedBy'           = "JSONwithAction"
+                            'TaggedByObjectIds'          = $null
+                            'TaggedByObjectDisplayNames' = $null
+                            'TaggedByRoleSystem'         = $null
                         }
                     }
 

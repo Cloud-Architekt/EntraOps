@@ -223,8 +223,8 @@ function Get-EntraOpsPrivilegedEAMIntune {
                     $_ | Add-Member -NotePropertyName "TaggedBy"                   -NotePropertyValue "AssignedDeviceObjects" -Force
                     $_ | Add-Member -NotePropertyName "TaggedByObjectIds"          -NotePropertyValue $AllDeviceIds           -Force
                     $_ | Add-Member -NotePropertyName "TaggedByObjectDisplayNames" -NotePropertyValue $AllDeviceNames         -Force
+                    $_ | Add-Member -NotePropertyName "TaggedByRoleSystem"         -NotePropertyValue $null                  -Force
                 }
-            } else {
                 $Classification += ($ClassifiedScopeTagsAssignments | Where-Object { $_.AssignmentId -eq $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId) }).Classification | Sort-Object AdminTierLevel | Select-Object -Unique *
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
                 $MatchedScopeTagAssignment = $ClassifiedScopeTagsAssignments | Where-Object { $_.AssignmentId -eq $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId) }
@@ -234,8 +234,8 @@ function Get-EntraOpsPrivilegedEAMIntune {
                     $_ | Add-Member -NotePropertyName "TaggedBy"                   -NotePropertyValue "AssignedDeviceObjects" -Force
                     $_ | Add-Member -NotePropertyName "TaggedByObjectIds"          -NotePropertyValue $ScopeDeviceIds         -Force
                     $_ | Add-Member -NotePropertyName "TaggedByObjectDisplayNames" -NotePropertyValue $ScopeDeviceNames       -Force
+                    $_ | Add-Member -NotePropertyName "TaggedByRoleSystem"         -NotePropertyValue $null                  -Force
                 }
-            }
             if ($Classification.count -eq "0") {
                 $WarningMessages.Add([PSCustomObject]@{Type = "Stage3"; Message = "No classification found for $($DeviceMgmtRbacAssignment.RoleDefinitionId) with scope $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId)!" })
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
@@ -312,6 +312,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $null
                     'TaggedByObjectDisplayNames' = $null
+                    'TaggedByRoleSystem'         = $null
                 }
             }
 
@@ -332,7 +333,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
         $Classification = @()
         $Classification += ($DeviceMgmtRbacClassificationsByAssignedObjects | Where-Object { $_.RoleAssignmentScopeId -contains $DeviceMgmtRbacAssignment.RoleAssignmentScopeId }).Classification
         $Classification += ($DeviceMgmtRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -contains $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $DeviceMgmtRbacAssignment.RoleDefinitionId }).Classification
-        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DeviceMgmtRbacAssignment
     }

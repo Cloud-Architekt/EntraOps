@@ -155,23 +155,23 @@ function Get-EntraOpsPrivilegedEamEntraId {
     $AadRbacClassifications = foreach ($AadRbacAssignment in $AadRbacAssignments) {
 
         [PSCustomObject]@{
-            'RoleAssignmentId'              = $AadRbacAssignment.RoleAssignmentId
-            'RoleAssignmentScopeId'         = $AadRbacAssignment.RoleAssignmentScopeId
-            'RoleAssignmentScopeName'       = $AadRbacAssignment.RoleAssignmentScopeName
-            'RoleAssignmentType'            = $AadRbacAssignment.RoleAssignmentType
-            'RoleAssignmentSubType'         = $AadRbacAssignment.RoleAssignmentSubType
-            'PIMManagedRole'                = $AadRbacAssignment.RoleAssignmentPIMRelated
-            'PIMAssignmentType'             = $AadRbacAssignment.RoleAssignmentPIMAssignmentType
-            'RoleDefinitionName'            = $AadRbacAssignment.RoleName
-            'RoleDefinitionId'              = $AadRbacAssignment.RoleId
-            'RoleType'                      = $AadRbacAssignment.RoleType
-            'RoleIsPrivileged'              = if ($null -eq $AadRbacAssignment.IsPrivileged) { $false } else { $AadRbacAssignment.IsPrivileged }
-            'Classification'                = $null  # Will be set during classification processing
-            'ObjectId'                            = $AadRbacAssignment.ObjectId
-            'ObjectType'                          = $AadRbacAssignment.ObjectType
-            'TransitiveByObjectId'                = $AadRbacAssignment.TransitiveByObjectId
-            'TransitiveByObjectDisplayName'       = $AadRbacAssignment.TransitiveByObjectDisplayName
-            'TransitiveByNestingObjectIds'         = $AadRbacAssignment.TransitiveByNestingObjectIds
+            'RoleAssignmentId'                      = $AadRbacAssignment.RoleAssignmentId
+            'RoleAssignmentScopeId'                 = $AadRbacAssignment.RoleAssignmentScopeId
+            'RoleAssignmentScopeName'               = $AadRbacAssignment.RoleAssignmentScopeName
+            'RoleAssignmentType'                    = $AadRbacAssignment.RoleAssignmentType
+            'RoleAssignmentSubType'                 = $AadRbacAssignment.RoleAssignmentSubType
+            'PIMManagedRole'                        = $AadRbacAssignment.RoleAssignmentPIMRelated
+            'PIMAssignmentType'                     = $AadRbacAssignment.RoleAssignmentPIMAssignmentType
+            'RoleDefinitionName'                    = $AadRbacAssignment.RoleName
+            'RoleDefinitionId'                      = $AadRbacAssignment.RoleId
+            'RoleType'                              = $AadRbacAssignment.RoleType
+            'RoleIsPrivileged'                      = if ($null -eq $AadRbacAssignment.IsPrivileged) { $false } else { $AadRbacAssignment.IsPrivileged }
+            'Classification'                        = $null  # Will be set during classification processing
+            'ObjectId'                              = $AadRbacAssignment.ObjectId
+            'ObjectType'                            = $AadRbacAssignment.ObjectType
+            'TransitiveByObjectId'                  = $AadRbacAssignment.TransitiveByObjectId
+            'TransitiveByObjectDisplayName'         = $AadRbacAssignment.TransitiveByObjectDisplayName
+            'TransitiveByNestingObjectIds'          = $AadRbacAssignment.TransitiveByNestingObjectIds
             'TransitiveByNestingObjectDisplayNames' = $AadRbacAssignment.TransitiveByNestingObjectDisplayNames
         }
     }
@@ -360,6 +360,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
                 'TaggedBy'                   = "ControlPlaneWithoutRoleActions"
                 'TaggedByObjectIds'          = $null
                 'TaggedByObjectDisplayNames' = $null
+                'TaggedByRoleSystem'         = $null
             }
             $CurrentAadRbacClassification.Classification.Add($ClassifiedAadRbacRoleWithoutActions) | Out-Null
         }        
@@ -388,6 +389,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $null
                     'TaggedByObjectDisplayNames' = $null
+                    'TaggedByRoleSystem'         = $null
                 }
                 $CurrentAadRbacClassification.Classification.Add($ClassifiedRoleAction) | Out-Null
             }

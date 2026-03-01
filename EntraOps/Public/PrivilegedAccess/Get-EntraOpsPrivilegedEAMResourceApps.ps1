@@ -90,6 +90,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $null
                     'TaggedByObjectDisplayNames' = $null
+                    'TaggedByRoleSystem'         = $null
                 }
             }
         } else {
@@ -100,6 +101,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                 'TaggedBy'                   = "JSONwithAction"
                 'TaggedByObjectIds'          = $null
                 'TaggedByObjectDisplayNames' = $null
+                'TaggedByRoleSystem'         = $null
             }
         }
 
@@ -118,7 +120,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         $Classification = @()
         $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $AppRoleAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
         if ($ClassificationCollection.Classification.Count -gt 0) {
-            $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames
+            $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem
         }
         $AppRoleAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $AppRoleAssignment
@@ -295,7 +297,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     }
                 }
                 
-                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
 
                 if ($Classification.Count -eq 0) {
                     $Classification = @([PSCustomObject]@{
@@ -382,7 +384,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     }
                 }
             
-                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
 
                 if ($Classification.Count -eq 0) {
                     $Classification = @(

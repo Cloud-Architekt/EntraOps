@@ -203,6 +203,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
                                         $ClassItem | Add-Member -NotePropertyName "TaggedBy"                   -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)" -Force
                                         $ClassItem | Add-Member -NotePropertyName "TaggedByObjectIds"          -NotePropertyValue @($AssignedCatalogResource.originId)               -Force
                                         $ClassItem | Add-Member -NotePropertyName "TaggedByObjectDisplayNames" -NotePropertyValue @($AssignedCatalogResource.displayName)            -Force
+                                        $ClassItem | Add-Member -NotePropertyName "TaggedByRoleSystem"         -NotePropertyValue $RbacSystem                                       -Force
                                         $MatchedClassificationToCatalogResources.Add($ClassItem) | Out-Null
                                     }
                                 } else {
@@ -265,6 +266,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
                         $Classification | Add-Member -NotePropertyName "TaggedBy"                   -NotePropertyValue "Assigned$($AssignedCatalogResource.originSystem)Resource" -Force
                         $Classification | Add-Member -NotePropertyName "TaggedByObjectIds"          -NotePropertyValue @($AssignedCatalogResource.originId)                       -Force
                         $Classification | Add-Member -NotePropertyName "TaggedByObjectDisplayNames" -NotePropertyValue @($AssignedCatalogResource.displayName)                    -Force
+                        $Classification | Add-Member -NotePropertyName "TaggedByRoleSystem"         -NotePropertyValue "EntraID"                                                  -Force
                         $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                     } 'OAuthApplication' {
                         Write-Verbose -Message "Classifying assigned catalog object $($AssignedCatalogResource.displayName) from origin system $($AssignedCatalogResource.originSystem) by Graph API App roles"
@@ -280,8 +282,9 @@ function Get-EntraOpsPrivilegedEamIdGov {
                                     'AdminTierLevelName'         = $AppRoleMatch.EAMTierLevelName
                                     'Service'                    = $AppRoleMatch.Service
                                     'TaggedBy'                   = "Assigned$($AssignedCatalogResource.originSystem)Resource"
-                                    'TaggedByObjectIds'          = @($AssignedCatalogResource.originId)
-                                    'TaggedByObjectDisplayNames' = @($AssignedCatalogResource.displayName)
+                                    'TaggedByObjectIds'          = @($AppRoleScope.originId)
+                                    'TaggedByObjectDisplayNames' = @($AppRoleScope.displayName)
+                                    'TaggedByRoleSystem'         = $AssignedCatalogResource.displayName
                                 }
                                 $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                             } else {
@@ -295,8 +298,9 @@ function Get-EntraOpsPrivilegedEamIdGov {
                                     'AdminTierLevelName'         = "Unclassified"
                                     'Service'                    = "Unclassified"
                                     'TaggedBy'                   = "Assigned$($AssignedCatalogResource.originSystem)Resource"
-                                    'TaggedByObjectIds'          = @($AssignedCatalogResource.originId)
-                                    'TaggedByObjectDisplayNames' = @($AssignedCatalogResource.displayName)
+                                    'TaggedByObjectIds'          = @($AppRoleScope.originId)
+                                    'TaggedByObjectDisplayNames' = @($AppRoleScope.displayName)
+                                    'TaggedByRoleSystem'         = $AssignedCatalogResource.displayName
                                 }
                                 $MatchedClassificationToCatalogResources.Add($Classification) | Out-Null
                             }
@@ -414,6 +418,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $null
                     'TaggedByObjectDisplayNames' = $null
+                    'TaggedByRoleSystem'         = $null
                 }
             }
 
@@ -433,7 +438,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
         $ClassificationCollection += ($IdGovRbacClassificationsByAssignedObjects | Where-Object { $_.RoleAssignmentScopeId -eq $IdGovRbacAssignment.RoleAssignmentScopeId }).Classification
         $ClassificationCollection += ($IdGovRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $IdGovRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $IdGovRbacAssignment.RoleDefinitionId }).Classification
         $Classification = @()
-        $Classification += $ClassificationCollection | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames | Sort-Object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification += $ClassificationCollection | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $IdGovRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $IdGovRbacAssignment
     }

@@ -160,6 +160,7 @@ function Get-EntraOpsPrivilegedEamDefender {
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $null
                     'TaggedByObjectDisplayNames' = $null
+                    'TaggedByRoleSystem'         = $null
                 }
             }
 
@@ -198,7 +199,7 @@ function Get-EntraOpsPrivilegedEamDefender {
         $Classification = @()
         $Classification += ($DefenderRbacClassificationsByAssignedObjects | Where-Object { $_.RoleAssignmentScopeId -contains $DefenderRbacAssignment.RoleAssignmentScopeId }).Classification
         $Classification += ($DefenderRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -contains $DefenderRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $DefenderRbacAssignment.RoleDefinitionId }).Classification
-        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
         $DefenderRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DefenderRbacAssignment
     }
