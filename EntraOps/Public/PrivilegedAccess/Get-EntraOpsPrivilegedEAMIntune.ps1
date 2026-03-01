@@ -217,7 +217,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
             if ($DeviceMgmtRbacAssignment.RoleAssignmentScopeId -eq "/") {
                 $Classification += ($MatchedClassificationPawDevices).Classification | Sort-Object AdminTierLevel | Select-Object -Unique *
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
-                $AllDeviceIds   = @($MatchedClassificationPawDevices.azureADDeviceId | Where-Object { $null -ne $_ } | Select-Object -Unique)
+                $AllDeviceIds = @($MatchedClassificationPawDevices.azureADDeviceId | Where-Object { $null -ne $_ } | Select-Object -Unique)
                 $AllDeviceNames = @($MatchedClassificationPawDevices.deviceName      | Where-Object { $null -ne $_ } | Select-Object -Unique)
                 $DeviceMgmtRbacAssignment.Classification | ForEach-Object {
                     $_ | Add-Member -NotePropertyName "TaggedBy"                   -NotePropertyValue "AssignedDeviceObjects" -Force
@@ -228,7 +228,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                 $Classification += ($ClassifiedScopeTagsAssignments | Where-Object { $_.AssignmentId -eq $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId) }).Classification | Sort-Object AdminTierLevel | Select-Object -Unique *
                 $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
                 $MatchedScopeTagAssignment = $ClassifiedScopeTagsAssignments | Where-Object { $_.AssignmentId -eq $($DeviceMgmtRbacAssignment.RoleAssignmentScopeId) }
-                $ScopeDeviceIds   = @($MatchedScopeTagAssignment.MatchedDeviceIds   | Where-Object { $null -ne $_ } | Select-Object -Unique)
+                $ScopeDeviceIds = @($MatchedScopeTagAssignment.MatchedDeviceIds   | Where-Object { $null -ne $_ } | Select-Object -Unique)
                 $ScopeDeviceNames = @($MatchedScopeTagAssignment.MatchedDeviceNames | Where-Object { $null -ne $_ } | Select-Object -Unique)
                 $DeviceMgmtRbacAssignment.Classification | ForEach-Object {
                     $_ | Add-Member -NotePropertyName "TaggedBy"                   -NotePropertyValue "AssignedDeviceObjects" -Force
