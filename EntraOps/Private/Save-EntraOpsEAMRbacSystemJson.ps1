@@ -14,6 +14,12 @@ function Save-EntraOpsEAMRbacSystemJson {
         The EAM classified objects to save.
     .PARAMETER AggregateFileName
         Name of the aggregate JSON file (e.g., "EntraID.json").
+    .PARAMETER ExportTransitiveByNestingDetails
+        When $true (default), TransitiveByNestingObjectIds and TransitiveByNestingDisplayNames
+        are included in the exported JSON. Set to $false to omit these fields.
+    .PARAMETER ExportTaggedByDetails
+        When $true (default), TaggedByObjectIds, TaggedByObjectDisplayNames, and
+        TaggedByRoleSystem are included in the exported JSON. Set to $false to omit these fields.
     #>
     [CmdletBinding()]
     param (
@@ -28,7 +34,13 @@ function Save-EntraOpsEAMRbacSystemJson {
         [object]$EamData,
 
         [Parameter(Mandatory = $true)]
-        [string]$AggregateFileName
+        [string]$AggregateFileName,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$ExportTransitiveByNestingDetails = $true,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$ExportTaggedByDetails = $true
     )
 
     # --- Path safety: ensure ExportFolder is under the expected base directory ---
@@ -80,6 +92,18 @@ function Save-EntraOpsEAMRbacSystemJson {
     }
 
     $EamData = $EamData | Sort-Object ObjectDisplayName, ObjectType, ObjectId
+
+    # Strip optional detail properties based on export flags
+    $ExcludeProperties = @()
+    if (-not $ExportTransitiveByNestingDetails) {
+        $ExcludeProperties += 'TransitiveByNestingObjectIds', 'TransitiveByNestingDisplayNames'
+    }
+    if (-not $ExportTaggedByDetails) {
+        $ExcludeProperties += 'TaggedByObjectIds', 'TaggedByObjectDisplayNames', 'TaggedByRoleSystem'
+    }
+    if ($ExcludeProperties.Count -gt 0) {
+        $EamData = $EamData | Select-Object -ExcludeProperty $ExcludeProperties
+    }
 
     # Save aggregate JSON
     $EamData | ConvertTo-Json -Depth 10 | Out-File -Path "$ExportFolder/$AggregateFileName" -Force
