@@ -197,18 +197,26 @@ function Update-EntraOpsClassificationControlPlaneScope {
     Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
     $PrivilegedUsersWithDevices = ($PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.OwnedDevices }) | Select-Object -ExpandProperty OwnedDevices | Select-Object -Unique
     Write-Host "  Devices owned by privileged users: $(@($PrivilegedUsersWithDevices).Count)" -ForegroundColor Gray
-    $PrivilegedDevicesAUs = $PrivilegedUsersWithDevices | ForEach-Object {
-        @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/devices/$($_)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName, isMemberManagementRestricted)
-    }
-    $PrivilegedDevicesWithoutProtection = @($PrivilegedDevicesAUs | Where-Object { $_.isMemberManagementRestricted -eq $False } | Select-Object -Unique id)
-    $ScopeNamePrivilegedDevices = $PrivilegedDevicesAUs | Where-Object { $_.isMemberManagementRestricted -eq $True } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+    # Build per-device protection status. Devices not in any AU at all are unprotected but would be
+    # invisible to a flat AU list - track HasRMAU per device to catch them.
+    $PrivilegedDevicesProtection = @($PrivilegedUsersWithDevices | ForEach-Object {
+            $DeviceId = $_
+            $DeviceAUs = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/devices/$DeviceId/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Where-Object { $null -ne $_.id } | Select-Object id, displayName, isMemberManagementRestricted)
+            [PSCustomObject]@{
+                DeviceId = $DeviceId
+                AUs      = $DeviceAUs
+                HasRMAU  = ($DeviceAUs | Where-Object { $_.isMemberManagementRestricted -eq $True }).Count -gt 0
+            }
+        })
+    $PrivilegedDevicesWithoutProtection = @($PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $False })
+    $ScopeNamePrivilegedDevices = $PrivilegedDevicesProtection | Where-Object { $_.HasRMAU -eq $True } | ForEach-Object { $_.AUs } | Where-Object { $_.isMemberManagementRestricted -eq $True } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
 
     Write-Host "  Unprotected  : $($PrivilegedDevicesWithoutProtection.Count)" -ForegroundColor $(if ($PrivilegedDevicesWithoutProtection.Count -gt 0) { 'Yellow' } else { 'DarkGreen' })
     if ($PrivilegedDevicesWithoutProtection.Count -gt 0) {
         Write-Warning "  Control Plane devices without RMAU protection - directory scope required!"
         $WarningMessages.Add([PSCustomObject]@{ Type = "UnprotectedDevices"; Message = "$($PrivilegedDevicesWithoutProtection.Count) Control Plane device(s) without RMAU protection - directory scope required" })
         $PrivilegedDevicesWithoutProtection | ForEach-Object {
-            Write-Host "    [!] Device $($_.id)" -ForegroundColor Yellow
+            Write-Host "    [!] Device $($_.DeviceId)" -ForegroundColor Yellow
         }
         $ScopeNamePrivilegedDevices += $DirectoryLevelAssignmentScope
     }
@@ -235,7 +243,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
     Write-Host " Privileged Groups" -ForegroundColor DarkCyan
     Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
     $PrivilegedGroupsAll = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "group" })
-    $PrivilegedGroupsWithoutProtection = @($PrivilegedGroupsAll | Where-Object { $_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByRMAU -eq $False })
+    $PrivilegedGroupsWithoutProtection = @($PrivilegedGroupsAll | Where-Object { $_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByAadRole -eq $False -and $_.RestrictedManagementByRMAU -eq $False })
     $PrivilegedGroupWithRMAU = @($PrivilegedGroupsAll | Where-Object { $_.RestrictedManagementByRMAU -eq $True })
 
     Write-Host "  Total groups : $($PrivilegedGroupsAll.Count)" -ForegroundColor Gray

@@ -122,10 +122,18 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
             $DesiredMemberCount = @($PrivilegedObjects.ObjectId).Count
             Write-Host "  Current members : $CurrentMemberCount | Desired: $DesiredMemberCount" -ForegroundColor Gray
 
+            # Deduplicate both sides before diff - an object with multiple role assignments at the
+            # same tier level appears once per assignment in the EAM JSON, producing duplicate ObjectIds.
+            # Compare-Object with duplicates in either side produces duplicate add/remove entries.
+            $DesiredIds = @($PrivilegedObjects.ObjectId | Select-Object -Unique)
+            $CurrentIds = @($CurrentGroupMembers.Id | Select-Object -Unique)
+
             # Check if group members already exists for sync, or just adding new items
             if ($Null -eq $CurrentGroupMembers.Id) {
-                Write-Host "  Group is empty - adding all $DesiredMemberCount objects" -ForegroundColor Yellow
-                foreach ($PrivObj in $PrivilegedObjects) {
+                # Deduplicate - same object may appear multiple times with different role assignments
+                $UniqueDesiredObjects = $PrivilegedObjects | Sort-Object ObjectId -Unique
+                Write-Host "  Group is empty - adding all $(@($UniqueDesiredObjects).Count) objects" -ForegroundColor Yellow
+                foreach ($PrivObj in $UniqueDesiredObjects) {
                     try {
                         $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($PrivObj.ObjectId)" -DisableCache -OutputType PSObject
                         $MemberType = $GroupMember.'@odata.type'.Replace('#microsoft.graph.', '')
@@ -144,7 +152,7 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                     }
                 }
             } elseif ($null -ne $PrivilegedObjects.ObjectId) {
-                $MemberDiff    = Compare-Object $PrivilegedObjects.ObjectId $CurrentGroupMembers.Id
+                $MemberDiff    = Compare-Object $DesiredIds $CurrentIds
                 $MembersToRemove = @($MemberDiff | Where-Object { $_.SideIndicator -eq "=>" })
                 $MembersToAdd    = @($MemberDiff | Where-Object { $_.SideIndicator -eq "<=" })
 
@@ -155,9 +163,9 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                 }
 
                 # Safety threshold: refuse to remove more than 50% of current members to protect against partial API failures
-                $RemovalThreshold = [Math]::Ceiling($CurrentGroupMembers.Id.Count * 0.5)
-                if ($MembersToRemove.Count -gt $RemovalThreshold -and $CurrentGroupMembers.Id.Count -gt 5) {
-                    Write-Warning "  [ABORT] $($MembersToRemove.Count) removals exceeds 50% safety threshold ($RemovalThreshold of $CurrentMemberCount members). This may indicate an upstream data issue. Review and apply manually."
+                $RemovalThreshold = [Math]::Ceiling($CurrentIds.Count * 0.5)
+                if ($MembersToRemove.Count -gt $RemovalThreshold -and $CurrentIds.Count -gt 5) {
+                    Write-Warning "  [ABORT] $($MembersToRemove.Count) removals exceeds 50% safety threshold ($RemovalThreshold of $($CurrentIds.Count) members). This may indicate an upstream data issue. Review and apply manually."
                     $WarningMessages.Add([PSCustomObject]@{ Type = "SafetyAbort"; Message = "Aborted $GroupName`: $($MembersToRemove.Count) removals exceeds 50% safety threshold ($RemovalThreshold of $CurrentMemberCount members)" })
                     $GrpStatus = "ABORTED"
                 } else {
