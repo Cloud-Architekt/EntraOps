@@ -44,7 +44,6 @@
         ],
         "RoleDefinitionActions": [
           "Application-RemoteDesktopConfig.ReadWrite.All",
-          "Application-RemoteDesktopConfig.ReadWrite.All",
           "Application.ReadWrite.All",
           "Application.ReadUpdate.All",
           "Application.ReadWrite.OwnedBy",
@@ -68,7 +67,6 @@
           "/"
         ],
         "RoleDefinitionActions": [
-          "APIConnectors.Read.All",
           "CustomAuthenticationExtension.ReadWrite.All",
           "CustomAuthenticationExtension.Receive.Payload",
           "Policy.ReadWrite.AuthenticationFlows",
@@ -180,11 +178,9 @@
           "CloudPC.ReadWrite.All",
           "Device.Command",
           "Device.ReadWrite.All",
-          "DeviceManagementApps.ReadW.All",
           "DeviceManagementApps.ReadWrite.All",
           "DeviceManagementConfiguration.ReadWrite.All",
           "DeviceManagementManagedDevices.PrivilegedOperations.All",
-          "DeviceManagementManagedDevices.PriviligedOperation.All",
           "DeviceManagementManagedDevices.PriviligedOperation.All",
           "DeviceManagementManagedDevices.ReadWrite.All",
           "DeviceManagementServiceConfig.ReadWrite.All",
@@ -262,7 +258,6 @@
           "User.Export.All",
           "User.ManageCreds.All",
           "User.ManageIdentities.All",
-          "User.ReadWrite",
           "User.ReadWrite.All",
           "User.ReadWrite.CrossCloud",
           "User-Mail.ReadWrite.All",
@@ -297,7 +292,6 @@
           "/"
         ],
         "RoleDefinitionActions": [
-          "IdentityProvider.ReadWrite.All",
           "IdentityRiskEvent.ReadWrite.All",
           "RiskPreventionProviders.ReadWrite.All",
           "IdentityRiskyAgent.ReadWrite.All",
@@ -433,13 +427,10 @@
           "IdentityProvider.ReadWrite.All",
           "ManagedTenant.ReadWrite.All",
           "ManagedTenants.ReadWrite.All",
-          "ManagedTenants.ReadWrite.All",
-          "ManagedTenants.WriteRead.All",
           "OnPremDirectorySynchronization.ReadWrite.All",
           "OnPremisesPublishingProfiles.ReadWrite.All",
           "Organization.ReadWrite.All",
           "OrganizationalBranding.ReadWrite.All",
-          "Policy.ReadWrite.ApplicationConfiguration",
           "Policy.ReadWrite.FeatureRollout",
           "SignInIdentifier.ReadWrite.All"
         ]
@@ -841,6 +832,7 @@
           "TeamworkDevice.ReadWrite.All",
           "TeamworkTag.Read.All",
           "TeamworkTag.ReadWrite.All",
+          "TeamworkTargetedMessage.Read.All",
           "WorkforceIntegration.ReadWrite.All"
         ]
       },
@@ -966,6 +958,7 @@
         "RoleDefinitionActions": [
           "Agreement.Read.All",
           "AgreementAcceptance.Read.All",
+          "APIConnectors.Read.All",
           "ConsentRequest.Read.All",
           "ConfigurationMonitoring.Read.All",
           "CrossTenantInformation.ReadBasic.All",
@@ -1061,6 +1054,7 @@
           "UserAuthMethod-WindowsHello.Read.All",
           "UserAuthenticationMethod.Read.All",
           "User.Read.All",
+          "User.ReadWrite",
           "VerifiedId-Profile.Read.All"
         ]
       },
