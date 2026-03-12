@@ -110,6 +110,8 @@ function Update-EntraOpsClassificationControlPlaneScope {
         PrivilegedObjectIds                  = $PrivilegedObjectIds
     }
 
+    # [array] cast ensures single-object pipeline results retain array behavior,
+    # which is required for .Count checks and consistent iteration below.
     [array]$PrivilegedObjects = Get-EntraOpsClassificationControlPlaneObjects @Parameters
 
     #region Get classification file and filter for unique privileged objects
@@ -175,6 +177,9 @@ function Update-EntraOpsClassificationControlPlaneScope {
 
     #region Privileged Groups
     Write-Output "Identify directory role scope of privileged groups..."
+    # Fix: Was filtering ObjectType -eq "user" which meant unprotected privileged groups were never detected.
+    # Fix: Was using -eq "0" (inverted logic) which triggered the warning when zero unprotected groups
+    # existed rather than when some did. Changed to .Count -gt 0 for correct numeric comparison.
     [array]$PrivilegedGroupsWithoutProtection = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "group" -and ($_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByRMAU -eq $False) }
     [array]$PrivilegedGroupWithRMAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "group" -and $_.RestrictedManagementByRMAU -eq $True }
     [array]$ScopeNamePrivilegedGroups = $PrivilegedGroupWithRMAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
@@ -197,6 +202,8 @@ function Update-EntraOpsClassificationControlPlaneScope {
     #region Privileged Service Principals
     Write-Output "Identify directory role scope of service principals and application objects..."
     [array]$PrivilegedServicePrincipals = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" }
+    # Initialize before conditional to prevent null reference when no SPs are found
+    # but the .replace('<ScopeNamePrivilegedServicePrincipals>', ...) runs unconditionally below.
     [array]$ScopeNamePrivilegedServicePrincipals = @()
     if ($PrivilegedServicePrincipals.Count -gt 0) {
         # Get list of object-level role assignment scope which includes Control Plane Service Principals

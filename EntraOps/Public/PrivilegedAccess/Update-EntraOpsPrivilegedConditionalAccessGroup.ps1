@@ -103,6 +103,10 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                             '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($_.InputObject)"
                         } | ConvertTo-Json
 
+                        # Use try/catch to prevent M365 group add failures (e.g. member already exists,
+                        # group type doesn't support operation) from aborting the entire CA group sync.
+                        # Use Invoke-EntraOpsMsGraphQuery instead of Invoke-MgGraphRequest for consistent
+                        # error handling, pagination support, and session caching.
                         try {
                             Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject
                         } catch {
