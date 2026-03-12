@@ -85,19 +85,22 @@ function Get-EntraOpsPrivilegedEamDefender {
         # Check if RBAC scope is listed in JSON by wildcard in RoleAssignmentScope (e.g. /azops-rg/*)
         $MatchedClassificationByScope += $DefenderResourcesByClassificationJSON | foreach-object {
             $Classification = $_
-            $Classification | where-object { $DefenderRbacAssignment.RoleAssignmentScopeId -like $Classification.RoleAssignmentScopeName -and $DefenderRbacAssignment.RoleAssignmentScopeId -notcontains $Classification.ExcludedRoleAssignmentScopeName }
+            # Fixed: reversed -notcontains operands — the exclusion list should be on the left side.
+            $Classification | where-object { $DefenderRbacAssignment.RoleAssignmentScopeId -like $Classification.RoleAssignmentScopeName -and $Classification.ExcludedRoleAssignmentScopeName -notcontains $DefenderRbacAssignment.RoleAssignmentScopeId }
         }
 
         # Check if role action and scope exists in JSON definition
         $DefenderRoleActionsInJsonDefinition = @()
         $DefenderRoleActionsInJsonDefinition = foreach ($Action in $DefenderRoleActions.rolePermissions.allowedResourceActions) {
-            $MatchedClassificationByScope | Where-Object { $_.RoleDefinitionActions -Contains $Action -and $Classification.ExcludedRoleDefinitionActions -notcontains $_.RoleDefinitionActions }
+            # Fixed: stale $Classification variable and wrong exclusion check target.
+            $MatchedClassificationByScope | Where-Object { $_.RoleDefinitionActions -Contains $Action -and $_.ExcludedRoleDefinitionActions -notcontains $Action }
         }
 
         if (($DefenderRoleActionsInJsonDefinition.Count -gt 0)) {
             $ClassifiedDefenderMgmtRbacRoleWithActions = @()
             foreach ($DefenderRoleAction in $DefenderRoleActions.rolePermissions.allowedResourceActions) {
-                $ClassifiedDefenderMgmtRbacRoleWithActions += $DefenderResourcesByClassificationJSON | Where-Object { $DefenderRoleAction -in $_.RoleDefinitionActions -and $_.RoleAssignmentScopeName -contains $DefenderRbacAssignment.RoleAssignmentScopeId -and $_.ExcludedRoleAssignmentScopeName -notcontains $DefenderRbacAssignment.RoleAssignmentScopeId }
+                # Fixed: use -like for wildcard scope matching and -notin for exclusion check.
+                $ClassifiedDefenderMgmtRbacRoleWithActions += $DefenderResourcesByClassificationJSON | Where-Object { $DefenderRoleAction -in $_.RoleDefinitionActions -and $DefenderRbacAssignment.RoleAssignmentScopeId -like $_.RoleAssignmentScopeName -and $DefenderRbacAssignment.RoleAssignmentScopeId -notin $_.ExcludedRoleAssignmentScopeName }
             }
             $ClassifiedDefenderMgmtRbacRoleWithActions = $ClassifiedDefenderMgmtRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
             $Classification = $ClassifiedDefenderMgmtRbacRoleWithActions | ForEach-Object {

@@ -197,20 +197,24 @@ function Get-EntraOpsPrivilegedEamIntune {
         # Check if RBAC scope is listed in JSON by wildcard in RoleAssignmentScope (e.g. /azops-rg/*)
         $MatchedClassificationByScope += $IntuneResourcesByClassificationJSON | foreach-object {
             $Classification = $_
-            $Classification | where-object { $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -like $Classification.RoleAssignmentScopeName -and $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -notcontains $Classification.ExcludedRoleAssignmentScopeName }
+            # Fixed: reversed -notcontains operands — the exclusion list should be on the left side.
+            $Classification | where-object { $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -like $Classification.RoleAssignmentScopeName -and $Classification.ExcludedRoleAssignmentScopeName -notcontains $DeviceMgmtRbacAssignment.RoleAssignmentScopeId }
         }
 
         # Check if role action and scope exists in JSON definition
         $IntuneRoleActionsInJsonDefinition = @()
         $IntuneRoleActionsInJsonDefinition = foreach ($Action in $IntuneRoleActions.rolePermissions.allowedResourceActions) {
-            $MatchedClassificationByScope | Where-Object { $_.RoleDefinitionActions -Contains $Action -and $Classification.ExcludedRoleDefinitionActions -notcontains $_.RoleDefinitionActions }
+            # Fixed: stale $Classification variable and wrong exclusion check target.
+            $MatchedClassificationByScope | Where-Object { $_.RoleDefinitionActions -Contains $Action -and $_.ExcludedRoleDefinitionActions -notcontains $Action }
         }
 
 
         if (($IntuneRoleActionsInJsonDefinition.Count -gt 0)) {
             $ClassifiedDeviceMgmtRbacRoleWithActions = @()
             foreach ($IntuneRoleAction in $IntuneRoleActions.rolePermissions.allowedResourceActions) {
-                $ClassifiedDeviceMgmtRbacRoleWithActions += $IntuneResourcesByClassificationJSON | Where-Object { $IntuneRoleAction -in $_.RoleDefinitionActions -and $_.RoleAssignmentScopeName -contains $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -and $_.ExcludedRoleAssignmentScopeName -notcontains $DeviceMgmtRbacAssignment.RoleAssignmentScopeId }
+                # Fixed: use -like for wildcard scope matching (consistent with first pass on line 200)
+                # and -notin for exclusion check (consistent with EntraID/IdGov pattern).
+                $ClassifiedDeviceMgmtRbacRoleWithActions += $IntuneResourcesByClassificationJSON | Where-Object { $IntuneRoleAction -in $_.RoleDefinitionActions -and $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -like $_.RoleAssignmentScopeName -and $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -notin $_.ExcludedRoleAssignmentScopeName }
             }
             $ClassifiedDeviceMgmtRbacRoleWithActions = $ClassifiedDeviceMgmtRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
             $Classification = $ClassifiedDeviceMgmtRbacRoleWithActions | ForEach-Object {

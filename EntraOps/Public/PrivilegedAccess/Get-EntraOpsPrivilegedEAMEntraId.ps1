@@ -119,7 +119,10 @@ function Get-EntraOpsPrivilegedEamEntraId {
     if ($SampleMode -eq $True) {
         $AllAadRoleActions = get-content -Path "$EntraOpsBaseFolder/Samples/AadRoleManagementRoleDefinitions.json" | ConvertFrom-Json -Depth 10
     } else {
-        $AllAadRoleActions = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions" -OutputType PSObject)
+        # Use beta endpoint — some roles (e.g. Modern Commerce User, AdHoc License Administrator,
+        # Email Verified User Creator) only exist in beta, not v1.0. Role assignments are collected
+        # from beta, so role definitions must use the same API version to avoid classification gaps.
+        $AllAadRoleActions = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions" -OutputType PSObject)
     }
     #endregion
 
@@ -141,7 +144,10 @@ function Get-EntraOpsPrivilegedEamEntraId {
         # Check if role action and scope exists in JSON definition
         $AadRoleActionsInJsonDefinition = @()
         $AadRoleActionsInJsonDefinition = foreach ($Action in $AadRoleActions.rolePermissions.allowedResourceActions) {
-            $MatchedClassificationByScope | Where-Object { $_.RoleDefinitionActions -Contains $Action -and $Classification.ExcludedRoleDefinitionActions -notcontains $_.RoleDefinitionActions }
+            # Fixed: was using stale $Classification from the previous foreach-object pipeline (line 137),
+            # which retained the last entry's ExcludedRoleDefinitionActions. Use $_ to reference each
+            # matched classification entry's own exclusion list.
+            $MatchedClassificationByScope | Where-Object { $_.RoleDefinitionActions -Contains $Action -and $_.ExcludedRoleDefinitionActions -notcontains $Action }
         }
 
         $CurrentAadRbacClassification.Classification = New-Object System.Collections.ArrayList

@@ -185,7 +185,8 @@ function Get-EntraOpsPrivilegedEamIdGov {
         # Check if role action and scope exists in JSON definition
         $IdGovRoleActionsInJsonDefinition = @()
         $IdGovRoleActionsInJsonDefinition = foreach ($Action in $IdGovRoleActions.rolePermissions.allowedResourceActions) {
-            $MatchedClassificationByScope | Where-Object { $_.RoleDefinitionActions -Contains $Action -and $Classification.ExcludedRoleDefinitionActions -notcontains $_.RoleDefinitionActions }
+            # Fixed: stale $Classification variable and wrong exclusion check target.
+            $MatchedClassificationByScope | Where-Object { $_.RoleDefinitionActions -Contains $Action -and $_.ExcludedRoleDefinitionActions -notcontains $Action }
         }
 
 
