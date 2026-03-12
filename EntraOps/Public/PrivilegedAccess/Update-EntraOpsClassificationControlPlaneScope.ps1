@@ -110,12 +110,12 @@ function Update-EntraOpsClassificationControlPlaneScope {
         PrivilegedObjectIds                  = $PrivilegedObjectIds
     }
 
-    $PrivilegedObjects = Get-EntraOpsClassificationControlPlaneObjects @Parameters
+    [array]$PrivilegedObjects = Get-EntraOpsClassificationControlPlaneObjects @Parameters
 
     #region Get classification file and filter for unique privileged objects
     $DirectoryLevelAssignmentScope = @("/")
     $EntraIdRoleClassification = Get-Content -Path $EntraIdClassificationParameterFile
-    $PrivilegedObjects = $PrivilegedObjects | sort-object ObjectType, ObjectDisplayName | Select-Object -Unique *
+    [array]$PrivilegedObjects = $PrivilegedObjects | sort-object ObjectType, ObjectDisplayName | Select-Object -Unique *
     Write-Output "Identified privileged objects:"
     $PrivilegedObjects | ForEach-Object {
         
@@ -126,12 +126,12 @@ function Update-EntraOpsClassificationControlPlaneScope {
 
     #region Privileged User
     Write-Output "Identify directory role scope of privileged users..."
-    $PrivilegedUsersWithoutProtection = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and ($_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByAadRole -eq $False -and $RestrictedManagementByRMAU -eq $False) }
+    [array]$PrivilegedUsersWithoutProtection = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and ($_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByAadRole -eq $False -and $_.RestrictedManagementByRMAU -eq $False) }
 
     # Include all Administrative Units because of Privileged Authentication Admin role assignment on (RM)AU level
-    $PrivilegedUserWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.AssignedAdministrativeUnits }
-    $ScopeNamePrivilegedUsers = $PrivilegedUserWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
-    if ($PrivilegedUsersWithoutProtection -gt "0") {
+    [array]$PrivilegedUserWithAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.AssignedAdministrativeUnits }
+    [array]$ScopeNamePrivilegedUsers = $PrivilegedUserWithAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+    if ($PrivilegedUsersWithoutProtection.Count -gt 0) {
         Write-Warning "Control Plane user without any protection, requires to avoid directory role assignments for user management!"
         Write-Host $PrivilegedUsersWithoutProtection
         $ScopeNamePrivilegedUsers += $DirectoryLevelAssignmentScope
@@ -150,14 +150,14 @@ function Update-EntraOpsClassificationControlPlaneScope {
 
     #region Privileged Devices
     Write-Output "Identify directory role scope of privileged devices..."
-    $PrivilegedUsersWithDevices = ($PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.OwnedDevices }) | Select-Object -ExpandProperty OwnedDevices | Select-Object -Unique
-    $PrivilegedDevicesAUs = $PrivilegedUsersWithDevices | ForEach-Object {
+    [array]$PrivilegedUsersWithDevices = ($PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and $null -ne $_.OwnedDevices }) | Select-Object -ExpandProperty OwnedDevices | Select-Object -Unique
+    [array]$PrivilegedDevicesAUs = $PrivilegedUsersWithDevices | ForEach-Object {
         @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/devices/$($_)/memberOf/microsoft.graph.administrativeUnit" -OutputType PSObject | Select-Object id, displayName, isMemberManagementRestricted)
     }
-    $PrivilegedDevicesWithoutProtection = $PrivilegedDevicesAUs | Where-Object { $_.isMemberManagementRestricted -eq $False } | Select-Object -Unique id
-    $ScopeNamePrivilegedDevices = $PrivilegedDevicesAUs | Where-Object { $_.isMemberManagementRestricted -eq $True } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+    [array]$PrivilegedDevicesWithoutProtection = $PrivilegedDevicesAUs | Where-Object { $_.isMemberManagementRestricted -eq $False } | Select-Object -Unique id
+    [array]$ScopeNamePrivilegedDevices = $PrivilegedDevicesAUs | Where-Object { $_.isMemberManagementRestricted -eq $True } | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
 
-    if ($PrivilegedDevicesWithoutProtection -gt "0") {
+    if ($PrivilegedDevicesWithoutProtection.Count -gt 0) {
         Write-Warning "Control Plane devices without any protection, requires to avoid directory role assignments for device object management!"
         Write-Host $PrivilegedDevicesWithoutProtection
         $ScopeNamePrivilegedDevices += $DirectoryLevelAssignmentScope
@@ -175,10 +175,10 @@ function Update-EntraOpsClassificationControlPlaneScope {
 
     #region Privileged Groups
     Write-Output "Identify directory role scope of privileged groups..."
-    $PrivilegedGroupsWithoutProtection = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "user" -and ($_.RestrictedManagementByRAG -eq $false -and $RestrictedManagementByRMAU -eq $False) }
-    $PrivilegedGroupWithRMAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "group" -and $_.RestrictedManagementByRMAU -eq $True }
-    $ScopeNamePrivilegedGroups = $PrivilegedGroupWithRMAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
-    if ($PrivilegedGroupsWithoutProtection -eq "0") {
+    [array]$PrivilegedGroupsWithoutProtection = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "group" -and ($_.RestrictedManagementByRAG -eq $false -and $_.RestrictedManagementByRMAU -eq $False) }
+    [array]$PrivilegedGroupWithRMAU = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "group" -and $_.RestrictedManagementByRMAU -eq $True }
+    [array]$ScopeNamePrivilegedGroups = $PrivilegedGroupWithRMAU.AssignedAdministrativeUnits | Select-Object -Unique id | ForEach-Object { "/administrativeUnits/$($_.id)" }
+    if ($PrivilegedGroupsWithoutProtection.Count -gt 0) {
         Write-Warning "Control Plane group without any protection, requires to avoid directory role assignments for group management!"
         $ScopeNamePrivilegedGroups += $DirectoryLevelAssignmentScope
     }
@@ -196,8 +196,9 @@ function Update-EntraOpsClassificationControlPlaneScope {
 
     #region Privileged Service Principals
     Write-Output "Identify directory role scope of service principals and application objects..."
-    $PrivilegedServicePrincipals = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" }
-    if ($PrivilegedServicePrincipals.Count -gt "0") {
+    [array]$PrivilegedServicePrincipals = $PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" }
+    [array]$ScopeNamePrivilegedServicePrincipals = @()
+    if ($PrivilegedServicePrincipals.Count -gt 0) {
         # Get list of object-level role assignment scope which includes Control Plane Service Principals
         $ScopeNameServicePrincipalObject = $PrivilegedServicePrincipals | ForEach-Object { "/$($_.ObjectId)" }
 
