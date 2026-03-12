@@ -217,6 +217,8 @@ function Update-EntraOpsClassificationControlPlaneScope {
         $AppIds = @()
         $AppIds += ($PrivilegedServicePrincipals | Where-Object { $null -ne $_.ObjectUserPrincipalName -and $_.ObjectSubType -eq "Application" }).ObjectUserPrincipalName
         $AppIds += ($PrivilegedServicePrincipals | Where-Object { $null -ne $_.ObjectSignInName -and $_.ObjectSubType -eq "Application" }).ObjectSignInName
+        # Filter out null or empty AppIds to avoid BadRequest errors from applications(appId='')
+        $AppIds = $AppIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
 
         # Get application object IDs for service principals because directory role assignments can be assigned to application objects
         $ScopeNameApplicationObject = $AppIds | ForEach-Object {

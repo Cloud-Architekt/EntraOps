@@ -175,7 +175,7 @@ function Get-EntraOpsPrivilegedDefenderRoles {
                     }
                 }
             } else {
-                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                Write-Verbose "Skipping group '$($RbacAssignmentByGroup.ObjectDisplayName)' ($($RbacAssignmentByGroup.ObjectId)) - no transitive members found for role '$($RbacAssignmentByGroup.RoleName)'"
             }
 
             $DefenderTransitiveRbacAssignments.Add($TransitiveMember) | Out-Null

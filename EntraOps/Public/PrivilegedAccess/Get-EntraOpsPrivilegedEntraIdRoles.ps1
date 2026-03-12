@@ -289,7 +289,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                     }
                 }
             } else {
-                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                Write-Verbose "Skipping group '$($RbacAssignmentByGroup.ObjectDisplayName)' ($($RbacAssignmentByGroup.ObjectId)) - no transitive members found for role '$($RbacAssignmentByGroup.RoleName)'"
             }
 
             $AadRbacTransitiveAssignments.Add($TransitiveMember) | Out-Null

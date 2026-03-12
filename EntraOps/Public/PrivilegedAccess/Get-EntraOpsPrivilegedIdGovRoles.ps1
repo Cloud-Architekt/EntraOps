@@ -146,7 +146,7 @@ function Get-EntraOpsPrivilegedIdGovRoles {
                     }
                 }
             } else {
-                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                Write-Verbose "Skipping group '$($RbacAssignmentByGroup.ObjectDisplayName)' ($($RbacAssignmentByGroup.ObjectId)) - no transitive members found for role '$($RbacAssignmentByGroup.RoleName)'"
             }
 
             $ElmRbacTransitiveAssignments.Add($TransitiveMember) | Out-Null

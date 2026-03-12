@@ -171,8 +171,9 @@ function Get-EntraOpsPrivilegedEntraObject {
             }
             $OutsideOfAadTenant = $false
 
-            # Owners
-            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/serviceprincipals/$AadObjectId/owners") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
+            # Owners — was incorrectly calling /serviceprincipals/{id}/owners for group objects,
+            # causing NotFound errors for every group. Groups use the /groups/{id}/owners endpoint.
+            Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/groups/$AadObjectId/owners") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
 
             # No support for custom security attributes
             $AdminTierLevel = ""
