@@ -147,7 +147,9 @@ function Get-EntraOpsPrivilegedEamEntraId {
         $CurrentAadRbacClassification.Classification = New-Object System.Collections.ArrayList
 
         if ($ControlPlaneRolesWithoutRoleActions.RoleId -contains $CurrentAadRbacClassification.RoleDefinitionId) {
-            Write-Warning "Apply classification for role $($CurrentAadRbacClassification.RoleDefinitionName) without role actions..."
+            # Use Verbose instead of Warning — this fires per role assignment, not per role definition,
+            # so roles assigned to many principals (e.g. Privileged Auth Admin) produce excessive duplicates.
+            Write-Verbose "Apply classification for role $($CurrentAadRbacClassification.RoleDefinitionName) without role actions..."
             $Classification = $ControlPlaneRolesWithoutRoleActions | Where-Object { $_.RoleId -contains $CurrentAadRbacClassification.RoleDefinitionId }
             $ClassifiedAadRbacRoleWithoutActions = [PSCustomObject]@{
                 'AdminTierLevel'     = "0"
