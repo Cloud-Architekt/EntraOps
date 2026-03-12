@@ -31,8 +31,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
 
     try {
         Import-Module "SentinelEnrichment" -ErrorAction Stop
-    }
-    catch {
+    } catch {
         throw "Cannot load module SentinelEnrichment. Please install the module from the PowerShell gallery"
     }
 
@@ -45,8 +44,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
         Connect-MgGraph -Identity
         $MgContext = Get-MgContext
         Write-Output "Succesfully logged to Tenant $($MgContext.TenantId)"
-    }
-    catch {
+    } catch {
         Write-Error -Message $_.Exception
         throw $_.Exception
     }
@@ -80,8 +78,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
     try {
         $ProgressPreference = 'SilentlyContinue'
         $FirstPartyApps = Invoke-WebRequest -UseBasicParsing -Method GET -Uri "https://raw.githubusercontent.com/merill/microsoft-info/main/_info/MicrosoftApps.json" | ConvertFrom-Json
-    }
-    catch {
+    } catch {
         Write-Warning "Issue to query list of first party apps from GitHub - $($_.Exception)"
     }
     #endregion
@@ -98,8 +95,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
             Write-Verbose "Query Application of ServicePrincipal `"$($ServicePrincipal.displayName)`""
             try {
                 $Application = $using:Applications | Where-Object appId -eq $ServicePrincipal.AppId
-            }
-            catch {
+            } catch {
                 Write-Verbose "Can not find app registration for $($ServicePrincipal.DisplayName)"
             }
 
@@ -118,8 +114,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
                     }
                 }
                 $AssignedAppRoles = $SPRoleAssignments | ConvertTo-Json -Compress -AsArray
-            }
-            catch {
+            } catch {
                 Write-Error -Message $_.Exception
                 throw $_.Exception
             }
@@ -132,8 +127,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
                     $GroupMemberships.Add($GroupMembership) | Out-Null
                 }
                 $GroupMemberships = $GroupMemberships | ConvertTo-Json -Compress -AsArray
-            }
-            catch {
+            } catch {
                 Write-Error -Message $_.Exception
                 throw $_.Exception
             }
@@ -157,16 +151,14 @@ function Save-EntraOpsWorkloadIdentityInfo {
                     }
                 }
                 $AssignedRoles = $TransitiveRoleAssignments | ConvertTo-Json -Compress -AsArray
-            }
-            catch {
+            } catch {
                 Write-Error -Message $_.Exception
                 throw $_.Exception
             }
 
             if ( $ServicePrincipal.AppId -in $using:FirstPartyApps.AppId ) {
                 $IsFirstPartyApp = $true
-            }
-            else {
+            } else {
                 $IsFirstPartyApp = $false
             }
 
@@ -192,8 +184,7 @@ function Save-EntraOpsWorkloadIdentityInfo {
                 }
                 ($using:NewWatchlistItems).Add( $CurrentItem ) | Out-Null
             }
-        }
-        catch {
+        } catch {
             Write-Warning "Could not add $($ServicePrincipal.displayName) - Error $($_.Exception)"
             Continue
         }

@@ -2,12 +2,12 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
-## [0.6.0] - 2026-02-19
+## [0.6.0] - 2026-03-12
 ### Added
-- Identify and classify API permissions as access package resources in catalogs
 - Support for delegated permissions in RBAC "ResourceApps"
 - Support for Agent Identities in RBAC "ResourceApps", including resolution of inherited permissions through Agent Identity Blueprint Principals
-- Added workbook for Agent Identities
+- Workbook for Agent Identities
+- Identify and classify API permissions as access package resources in catalogs
 - Introduction of `Get-EntraOpsCacheStatistics` to get overview of in-memory and persistent cache entries, TTL, hit/miss statistics and cache age
 - New private helper functions for shared logic: `Invoke-EntraOpsParallelObjectResolution`, `Invoke-EntraOpsEAMClassificationAggregation`, `New-EntraOpsEAMOutputObject`, `Resolve-EntraOpsClassificationPath`, `Save-EntraOpsEAMRbacSystemJson`, `Show-EntraOpsWarningSummary`, `Import-EntraOpsGlobalExclusions`
 - Added `LinkedIdentity` parameter to the Privileged EAM Overview workbook for filtering privileged accounts by linked identity
@@ -23,6 +23,13 @@ All essential changes on EntraOps will be documented in this changelog.
 - Improved error handling for access package catalog resolution, providing clearer warnings for invalid or deleted objects
 - Enhanced `Save-EntraOpsPrivilegedEAMInsightsCustomTable` with better progress reporting during batch uploads
 - `Connect-EntraOps` now displays cache configuration and status (memory cache entries, persistent cache size and age) on connection
+- Summary output in `Update-EntraOpsClassificationControlPlaneScope` to display unique object sources
+- Enhanced sorting in `Save-EntraOpsEAMRbacSystemJson` to include ObjectId for improved data organization
+- Enhanced filtering for linked identities to include primary accounts
+
+### Fixed
+- Role assignment checks in `Get-EntraOpsPrivilegedEntraObject` for improved accuracy
+- Deduplication of object IDs in `Update-EntraOpsPrivilegedConditionalAccessGroup` and `Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit`
 
 ### Removed
 - Support of "Azure PowerShell" only mode because of limited Graph API scope

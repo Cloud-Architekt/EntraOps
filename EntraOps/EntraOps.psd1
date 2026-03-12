@@ -134,7 +134,7 @@
         'Save-EntraOpsPrivilegedEAMJson'
         'Save-EntraOpsPrivilegedEAMWatchLists'
         'Save-EntraOpsWorkloadIdentityEnrichmentWatchLists'
-        'Save-EntraOpsWorkloadIdentityInfoWatchList'
+        'Save-EntraOpsWorkloadIdentityInfo'
         'Update-EntraOps'
         'Update-EntraOpsClassificationControlPlaneScope'
         'Update-EntraOpsClassificationFiles'

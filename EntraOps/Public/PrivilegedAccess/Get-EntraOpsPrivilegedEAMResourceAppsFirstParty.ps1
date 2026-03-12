@@ -97,7 +97,6 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                 }
 
                 try {
-                    #$ObjectDetails = Get-AzADServicePrincipal -ObjectId $($FirstPartyGraphActivity.ServicePrincipalObjectId)
                     $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $($FirstPartyGraphActivity.ServicePrincipalObjectId) -TenantId $TenantId
                 } catch {
                     Write-Warning "Service Principal Object for $($FirstPartyGraphActivity.AppDisplayName) not found!"

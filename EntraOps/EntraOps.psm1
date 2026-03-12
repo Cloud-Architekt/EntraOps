@@ -26,7 +26,6 @@ Foreach ($import in @($Public + $Private)) {
 $ErrorActionPreference = "Stop"
 Export-ModuleMember -Function $Public.Basename
 
-# Update Clear-ModuleVariable function in internal/Clear-ModuleVariable.ps1 if you add new variables here
 # This function has been adopted from the Maester Framework and has been originally written by Merill Fernando
 # Enhanced caching with TTL (Time-To-Live) and metadata for performance optimization
 

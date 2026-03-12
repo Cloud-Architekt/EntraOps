@@ -746,7 +746,6 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     $AadActiveRoleAssignments = $AadRoleAssignmentsByPim | Where-Object { $_.assignmentType -eq 'Activated' }
     $AadTimeBoundedRoleAssignments = $AadRoleAssignmentsByPim | Where-Object { $_.assignmentType -eq 'Assigned' -and $null -ne $_.endDateTime }
 
-    # Fixed: Build hashtable lookups correctly - separate lookups for assignment IDs vs origin IDs
     $ActiveAssignmentLookup = @{}
     $ActiveOriginToAssignmentMap = @{}
     foreach ($ActiveAssignment in $AadActiveRoleAssignments) {
@@ -789,8 +788,6 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $AadRbacActiveAndPermanentAssignment
     }
 
-    # Fixed: Include activated assignments in output (with proper flag) instead of excluding them
-    # This ensures all current role assignments are visible
     $AadPermanentRoleAssignments = $AadPermanentRoleAssignmentsWithEnrichment
     #endregion
 

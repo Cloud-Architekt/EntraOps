@@ -49,7 +49,6 @@
           "microsoft.directory/oAuth2PermissionGrants/allProperties/allTasks",
           "microsoft.directory/oAuth2PermissionGrants/basic/update",
           "microsoft.directory/oAuth2PermissionGrants/create",
-          "microsoft.directory/oAuth2PermissionGrants/createAsOwner",
           "microsoft.directory/permissionGrantPolicies/allProperties/update",
           "microsoft.directory/permissionGrantPolicies/basic/update",
           "microsoft.directory/permissionGrantPolicies/create",
@@ -410,7 +409,8 @@
         ],
         "RoleDefinitionActions": [
           "microsoft.azure.advancedThreatProtection/allEntities/allTasks",
-          "microsoft.directory/identityProtection/allProperties/allTasks"
+          "microsoft.directory/identityProtection/allProperties/allTasks",
+          "microsoft.directory/identityProtection/allProperties/update"
         ]
       },
       {

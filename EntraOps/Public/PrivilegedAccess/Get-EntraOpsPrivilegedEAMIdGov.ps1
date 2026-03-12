@@ -368,7 +368,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
 
         # Role actions are defined for scope and role definition contains an action of the role, otherwise all role actions within role assignment scope will be applied
         if ($SampleMode -eq $True) {
-            # Removed redundant warning
+            # Skip cache lookup in SampleMode
         } else {
             # Optimization: Use In-Memory Cache
             if ($IdGovRoleDefinitionsCache.ContainsKey("$($IdGovRbacAssignment.RoleDefinitionId)")) {
