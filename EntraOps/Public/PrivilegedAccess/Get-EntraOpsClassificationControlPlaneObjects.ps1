@@ -75,8 +75,11 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         [Parameter(Mandatory = $false)]
         [System.String]$EntraIdCustomizedClassificationFile = "$DefaultFolderClassification\$($TenantNameContext)\Classification_AadResources.json"
         ,
+        # Removed ValidateScript({ Test-Path $_ }) - on first run, the PrivilegedEAM/
+        # directory does not exist yet because Save-EntraOpsPrivilegedEAMJson has not
+        # been called. Missing data files are already handled gracefully below in the
+        # try/catch around Get-Content with a Write-Warning for each missing scope.
         [Parameter(Mandatory = $false)]
-        [ValidateScript({ Test-Path $_ })]
         [string]$EntraOpsEamFolder = "$DefaultFolderClassifiedEam"
         ,
         [Parameter(Mandatory = $false)]

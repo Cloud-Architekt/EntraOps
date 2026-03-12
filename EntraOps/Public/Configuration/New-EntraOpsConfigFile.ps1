@@ -52,8 +52,11 @@ function New-EntraOpsConfigFile {
         [ValidateSet('AzureDevOps', 'GitHub', 'None')]
         [string]$DevOpsPlatform = "GitHub",
 
+        # Removed ValidateScript({ Test-Path $_ }) - this cmdlet creates the config file,
+        # so the path will not exist yet when the parameter is validated. Validate the
+        # parent directory instead to catch typos without blocking new file creation.
         [Parameter(Mandatory = $false)]
-        [ValidateScript({ Test-Path $_ })]
+        [ValidateScript({ Test-Path (Split-Path $_ -Parent) })]
         [string]$ConfigFilePath = "$EntraOpsBasefolder/EntraOpsConfig.json",
 
         [Parameter(Mandatory = $false)]
