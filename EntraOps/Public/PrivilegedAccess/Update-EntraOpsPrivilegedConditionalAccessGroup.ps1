@@ -96,14 +96,18 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                         Write-Warning "$($_.InputObject) will be removed from $($GroupName)!"
                         Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/groups/$($GroupId)/members/$($_.InputObject)/`$ref" -OutputType PSObject
                     } elseif ($_.SideIndicator -eq "<=") {
-                        $GroupMember = Invoke-MgGraphRequest -Method GET -Uri "/beta/directoryObjects/$($_.InputObject)" -OutputType PSObject
+                        $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($_.InputObject)" -OutputType PSObject
                         Write-Host "Adding $($GroupMember.displayName) to $($GroupName)"
 
                         $OdataBody = @{
                             '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($_.InputObject)"
                         } | ConvertTo-Json
 
-                        Invoke-MgGraphRequest -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject
+                        try {
+                            Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject
+                        } catch {
+                            Write-Warning "Failed to add $($GroupMember.displayName) to $($GroupName). Error: $_"
+                        }
                     }
                 }
             }
