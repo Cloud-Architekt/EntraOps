@@ -75,44 +75,42 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
         Write-Host "Upload data for $($RbacSystem)"
         foreach ($ObjectType in $PrincipalTypeFilter) {
 
-            try {
-                $EamFiles = (Get-ChildItem -Path "$($ImportPath)\$($RbacSystem)\$($ObjectType)" -Filter "*.json").FullName
-            } catch {
-                Write-Warning "No $($RbacSystem).json found!"
+            # Reset to prevent stale data from a previous iteration leaking through
+            # when the directory does not exist for the current RbacSystem/ObjectType.
+            $EamFiles = @()
+            $ObjectTypePath = Join-Path -Path $ImportPath -ChildPath "$RbacSystem/$ObjectType"
+
+            if (Test-Path -Path $ObjectTypePath -PathType Container) {
+                $EamFiles = @((Get-ChildItem -Path $ObjectTypePath -Filter "*.json" -File).FullName)
             }
 
             if ($EamFiles.Count -gt 0) {
                 Write-Host "Upload classification data for object type: $($ObjectType)"
                 $TotalBatches = [Math]::Ceiling($EamFiles.Count / 50)
-            
+
                 # Loop through files in batches of 50 to avoid errors hitting the 1Mb file limit for DCRs
                 for ($i = 0; $i -lt $EamFiles.Count; $i += 50) {
                     $CurrentBatch = [Math]::Floor($i / 50) + 1
                     $PercentComplete = [math]::Round(($CurrentBatch / $TotalBatches) * 100, 0)
                     Write-Progress -Activity "Uploading to Custom Table" -Status "Processing batch $CurrentBatch of $TotalBatches for $ObjectType ($PercentComplete%)" -PercentComplete $PercentComplete
-                    
+
                     # Select the current batch of 50 files (array slicing is inclusive, so i+49 gives 50 items)
                     $EndIndex = [Math]::Min($i + 49, $EamFiles.Count - 1)
                     $Batch = $EamFiles[$i..$EndIndex]
-                
+
                     # Process the batch
                     $EamSummary = @()
                     $EamSummary += $Batch | ForEach-Object {
-                        # Check that each item is indeed a file before processing
-                        if (Test-Path $_ -PathType Leaf) {
-                            Get-Content $_ | ConvertFrom-Json -Depth 10
-                        } else {
-                            Write-Warning "Skipped non-file item: $_"
-                        }
+                        Get-Content $_ | ConvertFrom-Json -Depth 10
                     }
 
                     if ($EamSummary.Count -ne 0) {
                         $Json = $EamSummary | ConvertTo-Json -Depth 10
-                
+
                         # Send the batch to the API
-                        Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId                
+                        Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId
                     }
-                    
+
                     Write-Host "Processed batch ${CurrentBatch}/${TotalBatches}: $($EamSummary.Count) files (starting at index $i)"
                 }
             }
