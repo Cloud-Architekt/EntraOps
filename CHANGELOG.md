@@ -2,6 +2,42 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [0.6.0] - 2026-03-12
+### Added
+- Support for delegated permissions in RBAC "ResourceApps"
+- Support for Agent Identities in RBAC "ResourceApps", including resolution of inherited permissions through Agent Identity Blueprint Principals
+- Workbook for Agent Identities
+- Identify and classify API permissions as access package resources in catalogs
+- Introduction of `Get-EntraOpsCacheStatistics` to get overview of in-memory and persistent cache entries, TTL, hit/miss statistics and cache age
+- New private helper functions for shared logic: `Invoke-EntraOpsParallelObjectResolution`, `Invoke-EntraOpsEAMClassificationAggregation`, `New-EntraOpsEAMOutputObject`, `Resolve-EntraOpsClassificationPath`, `Save-EntraOpsEAMRbacSystemJson`, `Show-EntraOpsWarningSummary`, `Import-EntraOpsGlobalExclusions`
+- Added `LinkedIdentity` parameter to the Privileged EAM Overview workbook for filtering privileged accounts by linked identity
+
+### Changed
+- Performance enhancements by parallelization and adding support for local caching
+  - Implementation of `Invoke-EntraOpsParallelObjectResolution` for sharing resolution logic across cmdlets
+  - In-memory and persistent (file-based) caching for Graph API responses with configurable TTL
+- Define Custom Security Attributes for Privileged Users, Workload Identities and PAWs in EntraOps config (`New-EntraOpsConfigFile`)
+- Updated version of Classification Templates from AzurePrivilegedIAM
+- Major improvements in UI output (displays phases of analysis) and implementation of progress bars across all EAM cmdlets
+- Updated `Update-EntraOpsClassificationControlPlaneScope` to better handle service principals and application objects, including improved logging and error handling
+- Improved error handling for access package catalog resolution, providing clearer warnings for invalid or deleted objects
+- Enhanced `Save-EntraOpsPrivilegedEAMInsightsCustomTable` with better progress reporting during batch uploads
+- `Connect-EntraOps` now displays cache configuration and status (memory cache entries, persistent cache size and age) on connection
+- Summary output in `Update-EntraOpsClassificationControlPlaneScope` to display unique object sources
+- Enhanced sorting in `Save-EntraOpsEAMRbacSystemJson` to include ObjectId for improved data organization
+- Enhanced filtering for linked identities to include primary accounts
+
+### Fixed
+- Role assignment checks in `Get-EntraOpsPrivilegedEntraObject` for improved accuracy
+- Deduplication of object IDs in `Update-EntraOpsPrivilegedConditionalAccessGroup` and `Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit`
+- Remove valication on `EntraOpsEamFolder` parameter to allow first-run before `PrivilegedEAM/` directory exists (kudos to @weskroesbergen, [PR #47](https://github.com/Cloud-Architekt/EntraOps/pull/47))
+- Use `beta` endpoint for `roleManagement/directory/roleDefinitions` in `Get-EntraOpsPrivilegedEAMEntraId` to include roles only available in beta (kudos to @weskroesbergen, [PR #47](https://github.com/Cloud-Architekt/EntraOps/pull/47))
+- Fix exclusion checks in `Get-EntraOpsPrivilegedEAMIntune` and `Get-EntraOpsPrivilegedEAMDefender` (kudos to @weskroesbergen, [PR #47](https://github.com/Cloud-Architekt/EntraOps/pull/47))
+- Fix scope classification in `Get-EntraOpsPrivilegedEAMIntune` and `Get-EntraOpsPrivilegedEAMDefender` (kudos to @weskroesbergen, [PR #47](https://github.com/Cloud-Architekt/EntraOps/pull/47))
+
+### Removed
+- Support of "Azure PowerShell" only mode because of limited Graph API scope
+
 ## [0.5.0] - 2025-12-10
 ### Added
 - [Experimental] GitHub Custom Agents for EntraOps: Report Generation and QA Agent

@@ -36,7 +36,7 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
     )
 
     # Get Tier Levels with unprotected privileged EAM objects
-    $PrivilegedEamTierLevels = foreach ($RbacSystem in $RbacSystems) {
+    $UnprotectedPrivilegedEamTierLevels = foreach ($RbacSystem in $RbacSystems) {
         # Get all privileged EAM objects
         $PrivilegedEamObjects = Get-Content "$DefaultFolderClassifiedEam/$RbacSystem/$($RbacSystem).json" | ConvertFrom-Json
 
@@ -45,9 +45,11 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
         $UnprotectedPrivilegedUser.Classification | select-object -unique AdminTierLevelName, AdminTierLevel
     }
 
-    # Get all unique AdminTierLevels which needs to be iterated for assigning objects to Conditional Access Target Groups
+    # Get all unique AdminTierLevels which needs to be iterated for creating Administrative Units
     $PrivilegedEamTierLevels = Get-ChildItem -Path "$($DefaultFolderClassification)/Templates" -File -Recurse -Exclude *.Param.json | foreach-object { Get-Content $_.FullName -Filter "*.json" | ConvertFrom-Json }
     $SelectedPrivilegedEamTierLevels = $PrivilegedEamTierLevels | where-object { $_.EAMTierLevelName -in $ApplyToAccessTierLevel } | select-object -unique @{Name = 'AdminTierLevel'; Expression = 'EAMTierLevelTagValue' }, @{Name = 'AdminTierLevelName'; Expression = 'EAMTierLevelName' }
+    # Only create AUs for tier levels that actually have unprotected privileged objects
+    $SelectedPrivilegedEamTierLevels = $SelectedPrivilegedEamTierLevels | where-object { $_.AdminTierLevelName -in $UnprotectedPrivilegedEamTierLevels.AdminTierLevelName }
     #endregion
 
     # Create Administrative Units for each Tier Level
@@ -68,22 +70,19 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
 
             try {
                 $CreatedAuObject = Invoke-EntraOpsMsGraphQuery -Method "POST" -Body $Body -Uri "/beta/administrativeUnits"
-            }
-            catch {
+            } catch {
                 Write-Warning "Can not create Administrative Unit $($AuParams.DisplayName)! Error: $_"
             }
 
             # Check if AU has been created successfully, wait for delay and retry if not available yet
             Try {
                 Do { Start-Sleep -Seconds 1 }
-                Until ($AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits/$($CreatedAuObject.id)" -DisableCache))
+                Until ($AdministrativeUnit = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($CreatedAuObject.id)" -DisableCache))
                 Write-Host "$($AdministrativeUnit.displayName) has been created successfully" -f Green
-            }
-            Catch {
+            } Catch {
                 Write-Warning "$($AuParams.DisplayName) not available yet"
             }
-        }
-        else {
+        } else {
             Write-Host "Administrativer Unit $($AdministrativeUnit.displayName) already exists"
         }
     }

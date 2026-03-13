@@ -62,6 +62,11 @@ function Invoke-EntraOpsGraphSecurityQuery {
             }
         } until (-not $retry -or $retryCount -ge $maxRetries)
 
+        if ($retryCount -ge $maxRetries -and -not $QueryResults) {
+            Write-Warning "Graph Security query failed after $maxRetries retries due to throttling (HTTP 429)."
+            throw "Graph Security query exceeded maximum retry count ($maxRetries). All attempts were throttled."
+        }
+
         if ( $QueryResults ) {
             # Convert JSON strings to objects
             $propertiesToConvert = ($QueryResponse.schema | Where-Object {$_.type -eq "Object"}).Name

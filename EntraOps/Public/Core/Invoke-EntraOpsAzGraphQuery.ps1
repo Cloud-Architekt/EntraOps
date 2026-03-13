@@ -26,25 +26,32 @@ function Invoke-EntraOpsAzGraphQuery {
     [string]$KqlQuery
     ,
     [parameter(Mandatory = $false)]
-    [string]$BatchSize = "1000"
+    [int]$BatchSize = 1000
   )
 
-  $SkipResult = "0"
+  $SkipResult = 0
+  $Result = [System.Collections.Generic.List[object]]::new()
 
   while ($true) {
-    if ($SkipResult -gt 0) {
-      $GraphResult = Search-AzGraph -Query $kqlQuery -First $BatchSize -SkipToken $GraphResult.SkipToken -UseTenantScope
-    }
-    else {
-      $GraphResult = Search-AzGraph -Query $kqlQuery -First $BatchSize -UseTenantScope
+    try {
+      if ($SkipResult -gt 0) {
+        $GraphResult = Search-AzGraph -Query $kqlQuery -First $BatchSize -SkipToken $GraphResult.SkipToken -UseTenantScope
+      } else {
+        $GraphResult = Search-AzGraph -Query $kqlQuery -First $BatchSize -UseTenantScope
+      }
+    } catch {
+      Write-Error "Azure Resource Graph query failed: $($_.Exception.Message)"
+      return $Result
     }
 
-    $Result += $GraphResult.data
+    if ($null -ne $GraphResult.data) {
+      $Result.AddRange(@($GraphResult.data))
+    }
 
     if ($GraphResult.data.Count -lt $BatchSize) {
       break;
     }
-    $SkipResult += $SkipResult + $BatchSize
+    $SkipResult += $BatchSize
   }
   return $Result
 }

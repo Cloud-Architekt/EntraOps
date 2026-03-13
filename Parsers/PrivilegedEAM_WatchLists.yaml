@@ -12,8 +12,10 @@ Description: |
 ParserName: PrivilegedEAM
 ParserQuery: |
   _GetWatchlist('EntraOps_Principals')
+  | extend tostring(ObjectId)
   | join kind=inner (
       _GetWatchlist('EntraOps_RoleAssignments')
+          | extend tostring(ObjectId)
           | extend EligibilityBy = case(
               RoleSystem == "EntraID" and PIMAssignmentType == "Eligible", "PIM for Entra ID Roles",
               RoleSystem == "EntraID" and PIMAssignmentType == "Eligible" and (RoleAssignmentSubType == "Nested Eligible member" or RoleAssignmentSubType  == "Eligible member"), "PIM for Entra ID Roles and Groups",
@@ -63,8 +65,10 @@ ParserQuery: |
       Classification,
       RoleAssignments,
       Owners,
+      Sponsors,
       OwnedObjects,
       OwnedDevices,
+      IdentityParent,
       AssociatedWorkAccount,
       AssociatedPawDevice,
       Type

@@ -33,9 +33,9 @@ function Update-EntraOps {
     $ErrorActionPreference = "Stop"
 
     if ($null -ne $PersonalAccessToken) {
-        git clone -b $Branch https://$($PersonalAccessToken):@github.com/Cloud-Architekt/EntraOps.git $TemporaryUpdateFolder
-    }
-    else {
+        $CloneUrl = "https://$($PersonalAccessToken):@github.com/Cloud-Architekt/EntraOps.git"
+        git clone -b $Branch $CloneUrl $TemporaryUpdateFolder
+    } else {
         git clone -b $Branch https://github.com/Cloud-Architekt/EntraOps.git $TemporaryUpdateFolder
     }
 
@@ -45,8 +45,7 @@ function Update-EntraOps {
             Write-Output "Removing folder $TargetUpdateFolder..."
             try {
                 Remove-Item -Path $TargetUpdateFolder -Force -Recurse
-            }
-            catch {
+            } catch {
                 Write-Error "Failed to remove folder $($TargetUpdateFolder). Error: $_"
             }
         }
@@ -54,8 +53,7 @@ function Update-EntraOps {
         Write-Output "Updating folder $TargetUpdateFolder..."
         try {
             Copy-item -Path "$($TemporaryUpdateFolder)/$($TargetUpdateFolder)" -Destination "$($TargetUpdateFolder)" -Force -Recurse
-        }
-        catch {
+        } catch {
             Write-Error "Failed to copy folder $($TemporaryUpdateFolder)/$($TargetUpdateFolder) to $($TargetUpdateFolder). Error: $_"
         }
     }
@@ -63,8 +61,7 @@ function Update-EntraOps {
     Write-Output "Importing updated EntraOps module..."
     try {
         Import-Module ./EntraOps -Force
-    }
-    catch {
+    } catch {
         Write-Error "Failed to import updated EntraOps module. Error: $_"
     }
 
@@ -72,8 +69,7 @@ function Update-EntraOps {
         Write-Host "Re-adding workflow parameters in GitHub workflows after update..."
         try {
             Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigFile
-        }
-        catch {
+        } catch {
             Write-Error "Failed to update required workflow parameters. Error: $_"
         }
     }

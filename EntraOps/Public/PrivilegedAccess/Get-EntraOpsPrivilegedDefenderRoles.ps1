@@ -36,6 +36,15 @@ function Get-EntraOpsPrivilegedDefenderRoles {
         ,
         [Parameter(Mandatory = $false)]
         [System.Boolean]$SampleMode = $False
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Boolean]$EnableParallelProcessing = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Int32]$ParallelThrottleLimit = 10
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.Collections.Generic.List[psobject]]$WarningMessages
     )
 
     # Set Error Action
@@ -46,8 +55,15 @@ function Get-EntraOpsPrivilegedDefenderRoles {
     if ($SampleMode -eq $True) {
         Write-Warning "Not supported yet!"
     } else {
-        $DefenderRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleDefinitions" -OutputType PSObject
-        $DefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleAssignments" -OutputType PSObject
+        $DefenderRoleDefinitions = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleDefinitions?`$select=id,displayName,description,rolePermissions" -OutputType PSObject
+        $DefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/roleAssignments?`$select=id,principalIds,roleDefinitionId,appScopeIds,directoryScopeIds" -OutputType PSObject
+    }
+    
+    # Optimization: Build Role Definition Lookup Hashtable for O(1) access
+    Write-Verbose "Building Role Definition Lookup Table..."
+    $RoleDefLookup = @{}
+    foreach ($RoleDef in $DefenderRoleDefinitions) {
+        $RoleDefLookup[$RoleDef.id] = $RoleDef
     }
     #endregion
 
@@ -55,23 +71,54 @@ function Get-EntraOpsPrivilegedDefenderRoles {
     #region Get role assignments for all permanent role member
     Write-Host "Get details of Defender Role Assignments foreach individual principal..."
     if (![string]::IsNullOrWhiteSpace($DefenderRoleAssignments.id)) {
+        # Fetch scope tags for resolving appScopeIds to display names
+        $ScopeTags = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/deviceManagement/roleScopeTags" -OutputType PSObject
+
         $DefenderRoleAssignmentPrincipals = ($DefenderRoleAssignments | select-object -ExpandProperty principalIds -Unique)
+        Write-Host "Processing $($DefenderRoleAssignmentPrincipals.Count) Defender role principals..."
+        $PrincipalCounter = 0
         $DefenderPermanentRbacAssignments = foreach ($Principal in $DefenderRoleAssignmentPrincipals) {
+            $PrincipalCounter++
+            if (($PrincipalCounter % 10) -eq 0 -or $PrincipalCounter -eq $DefenderRoleAssignmentPrincipals.Count) {
+                $PercentComplete = [math]::Round(($PrincipalCounter / $DefenderRoleAssignmentPrincipals.Count) * 100, 0)
+                Write-Progress -Activity "Processing Defender Role Principals" -Status "Processing principal $PrincipalCounter of $($DefenderRoleAssignmentPrincipals.Count)" -PercentComplete $PercentComplete
+            }
             Write-Verbose "Get identity information from permanent member $Principal"
             try {
                 $PrincipalProfile = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/directoryObjects/$($Principal)" -OutputType PSObject
                 $ObjectType = $PrincipalProfile.'@odata.type'.Replace('#microsoft.graph.', '')
             } catch {
-                Write-Warning "Issue to resolve directory object $Principal! $($_.Exception.Message)"
+                $WarningMessage = "Issue to resolve directory object $Principal! $($_.Exception.Message)"
+                if ($null -ne $WarningMessages) {
+                    $WarningMessages.Add([PSCustomObject]@{
+                            Timestamp = (Get-Date)
+                            Type      = "ObjectResolutionError"
+                            ObjectId  = $Principal
+                            Message   = $WarningMessage
+                        })
+                }
+                Write-Warning $WarningMessage
             }
 
             $AllPrinicpalDefenderRoleAssignments = Invoke-EntraOpsMsGraphQuery -Uri "/beta/roleManagement/defender/RoleAssignments?$count=true&`$filter=principalIds/any(a:a+eq+'$Principal')" -ConsistencyLevel "eventual" -OutputType PSObject
 
             foreach ($DefenderPrincipalRoleAssignment in $AllPrinicpalDefenderRoleAssignments) {
 
-                $Role = ($DefenderRoleDefinitions | where-object { $_.id -eq $DefenderPrincipalRoleAssignment.roleDefinitionId })
+                # Optimization: Use hashtable lookup instead of Where-Object for O(1) access
+                $Role = $RoleDefLookup[$DefenderPrincipalRoleAssignment.roleDefinitionId]
 
-                if ($null -eq $Role) { Write-Warning "Role definition is empty or does not exist for Role Assignment $($DefenderPrincipalRoleAssignment.id)" }
+                if ($null -eq $Role) {
+                    $WarningMessage = "Role definition is empty or does not exist for Role Assignment $($DefenderPrincipalRoleAssignment.id)"
+                    if ($null -ne $WarningMessages) {
+                        $WarningMessages.Add([PSCustomObject]@{
+                                Timestamp = (Get-Date)
+                                Type      = "RoleDefinitionError"
+                                ObjectId  = $DefenderPrincipalRoleAssignment.id
+                                Message   = $WarningMessage
+                            })
+                    }
+                    Write-Warning $WarningMessage
+                }
 
                 if ( [string]::IsNullOrEmpty($DefenderPrincipalRoleAssignment.directoryScopeIds) ) {
                     # Directory Scope Id is null if the role is assigned to all devices or all users, only scoping on both object types includes "/" as directoryScopeId
@@ -116,6 +163,7 @@ function Get-EntraOpsPrivilegedDefenderRoles {
                 }
             }
         }
+        Write-Progress -Activity "Processing Defender Role Principals" -Completed
     } else {
         Write-Warning "No Defender Role Assignments found!"
         $DefenderPermanentRbacAssignments = $null
@@ -138,10 +186,10 @@ function Get-EntraOpsPrivilegedDefenderRoles {
             $GroupObjectDisplayName = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/groups/$($GroupWithRbacAssignment.ObjectId)" -OutputType PSObject).displayName
             foreach ($TransitiveMember in $TransitiveMembers) {
                 $Member = [pscustomobject]@{
-                    displayName           = $TransitiveMember.displayName
-                    id                    = $TransitiveMember.id
-                    '@odata.type'         = $TransitiveMember.'@odata.type'
-                    RoleAssignmentSubType = $TransitiveMember.RoleAssignmentSubType
+                    displayName            = $TransitiveMember.displayName
+                    id                     = $TransitiveMember.id
+                    '@odata.type'          = $TransitiveMember.'@odata.type'
+                    RoleAssignmentSubType  = $TransitiveMember.RoleAssignmentSubType
                     GroupObjectDisplayName = $GroupObjectDisplayName
                     GroupObjectId          = $GroupWithRbacAssignment.ObjectId
                 }
@@ -154,9 +202,9 @@ function Get-EntraOpsPrivilegedDefenderRoles {
 
             $RbacAssignmentByNestedGroupMembers = $AllTransitiveMembers | Where-Object { $_.GroupObjectId -eq $RbacAssignmentByGroup.ObjectId }
 
-            if ($RbacAssignmentByNestedGroupMembers.Count -gt "0") {
+            if ($RbacAssignmentByNestedGroupMembers.Count -gt 0) {
                 $RbacAssignmentByNestedGroupMembers | foreach-object {
-                    [pscustomobject]@{
+                    $TransitiveAssignment = [pscustomobject]@{
                         RoleAssignmentId              = $RbacAssignmentByGroup.RoleAssignmentId
                         RoleAssignmentScopeId         = $RbacAssignmentByGroup.RoleAssignmentScopeId
                         RoleAssignmentScopeName       = $RbacAssignmentByGroup.RoleAssignmentScopeName
@@ -167,18 +215,23 @@ function Get-EntraOpsPrivilegedDefenderRoles {
                         RoleDefinitionName            = $RbacAssignmentByGroup.RoleDefinitionName
                         RoleDefinitionId              = $RbacAssignmentByGroup.RoleDefinitionId
                         RoleType                      = $RbacAssignmentByGroup.RoleType
-                        RoleIsPrivileged              = $Role.isPrivileged
+                        RoleIsPrivileged              = $RbacAssignmentByGroup.RoleIsPrivileged
                         ObjectId                      = $_.Id
                         ObjectType                    = $_.'@odata.type'.Replace("#microsoft.graph.", "").ToLower()
                         TransitiveByObjectId          = $RbacAssignmentByGroup.ObjectId
                         TransitiveByObjectDisplayName = $_.GroupObjectDisplayName
                     }
+                    $DefenderTransitiveRbacAssignments.Add($TransitiveAssignment) | Out-Null
                 }
             } else {
-                Write-Warning "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                if ($null -ne $WarningMessages) {
+                    $WarningMessages.Add([PSCustomObject]@{
+                            Type    = "Empty Group"
+                            Message = "Empty group $($RbacAssignmentByGroup.ObjectId)"
+                            Target  = $RbacAssignmentByGroup.ObjectId
+                        })
+                }
             }
-
-            $DefenderTransitiveRbacAssignments.Add($TransitiveMember) | Out-Null
         }
     }
     #endregion

@@ -19,7 +19,19 @@
           "AgentCollection.ReadWrite.All",
           "AgentCollection.ReadWrite.ManagedBy",
           "AgentInstance.ReadWrite.All",
-          "AgentInstance.ReadWrite.ManagedBy"
+          "AgentInstance.ReadWrite.ManagedBy",
+          "AgentIdentity.DeleteRestore.All",
+          "AgentIdentity.EnableDisable.All",
+          "AgentIdentity.ReadWrite.All",
+          "AgentIdentityBlueprint.AddRemoveCreds.All",
+          "AgentIdentityBlueprint.DeleteRestore.All",
+          "AgentIdentityBlueprint.ReadWrite.All",
+          "AgentIdentityBlueprint.UpdateAuthProperties.All",
+          "AgentIdentityBlueprint.UpdateBranding.All",
+          "AgentIdentityBlueprintPrincipal.DeleteRestore.All",
+          "AgentIdentityBlueprintPrincipal.EnableDisable.All",
+          "AgentIdentityBlueprintPrincipal.ReadWrite.All",
+          "AgentIdUser.ReadWrite.All"
         ]
       },
       {
@@ -31,7 +43,6 @@
           "/"
         ],
         "RoleDefinitionActions": [
-          "Application-RemoteDesktopConfig.ReadWrite.All",
           "Application-RemoteDesktopConfig.ReadWrite.All",
           "Application.ReadWrite.All",
           "Application.ReadUpdate.All",
@@ -49,19 +60,6 @@
       },
       {
         "Category": "Microsoft.Graph",
-        "Service": "Agent Identity",
-        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
-        "ResourceScope": "Application",
-        "RoleAssignmentScopeName": [
-          "/"
-        ],
-        "RoleDefinitionActions": [
-          "AgentApplication.Create",
-          "AgentIdentity.Create"
-        ]
-      },
-      {
-        "Category": "Microsoft.Graph",
         "Service": "Authentication",
         "ResourceAppId": "00000003-0000-0000-c000-000000000000",
         "ResourceScope": "Application",
@@ -69,7 +67,6 @@
           "/"
         ],
         "RoleDefinitionActions": [
-          "APIConnectors.Read.All",
           "CustomAuthenticationExtension.ReadWrite.All",
           "CustomAuthenticationExtension.Receive.Payload",
           "Policy.ReadWrite.AuthenticationFlows",
@@ -181,11 +178,9 @@
           "CloudPC.ReadWrite.All",
           "Device.Command",
           "Device.ReadWrite.All",
-          "DeviceManagementApps.ReadW.All",
           "DeviceManagementApps.ReadWrite.All",
           "DeviceManagementConfiguration.ReadWrite.All",
           "DeviceManagementManagedDevices.PrivilegedOperations.All",
-          "DeviceManagementManagedDevices.PriviligedOperation.All",
           "DeviceManagementManagedDevices.PriviligedOperation.All",
           "DeviceManagementManagedDevices.ReadWrite.All",
           "DeviceManagementServiceConfig.ReadWrite.All",
@@ -263,7 +258,6 @@
           "User.Export.All",
           "User.ManageCreds.All",
           "User.ManageIdentities.All",
-          "User.ReadWrite",
           "User.ReadWrite.All",
           "User.ReadWrite.CrossCloud",
           "User-Mail.ReadWrite.All",
@@ -298,7 +292,6 @@
           "/"
         ],
         "RoleDefinitionActions": [
-          "IdentityProvider.ReadWrite.All",
           "IdentityRiskEvent.ReadWrite.All",
           "RiskPreventionProviders.ReadWrite.All",
           "IdentityRiskyAgent.ReadWrite.All",
@@ -434,13 +427,10 @@
           "IdentityProvider.ReadWrite.All",
           "ManagedTenant.ReadWrite.All",
           "ManagedTenants.ReadWrite.All",
-          "ManagedTenants.ReadWrite.All",
-          "ManagedTenants.WriteRead.All",
           "OnPremDirectorySynchronization.ReadWrite.All",
           "OnPremisesPublishingProfiles.ReadWrite.All",
           "Organization.ReadWrite.All",
           "OrganizationalBranding.ReadWrite.All",
-          "Policy.ReadWrite.ApplicationConfiguration",
           "Policy.ReadWrite.FeatureRollout",
           "SignInIdentifier.ReadWrite.All"
         ]
@@ -465,6 +455,22 @@
     "EAMTierLevelName": "ManagementPlane",
     "EAMTierLevelTagValue": "1",
     "TierLevelDefinition": [
+      {
+        "Category": "Microsoft.Graph",
+        "Service": "Agent Identity",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "AgentApplication.Create",
+          "AgentIdentity.Create.All",
+          "AgentIdentity.Create",
+          "AgentIdentityBlueprint.Create",
+          "AgentIdentityBlueprintPrincipal.Create"
+        ]
+      },
       {
         "Category": "Microsoft.Intune",
         "Service": "Certificate Management",
@@ -610,6 +616,7 @@
           "MultiTenantOrganization.ReadBasic.All",
           "OrgContact.Read.All",
           "PartnerBilling.Read.All",
+          "SentimentSurvey.Export.All",
           "User-LifeCycleInfo.Read.All"
         ]
       },
@@ -825,6 +832,7 @@
           "TeamworkDevice.ReadWrite.All",
           "TeamworkTag.Read.All",
           "TeamworkTag.ReadWrite.All",
+          "TeamworkTargetedMessage.Read.All",
           "WorkforceIntegration.ReadWrite.All"
         ]
       },
@@ -950,6 +958,7 @@
         "RoleDefinitionActions": [
           "Agreement.Read.All",
           "AgreementAcceptance.Read.All",
+          "APIConnectors.Read.All",
           "ConsentRequest.Read.All",
           "ConfigurationMonitoring.Read.All",
           "CrossTenantInformation.ReadBasic.All",
@@ -1011,6 +1020,9 @@
           "AgentCard.Read.All",
           "AgentCardManifest.Read.All",
           "AgentCollection.Read.All",
+          "AgentIdentity.Read.All",
+          "AgentIdentityBlueprint.Read.All",
+          "AgentIdentityBlueprintPrincipal.Read.All",
           "AgentInstance.Read.All",
           "AdministrativeUnit.Read.All",
           "Application.Read.All",
@@ -1042,6 +1054,7 @@
           "UserAuthMethod-WindowsHello.Read.All",
           "UserAuthenticationMethod.Read.All",
           "User.Read.All",
+          "User.ReadWrite",
           "VerifiedId-Profile.Read.All"
         ]
       },
@@ -1056,10 +1069,16 @@
         "RoleDefinitionActions": [
           "Calendars.Read.Shared",
           "Calendars.ReadBasic",
+          "ChannelMessage.Send",
           "Device.Read",
+          "Directory.AccessAsUser.All",
+          "Files.ReadWrite",
           "email",
+          "offline_access",
           "openid",
           "profile",
+          "user_impersonation",
+          "User.Read",
           "User.ReadBasic.All"
         ]
       },
@@ -1073,6 +1092,19 @@
         ],
         "RoleDefinitionActions": [
           "User.Invite.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
+        "Service": "Agent Identity",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "AgentIdUser.ReadWrite.IdentityParentedBy",
+          "AgentIdentity.CreateAsManager"
         ]
       },
       {

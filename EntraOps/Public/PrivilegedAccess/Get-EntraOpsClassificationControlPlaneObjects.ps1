@@ -76,7 +76,6 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         [System.String]$EntraIdCustomizedClassificationFile = "$DefaultFolderClassification\$($TenantNameContext)\Classification_AadResources.json"
         ,
         [Parameter(Mandatory = $false)]
-        [ValidateScript({ Test-Path $_ })]
         [string]$EntraOpsEamFolder = "$DefaultFolderClassifiedEam"
         ,
         [Parameter(Mandatory = $false)]
@@ -99,7 +98,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     $PrivilegedObjects = @()
 
     # Check if classification file custom and/or template file exists, choose custom template for tenant if available
-    if (!(Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext))")) {
+    if (!(Test-Path -Path "$($DefaultFolderClassification)/$($TenantNameContext)")) {
         try {
             New-Item -Path "$($DefaultFolderClassification)/$($TenantNameContext)" -ItemType Directory -Force | Out-Null
         } catch {
@@ -241,12 +240,69 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     #region Get list of all privileged objects by manual list of ObjectIds
     if ($PrivilegedObjectClassificationSource -contains "PrivilegedObjectIds" -and $null -ne $PrivilegedObjectIds) {
         Write-Host "Get privileged objects from manual list of object ids..."
-        $PrivilegedObjects = $PrivilegedObjectIds | ForEach-Object {
+        $PrivilegedObjects += $PrivilegedObjectIds | ForEach-Object {
             $PrivilegedObject = Get-EntraOpsPrivilegedEntraObject -AadObjectId $_
             $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value @("Manual") -Force | Out-Null
             $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "Manual" -Force | Out-Null
+            return $PrivilegedObject
         }
     }
+    #endregion
+
+    #region Display summary of identified Control Plane objects
+    Write-Host "`n=== Control Plane Classification Summary ===" -ForegroundColor Cyan
+    $UniqueTotalCount = ($PrivilegedObjects | Select-Object -Unique ObjectId).Count
+    Write-Host "Total unique privileged objects identified: $UniqueTotalCount`n" -ForegroundColor White
+
+    $PrivilegedObjects | Group-Object ClassificationSource | ForEach-Object {
+        $SourceGroup = $_
+        $UniqueSourceObjects = $SourceGroup.Group | Select-Object -Unique ObjectId, ObjectType, ObjectDisplayName
+        Write-Host "  [Source: $($SourceGroup.Name)] - $($UniqueSourceObjects.Count) unique object(s)" -ForegroundColor Yellow
+
+        switch ($SourceGroup.Name) {
+            "EntraOps" {
+                Write-Host "    Analyzed EntraOps scopes: $($EntraOpsScopes -join ', ')" -ForegroundColor Gray
+                $ObjectLevelClassified = $SourceGroup.Group | Where-Object { $_.ClassificationReason -contains "ObjectAdminTierLevelName" } | Select-Object -Unique ObjectId
+                $RoleLevelClassified = $SourceGroup.Group | Where-Object { $_.ClassificationReason -notcontains "ObjectAdminTierLevelName" } | Select-Object -Unique ObjectId
+                if ($ObjectLevelClassified.Count -gt 0) {
+                    Write-Host "    Classified by object-level Control Plane tier (ObjectAdminTierLevelName): $($ObjectLevelClassified.Count) object(s)" -ForegroundColor Gray
+                }
+                if ($RoleLevelClassified.Count -gt 0) {
+                    $RoleSystems = $SourceGroup.Group | Where-Object { $_.ClassificationReason -notcontains "ObjectAdminTierLevelName" } `
+                    | ForEach-Object { $_.ClassificationReason } | Where-Object { $null -ne $_.RoleSystem } `
+                    | Select-Object -ExpandProperty RoleSystem -Unique | Sort-Object
+                    Write-Host "    Classified by Control Plane role assignments: $($RoleLevelClassified.Count) object(s)" -ForegroundColor Gray
+                    if ($RoleSystems) { Write-Host "    RBAC systems with Control Plane assignments: $($RoleSystems -join ', ')" -ForegroundColor Gray }
+                }
+            }
+            "Azure Resource Graph" {
+                Write-Host "    High privileged roles analyzed: $($AzureHighPrivilegedRoles -join ', ')" -ForegroundColor Gray
+                if ($AzureHighPrivilegedScopes -eq "*") {
+                    Write-Host "    Azure scopes: All scopes (including management groups)" -ForegroundColor Gray
+                } else {
+                    Write-Host "    Azure scopes: $($AzureHighPrivilegedScopes -join ', ')" -ForegroundColor Gray
+                }
+                $AssignedRoles = $SourceGroup.Group | ForEach-Object { $_.ClassificationReason } `
+                | Where-Object { $null -ne $_.RoleName } | Select-Object -ExpandProperty RoleName -Unique | Sort-Object
+                if ($AssignedRoles) { Write-Host "    Roles found assigned: $($AssignedRoles -join ', ')" -ForegroundColor Gray }
+            }
+            "XSPM" {
+                Write-Host "    Exposure criticality level filter: $ExposureCriticalityLevel" -ForegroundColor Gray
+                $EdgeLabels = $SourceGroup.Group | ForEach-Object { $_.ClassificationReason } `
+                | Where-Object { $null -ne $_.EdgeLabel } | Select-Object -ExpandProperty EdgeLabel -Unique | Sort-Object
+                if ($EdgeLabels) { Write-Host "    Exposure edge relations identified: $($EdgeLabels -join ', ')" -ForegroundColor Gray }
+            }
+            "Manual" {
+                Write-Host "    Classification based on manually specified privileged object IDs" -ForegroundColor Gray
+            }
+        }
+
+        $UniqueSourceObjects | Group-Object ObjectType | Sort-Object Name | ForEach-Object {
+            Write-Host "    Object types: $($_.Count) $($_.Name)(s)" -ForegroundColor Gray
+        }
+        Write-Host ""
+    }
+    Write-Host "==========================================`n" -ForegroundColor Cyan
     #endregion
 
     #region Summarize and return list of privileged objects

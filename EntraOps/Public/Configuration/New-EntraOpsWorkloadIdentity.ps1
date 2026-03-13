@@ -196,10 +196,10 @@ function New-EntraOpsWorkloadIdentity {
     #region Add required Microsoft Entra ID (scoped) directory role for managing Conditional Access Target Groups
     if ($Config.AutomatedConditionalAccessTargetGroups.ApplyConditionalAccessTargetGroups -eq $true) {
         $AdminUnitName = $Config.AutomatedConditionalAccessTargetGroups.AdminUnitName
-        $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($AdminUnitName)'" -OutputType PSObject -DisableCache).id
+        $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits?`$filter=DisplayName eq '$($AdminUnitName)'" -OutputType PSObject -DisableCache).id
         #region Create Administrative Unit if it does not exist
         if (-not $AdminUnitId) {
-            Write-Host "Creating Administrative Unit $($Name)"
+            Write-Host "Creating Administrative Unit $($AdminUnitName)"
 
             $AuParams = @{
                 DisplayName                  = $AdminUnitName
@@ -217,7 +217,7 @@ function New-EntraOpsWorkloadIdentity {
             # Check if AU has been created successfully, wait for delay and retry if not available yet
             Try {
                 Do { Start-Sleep -Seconds 1 }
-                Until ($AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Body $Body -Uri "/beta/administrativeUnits/$($NewAdminUnitId)" -DisableCache).Id)
+                Until ($AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($NewAdminUnitId)" -DisableCache).Id)
                 Write-Host "$($AdminUnitName) - $($AdminUnitId) has been created successfully" -f Green
             } Catch {
                 Write-Warning "$($AdminUnitName) not available yet"
@@ -270,25 +270,21 @@ function New-EntraOpsWorkloadIdentity {
 
     if ($Config.LogAnalytics.IngestToLogAnalytics -eq $true) {
         try {
-            Write-Output "Adding permissions to Resource Group of Data Collection Rule on $($DataCollectionRuleResourceGroupId)..."
+            Write-Output "Adding permissions to Resource Group of Data Collection Rule on $($Config.LogAnalytics.DataCollectionResourceGroupName)..."
             Add-AzureRolePermissions -RoleDefinitionName "Monitoring Metrics Publisher" -ResourceGroupName $Config.LogAnalytics.DataCollectionResourceGroupName -SubscriptionId $Config.LogAnalytics.DataCollectionRuleSubscriptionId
             Add-AzureRolePermissions -RoleDefinitionName "Reader" -ResourceGroupName $Config.LogAnalytics.DataCollectionResourceGroupName -SubscriptionId $Config.LogAnalytics.DataCollectionRuleSubscriptionId    
         } catch {
-            Write-Warning "Failed to assign roles on $($DataCollectionRuleResourceGroupId). Error: $_"
+            Write-Warning "Failed to assign roles on $($Config.LogAnalytics.DataCollectionResourceGroupName). Error: $_"
         }
-    } else {
-        Write-Output "Skipping Data Collection Rule permissions... (IngestToLogAnalytics is set to false)"
     }
 
     if ($Config.SentinelWatchLists.IngestToWatchLists -eq $true) {
         try {
-            Write-Output "Adding permissions to Resource Group of Sentinel workspace on $($DataCollectionRuleResourceGroupId)..."
+            Write-Output "Adding permissions to Resource Group of Sentinel Workspace on $($Config.SentinelWatchLists.SentinelResourceGroupName)..."
             Add-AzureRolePermissions -RoleDefinitionName "Microsoft Sentinel Contributor" -ResourceGroupName $Config.SentinelWatchLists.SentinelResourceGroupName -SubscriptionId $Config.SentinelWatchLists.SentinelSubscriptionId    
         } catch {
-            Write-Warning "Failed to assign roles on $($DataCollectionRuleResourceGroupId). Error: $_"
+            Write-Warning "Failed to assign roles on $($Config.SentinelWatchLists.SentinelResourceGroupName). Error: $_"
         }
-    } else {
-        Write-Output "Skipping WatchList permissions... (IngestToWatchLists is set to false)"
     }
 
     # Add required permissions to Reader Permission on Tenant Root group if AutomatedControlPlaneScopeUpdate is using Resource Graph to get sensitive Privileged Roles in Azure Tenant
@@ -302,14 +298,14 @@ function New-EntraOpsWorkloadIdentity {
 
     #region Add ClientId to environment file
     Write-Output "Write $AppDisplayName AppId to environment file $($ConfigFile)..."
-    $Config.ClientId = $AppObject.AppId
+    $Config.ClientId = if ($AppObject) { $AppObject.AppId } else { $SpObject.AppId }
     $Config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile
     #endregion
 
     #region Add Federated Credential to Application object
     if ($Config.AuthenticationType -eq "FederatedCredentials" -and $CreateFederatedCredential) {
         if ($Config.DevOpsPlatform -eq "GitHub") {
-            Write-Output "Acdd Federated Credential to $AppDisplayName..."
+            Write-Output "Add Federated Credential to $AppDisplayName..."
 
             switch ($FederatedEntityType) {
                 Branch {
@@ -340,4 +336,5 @@ function New-EntraOpsWorkloadIdentity {
     } else {
         Write-Verbose "Skipping Federated Credential configuration... (AuthenticationType is not Federated)"
     }
+    #endregion
 }

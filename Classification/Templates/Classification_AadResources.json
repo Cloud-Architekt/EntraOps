@@ -36,6 +36,7 @@
           "microsoft.directory/applications/create",
           "microsoft.directory/applications/credentials/update",
           "microsoft.directory/applications/delete",
+          "microsoft.directory/applications/disablement/update",
           "microsoft.directory/applications/extensionProperties/update",
           "microsoft.directory/applications/notes/update",
           "microsoft.directory/applications/owners/update",
@@ -43,15 +44,11 @@
           "microsoft.directory/applications/tag/update",
           "microsoft.directory/applications/verification/update",
           "microsoft.directory/applicationTemplates/instantiate",
-          "microsoft.directory/applicationTemplates/instantiate",
           "microsoft.directory/deletedItems.applications/delete",
-          "microsoft.directory/deletedItems.applications/delete",
-          "microsoft.directory/deletedItems.applications/restore",
           "microsoft.directory/deletedItems.applications/restore",
           "microsoft.directory/oAuth2PermissionGrants/allProperties/allTasks",
           "microsoft.directory/oAuth2PermissionGrants/basic/update",
           "microsoft.directory/oAuth2PermissionGrants/create",
-          "microsoft.directory/oAuth2PermissionGrants/create/AsOwner",
           "microsoft.directory/permissionGrantPolicies/allProperties/update",
           "microsoft.directory/permissionGrantPolicies/basic/update",
           "microsoft.directory/permissionGrantPolicies/create",
@@ -95,6 +92,7 @@
           "microsoft.directory/domains/federationConfiguration/create",
           "microsoft.directory/domains/federationConfiguration/delete",
           "microsoft.directory/hybridAuthenticationPolicy/allProperties/allTasks",
+          "microsoft.directory/onPasswordSubmitCustomAuthenticationExtension/allProperties/allTasks",
           "microsoft.directory/organization/strongAuthentication/allTasks",
           "microsoft.directory/passwordHashSync/allProperties/allTasks",
           "microsoft.directory/userCredentialPolicies/basic/update",
@@ -102,6 +100,20 @@
           "microsoft.directory/userCredentialPolicies/delete",
           "microsoft.directory/userCredentialPolicies/owners/update",
           "microsoft.directory/userCredentialPolicies/tenantDefault/update"
+        ]
+      },
+      {
+        "Category": "Microsoft.AzureAD",
+        "Service": "Backup and Recovery",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "microsoft.directory/backup/preview/cancel",
+          "microsoft.directory/backup/preview/create",
+          "microsoft.directory/backup/recovery/cancel",
+          "microsoft.directory/backup/recovery/create",
+          "microsoft.directory/backup/standard/read"
         ]
       },
       {
@@ -327,8 +339,6 @@
           "microsoft.directory/groups.security/visibility/update",
           "microsoft.directory/groups/assignedLabels/update",
           "microsoft.directory/groups/basic/update",
-          "microsoft.directory/groups/basic/update",
-          "microsoft.directory/groups/classification/update",
           "microsoft.directory/groups/classification/update",
           "microsoft.directory/groups/create",
           "microsoft.directory/groups/delete",
@@ -515,7 +525,6 @@
           "microsoft.directory/verifiableCredentials/configuration/allProperties/update",
           "microsoft.directory/verifiableCredentials/configuration/contracts/allProperties/update",
           "microsoft.directory/verifiableCredentials/configuration/contracts/cards/revoke",
-          "microsoft.directory/verifiableCredentials/configuration/contracts/create",
           "microsoft.directory/verifiableCredentials/configuration/contracts/create",
           "microsoft.directory/verifiableCredentials/configuration/create",
           "microsoft.directory/verifiableCredentials/configuration/delete"
@@ -729,8 +738,6 @@
           "microsoft.directory/contacts/create",
           "microsoft.directory/contacts/delete",
           "microsoft.office365.exchange/allEntities/basic/allTasks",
-          "microsoft.office365.exchange/allEntities/basic/allTasks",
-          "microsoft.office365.exchange/allRecipients/allProperties/allTasks",
           "microsoft.office365.exchange/allRecipients/allProperties/allTasks",
           "microsoft.office365.exchange/messageTracking/allProperties/allTasks",
           "microsoft.office365.exchange/migration/allProperties/allTasks",
@@ -878,6 +885,7 @@
           "microsoft.teams/callQuality/standard/read",
           "microsoft.teams/devices/standard/read",
           "microsoft.teams/meetings/allProperties/allTasks",
+          "microsoft.teams/policies/externalAccessPolicy/allTasks",
           "microsoft.teams/voice/allProperties/allTasks"
         ]
       },
@@ -1098,6 +1106,7 @@
           "microsoft.directory/users/photo/read",
           "microsoft.directory/users/registeredDevices/read",
           "microsoft.directory/users/scopedRoleMemberOf/read",
+          "microsoft.directory/users/sponsorOf/read",
           "microsoft.directory/users/sponsors/read",
           "microsoft.directory/users/standard/read",
           "microsoft.people/users/photo/read",
@@ -1115,8 +1124,6 @@
           "microsoft.directory/applications/createAsOwner",
           "microsoft.directory/groups.security/createAsOwner",
           "microsoft.directory/groups.unified/createAsOwner",
-          "microsoft.directory/servicePrincipals/createAsOwner",
-          "microsoft.directory/applications/createAsOwner",
           "microsoft.directory/groups/createAsOwner",
           "microsoft.directory/servicePrincipals/createAsOwner"
         ]
