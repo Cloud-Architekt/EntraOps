@@ -30,6 +30,10 @@ All essential changes on EntraOps will be documented in this changelog.
 ### Fixed
 - Role assignment checks in `Get-EntraOpsPrivilegedEntraObject` for improved accuracy
 - Deduplication of object IDs in `Update-EntraOpsPrivilegedConditionalAccessGroup` and `Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit`
+- Remove valication on `EntraOpsEamFolder` parameter to allow first-run before `PrivilegedEAM/` directory exists (kudos to @weskroesbergen, [PR #47](https://github.com/Cloud-Architekt/EntraOps/pull/47))
+- Use `beta` endpoint for `roleManagement/directory/roleDefinitions` in `Get-EntraOpsPrivilegedEAMEntraId` to include roles only available in beta (kudos to @weskroesbergen, [PR #47](https://github.com/Cloud-Architekt/EntraOps/pull/47))
+- Fix exclusion checks in `Get-EntraOpsPrivilegedEAMIntune` and `Get-EntraOpsPrivilegedEAMDefender` (kudos to @weskroesbergen, [PR #47](https://github.com/Cloud-Architekt/EntraOps/pull/47))
+- Fix scope classification in `Get-EntraOpsPrivilegedEAMIntune` and `Get-EntraOpsPrivilegedEAMDefender` (kudos to @weskroesbergen, [PR #47](https://github.com/Cloud-Architekt/EntraOps/pull/47))
 
 ### Removed
 - Support of "Azure PowerShell" only mode because of limited Graph API scope

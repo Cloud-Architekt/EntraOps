@@ -76,7 +76,6 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         [System.String]$EntraIdCustomizedClassificationFile = "$DefaultFolderClassification\$($TenantNameContext)\Classification_AadResources.json"
         ,
         [Parameter(Mandatory = $false)]
-        [ValidateScript({ Test-Path $_ })]
         [string]$EntraOpsEamFolder = "$DefaultFolderClassifiedEam"
         ,
         [Parameter(Mandatory = $false)]

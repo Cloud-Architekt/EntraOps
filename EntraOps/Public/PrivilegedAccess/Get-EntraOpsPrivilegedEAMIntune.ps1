@@ -273,7 +273,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
         # Check if RBAC scope is listed in JSON by wildcard in RoleAssignmentScope (e.g. /azops-rg/*)
         $MatchedClassificationByScope += $IntuneResourcesByClassificationJSON | foreach-object {
             $Classification = $_
-            $Classification | where-object { $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -like $Classification.RoleAssignmentScopeName -and $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -notcontains $Classification.ExcludedRoleAssignmentScopeName }
+            $Classification | where-object { $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -like $Classification.RoleAssignmentScopeName -and $Classification.ExcludedRoleAssignmentScopeName -notcontains $DeviceMgmtRbacAssignment.RoleAssignmentScopeId }
         }
 
         # Check if role action and scope exists in JSON definition
@@ -286,7 +286,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
         if (($IntuneRoleActionsInJsonDefinition.Count -gt 0)) {
             $ClassifiedDeviceMgmtRbacRoleWithActions = @()
             foreach ($IntuneRoleAction in $IntuneRoleActions.rolePermissions.allowedResourceActions) {
-                $ClassifiedDeviceMgmtRbacRoleWithActions += $IntuneResourcesByClassificationJSON | Where-Object { $IntuneRoleAction -in $_.RoleDefinitionActions -and $_.RoleAssignmentScopeName -contains $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -and $_.ExcludedRoleAssignmentScopeName -notcontains $DeviceMgmtRbacAssignment.RoleAssignmentScopeId }
+                $ClassifiedDeviceMgmtRbacRoleWithActions += $IntuneResourcesByClassificationJSON | Where-Object { $IntuneRoleAction -in $_.RoleDefinitionActions -and $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -like $_.RoleAssignmentScopeName -and $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -notin $_.ExcludedRoleAssignmentScopeName }
             }
             $ClassifiedDeviceMgmtRbacRoleWithActions = $ClassifiedDeviceMgmtRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
             $Classification = $ClassifiedDeviceMgmtRbacRoleWithActions | ForEach-Object {

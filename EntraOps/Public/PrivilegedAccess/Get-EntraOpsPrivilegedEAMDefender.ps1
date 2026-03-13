@@ -137,7 +137,7 @@ function Get-EntraOpsPrivilegedEamDefender {
         # Check if RBAC scope is listed in JSON by wildcard in RoleAssignmentScope (e.g. /azops-rg/*)
         $MatchedClassificationByScope += $DefenderResourcesByClassificationJSON | foreach-object {
             $Classification = $_
-            $Classification | where-object { $DefenderRbacAssignment.RoleAssignmentScopeId -like $Classification.RoleAssignmentScopeName -and $DefenderRbacAssignment.RoleAssignmentScopeId -notcontains $Classification.ExcludedRoleAssignmentScopeName }
+            $Classification | where-object { $DefenderRbacAssignment.RoleAssignmentScopeId -like $Classification.RoleAssignmentScopeName -and $Classification.ExcludedRoleAssignmentScopeName -notcontains $DefenderRbacAssignment.RoleAssignmentScopeId }
         }
 
         # Check if role action and scope exists in JSON definition
@@ -149,7 +149,7 @@ function Get-EntraOpsPrivilegedEamDefender {
         if (($DefenderRoleActionsInJsonDefinition.Count -gt 0)) {
             $ClassifiedDefenderMgmtRbacRoleWithActions = @()
             foreach ($DefenderRoleAction in $DefenderRoleActions.rolePermissions.allowedResourceActions) {
-                $ClassifiedDefenderMgmtRbacRoleWithActions += $DefenderResourcesByClassificationJSON | Where-Object { $DefenderRoleAction -in $_.RoleDefinitionActions -and $_.RoleAssignmentScopeName -contains $DefenderRbacAssignment.RoleAssignmentScopeId -and $_.ExcludedRoleAssignmentScopeName -notcontains $DefenderRbacAssignment.RoleAssignmentScopeId }
+                $ClassifiedDefenderMgmtRbacRoleWithActions += $DefenderResourcesByClassificationJSON | Where-Object { $DefenderRoleAction -in $_.RoleDefinitionActions -and $DefenderRbacAssignment.RoleAssignmentScopeId -like $_.RoleAssignmentScopeName -and $DefenderRbacAssignment.RoleAssignmentScopeId -notin $_.ExcludedRoleAssignmentScopeName }
             }
             $ClassifiedDefenderMgmtRbacRoleWithActions = $ClassifiedDefenderMgmtRbacRoleWithActions | select-object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
             $Classification = $ClassifiedDefenderMgmtRbacRoleWithActions | ForEach-Object {

@@ -238,7 +238,8 @@ function Get-EntraOpsPrivilegedEamEntraId {
         $AllAadRoleActions = $RoleDefCachedObject.Data
     } else {
         # Recommendation: Optimize Payload (Minimal Select)
-        $AllAadRoleActions = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?`$select=id,displayName,rolePermissions" -OutputType PSObject)
+
+        $AllAadRoleActions = (Invoke-EntraOpsMsGraphQuery -Method Get -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions?`$select=id,displayName,rolePermissions" -OutputType PSObject)
         
         if ($AllAadRoleActions.Count -gt 0) {
             try {
