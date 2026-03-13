@@ -29,7 +29,7 @@
 
 ## Introduction
 
-EntraOps is a personal research project to show capabilities for automated management of Microsoft Entra ID tenant at scale by using DevOps-approach. At this time, a PowerShell module and GitHub repository template is available to analyze privileges and use a (customizable) classification model to identify the sensitivity of access (based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA)). The solution can be used on any platform which supports PowerShell Core. Therefore, you have the option to run EntraOps in DevOps, serverless or local environments.
+EntraOps is a personal research project to demonstrate capabilities for automated management of a Microsoft Entra ID tenant at scale using a DevOps approach. A PowerShell module and GitHub repository template are available to analyze privileges and use a (customizable) classification model to identify the sensitivity of access (based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA)). The solution can be used on any platform that supports PowerShell Core, giving you the option to run EntraOps in DevOps, serverless, or local environments.
 
 ## Key features
 
@@ -39,18 +39,20 @@ EntraOps is a personal research project to show capabilities for automated manag
 
 - 🆕 Automation to update classification templates, PowerShell module and other resources from repository
 
-- 👑 Identify privileged assets based on automated and full customizable classification of Enterprise Access “tiering” model.
-Integration to customize Control Plane scope automatically by critical assets in Microsoft Security Exposure Management, high-privileges roles/scope in Microsoft Azure RBAC and privileged objects in Microsoft Entra (by EntraOps).
+- 👑 Identify privileged assets based on automated and fully customizable classification of the Enterprise Access "tiering" model.
+Integration to automatically customize Control Plane scope using critical assets in Microsoft Security Exposure Management, high-privilege roles/scopes in Microsoft Azure RBAC, and privileged objects in Microsoft Entra (by EntraOps).
 
 - 🔬 Ingest classification data with all details to custom table in Microsoft Sentinel/Log Analytics Workspace or WatchLists for hunting and enrichment. Including support for Sentinel WatchList templates (High Value Assets, VIP Users and Identity Correlation)
 
 - 🤖 Advanced WatchLists to get insights (e.g., relation between managed identities and Azure Resources) but also information about security posture of Workload Identities by Microsoft Entra Recommendations and Microsoft Defender for Cloud CSPM (Attack Paths).
 
-- 📊 Build reports or queries on your classified privileges to identify "tier breach" on Microsoft's Enterprise Access Model or privilege escalation paths. Workbook template to visualize classification data of role assignments (identified by EntraOps) and objects (by using custom security attributes)
+- 📊 Build reports or queries on your classified privileges to identify tier breaches in Microsoft's Enterprise Access Model or privilege escalation paths. Workbook templates to visualize classification data of role assignments (identified by EntraOps) and objects (by using custom security attributes).
 
-- 🛡️ Automated assignment of privileged assets in Conditional Access Groups and Restricted Management Administrative Units (RMAU) to protect high-privileged assets from lower privileges and apply strong Zero Trust policies. Privileged users and groups without existing restricted management by assignment to Administrative Unit (AU), role-assignable group or Entra ID role will be automatically covered by assignment to a RMAU (named "UnprotectedObjects").
+- 🛡️ Automated assignment of privileged assets to Conditional Access Groups and Restricted Management Administrative Units (RMAU) to protect high-privileged assets from lower-privileged identities and apply strong Zero Trust policies. Privileged users and groups without existing restricted management — by assignment to an Administrative Unit (AU), role-assignable group, or Entra ID role — are automatically covered by assignment to an RMAU (named "UnprotectedObjects").
 
-- 🕵️‍♂️ GitHub Custom Agents to identify and analyse privileged objects in EntraOps
+- ⚡ Performance enhancements through parallelization and in-memory/persistent (file-based) caching of Graph API responses with configurable TTL, reducing execution time significantly on large tenants. Use `Get-EntraOpsCacheStatistics` to inspect cache hit/miss rates, TTL, and cache age.
+
+- 🕵️‍♂️ GitHub Custom Agents to identify and analyze privileged objects in EntraOps
   - EntraOps Report Agent: Applies Enterprise Access Model tiers and hygiene rules (cloud-only, no on-prem/guest for high privilege).
   Detects tier mismatches, permanent high-privilege assignments, risky identity types, and insecure ownership.
   Integrates with Microsoft Sentinel for UserRiskEvents, ServicePrincipalRiskEvents, and SecurityIncident data.
@@ -63,10 +65,10 @@ Currently the following RBAC systems are supported:
 - 🔑 Microsoft Entra roles
 - 🔄 Microsoft Entra Identity Governance
 - 🛡️ Microsoft Defender XDR Unified RBAC
-- 🤖 Microsoft Graph App Roles
+- 🤖 Microsoft Graph API permissions — application permissions (app roles) and delegated permissions, including Agent Identities and Agent Identity Blueprint Principals
 - 🖥️ Microsoft Intune
 
-EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline and any automation/worker environment which supports PowerShell Core. The automation to create a pipeline supports GitHub only yet.
+EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline, or in any automation/worker environment that supports PowerShell Core. The pipeline automation currently supports GitHub only.
 
 ## Videos and demos of EntraOps Privileged EAM
 
@@ -106,7 +108,7 @@ Connect-EntraOps -AuthenticationType "UserAssignedMSI" -TenantName <TenantName>`
 -AccountId <UserAssignedMSIObjectId>
 ```
 
-Service Principal with ClientSecret
+Service Principal with ClientSecret (authenticate with Az PowerShell first, then hand off the session)
 
 ```powershell
 $ServicePrincipalCredentials = Get-Credential
@@ -114,7 +116,7 @@ Connect-AzAccount -Credential $ServicePrincipalCredentials -ServicePrincipal -Te
 Connect-EntraOps -TenantName $TenantName -AuthenticationType "AlreadyAuthenticated"
 ```
 
-Workload with already authenticated Azure PowerShell
+Workload with an already-authenticated session (e.g., Managed Identity via Az PowerShell)
 
 ```powershell
 Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "cloudlab.onmicrosoft.com"
@@ -129,10 +131,10 @@ Both cmdlets process all supported RBAC systems by default. Use the `-RbacSystem
 - **EntraID** – [Entra ID directory roles](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/custom-overview) (built-in and custom roles)
 - **IdentityGovernance** – [Entra ID Governance](https://learn.microsoft.com/en-us/entra/id-governance/identity-governance-overview) (access packages, entitlement management)
 - **DeviceManagement** – [Microsoft Intune RBAC](https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/role-based-access-control) (device management roles)
-- **ResourceApps** – [Microsoft Graph API permissions and app roles](https://learn.microsoft.com/en-us/entra/identity-platform/permissions-consent-overview) (application permissions)
+- **ResourceApps** – [Microsoft Graph API permissions and app roles](https://learn.microsoft.com/en-us/entra/identity-platform/permissions-consent-overview) (application permissions and delegated permissions, including Agent Identities)
 - **Defender** – [Microsoft Defender XDR Unified RBAC](https://learn.microsoft.com/en-us/defender-xdr/manage-rbac) (security operations roles)
 
-There are two ways, I've you want to filter the EntraOps results in PowerShell:
+There are two ways to filter the EntraOps results in PowerShell:
 **Option A** – Export RBAC systems to JSON files, then load one or more systems into a variable for filtering:
 
 ```powershell
@@ -250,13 +252,13 @@ _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-Ent
     ```
 
 5. Optional: Create a data collection rule and endpoint if you want to ingest data to custom table in Log Analytics or Microsoft Sentinel workspace.
-Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-portal#create-data-collection-endpoint) to configure a data collection endpoint, custom table, and transformation rule. Use as table name "PrivilegedEAM_CL" to make sure the parser will works on your created custom table. Execute EntraOps interactively and execute "Save-EntraOpsPrivilegedEAMJson" to create a JSON file which can be used as sample data.
+Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/tutorial-logs-ingestion-portal#create-data-collection-endpoint) to configure a data collection endpoint, custom table, and transformation rule. Use the table name "PrivilegedEAM_CL" to ensure the parser will work with your custom table. Execute EntraOps interactively and execute "Save-EntraOpsPrivilegedEAMJson" to create a JSON file which can be used as sample data.
 
     _Recommendation: There is a limitation of 10 KB for a single WatchList entry. This limit can be exceeded in the case of a high number of property items (e.g., classification or owner properties). Therefore, I can strongly recommend choosing "Custom tables" in a large environment. If you are choosing WatchList as ingestion option, keep an eye on the deployment logs for any warnings of this limitation. Entries will not be added if the limit has been exceeded._
 
 6. Review and customize the EntraOps.config file based on your requirements.
    - `TenantId` and `TenantName` should be already updated based on the provided parameters to create the config file. `ClientId` will be automatically updated by running the cmdlet `New-EntraOpsWorkloadIdentity`.
-   - The default scheduled time for running the pull workflow will be a also enabled (`PullScheduledTrigger`) and defined (`PullScheduledCron`) in the config file. By default, the workflow to ingest data will be triggered right after the pull has been completed (by default value of `PushAfterPullWorkflowTrigger`).
+   - The default scheduled time for running the pull workflow will also be enabled (`PullScheduledTrigger`) and defined (`PullScheduledCron`) in the config file. By default, the workflow to ingest data will be triggered right after the pull has been completed (by default value of `PushAfterPullWorkflowTrigger`).
    - Automated updates for classification templates from AzurePrivilegedIAM repository (`AutomatedClassificationUpdate`) or Control Plane scope (`ApplyAutomatedControlPlaneScopeUpdate`) can also be enabled by parameters. Customization of classification updates or data source to identify Control Plane assets is also available from here.
    - Review the settings in the section `AutomatedEntraOpsUpdate` to configure an automated update of the EntraOps PowerShell module on demand or scheduled basis.
    - Enable and update the following parameters if you want to ingest classification data to Custom Tables in Microsoft Sentinel/Log Analytics Workspace (`IngestToLogAnalytics`) or Microsoft Sentinel WatchLists (`IngestToWatchLists`). You need to add the required parameters of the workspace and/or data collection endpoints.
@@ -286,8 +288,8 @@ Follow the instructions from [Microsoft Learn](https://learn.microsoft.com/en-us
 
 ### Parser for Custom Tables and WatchLists
 
-I have built a parser which ensures a standardized schema for EntraOps data across the various ingestion options.
-This allows you to use the same queries and workbooks, regardless of whether you have used WatchLists or Custom Table.
+A parser ensures a standardized schema for EntraOps data across the various ingestion options.
+This allows you to use the same queries and workbooks regardless of whether you have used WatchLists or Custom Tables.
 
 Deploy the according parser for your ingestion option.
 _Recommendation: Choose the parser for "Custom table" if you have enabled ingestion to both targets._
@@ -569,7 +571,7 @@ For example, Restricted Management AUs to protect sensitive security groups from
 
 ## Why was this classification chosen for the role?
 
-Do you like to know which role action is why "Global Reader" has been classified as "Control Plane"? What is the definition of Microsoft's `isPrivileged` classification on the related role action? [AzEntraIdRoleActionsAdvertizer](https://www.azadvertizer.net/azEntraIdRoleActionsAdvertizer.html) and [AzEntraApiPermissionsAdvertizer](https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html) allows to have a visualized view which role or API permission is assigned to a role and what is the specific Administration Tier Level in EntraOps.
+Want to know which role action causes "Global Reader" to be classified as "Control Plane"? What is the definition of Microsoft's `isPrivileged` classification on the related role action? [AzEntraIdRoleActionsAdvertizer](https://www.azadvertizer.net/azEntraIdRoleActionsAdvertizer.html) and [AzEntraApiPermissionsAdvertizer](https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html) allows to have a visualized view which role or API permission is assigned to a role and what is the specific Administration Tier Level in EntraOps.
 
 _Enter the role definition name in the "used by Roles" and choose the desired tier level in "EntraOps TierLevel" to filter for the associated role action. In this case, read BitLocker keys are classified as "Control Plane" in EntraOps and also flagged as "isPrivileged" by Microsoft._
 <br>
@@ -596,7 +598,10 @@ Added features, changes or bug fixes can be found in the [GitHub issues](https:/
 
 ## Disclaimer and License
 
-This tool is provided as-is, with no warranties.
-Code or documentation contributions, issue reports and feature requests are always welcome!
-Please use GitHub issue to review existing or create new issues.
-The EntraOps project is MIT licensed.
+> **DISCLAIMER:** This project is provided **"as-is"**, without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement. In no event shall the authors or copyright holders be liable for any claim, damages, or other liability — whether in an action of contract, tort, or otherwise — arising from, out of, or in connection with the software or the use or other dealings in the software.
+>
+> **Use this project at your own risk.** Always review and test the code in a non-production environment before deploying it in production. The authors are not responsible for any impact to your environment, data loss, security incidents, or compliance issues that may result from using this project.
+
+Code or documentation contributions, issue reports, and feature requests are always welcome!
+Please use GitHub Issues to review existing issues or create new ones.
+The EntraOps project is licensed under the [MIT License](./LICENSE).
