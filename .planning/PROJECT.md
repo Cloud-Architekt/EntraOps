@@ -2,6 +2,8 @@
 
 ## Current State
 
+**Active: v1.3 Updated UI Documentation** 🚧 (started 2026-04-05)
+
 **Shipped: v1.2 Self-Service Implementation Workflow** ✅ (2026-04-04)
 
 The GUI is fully functional and shipped through three milestones. A user who forks EntraOps and runs `Save-EntraOpsPrivilegedEAMJson` can then `cd gui && npm install && npm run dev` to get a working local browser dashboard with:
@@ -19,14 +21,17 @@ The GUI is fully functional and shipped through three milestones. A user who for
 
 See [.planning/milestones/v1.2-ROADMAP.md](.planning/milestones/v1.2-ROADMAP.md) for full v1.2 milestone archive.
 
-## Next Milestone Goals
+## Current Milestone: v1.3 Updated UI Documentation
 
-To be defined via `/gsd-new-milestone`. Candidates from deferred backlog:
-- Pre-install prerequisite PowerShell modules (Az.Accounts, Az.Resources, Az.ResourceGraph) in UI setup gate
-- Fix terminal line spacing in ConnectPage SSE output
-- Alerting / notifications — flag new ControlPlane identities after classification run
-- Attack path analysis — privilege chain tracing, blast radius, exposure scoring
-- AI/Copilot integration — plain-English tier explanations, natural language search
+**Goal:** Create a comprehensive `docs/` folder covering the EntraOps GUI for both end users (security admins) and contributors (developers).
+
+**Target deliverables:**
+- Getting started / installation guide (fork → run `Save-EntraOpsPrivilegedEAMJson` → `npm run dev` → open browser)
+- Feature walkthrough with screenshot references for each screen
+- Troubleshooting / FAQ
+- Configuration reference (EntraOpsConfig.json, API endpoints, environment variables)
+- Architecture / integration overview (GUI ↔ PowerShell module data flow)
+- Separate sections for end users and contributors
 
 ## What This Is
 
@@ -72,9 +77,9 @@ Additionally delivered 17 originally-deferred v2 requirements (RUN-01–06, CONN
 - ✓ IMPL-06: Real-time SSE streaming progress log during implementation run — v1.2
 - ✓ IMPL-07: Outcome summary with pass/fail per cmdlet after run completes — v1.2
 
-### Active
+### Active (v1.3)
 
-_(No active requirements — start `/gsd-new-milestone` to define v1.3)_
+_(Requirements to be defined — see `.planning/REQUIREMENTS.md`)_
 
 ### Deferred to Future (removed from v1.2 short-list)
 
@@ -152,4 +157,4 @@ Three milestones shipped: v1.0 (6 phases, 30 plans) → v1.1 (2 phases, 6 plans)
 Key tech debt: GlobalExclusionsTab fetches raw GUIDs (WARN-1); IMPL-03 tier scope not explicit column (WARN-2); ConnectPage terminal double-space (todo filed); Nyquist VALIDATION.md absent for v1.2 phases.
 
 ---
-*Last updated: 2026-04-04 after v1.2 milestone completion*
+*Last updated: 2026-04-05 after v1.3 milestone start*

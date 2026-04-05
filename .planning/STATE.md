@@ -1,34 +1,33 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Self-Service Implementation Workflow
-status: complete
-last_updated: "2026-04-04T23:59:00Z"
-last_activity: 2026-04-04 -- v1.2 milestone archived and tagged
+milestone: v1.3
+milestone_name: Updated UI Documentation
+status: active
+last_updated: "2026-04-05T00:00:00Z"
+last_activity: 2026-04-05 -- Milestone v1.3 started
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 10
-  completed_plans: 10
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-04 after v1.2)
+See: .planning/PROJECT.md (updated 2026-04-05 after v1.3 start)
 
 **Core value:** A user who has run `Save-EntraOpsPrivilegedEAMJson` can open a browser and immediately understand who holds ControlPlane access in their tenant — without writing a KQL query, opening Azure Portal, or reading raw JSON.
-**Current state:** v1.2 SHIPPED. Run `/gsd-new-milestone` to begin v1.3 planning.
+**Current state:** v1.3 DEFINING REQUIREMENTS. Run `/gsd-plan-phase [N]` after roadmap is created.
 
 ## Current Position
 
-Milestone: v1.2 — COMPLETE AND ARCHIVED
-Status: All 4 phases complete, milestone tagged v1.2, archives created
-Last activity: 2026-04-04 — v1.2 milestone archived and tagged
-
-**Progress bar:** ██████████ 100% (4/4 phases complete)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-05 — Milestone v1.3 started
 
 ## v1.2 Phase Overview
 
