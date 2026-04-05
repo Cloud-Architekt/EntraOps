@@ -12,7 +12,7 @@ interface UseExclusionsResult {
   exclusions: Set<string>;
   isLoading: boolean;
   invalidate: () => void;
-  addExclusion: (guid: string) => Promise<void>;
+  addExclusion: (guid: string, displayName?: string, objectType?: string) => Promise<void>;
 }
 
 export function useExclusions(): UseExclusionsResult {
@@ -42,11 +42,11 @@ export function useExclusions(): UseExclusionsResult {
     };
   }, [refreshKey]);
 
-  const addExclusion = useCallback(async (guid: string): Promise<void> => {
+  const addExclusion = useCallback(async (guid: string, displayName?: string, objectType?: string): Promise<void> => {
     const res = await fetch('/api/exclusions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ guid }),
+      body: JSON.stringify({ guid, displayName, objectType }),
     });
     if (!res.ok && res.status !== 409) {
       throw new Error(`Failed to exclude object (${res.status})`);

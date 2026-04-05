@@ -70,7 +70,7 @@ export function ObjectBrowser() {
     const guid = object.ObjectId;
     setPendingExcludes((prev) => new Set([...prev, guid]));
     try {
-      await addExclusion(guid);
+      await addExclusion(guid, object.ObjectDisplayName, object.ObjectType);
       toast.success('Object excluded', {
         action: {
           label: 'View Exclusions →',

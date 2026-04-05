@@ -132,7 +132,7 @@ export function ReclassifyPage() {
     setPending(new Map());
   }
 
-  async function handleExclude(objectId: string) {
+  async function handleExclude(objectId: string, displayName?: string, objectType?: string) {
     // D-14: Remove pending override synchronously before the async POST
     // so getPendingCount reflects the correct count immediately (D-15)
     const previousPendingValue = pending.get(objectId);
@@ -150,7 +150,7 @@ export function ReclassifyPage() {
     setExcludingIds((prev) => new Set([...prev, objectId]));
 
     try {
-      await addExclusion(objectId);
+      await addExclusion(objectId, displayName, objectType);
       // D-11: individual toast per action; D-16: user stays on Reclassify screen
       toast.success('Object excluded', {
         action: {
@@ -325,7 +325,7 @@ export function ReclassifyPage() {
                           size="sm"
                           className="h-7 gap-1"
                           aria-label={`Exclude ${obj.ObjectDisplayName} from classification`}
-                          onClick={() => handleExclude(obj.ObjectId)}
+                          onClick={() => handleExclude(obj.ObjectId, obj.ObjectDisplayName, obj.ObjectType)}
                         >
                           <ShieldMinus size={14} />
                           Exclude
