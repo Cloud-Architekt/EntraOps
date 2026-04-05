@@ -1,325 +1,188 @@
-# Research Summary — EntraOps GUI
+# Project Research Summary
 
-**Project:** EntraOps GUI (local-first React security dashboard)
-**Domain:** Microsoft Entra ID privileged identity management — file-driven, single-tenant, desktop-only
-**Researched:** 24 March 2026
-**Confidence:** HIGH (all stack decisions verified against live npm registry and official docs)
-
----
+**Project:** EntraOps GUI — v1.3 Updated UI Documentation
+**Domain:** Markdown documentation for a locally-hosted security administration GUI (fork-and-run model)
+**Researched:** 2026-04-05
+**Confidence:** HIGH
 
 ## Executive Summary
 
-EntraOps GUI is a local developer tool, not a SaaS product. The right mental model is VS Code's webview or GitHub Desktop — a trusted, single-user UI that bridges a CLI tool (EntraOps PowerShell module) and a browser. This framing drives every architectural decision: no auth, no cloud dependencies, Express binds to `127.0.0.1`, file system is the security boundary. The codebase lives in `gui/` inside the existing PowerShell repo so any user who forks EntraOps gets the GUI automatically. `npm run dev` must be the entire setup story.
+EntraOps GUI v1.3 is a documentation milestone, not a feature milestone. The product is fully shipped (11 screens across v1.0–v1.2); the task is creating a comprehensive `docs/` folder that serves two distinct audiences: security administrators who use the GUI and contributors who extend it. Research across ArgoCD, Grafana, Portainer, and HashiCorp Vault confirms the pattern: the best documentation for a locally-hosted developer tool is plain Markdown files committed to the repo, organized as a hub-and-spoke hierarchy, with one file per screen and audience separation enforced by folder structure — not by any static site generator.
 
-The recommended stack has four PRD corrections that require conscious decisions upfront: **Tailwind v4** (not v3 — CSS-first, different config), **Express v5** (not v4 — async middleware, security fixes), **Zod v4** (not v3 — 14x faster, is now the npm default), and **Node.js 22 minimum** (v20 is EOL as of March 2026). Additionally, **React Router v7** is a required addition the PRD omitted — URL-reflected filter state (F-10) cannot be done without it. UI components use **shadcn/ui** (not Fluent UI v9): Fluent's Griffel CSS-in-JS fundamentally conflicts with Tailwind's utility approach; Fluent aesthetics are achieved via CSS custom properties in the Tailwind `@theme` block instead.
+The recommended approach is deliberate plain Markdown at `docs/` (repo root, not `gui/docs/`), with relative links, `docs/assets/screenshots/<screen>/` storage, and a `docs/README.md` navigation hub. No VitePress, Starlight, or Docusaurus is warranted at this scale: the fork-and-run audience reads docs on GitHub or in their editor, not on a localhost docs site. The architecture is designed to be forward-compatible — if a hosted site becomes a future milestone goal, VitePress can be bolted on top of the same folder with zero content restructuring.
 
-The primary security risks are concentrated in two future phases: **Phase 3** (PowerShell runner — shell injection is catastrophic if `exec()` is used instead of `spawn()` with array args) and **Phase 2** (template editor — arbitrary file write without schema validation silently corrupts classification output). Phase 1 has one critical baseline requirement: Express must bind to `127.0.0.1` explicitly and all file-read routes must apply path traversal guards. These are not optional hardening — they are required for the tool to be safe on a corporate laptop.
+The primary risks are documentation quality risks, not technical ones. Screenshot drift, audience mismatch (writing for the developer, not the security admin), missing security context (why the tier model matters), and config docs that diverge from the actual `EntraOpsConfig.json` are the recurring failure modes in tools of this type. Mitigating them requires establishing structure and a glossary before any content is authored, sourcing config docs from the live file rather than memory, and treating the getting-started guide as a first-run safety path that ends at a dry-run Apply — not a deep feature tour.
 
 ---
 
 ## Key Findings
 
-### 1. Recommended Stack
+### Recommended Stack
 
-The final verified library list for March 2026. PRD corrections are flagged.
+Plain Markdown files with no tooling additions are the correct choice for this milestone. The fork-and-run deployment model makes this clear: GitHub's native Markdown renderer is the delivery surface. Relative `.md` link paths work identically in GitHub, VSCode preview, and any future VitePress site, so zero refactoring is needed if a hosted docs site becomes a future goal.
 
-#### Frontend
+**Core technologies:**
+- **Plain `.md` files** — All documentation content. Native GitHub rendering, zero tooling, editor-readable.
+- **Relative path links** — All internal cross-references. Forward-compatible with VitePress if added later. Absolute URLs break after repo forks.
+- **`docs/assets/screenshots/<screen>/`** — Screenshot storage. Committed PNGs with relative references; GitHub renders inline, no tooling required.
+- **`markdownlint-cli2 ^0.17`** — Optional root `devDependency`. Enforces consistent heading levels and formatting; zero runtime cost.
 
-| Library | Version | Role | Notes |
-|---------|---------|------|-------|
-| React | 19.2 | UI framework | React Compiler v1.0 stable; Actions; `use()` hook |
-| TypeScript | 5.8+ | Type safety | No change from PRD |
-| Vite | 8.0.2 | Build + dev server | Use `@vitejs/plugin-react` + `@tailwindcss/vite` |
-| **Tailwind CSS** | **4.2.2** | Styling | ⚠️ PRD assumed v3; v4 is CSS-first, no `tailwind.config.js` |
-| shadcn/ui | CLI v4 (Mar 2026) | Component library | Copied into codebase — not a dependency; Tailwind v4 + React 19 support |
-| Lucide React | 1.6.0 | Icons | Required companion to shadcn/ui |
-| @fluentui/react-icons | latest | Fluent icons | Optional; use selectively for tier/identity type badges |
-| Sonner | 2.0.7 | Toast notifications | Replaces old shadcn toast component |
-| TanStack Query | 5.95.2 | Data fetching + caching | `queryKey` factories; `useMutation` for template writes |
-| TanStack Table | 8.21.3 | Object browser table | Headless; server-side pagination mode |
-| **React Router** | **7.13.2** | Routing + URL state | ⚠️ PRD omitted this; required for F-10 (bookmarkable filters) |
-| Recharts | 3.8.0 | Charts | Use shadcn `Chart` wrapper for theme consistency |
-| ansi-to-html | 0.7.2 | ANSI → HTML (Phase 3) | Viable for display-only; flag for Phase 3 review |
-| react-diff-viewer-continued | 4.2.0 | JSON diff view (Phase 4) | Actively maintained fork |
+VitePress (for a future hosted site) can be added as a root `devDependency` without touching `gui/` at all — its Vue runtime does not enter the React client. That decision belongs to a future milestone.
 
-#### Backend
+### Expected Features
 
-| Library | Version | Role | Notes |
-|---------|---------|------|-------|
-| **Express** | **5.2.1** | HTTP server | ⚠️ PRD implied v4; v5 stable since Dec 2024; async middleware, ReDoS fix |
-| simple-git | 3.33.0 | Git access | Args passed as arrays — no shell injection risk |
-| **Zod** | **4.3.6** | Schema validation | ⚠️ PRD said "Zod" without version; v4 is the current npm default; 14x faster |
-| tsx | 4.21.0 | TypeScript runner | No compile step; esbuild-powered |
-| nodemon | 3.1.14 | Backend hot reload | Exclude `PrivilegedEAM/` + `Classification/` from watch |
-| concurrently | 9.2.1 | Dev process manager | Runs Vite + Express in parallel |
+Research from ArgoCD, Portainer, Grafana, and Vault identifies a clear set of documentation sections that security admins expect to find. Missing any table-stakes section makes the tool feel unfinished or untrustworthy.
 
-#### Runtime
+**Must have (table stakes — users expect these):**
+- Prerequisites list with explicit `pwsh`, Node.js, EntraOps module version requirements
+- Numbered getting-started steps, each ending with an expected visual outcome
+- Quick-start box (3-command path: fork → `Save-EntraOpsPrivilegedEAMJson` → `npm run dev`)
+- One page per GUI screen (11 screens = 11 pages)
+- Screenshot for every "you should see" instruction
+- Troubleshooting / FAQ structured by symptom, not error code
+- Configuration reference sourced from live `EntraOpsConfig.json`
+- Architecture / data-flow narrative (PS module → JSON → Express → React)
+- Explicit "no auth = local only" safety callout in getting-started
+- "What this tool is NOT" scope disclaimer
 
-- **Node.js 22 LTS minimum** (v20 EOL March 2026; v24 recommended for new installs)
-- No npm dependency for SSE streaming — use Express `res.write` + `text/event-stream` natively
+**Should have (differentiators — elevate docs from present to excellent):**
+- Concepts / domain glossary covering ControlPlane, ManagementPlane, UserAccess, EAM, AdminTierLevel, Classification Template, Applied vs Computed tier, Exclusion, dry-run, PrivilegedEAM — before any screen docs
+- Architecture data-flow diagram (Mermaid or ASCII)
+- "Before you start" security posture callout on Apply to Entra page
+- Dry-run walkthrough as the recommended first-run path (leads with `-SampleMode`)
+- Step-outcome pairings: every instruction ends with "You should see..."
+- Annotated screenshots for the 3 most complex screens (Apply workflow, Object Browser, Template Editor)
+- FAQ entries phrased as user questions ("Why is X...?", "What happens if...?")
+- "See also" cross-links at the bottom of each screen page
 
-#### Fluent Aesthetic via CSS Custom Properties
+**Defer (v2+):**
+- VitePress / static site generator — only when a hosted public docs site is a milestone goal
+- Versioned docs — no audience for v1.2 vs v1.3 distinction in a forked repo model
+- Changelog doc page — GitHub Releases tab is the right surface for this
+- JSDoc/TSDoc auto-generated API docs — no external API consumers; data model docs are more valuable
+- Video walkthroughs — stale with every UI change; cannot live in git
 
-Do not install Fluent UI React v9. Instead, configure the Tailwind `@theme` block:
+### Architecture Approach
 
-```css
-@theme inline {
-  --color-primary: #0078d4;             /* Fluent Blue 60 */
-  --color-primary-hover: #106ebe;
-  --color-background: #ffffff;
-  --color-foreground: #201f1e;          /* neutralDark */
-  --color-muted: #f3f2f1;              /* neutralLight */
-  --color-muted-foreground: #605e5c;   /* neutralSecondary */
-  --color-border: #edebe9;             /* neutralQuaternary */
-  --color-destructive: #a4262c;        /* Fluent red */
-  --radius: 0.125rem;                  /* 2px — Fluent-tight radii */
-  --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-}
-```
+The docs folder uses a hub-and-spoke navigation model: `docs/README.md` is the single authoritative navigation hub; every sub-section has its own `README.md` (rendered automatically by GitHub); every leaf file has back-links to its section index and the hub. The folder structure enforces audience separation — `user-guide/`, `configuration/`, `troubleshooting/` for security admins; `contributing/`, `architecture/` for developers. No content crosses audience boundaries within a single file.
 
----
+**Major components:**
+1. `docs/README.md` — Navigation hub; table of contents for all docs; updated whenever a file is added
+2. `docs/user-guide/` — One `.md` per GUI screen; end-user walkthroughs; purpose + navigation + screenshots + "see also" back-links
+3. `docs/configuration/` — `entraops-config.md`, `environment-variables.md`, `api-endpoints.md`; lookup reference mode
+4. `docs/architecture/` — `overview.md`, `data-flow.md`, `tech-stack.md`; explains the PS module → JSON → backend → browser pipeline
+5. `docs/troubleshooting/` — `faq.md` structured by symptom; covers the 5 most common setup failures
+6. `docs/contributing/` — `dev-setup.md`, `project-structure.md`, `adding-features.md`; developer audience only
+7. `docs/assets/screenshots/<screen>/` — PNG binaries organized by screen subfolder; relative-linked from user-guide files
 
-### 2. Table Stakes Features (Must Ship in v1 — Phases 1–2)
+The root `README.md` is modified to add a "GUI Documentation" section linking to `docs/README.md`. `IMPLEMENTATION_GUIDE.md`, `CHANGELOG.md`, and `SECURITY.md` remain at root and are cross-referenced but not modified.
 
-Users are security administrators who compare this tool to Entra Admin Center, PIM, and Defender XDR. Missing any of these makes the tool feel incomplete or untrustworthy.
+### Critical Pitfalls
 
-**Phase 1 (Dashboard + Object Browser):**
+**Top 5 pitfalls with prevention strategies (full list in [PITFALLS.md](PITFALLS.md)):**
 
-| Feature | Why Non-Negotiable |
-|---------|-------------------|
-| Tier KPI cards (ControlPlane / ManagementPlane / UserAccess counts) | Core value at a glance; first thing any privileged access admin looks for |
-| Assignment type breakdown (Permanent vs Eligible per tier) | Permanent ControlPlane assignments are the primary red flag; must be visible immediately |
-| RBAC system breakdown | Cross-system view is EntraOps's core value proposition; 5 systems visible at once |
-| Object type breakdown (User / Group / Service Principal) | Non-human identity at ControlPlane is a critical security signal |
-| Data freshness timestamp | Users cannot trust data of unknown age; every comparable tool shows this |
-| Sortable, paginated object table | All PAM tools lead with a principal list; TanStack Table handles this |
-| Multi-facet filter bar (tier, RBAC system, object type, PIM type) | Users arrive with a specific question; they need to filter to the answer in seconds |
-| Free-text search (name / UPN / objectId) | Standard in all Azure admin tools; critical for finding a specific identity |
-| Filter state in URL (bookmarkable) | Security teams share links; auditors want reproducible views |
-| Object detail slide-out panel | Identity card + role assignments + AU memberships in one place |
-| RoleDefinitionActions expandable in detail panel | Shows *why* an identity is ControlPlane — the specific permission strings |
-| Tier color-coding throughout (red/amber/blue) | Users must never have to guess tier from a badge alone |
-| Graceful empty states | Users who haven't run `Save-EntraOpsPrivilegedEAMJson` hit this first; must not crash |
+1. **Screenshot Drift (D1)** — Screenshots become stale within 2 months as UI evolves. Mitigation: limit screenshots to structural/orientation views; avoid transient states (SSE streaming, loading skeletons); add `<!-- screenshot: <file>, taken v1.x -->` comments for staleness traceability.
 
-**Phase 2 (Template Editor):**
+2. **Audience Mismatch (D2)** — Writing for the developer when the primary reader is a security admin. Mitigation: assign every doc section to exactly one persona (Security Admin or Contributor) before writing; measure end-user docs by whether someone with zero React/Node knowledge can complete the task.
 
-| Feature | Why Non-Negotiable |
-|---------|-------------------|
-| Template structured view (tier > category > service hierarchy) | Users currently hand-edit JSON; a structured UI is the entire value of Phase 2 |
-| Zod schema validation before save | Corrupted templates cause silent privilege misclassification — the worst failure mode |
-| Diff preview before save | No one should write a file without knowing what changed |
-| Global.json exclusion list editor | Break-glass accounts need a UI; hand-editing JSON is error-prone |
-| Git warning on save | Template changes should be committed; warn before writing |
+3. **Missing "Why" Behind the Tier Model (D3)** — Dashboard docs that say "KPI cards show ControlPlane counts" without explaining what ControlPlane means or why tier separation matters. Mitigation: author a Concepts page first (300–500 words, tier comparison table); link to it from every screen that uses tier terminology.
+
+4. **Config Docs Diverging from Reality (D5)** — `EntraOpsConfig.json` has ~40 fields; docs written from memory miss fields, misstate defaults, or describe fields as optional when omitting them causes startup errors. Mitigation: generate the config reference by reading the actual committed file; flag every field with "requires restart" vs "hot-reloaded".
+
+5. **Missing Quick-Start Path (D6)** — Feature-complete docs with no clear "zero to dashboard" flow. Users read about templates before understanding what the dashboard shows. Mitigation: author the getting-started guide first; limit it to a single happy path (fork → classify → run dev → dashboard); hard-stop under 500 words; terminate at a dry-run Apply, not a live run.
 
 ---
 
-### 3. Differentiators
+## Implications for Roadmap
 
-Features that set EntraOps GUI apart from Entra Admin Center, PIM, and Defender XDR. These are the reasons someone uses this tool instead of the built-in Microsoft tooling.
+Based on combined research, the docs phases must be ordered by dependency: foundation before content, content before reference, critical path (getting-started) before comprehensive feature walkthroughs. The biggest risk is writing screen docs before a glossary exists — terminology inconsistency (D10) then permeates every doc and requires a global find-and-replace pass to fix.
 
-| Differentiator | Why It Matters |
-|---------------|----------------|
-| **Cross-system unified identity view** | PIM shows Entra roles only; Defender shows Defender only. EntraOps GUI is the only place all 5 RBAC systems appear together for one identity |
-| **Transitive membership attribution** | Surface when an identity reaches a tier *via group membership* — the `TransitiveByObjectDisplayName` field is unique to EntraOps output |
-| **RoleDefinitionActions transparency** | No commercial tool shows the raw permission strings that determine classification; turns this into an education tool |
-| **Tier-aware charts** | Recharts bar/donut colored by EAM tier; concept that doesn't exist in any standard Entra tool |
-| **Administrative Unit membership context** | Which tier AUs an identity belongs to, whether RMAU protection applies — invisible in all standard tools |
-| **Template editor with diff** (Phase 2) | No other tool offers in-browser editing of `Classification/Templates/*.json` with schema validation and diff preview |
-| **PowerShell command runner** (Phase 3) | Run classification updates in the browser; no terminal switch required |
-| **Git-native EAM change history** (Phase 4) | "What changed between runs?" answered from local git — no Sentinel workspace required |
-| **Object-level change summary** (Phase 4) | "3 new ControlPlane identities since last run" — no other tool produces this from local history |
+### Phase 1: Documentation Foundation — Structure, Glossary, and Concepts
 
----
+**Rationale:** Every subsequent phase depends on this. The glossary locks terminology before any content is authored. The docs folder skeleton means every subsequent phase can be developed independently without restructuring. The Concepts page is referenced by every feature doc — it must exist first.
+**Delivers:** `docs/` folder scaffold (all directories and placeholder READMEs), `docs/README.md` navigation hub, `docs/concepts.md` (glossary of ~15 terms: ControlPlane, ManagementPlane, UserAccess, EAM, AdminTierLevel, Classification Template, Applied vs Computed tier, Exclusion, dry-run, PrivilegedEAM), screenshot naming and viewport convention
+**Addresses:** Must-have doc structure; arises from features research folder structure recommendation
+**Avoids:** Pitfalls D3 (missing concepts), D10 (terminology drift), D2 (audience mismatch via persona assignment)
 
-### 4. Architecture Overview
+### Phase 2: Getting Started Guide
 
-The GUI lives in `gui/` inside the existing EntraOps repo. It uses a **three-zone layout** with strict coupling rules:
+**Rationale:** The single highest-value doc. New users need a smooth zero-to-dashboard path before reading about any feature. Must be authored from the user's perspective, not the developer's memory. Pitfall D6 is the most likely failure mode.
+**Delivers:** `docs/user-guide/getting-started.md` — prerequisites (PowerShell 7, EntraOps module, Node.js), 5-step numbered flow, quick-start box, expected visual outcome per step, "what to do next" link section; reference from root `README.md`
+**Addresses:** Table-stakes prerequisites, numbered steps, quick-start box, "no auth = local only" callout
+**Avoids:** Pitfalls D6 (no quick-start path), D11 (missing PowerShell prerequisite gate), D8 (GUI docs not integrated with PowerShell context)
+**Research flag:** Low — Portainer/ArgoCD getting-started patterns are well-documented; no research-phase needed
 
-```
-gui/
-├── shared/types/     ← Zero Node.js imports. Both client + server import from here.
-├── client/           ← Vite SPA. Imports from shared/. Never imports from server/.
-└── server/           ← Express backend. Imports from shared/. Uses Node.js + fs.
-```
+### Phase 3: Feature Walkthrough — All 11 GUI Screens
 
-**Runtime topology:**
-- Dev: Vite (`:5173`) proxies `/api/*` → Express (`:3001`). No CORS needed in dev.
-- Prod: Express serves `client/dist/` static files + catches all non-API routes with `index.html`.
+**Rationale:** Largest content phase. Each screen follows a standard template (navigation path → overview screenshot → action sections → behavior notes → see also). Apply to Entra is the most complex and highest-stakes screen; dry-run must lead (D9). Dashboard and Object Browser are the "first view" screens and must be polished.
+**Delivers:** `docs/user-guide/dashboard.md`, `object-browser.md`, `reclassify.md`, `exclusions.md`, `apply-to-entra.md`, `connect-classify.md`, `templates.md`, `history.md`, `run-commands.md`, `settings.md`; screenshots in `docs/assets/screenshots/<screen>/`
+**Addresses:** One-page-per-screen (table stakes), screenshot per instruction, annotated screenshots for Apply/Object Browser/Templates
+**Avoids:** Pitfalls D1 (structural screenshots only), D2 (security admin language throughout), D7 (outcome-first framing), D9 (dry-run prominently documented on Apply page), D13 (SSE streaming output annotated), D14 (Classification Template schema reference)
+**Research flag:** Moderate for Apply to Entra (4-state SSE workflow) and Templates (Zod schema reference); all others follow standard patterns
 
-**Key components:**
+### Phase 4: Configuration Reference
 
-| Component | Responsibility |
-|-----------|---------------|
-| `EamFileService` | Reads `PrivilegedEAM/*.json` — async fs, BOM stripping, in-memory cache with mtime invalidation, pagination |
-| `TemplateService` | Reads/writes `Classification/Templates/*.json` — Zod validation, atomic write (temp → rename), `passthrough()` for unknown fields |
-| `GitService` | simple-git with full edge-case handling (empty repo, shallow clone, detached HEAD) |
-| `RunnerService` | Phase 3 only — `spawn()` with array args, process lifecycle tracking, SSE stream |
-| TanStack Query hooks | Data layer on the client; cache key factories; invalidation on write |
-| React Router v7 | URL search params for filter state; per-object routes for deep linking |
-| Zustand stores | Local UI state (panel open/closed, command runner status) that doesn't belong in URL |
+**Rationale:** Lookup reference for `EntraOpsConfig.json` schema, environment variables, and Express API endpoints. Must be sourced from the live file — not written from memory — to avoid pitfall D5.
+**Delivers:** `docs/configuration/entraops-config.md` (full field reference: type, default, which screen exposes it, restart vs hot-reload), `environment-variables.md`, `api-endpoints.md`
+**Addresses:** Configuration reference (table stakes), API endpoint inventory (contributor table stakes)
+**Avoids:** Pitfalls D5 (config defaults mismatch), D12 (JSON file paths not matching real paths)
+**Research flag:** Low — source from live `EntraOpsConfig.json`; no research needed
 
-**Data flow for large files:**
-- Files <300MB: `fs.promises.readFile()` + `JSON.parse()` → in-memory cache (5-min TTL + mtime check)
-- Files ≥300MB: `stream-json` streaming parser (opt-in, detected by file size on first load)
-- Pagination is **server-side** — the browser never receives the full dataset. All filtering and slicing happens in Express before the JSON response is serialized.
+### Phase 5: Architecture and Integration Overview
 
-**API design:** Plain REST with Zod-validated request bodies. No tRPC. Route structure: `/api/eam/*`, `/api/templates/*`, `/api/git/*`, `/api/run` (Phase 3).
+**Rationale:** Explains the non-obvious data pipeline (PS module → JSON → Express → React) that underlies everything the GUI does. Without this, users don't understand why data looks "stale" or what triggers a refresh. Must include the file-write map.
+**Delivers:** `docs/architecture/overview.md`, `data-flow.md` (Mermaid diagram), `tech-stack.md`; JSON file write map table (which GUI action writes to which JSON)
+**Addresses:** Architecture/data-flow diagram (differentiator), integration narrative
+**Avoids:** Pitfalls D8 (GUI and PowerShell docs not integrated), D13 (SSE streaming undocumented at system level), D12 (JSON file paths)
+**Research flag:** Low — architecture is a direct description of the built system
 
----
+### Phase 6: Troubleshooting / FAQ
 
-### 5. Top Pitfalls (Ranked by Severity)
+**Rationale:** Authored after feature walkthroughs because the most valuable FAQ entries come from knowing what each screen's empty/error states look like. Structure by symptom, not error code.
+**Delivers:** `docs/troubleshooting/README.md` (symptom quick-list), `docs/troubleshooting/faq.md` (10+ entries: dashboard zeros, port 3001 conflict, missing `pwsh`, empty PrivilegedEAM dir, device code auth timeout, stream stalled, classification changes not persisting)
+**Addresses:** Troubleshooting/FAQ (table stakes)
+**Avoids:** Pitfall D4 (troubleshooting structured by symptoms, not error codes)
+**Research flag:** Low — Grafana symptom-first pattern applies directly
 
-#### CRITICAL — SECURITY (must be in Phase 1 / Phase 3 baseline)
+### Phase 7: Contributor Docs
 
-1. **Shell injection via PowerShell runner** — Never use `exec()` or string interpolation for PowerShell commands. Always `spawn('pwsh', ['-NonInteractive', '-NoProfile', allowlistedCmd, ...validatedArgs])` with exact-equality allowlist check. Validate every parameter value with a per-command Zod schema before passing to spawn. One `exec()` anywhere in the runner is an RCE vulnerability.
+**Rationale:** Authored last — contributor audience is smaller; `adding-features.md` must reference the final project structure established after all feature walkthroughs stabilize.
+**Delivers:** `docs/contributing/dev-setup.md`, `project-structure.md`, `adding-features.md` (conventions: new page → sidebar → server route → shared type); link to `configuration/api-endpoints.md` for backend reference
+**Addresses:** Contributor table stakes (local dev setup, project structure map, how to add a cmdlet, API endpoint inventory, data model explanation)
+**Avoids:** Pitfall D2 (developer framing isolated to this section only)
+**Research flag:** Low — standard OSS contributor doc patterns
 
-2. **Path traversal in file API endpoints** — `path.join()` does NOT prevent traversal — it resolves `../` cleanly. After resolving, every file-read and file-write endpoint must assert `resolved.startsWith(BASE + path.sep)`. Template write endpoints are highest risk. Apply the guard before every `fs` operation.
+### Phase 8: Root README Update and Cross-Link Audit
 
-3. **Express binding to 0.0.0.0** — `app.listen(PORT)` binds to all interfaces on most systems. On a corporate laptop or home network, the API (including the Phase 3 command runner) becomes accessible to other machines. Always: `app.listen(PORT, '127.0.0.1', ...)`. Add a `Host` header validation middleware for DNS rebinding protection.
-
-4. **Arbitrary file write without Zod validation** — The template editor write endpoint must call `Zod.parse()` before any `fs.writeFile()`. Use `.safeParse()` for loading but never write on a parse failure. Shared Zod schema (imported by both frontend form and backend route handler) is the single source of truth.
-
-#### CRITICAL — ARCHITECTURE (must be in Phase 1 baseline)
-
-5. **Blocking the event loop with synchronous JSON reads** — `fs.readFileSync()` + `JSON.parse()` on large EAM files blocks all Express requests for seconds. Use `fs.promises.readFile()` everywhere. Add the in-memory cache (mtime-invalidated) on the first data endpoint before any UI work — the dashboard depends on it.
-
-#### MODERATE (address in the phase that introduces the feature)
-
-6. **Orphaned PowerShell processes** (Phase 3) — SSE disconnect doesn't kill the child process. Attach `req.on('close')` to every SSE route. Track active processes in a module-level Map. Cleanup on Express `SIGTERM`.
-
-7. **PowerShell executable path on Windows** (Phase 3) — Hardcoded `'pwsh'` fails on some Windows configs. Resolve path at startup; check `pwsh` → `pwsh.exe` → `powershell.exe`; cache result; never use `shell: true`.
-
-8. **Windows BOM + backslash paths** (Phase 1) — `JSON.parse()` throws on UTF-8 BOM. Strip `\uFEFF` before parsing. Normalize paths to forward slashes before sending to frontend.
-
-9. **Shared types bundle leakage** (Phase 1) — Any Node.js built-in import in `shared/` causes Vite build failures or leaks server code to the browser bundle. Enforce zero Node.js imports in `shared/` via ESLint or CI check.
-
-10. **TanStack Table filter re-renders** (Phase 1) — Define column definitions outside the component (or `useMemo`). Debounce URL search param updates by 300ms. Separate local filter state from URL state for responsive keystroke UX. Use server-side filtering for tenants with >2,000 privileged objects.
-
-11. **Zod schema vs. disk template drift** (Phase 2) — User-customized templates may have extra fields. Use `schema.passthrough()` when loading templates (preserve unknown fields). Only strict-validate the fields the GUI writes. Display a warning badge for unrecognized fields rather than blocking the editor.
-
-12. **Git edge cases** (Phase 1 dashboard widget + Phase 4) — Wrap every `simple-git` call in try/catch. Check `.checkIsRepo()` before any operations. Handle: empty repo (no commits), detached HEAD (CI checkout), shallow clone (git log depth=1), uncommitted files (use `fs.stat()` mtime as authoritative freshness timestamp, not just git log).
-
-#### MINOR
-
-13. **PowerShell ANSI progress bars** (Phase 3) — `ansi-to-html` doesn't handle `Write-Progress` OSC sequences. Strip cursor-movement sequences (`/\x1b\[\d+[A-G]/g`) before rendering. Replace carriage returns without newlines (`\r` without `\n`) to prevent line overwrite in HTML.
-
-14. **nodemon restarting during active command runs** (Phase 3 dev) — Configure nodemon to ignore `PrivilegedEAM/` and `Classification/` directories.
+**Rationale:** Final pass — add "GUI Documentation" section to root `README.md`, verify all `docs/README.md` nav links are accurate, confirm no orphan files.
+**Delivers:** Updated root `README.md`; verified `docs/README.md` with all cross-links functional; no orphan doc files
+**Addresses:** Navigation from README to docs (table stakes)
+**Avoids:** Hub-and-spoke navigation degrading if a file was added without updating the hub
 
 ---
 
-## Build Wave Structure
+### Phase Ordering Rationale
 
-Recommended implementation order based on feature dependencies and architecture coupling:
+- **Foundation before content (Phase 1 first):** Terminology established in the glossary is used everywhere. Folder structure must exist before file paths can be referenced.
+- **Getting-started before walkthrough (Phase 2 before Phase 3):** The getting-started guide is the entry point; feature docs that cross-link back to it need the target to exist.
+- **Feature walkthroughs before config/troubleshooting (Phase 3 before 4, 5, 6):** Config reference and FAQ entries need to reference canonical screen names; screen docs establish those names.
+- **Contributor docs last (Phase 7):** Developer docs can reference the final file structure only after it stabilizes.
+- **README update as final gate (Phase 8):** Hub navigation updated when all spokes are in place.
 
-### Wave 1 — Foundation Scaffold (Phase 1, Week 1)
+### Research Flags
 
-**Rationale:** Everything depends on this. Cannot build dashboard or object browser without a working data pipeline with correct security baseline.
+Phases likely needing deeper research during planning:
+- **Phase 3 (Apply to Entra screen):** 4-state SSE workflow and `-SampleMode` integration warrant planning against the live implementation before writing.
+- **Phase 3 (Templates screen):** Zod validation schema and diff-preview mechanics should be read from source before authoring.
+- **Phase 4 (Config reference):** Must be generated from `EntraOpsConfig.json` directly — planning phase should include a file audit step.
 
-- `gui/` directory structure with `shared/`, `client/`, `server/` and strict import rules
-- Express v5 with `127.0.0.1` binding, path-anchored file routes, `Host` header middleware
-- `EamFileService`: async read, BOM strip, in-memory cache, server-side pagination
-- Vite SPA scaffold with Tailwind v4 CSS, shadcn/ui init, Fluent `@theme` block
-- React Router v7 route shell (Dashboard, Browser, Templates stub pages)
-- TanStack Query client + typed API client (`gui/client/src/lib/`)
-- `npm run dev` (concurrently) working end-to-end
-
-**Pitfalls to address:** S2 (path traversal), S3 (0.0.0.0 binding), A1 (async JSON reads), D1 (proxy setup), D2 (shared types boundary), C2 (BOM stripping)
-
-### Wave 2 — Dashboard Page (Phase 1, Week 1–2)
-
-**Rationale:** Validates the entire data pipeline; delivers immediate value to first users.
-
-- `/api/eam/summary` endpoint (tier counts, RBAC system counts, freshness timestamp)
-- Tier KPI cards, assignment type breakdown chart, RBAC system chart
-- Data freshness card + graceful empty state (no data → instructions to run EntraOps)
-- Tier color-coding convention established (red/amber/blue) used everywhere downstream
-
-**Stack hits:** Recharts, shadcn `Chart` wrapper, data freshness via `fs.stat()` mtime
-
-### Wave 3 — Object Browser (Phase 1, Week 2–3)
-
-**Rationale:** The highest-traffic page. Requires URL state to be correct before detail panel.
-
-- `/api/eam/objects` endpoint with server-side filter + pagination
-- TanStack Table with column definitions defined outside component (`useMemo`)
-- Filter bar (tier, RBAC system, object type, PIM type, free-text) with 300ms debounce to URL
-- `useSearchParams()` for bookmarkable filter state
-- Object detail slide-out panel (identity card, role assignments, AU memberships)
-- RoleDefinitionActions expand-in-place in detail panel
-- Per-object URL route (`/object/:id`)
-
-**Pitfalls to address:** D3 (filter re-renders + debounce), M2 (git edge cases for freshness widget)
-
-### Wave 4 — Template Editor (Phase 2)
-
-**Rationale:** High value, isolated from Phase 1. Depends on shared Zod schema pattern established in Wave 1.
-
-- `/api/templates/:name` GET + PUT endpoints (allowlisted names, Zod validation, atomic write, `passthrough()` on load)
-- Template structured tree view (tier > category > service hierarchy)
-- RoleDefinitionActions add/remove in-place
-- `react-diff-viewer-continued` diff preview dialog before save
-- Global.json exclusion list editor
-- Git warning modal on save
-
-**Pitfalls to address:** S4 (file write without validation), S2 (template write path traversal), M1 (Zod schema drift)
-
-### Wave 5 — PowerShell Command Runner (Phase 3)
-
-**Rationale:** High friction removal for core workflow. Highest security risk concentration — do Phase 1 + 2 first to validate usage patterns.
-
-- Exact-equality allowlist (single enum of permitted cmdlet names)
-- Per-command Zod parameter validation before any spawn
-- `child_process.spawn()` with array args, `'pwsh'` path resolved at startup
-- SSE streaming endpoint (`text/event-stream`; `req.on('close')` cleanup; process kill map)
-- ANSI rendering with progress-bar sequence stripping
-- Stop button → `DELETE /api/run` → `SIGTERM` + 2s timeout → `SIGKILL`
-- Session run history (last N runs this browser session, via Zustand)
-
-**Pitfalls to address:** S1 (shell injection), A2 (orphaned processes), C1 (pwsh path), C3 (no shell:true), MIN1 (ANSI progress bars), MIN2 (nodemon exclusions)
-
-### Wave 6 — Git Change History (Phase 4)
-
-**Rationale:** Unlocks the audit use case; requires simple-git service with full edge-case hardening.
-
-- `GitService` with `checkIsRepo()` guard, try/catch on all operations, empty-state handling
-- `/api/git/commits` endpoint (scoped to `PrivilegedEAM/`, last 50 commits)
-- Commit list UI with date, message, files-changed count
-- Commit pair selector → `/api/git/diff` → semantic EAM change summary (added/removed/tier-changed)
-- `react-diff-viewer-continued` for raw JSON diff of selected file
-- "Compare any two runs" selector (not just adjacent commits)
-
-**Pitfalls to address:** M2 (empty repo, shallow clone, detached HEAD, uncommitted files)
-
-### Wave 7+ (Post-MVP)
-
-- **Phase 5:** Settings page (`EntraOpsConfig.json` structured editor)
-- **Phase 6+:** Attack path graph (Cytoscape.js; requires `Get-EntraOpsWorkloadIdentityAttackPaths` data)
-- **Phase 7+:** AI/Copilot integration (explain classifications; natural language filter; local Ollama option)
-- **Alerting:** Dashboard badge for new ControlPlane identities before full push notification support
-
----
-
-## Key Decisions Made by Research
-
-These are settled. Planners and implementation phases should not re-litigate them.
-
-| Decision | Verdict | Rationale |
-|----------|---------|-----------|
-| **Tailwind v4, not v3** | CONFIRMED | CSS-first `@theme` config; 3.5x faster builds; no `tailwind.config.js`; required for Vite 8 plugin |
-| **shadcn/ui, not Fluent UI v9** | CONFIRMED | Griffel (Fluent's CSS-in-JS) conflicts with Tailwind; shadcn/ui owns the space; Fluent aesthetic achieved via CSS variables |
-| **React Router v7 (add to PRD stack)** | REQUIRED | PRD omission; F-10 (URL filter state) cannot be implemented without a router with `useSearchParams()` |
-| **Express v5, not v4** | CONFIRMED | Stable since Sept 2024; async middleware eliminates try/catch boilerplate; ReDoS fix in path-to-regexp v8 |
-| **Zod v4, not v3** | CONFIRMED | 14x faster string parsing; is now the npm default; `passthrough()` semantic critical for template loading |
-| **Node.js 22 minimum** | CONFIRMED | v20 EOL is March 2026; v22 receives security fixes through April 2027 |
-| **SSE, not WebSocket** | CONFIRMED | PowerShell streaming is unidirectional; SSE needs no library; EventSource is native browser API |
-| **Server-side pagination** | CONFIRMED | Large tenant files can be 10MB–500MB; browser must never receive the full dataset |
-| **Express binds to `127.0.0.1`** | SECURITY BASELINE | Must not bind to `0.0.0.0`; local tool with no auth on a corporate network is a critical exposure |
-| **Shared types: zero Node.js imports** | ARCHITECTURE BASELINE | Prevents server code leaking into Vite bundle; enforced by ESLint/CI |
-| **No auth, no login screen** | CONFIRMED (anti-feature) | Local single-user tool; filesystem is the security boundary; auth adds complexity with no security benefit |
-| **No Graph API calls** | CONFIRMED (anti-feature) | Defeats the "local file reader" value prop; users who just forked the repo can't see anything if Graph auth is required |
-| **No dark mode in v1** | CONFIRMED (anti-feature) | CSS variables are already correct for future dark mode; don't add complexity to Phase 1 |
-| **No PDF/CSV export in v1** | CONFIRMED (anti-feature) | Medium complexity; blocks Phase 1 velocity; JSON via API endpoint is sufficient |
-| **Desktop-first, 1280px minimum** | CONFIRMED (anti-feature) | Security dashboards are desktop workflows; responsive CSS adds complexity with zero user value |
+Phases with standard patterns (research-phase not needed):
+- **Phase 1:** Folder scaffold and glossary — straightforward structure work
+- **Phase 2:** Getting-started — Portainer/ArgoCD patterns apply directly
+- **Phase 5:** Architecture overview — describes the built system; no research needed
+- **Phase 6:** FAQ/troubleshooting — Grafana symptom-first pattern applies directly
+- **Phase 7:** Contributor docs — standard OSS patterns
+- **Phase 8:** README update — mechanical cross-link verification
 
 ---
 
@@ -327,37 +190,40 @@ These are settled. Planners and implementation phases should not re-litigate the
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Technology versions | HIGH | Verified against live npm registry March 2026 |
-| Security baseline (S1–S4) | HIGH | OWASP A01/A03 patterns; identical concerns in any local tool with file write + process spawn |
-| Architecture patterns | HIGH | Standard for VS Code webviews, Nx Console, similar local developer tools |
-| Feature prioritization | HIGH | Domain-specific analysis of Microsoft Entra PIM + Defender XDR as reference tools |
-| Large file handling thresholds | MEDIUM | 300MB threshold is a reasonable heuristic; real tenant sizes vary widely |
-| Phase 3 ANSI rendering edge cases | MEDIUM | PowerShell ANSI output is complex; real-world testing required; may need `@xterm/xterm` upgrade |
-| Phase 5+ attack path graph | MEDIUM | Cytoscape.js recommendation is well-founded; data model for EntraOps paths needs design work |
+| Stack | HIGH | Official npm registry + direct codebase inspection + official generator docs all checked. Plain Markdown verdict is unambiguous given the fork-and-run constraint. |
+| Features | HIGH | Verified against 4 live comparable tools (ArgoCD, Grafana, Portainer, Vault). Section structure recommendations directly sourced from their doc patterns. |
+| Architecture | HIGH | Folder structure derived from codebase inspection (existing root files, `gui/` structure) + established Markdown-only nav patterns. No speculative architecture. |
+| Pitfalls | HIGH | Codebase analysis (actual `EntraOpsConfig.json` complexity, SSE streaming, PowerShell boundary) + Diátaxis framework + Write the Docs conventions. |
 
-**Gaps requiring later attention:**
-- Actual size distribution of `PrivilegedEAM/` files in real tenants (determines whether streaming fallback is necessary in Phase 1 or a later hardening step)
-- Windows-specific testing for BOM stripping and PowerShell path resolution (development on macOS may mask issues)
-- Phase 3 ANSI sequence coverage — test with `Write-Progress`, `Write-Host`, colored output, and hyperlinks before shipping
+**Overall confidence:** HIGH
+
+### Gaps to Address
+
+- **Screenshots require a running instance:** The feature walkthrough phase (Phase 3) requires a live working install to capture screenshots. Schedule the screenshot pass when a working tenant connection is available.
+- **`EntraOpsConfig.json` field inventory needs a live read before Phase 4:** Config reference must be generated from the actual committed file. A pre-phase file audit is a required planning step.
+- **13 allowlisted cmdlets need enumeration:** The Run Commands screen doc requires listing all 13 cmdlets with their user-facing purpose. Read from the server-side allow-list array, not estimated during planning.
 
 ---
 
 ## Sources
 
-| Source | Confidence |
-|--------|-----------|
-| npm registry (live, March 2026) | HIGH |
-| react.dev/blog (React 19.2, Oct 2025) | HIGH |
-| tailwindcss.com/blog/tailwindcss-v4 | HIGH |
-| ui.shadcn.com/docs/tailwind-v4 | HIGH |
-| github.com/expressjs/express/releases (v5.2.1) | HIGH |
-| nodejs.org/en/about/previous-releases (v20 EOL) | HIGH |
-| zod.dev/v4 | HIGH |
-| Microsoft Entra PIM docs (verified March 2026) | HIGH |
-| Microsoft Defender XDR Identity docs (verified March 2026) | HIGH |
-| Microsoft Security Exposure Management — Attack paths (verified March 2026) | HIGH |
-| OWASP Top 10 2021 | HIGH |
-| Node.js child_process docs | HIGH |
-| AzurePrivilegedIAM GitHub (EntraOps classification source) | HIGH |
-| EntraOps GUI PRD (`GUI-PRD.md` v0.1 draft) | HIGH |
-| EntraOps codebase analysis (`.planning/codebase/`) | HIGH |
+### Primary (HIGH confidence)
+- `gui/client/package.json` — Direct inspect: React 19, Vite 5.x, Tailwind CSS v4, Vitest
+- `EntraOpsConfig.json` — Direct codebase inspection confirming ~40 fields across nested sections
+- ArgoCD official docs — user-guide structure, FAQ format, screenshot placement patterns
+- Portainer official docs — install guide pattern, numbered steps with expected outcomes
+- Grafana official docs — troubleshooting structure, symptom-first organization
+- HashiCorp Vault official docs — config reference structure, field-level documentation
+
+### Secondary (MEDIUM confidence)
+- VitePress 1.6.4 — npm registry + vitepress.dev/guide/getting-started (verified forward-compatibility of `.md` relative links)
+- Diátaxis documentation framework — tutorials/how-to/reference/explanation separation applied to docs architecture
+- Write the Docs community conventions — symptom-first troubleshooting and persona-audience separation patterns
+
+### Tertiary (informational only)
+- Starlight (Astro) — reviewed and rejected; self-labeled beta, separate framework
+- Docusaurus v3.9.2 — reviewed and rejected; separate project build pipeline not justified at this scale
+
+---
+*Research completed: 2026-04-05*
+*Ready for roadmap: yes*
