@@ -1,267 +1,285 @@
-# Feature Landscape — EntraOps GUI
+# Feature Research — EntraOps GUI Documentation
 
-**Domain:** Local security dashboard for Microsoft Entra ID privileged identity management (EAM-based)
-**Researched:** 24 March 2026
-**Confidence:** HIGH (Microsoft official docs for PIM/Defender XDR; HIGH domain knowledge of PAM tool patterns)
+**Domain:** Technical documentation for a locally-hosted security administration GUI
+**Researched:** 5 April 2026
+**Confidence:** HIGH — patterns drawn from live docs of ArgoCD, Grafana, Portainer, and HashiCorp Vault (verified against official sources)
 
 ---
 
 ## Research Context
 
-EntraOps GUI is replacing: reading raw JSON files + running KQL in Sentinel. The reference peer tools are:
+This research covers what documentation sections and features to include in the `docs/` folder for the v1.3 milestone. The product is already built (11 screens shipped across v1.0–v1.2). The research question is: **what does great documentation look like for a tool of this type, at this scale, for this audience?**
 
-- **Microsoft Entra Admin Center / PIM** — primary UI users already know
-- **Microsoft Defender XDR Identity page** — richest modern identity investigation UI from Microsoft
-- **Microsoft Security Exposure Management** — the SOTA for attack path visualization (Microsoft ecosystem)
-- **BloodHound CE (SpectreOps)** — SOTA for AD/Entra attack graph exploration; gold standard in the community
-
-Users are security administrators fluent with Azure/Entra UI patterns. Their bar is set by what those tools already do.
+**Comparable tools studied:**
+- **ArgoCD** — strongest model: clear user/operator/developer separation, screenshot-per-action pattern, FAQ as user-phrased Q&A
+- **Grafana** — best troubleshooting structure: topics-first, then logs, then community
+- **Portainer** — best install guide: tabbed options, explicit prerequisites, numbered steps with expected output
+- **HashiCorp Vault** — best configuration reference: field-level docs, use-case entry point
 
 ---
 
-## Table Stakes
+## Feature Landscape
 
-Features users expect from any identity management dashboard. Missing = tool feels unfinished or untrustworthy.
+### Table Stakes — User Docs (Users Expect These)
 
-| Feature | Why Expected | Complexity | Phase |
+Documentation sections a security admin expects when they clone the repo. Missing one = the tool feels unfinished or untrustworthy.
+
+| Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| **Tier summary KPI cards** | PIM dashboard has assignment counts; users want "how many ControlPlane objects?" at a glance | Low | Phase 1 |
-| **Assignment type breakdown: Permanent vs Eligible** | First thing a PIM admin looks for — permanent ControlPlane assignments are the red flag | Low | Phase 1 |
-| **RBAC system breakdown** | Users need to know which systems contribute most privilege; cross-system view is EntraOps's core value | Low | Phase 1 |
-| **Object type breakdown (User / Group / Service Principal)** | Non-human identities (SPs, Managed Identities) classified at ControlPlane are a primary concern | Low | Phase 1 |
-| **Data freshness / last-run timestamp** | Without knowing when data was collected, users can't trust it; PIM shows this; Sentinel workbooks show it | Low | Phase 1 |
-| **Sortable, paginated object table** | All PAM tools lead with a principal list; users know how to use tables; TanStack Table handles this well | Medium | Phase 1 |
-| **Multi-facet filtering** | Users arrive with a question: "show me all permanent ControlPlane users" — needs tier + assignment type + object type | Medium | Phase 1 |
-| **Free-text search (name / UPN / objectId)** | Standard in every Azure admin tool; critical for finding one specific identity | Low | Phase 1 |
-| **Filter state in URL (bookmarkable)** | Security teams share links; auditors want reproducible views; PIM and Entra Admin Center support deep linking | Medium | Phase 1 |
-| **Object detail panel** | Defender XDR identity page is the reference: entity attributes + role assignments + group memberships in one place | Medium | Phase 1 |
-| **Role assignment expandability (show RoleDefinitionActions)** | EntraOps users need to see *why* something is classified — the raw permission strings are the evidence | Medium | Phase 1 |
-| **On-prem sync status indicator** | Hybrid environments have synced objects; their modification path differs from cloud-only objects | Low | Phase 1 |
-| **Restricted Management AU status** | RMAU protection state tells users whether object is shielded from non-CP admins | Low | Phase 1 |
-| **Visible empty states with instructions** | Users who fork and haven't run `Save-EntraOpsPrivilegedEAMJson` yet hit this first; must not crash or show blank screen | Low | Phase 1 |
-| **Tier color-coding throughout** | Visual consistency: ControlPlane=red, ManagementPlane=amber, UserAccess=blue; users must never guess tier from a badge | Low | Phase 1 |
-| **Per-object full-page URL** | Auditors need a stable URL to a specific object's detail view (for tickets, reports) | Low | Phase 1 |
-| **Classification template structured view** | Users currently edit JSON by hand; they need a UI that shows tier > category > service hierarchy | Medium | Phase 2 |
-| **Schema validation before save** | Writing broken JSON to `Classification/Templates/` corrupts the next classification run; essential safety gate | Medium | Phase 2 |
-| **Template save with git warning** | Changes to templates must be committed; warn before writing so users don't lose track of local modifications | Low | Phase 2 |
-| **Global.json exclusion list editor** | Break-glass accounts and excluded principals need a UI so users don't hand-edit JSON | Medium | Phase 2 |
+| **Prerequisites list** | Every admin tool lists what must already be running; hitting an undocumented dependency mid-install kills trust | LOW | PowerShell module version, Node.js version, git, tenant permissions |
+| **Numbered getting-started steps** | Portainer, ArgoCD, Grafana all use numbered steps ending with "you should see X"; users pattern-match to this | LOW | Must end each step with the expected outcome (what the browser shows) |
+| **Quick-start box at page top** | Security admins are time-poor; they skim; a 3-command box earns trust before they read the detail | LOW | Fork → `Save-EntraOpsPrivilegedEAMJson` → `npm run dev` → open browser |
+| **One page per GUI screen** | ArgoCD and Portainer each dedicate a page per feature; users search by screen name | MEDIUM | 11 screens = 11 pages; each needs purpose, navigation path, and key actions |
+| **Screenshot for every screen** | Portainer and ArgoCD include a screenshot at every "you should see" point; text-only walkthroughs feel abstract for GUI tools | MEDIUM | PNG per screen; placed immediately after the instruction that triggers it |
+| **Troubleshooting / FAQ** | Every tool studied has a FAQ; ArgoCD phrases entries as user questions ("Why is X happening?"); symptom → cause → fix | LOW | At least 10 entries covering real failure modes |
+| **Configuration reference** | Vault and ArgoCD dedicate a page to config file fields; every field that affects behavior needs documentation | MEDIUM | `EntraOpsConfig.json` fields, env variables (`PORT`, `VITE_API_URL`) |
+| **"What this tool is NOT" section** | Vault and ArgoCD explicitly disclaim scope; prevents support requests for non-features | LOW | Not a replacement for Sentinel, no real-time Graph API, desktop-only |
+| **Navigation from README to docs** | GitHub README is the first touch; it must link into docs rather than duplicate them | LOW | `docs/` link in root README |
+| **Explicit "no auth = local only" safety note** | Security admins will immediately ask "is this exposed to the network?"; answer must be proactive | LOW | Single callout box in getting-started; repeated in architecture overview |
 
 ---
 
-## Differentiators
+### Table Stakes — Contributor Docs (Developers Expect These)
 
-Features that set EntraOps GUI apart. Not expected from generic PAM tools, but high value for EAM users.
+A developer who forks EntraOps and wants to extend the GUI needs these. Missing = they read source instead of docs.
 
-| Feature | Value Proposition | Complexity | Phase |
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| **Local dev setup steps** | Every OSS project documents how to run in dev mode with hot reload | LOW | `npm run dev` vs `npm run build`; separate frontend/backend concerns |
+| **Project structure map** | Portainer contributor docs include a directory breakdown; developers need to know where to find things | LOW | `gui/src/`, `gui/server/`, key file purposes |
+| **How to add a new allowed cmdlet** | PowerShell allow-list is a custom security mechanism; contributors need to know where to change it | LOW | Points to allow-list array in `server.js` or equivalent |
+| **API endpoint inventory** | Internal REST + SSE endpoints are called by frontend; documenting them prevents accidental breakage | MEDIUM | GET/POST/SSE endpoints, request/response shapes |
+| **Data file format explanation** | `PrivilegedEAM/*.json` structure is the root of all data; contributors extending the GUI must understand it | MEDIUM | EAM object schema, which fields the GUI uses |
+| **How to run tests (if any)** | Standard expectation; even if minimal | LOW | "Currently no automated tests; manual verification steps in CONTRIBUTING.md" is acceptable |
+
+---
+
+### Differentiators — Documentation Features That Go Beyond Baseline
+
+These elevate the docs from "present" to "excellent."
+
+| Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| **Cross-system unified table** | PIM shows Entra ID roles only; Defenders shows Defender only. EntraOps GUI is the only place all 5 RBAC systems (EntraID, ResourceApps, IdentityGovernance, DeviceManagement, Defender) appear together for one identity | Low-Med | Phase 1 |
-| **Tier-aware visualization charts** | Bar/donut charts colored by EAM tier (0/1/2) normalise the tier concept visually; Entra Admin Center has no tier concept | Low-Med | Phase 1 |
-| **Transitive membership attribution** | Show when an identity reaches a privilege tier *via group membership* vs direct assignment — "transitiveByObjectDisplayName" field is unique to EntraOps output | Medium | Phase 1 |
-| **RoleDefinitionActions transparency** | No commercial tool shows the raw permission strings that determine classification. Showing why an identity is ControlPlane (the specific actions) turns this into an education tool | Medium | Phase 1 |
-| **Administrative Unit membership panel** | Which tier AUs an identity belongs to; whether RMAU protection applies — this context is invisible in all standard Entra tools | Low | Phase 1 |
-| **Template editor for EAM tier definitions** | No other tool offers in-browser editing of `Classification/Templates/*.json`. Eliminates risk of schema corruption via hand-editing | High | Phase 2 |
-| **RoleDefinitionActions add/remove UI** | Adding a new permission string to a tier definition currently requires knowing the exact action name and editing raw JSON. A structured UI with type-ahead search from known action names is uniquely valuable | High | Phase 2 |
-| **Diff preview before template save** | Before writing back to disk, show a structured diff of what tier/category/service/actions changed — unique to this tool | Medium | Phase 2 |
-| **PowerShell command runner** | Run `Save-EntraOpsPrivilegedEAMJson` and watch it stream in the browser without opening a terminal — removes friction from the core workflow | High | Phase 3 |
-| **Git-native change history** | Browse EAM diff between any two classification runs — object-level changes (tier changes, new privilege identities, drift) with no Sentinel workspace required | High | Phase 4 |
-| **Object-level change summary** | "Since last run: 3 new ControlPlane identities, 1 tier change." No other tool produces this from local git history | High | Phase 4 |
+| **Concepts / domain glossary page** | ArgoCD has "Understand the Basics" before getting started; EntraOps uses EAM jargon (ControlPlane, AdminTierLevel, RoleDefinitionActions) that admins outside the Identiverse community don't know | MEDIUM | Define: ControlPlane/ManagementPlane/UserAccess, EAM, AdminTierLevel, Classification Template, Exclusions |
+| **Architecture / data-flow diagram** | Vault has component diagrams; Grafana has data source flow diagrams. The GUI ↔ PowerShell module ↔ local JSON ↔ browser data flow is non-obvious | MEDIUM | ASCII or Mermaid diagram: PS module → JSON files → Express backend → React frontend |
+| **"Before you start" security posture note** | This tool applies changes to Entra (AUs, CA Groups); a callout box stating "dry-run first" before Apply to Entra is a trust-builder | LOW | Callout box at top of Apply to Entra screen walkthrough |
+| **Annotated screenshots** | Only worth doing for the 3 most complex screens (Apply workflow, Object Browser, Template Editor). Numbered callout zones make walkthroughs significantly clearer | HIGH | Numbered circles ①②③ + legend table; keeps annotation in markdown-maintainable form |
+| **Step-outcome pairings** | ArgoCD's getting-started pairs every action with an expected visual outcome ("a panel will be opened"); reduces "did it work?" uncertainty | LOW | Every step ends with: "You should see [description of state]" |
+| **"What happens when you..." for irreversible actions** | Security tools that make Entra writes must explain the blast radius before first use | LOW | Prose paragraph in Apply to Entra page: what changes, what doesn't, how to undo |
+| **Dry-run walkthrough as first example** | Leading with dry-run as the recommended first run de-risks the first user experience; comparable to Vault's "dev mode" getting started | LOW | Getting-started path terminates at dry-run Apply, not a live run |
+| **FAQ phrased as user questions** | ArgoCD FAQ works because entries are "Why is X...?" not "X behavior." Users surface FAQs by symptom, not feature name | LOW | Style guide: each FAQ heading starts with "Why...", "How do I...", "What happens if..." |
+| **"See also" cross-links at page bottom** | Grafana and ArgoCD link related docs pages at the bottom of each page | LOW | Each screen page links to: upstream screen, downstream screen, related FAQ entries |
 
 ---
 
-## Anti-Features
+### Anti-Features — Commonly Expected, Usually Problematic
 
-Things to deliberately **not** build in v1. Each one is a trap.
+Documentation patterns that seem useful but create more problems than they solve for a tool at this scale.
 
-| Anti-Feature | Why Avoid in v1 | What to Do Instead |
-|--------------|----------------|-------------------|
-| **Real-time Microsoft Graph API calls** | Authentication complexity (OIDC, tokens, scopes) would make the GUI require pre-auth setup. Users who just forked the repo can't open a browser and see anything. Defeats the "local file reader" value prop | Read `PrivilegedEAM/` JSON files via Express backend only |
-| **Login / authentication screen** | Local single-user tool; the filesystem is the security boundary; adding auth adds complexity with no security benefit | No-auth by design; document in README that GUI is local-only |
-| **Access review workflows (approve/deny/certify)** | That's PIM's job. EntraOps GUI has no write-path to Entra ID assignments. Implementing pseudo-reviews would confuse users about what's actually certified | Show review-relevant data (permanent assignments, never-used roles) only |
-| **PDF/CSV export** | Medium complexity; requires string formatting, layout code; blocks Phase 1 velocity | Defer to post-MVP; JSON export via API endpoint is sufficient for v1 |
-| **Custom alert rules UI** | Alerting requires a persistent process and notification delivery (email, webhook, Teams). The local dev server isn't that | Alerting belongs in Phase 5+; show "new since last run" in dashboard as passive signal |
-| **Full Sentinel/KQL interface** | Users already have Sentinel for this. KQL integration requires Azure auth, workspace config, and API quota management. Scope creep that adds setup friction | Focus on local file consumption |
-| **Lifecycle workflow management** | Entra ID Governance Lifecycle Workflows are managed in Entra Admin Center. Duplicating that UI is months of work with no differentiation | Out of scope permanently |
-| **Multi-tenant support** | Single forked repo = single tenant. Multi-tenant requires auth switching, data namespacing, and security isolation. Complex for negligible v1 audience | Design data model to not preclude multi-tenant later (objectId namespacing) but don't build it |
-| **Mobile / tablet responsive design** | Security dashboards are desktop-only workflows; responsive design adds CSS complexity and dilutes desktop UX | Desktop-first; document minimum viewport (1280px) |
-| **Natural language search** | Requires an LLM integration or embedding model; adds latency, API cost, privacy concerns, and a new dependency. The free-text filter covers 90% of the use case | Free-text search on name/UPN/objectId is sufficient for v1 |
-| **Dark mode** | Nice-to-have; adds CSS variable complexity; blocks v1 velocity | Design tokens correctly (CSS variables) so dark mode can be added later without rework |
+| Feature | Why Requested | Why Problematic | Alternative |
+|---------|---------------|-----------------|-------------|
+| **Changelog / release notes doc page** | Users want to know what changed | Requires discipline to maintain; gets stale immediately; becomes a liability when outdated | GitHub Releases tab; link from README |
+| **Internal API reference (Swagger / OpenAPI)** | Developers expect API docs for any backend | No external API consumers; it's a coupled frontend+backend. Formal spec adds maintenance burden with zero audience | Document 6–8 endpoints inline in contributor docs as markdown tables |
+| **JSDoc / TSDoc auto-generated docs** | Modern JS projects sometimes ship generated docs | Domain complexity is in the data model and security logic, not function signatures. JSDoc generates noise, not insight | Document the EAM JSON data model instead; that's where contributors get lost |
+| **Video walkthroughs embedded in docs** | Every GUI tool benefits from video | Videos can't live in a git repo, go stale with every UI change, require hosting | Prefer annotated screenshots; they version-control with the code |
+| **Versioned docs site** | Large OSS tools version their docs | EntraOps GUI ships in a forked repo; users are always on their fork's version. No distinct "v1.2 docs" audience | Single docs folder; encourage users to read from their fork |
+| **Interactive playground / sandbox** | Some tools offer live demos | Requires a running backend, Microsoft device code auth, or mock data; cannot be safely public-facing | Screenshot walkthroughs + dry-run mode serve this purpose |
+| **Per-API-call curl examples** | Vault, Stripe document every API call | No external API consumers; curl examples would only document internal plumbing | Document user workflows (task-based), not API calls (implementation-based) |
+| **Community / forum links** | Grafana, Portainer include community links | No GUI-specific community exists | Link to parent EntraOps GitHub Discussions instead |
+| **Accessibility / localization documentation** | Enterprise tools document a11y and l10n | Single-user local tool; narrow audience; a11y/l10n docs are maintenance overhead with no realistic audience | Single note confirming desktop browser support; nothing further |
+
+---
+
+## Section Structure Recommendations
+
+### docs/ Folder Structure
+
+Based on ArgoCD's separation of concerns and Portainer's install-first entry point:
+
+```
+docs/
+├── README.md                  # Landing page / nav index
+├── getting-started.md         # Quick-start + detailed install steps
+├── concepts.md                # EAM tiers, classification templates, exclusions glossary
+├── features/
+│   ├── dashboard.md           # Tier dashboard
+│   ├── object-browser.md      # Object browser + detail panel
+│   ├── connect-classify.md    # Connect & Classify wizard
+│   ├── template-editor.md     # Classification template editor
+│   ├── reclassification.md    # Object reclassification screen
+│   ├── exclusions.md          # Exclusions management
+│   ├── apply-to-entra.md      # Apply to Entra workflow + dry-run
+│   ├── command-runner.md      # PowerShell command runner
+│   ├── git-history.md         # Git change history browser
+│   └── settings.md            # Settings page
+├── configuration.md           # EntraOpsConfig.json reference + env variables
+├── architecture.md            # Data flow: PS module → JSON → backend → browser
+├── troubleshooting.md         # FAQ + common errors
+└── contributing/
+    ├── dev-setup.md           # Local dev environment setup
+    ├── project-structure.md   # Directory map + key files
+    ├── api-reference.md       # Backend endpoints inventory
+    └── data-model.md          # PrivilegedEAM JSON schema explained
+```
+
+### Getting Started Page Structure
+
+Pattern from ArgoCD + Portainer (consistently effective):
+
+```
+1. Prerequisites (explicit version numbers)
+2. Quick Start (3 commands to first browser view)
+3. Step 1: Fork EntraOps and run classification
+4. Step 2: Start the GUI server
+5. Step 3: Open the dashboard
+6. Step 4: Run a dry-run Apply to Entra (recommended first action)
+7. Next Steps (links to each feature page)
+```
+
+Each step: instruction → code block → expected outcome ("You should see the Tier Dashboard with your tenant's data.")
+
+### Feature Walkthrough Page Structure
+
+Based on ArgoCD user-guide pages:
+
+```
+# [Screen Name]
+
+> One-sentence purpose statement
+
+## Navigation
+How to reach this screen from the sidebar / previous screen.
+
+## Overview
+[Screenshot of full screen — immediately here, not at end]
+
+## [Action 1 Name]
+What the action does → How to do it → Screenshot of result
+
+## Behavior Notes
+Edge cases, limitations, what triggers state changes
+
+## See Also
+- [Related screen link]
+- [Relevant FAQ entry]
+```
+
+### Troubleshooting Entry Format
+
+Each FAQ entry (ArgoCD FAQ pattern — verified effective):
+
+```
+## Why is [symptom]?
+
+**Cause:** [short prose explanation]
+
+**Fix:**
+[step or code block]
+
+**See also:** [link]
+```
+
+---
+
+## Screenshot Guidance
+
+| Trigger | Screenshot? | Notes |
+|---------|-------------|-------|
+| "You should see X after step N" | YES | Placed immediately after the instruction |
+| Overview of a new screen | YES | Full-screen, no annotation needed |
+| Each stage of a multi-step wizard | YES | 4 Apply stages = 4 screenshots |
+| Configuration file example | NO | Use a code block instead |
+| Error message (first reference) | YES | Helps users recognize it |
+| Real-time SSE stream / animation | NO | Describe in prose; GIFs are a maintenance liability |
+
+**Standards from comparable tools (ArgoCD, Portainer):**
+
+1. Screenshot placed immediately after the sentence that produces the state — not end-of-section
+2. Alt text always descriptive: `![Dashboard showing ControlPlane KPI cards]` not `![Dashboard]`
+3. File naming: `docs/assets/[screen-name]-[action].png` e.g., `apply-confirm-stage.png`
+4. Full-browser-width at 1280px minimum; no partial crops unless annotating a specific zone
+5. Use dummy tenant data — never real UPNs, GUIDs, or tenant IDs in screenshots
+6. Stale screenshots are worse than no screenshots; update with each UI change
+
+**Annotation (complex screens only — Object Browser, Apply workflow, Template Editor):**
+- Numbered circles (①②③) overlaid
+- Legend table immediately below: `| ① | Label | What this zone does |`
+- Keeps annotation in markdown-maintainable form rather than raster-embedded arrows
+
+---
+
+## Audience Separation Pattern
+
+Based on ArgoCD's three-audience model (strongest example studied):
+
+| ArgoCD Section | EntraOps GUI Equivalent | Framing |
+|----------------|------------------------|---------|
+| User Guide | `docs/features/` + `docs/getting-started.md` | "How do I..." (task-based) |
+| Operator Manual | `docs/configuration.md` + `docs/architecture.md` | "How does it work..." (behavior-based) |
+| Developer Guide | `docs/contributing/` | "How do I extend..." (internals-based) |
+
+**Key principles:**
+
+1. **Audience signal at section entry** — "For security admins" vs "For developers extending the GUI" at top of each section
+2. **Task framing (user) vs implementation framing (contributor)** — User docs ask "What do I want to do?"; contributor docs ask "How does the system do it?"
+3. **Depth inversion** — User docs go wide (all 11 screens) and shallow (no source file references); contributor docs go narrow (key extension points) and deep (file paths, endpoint schemas)
+4. **One-directional cross-audience links** — User docs MAY link to architecture for curious users; contributor docs should NOT reference user tasks
 
 ---
 
 ## Feature Dependencies
 
 ```
-URL-bookmarkable filters → URL router (React Router v7)
-Object detail panel → Sortable table (click-to-open)
-Classification template editor → JSON schema validation (Zod v4)
-Classification template editor → File write API (Express backend)
-Template diff preview → Template editor (display diff before save)
-RoleDefinitionActions type-ahead → Known actions dataset (derive from existing Classification files)
-Git change history → Git API (simple-git backend endpoint)
-Object-level change summary → Git change history (diff parser)
-PowerShell command runner → Process streaming API (Express SSE or WebSocket endpoint)
-Data freshness timestamp → File stat API (Express backend reads mtime of PrivilegedEAM/ files)
-Empty state detection → File stat API (same endpoint)
-```
+Getting Started
+    └──requires──> Prerequisites list
+    └──references──> Concepts page (EAM terms used in walkthrough)
 
-### Critical Path for Phase 1
+Feature Walkthroughs (11 pages)
+    └──require──> Screenshots (no placeholder; ship with images)
+    └──reference──> Troubleshooting (each page links to relevant FAQ entries)
+    └──reference──> Configuration reference (settings-dependent features)
 
-The backend data pipeline must be established first:
+Troubleshooting
+    └──enhanced by──> Architecture (data flow understanding aids diagnosis)
+    └──references──> Configuration reference (many fixes involve config changes)
 
-```
-Express API endpoint (GET /api/eam/:rbacSystem)
-  → reads PrivilegedEAM/{rbacSystem}/*.json
-  → parses + aggregates
-  → returns normalized object array
+Architecture overview
+    └──requires──> Concepts page (data flow uses EAM terms)
 
-Dashboard charts depend on: aggregated data API
-Object table depends on: aggregated data API
-Object detail panel depends on: per-object data (same API, filtered by objectId)
-URL filter state depends on: React Router integration
+Contributing / dev-setup
+    └──references──> Architecture
+    └──references──> API endpoint inventory
 ```
 
 ---
 
-## MVP Recommendation
+## MVP for v1.3
 
-**Phase 1 (Dashboard + Object Browser) should prioritize:**
+### Must Ship
 
-1. Data freshness card + empty state (trust signal; build before anything else)
-2. Tier KPI cards (counts per tier; core value at a glance)
-3. Assignment type breakdown chart (Permanent vs Eligible per tier; primary security signal)
-4. Object table with TanStack Table (sort, paginate on client)
-5. Multi-facet filter bar with URL state (tier, RBAC system, object type, PIM type)
-6. Free-text search
-7. Object detail slide-out panel (identity card + role assignments + AU memberships)
-8. RBAC system breakdown chart
-9. Cross-system tab navigation (or single unified table with RBAC system column)
+- [ ] `getting-started.md` — fork → classify → run → dashboard (with screenshots)
+- [ ] 11 feature pages in `docs/features/` — one per screen, with at least one screenshot each
+- [ ] `troubleshooting.md` — FAQ covering 10+ known failure modes
+- [ ] `configuration.md` — `EntraOpsConfig.json` field reference
 
-**Phase 2 (Template Editor) should prioritize:**
+### Should Ship
 
-1. Template file tabs (one per RBAC system)
-2. Tier > Category > Service tree display
-3. RoleDefinitionActions edit-in-place (add/remove action strings)
-4. Zod schema validation before write
-5. Diff preview dialog before save
-6. Global.json exclusion list editor
-7. Git warning on save
+- [ ] `concepts.md` — EAM glossary; new users need this before feature pages make sense
+- [ ] `architecture.md` — data flow diagram; answers top contributor question
+- [ ] `contributing/dev-setup.md` — current CONTRIBUTING.md is minimal
 
-**Defer to Phase 1 polish (not blocking MVP):**
+### Defer to v1.4+
 
-- On-prem sync status column (data is available but low visual priority)
-- Full-page object URL (slide-out panel is sufficient for v1)
-- Transitive membership attribution callout in detail panel
-
----
-
-## Future Phase Candidates
-
-### Phase 3: PowerShell Command Runner
-
-**Complexity:** High — requires streaming process execution, allowlist enforcement, ANSI rendering.
-
-**User value:** High — the most common workflow gap. Users currently must switch to a terminal to re-run classification.
-
-**Key UX patterns to follow:**
-- Terminal-style output (dark background, monospace, ANSI colors)
-- Real-time streaming via Server-Sent Events or WebSocket
-- Progress indicator during execution
-- Clear "running" / "stopped" / "succeeded" / "failed" status
-- Session history (last N runs this browser session)
-- Allowlist: hard-coded in backend; never accept arbitrary strings from client
-
-### Phase 4: Git Change History
-
-**Complexity:** High — requires git diff parsing, semantic change detection, UI for commit selection.
-
-**User value:** High — "what changed between runs?" is a key audit question with no current answer outside KQL.
-
-**Key UX patterns to follow:**
-- Commit list with date, message, files-changed count
-- Structured change summary: Added / Removed / Tier-changed with counts
-- Per-object diff for selected commit pair
-- Side-by-side or unified diff view for raw JSON (`react-diff-viewer-continued`)
-- "Compare two runs" selector (not just adjacent commits)
-
-### Phase 5+: Attack Path Analysis
-
-**Complexity:** Very High — requires a graph data model, graph layout algorithm, and interactive visualization.
-
-**State of the art:**
-- Microsoft Security Exposure Management (enterprise) uses a **directed graph** with:
-  - Choke point identification (nodes where multiple paths converge toward ControlPlane)
-  - Blast radius visualization (if this identity were compromised, what can it reach?)
-  - Attack path count dashboard
-  - Node types: identities, groups, devices, applications, scopes
-  - Edge types: MemberOf, AssignedRole, CanDelegate, OwnedBy, TransitiveMemberOf
-- BloodHound CE (SpectreOps) uses **Cypher queries** on a Neo4j graph for path finding; UI is force-directed graph (Sigma.js); gold standard for AD/Entra path analysis
-
-**EntraOps-specific attack paths that are relevant:**
-
-| Path Type | Start Node | End Node | Edge | Notes |
-|-----------|-----------|----------|------|-------|
-| Tier escalation | ManagementPlane user | ControlPlane group | MemberOf (transitive) | Group nesting cross-tier |
-| App role escalation | Service Principal | ControlPlane actions | HasAppRole | ResourceApps ControlPlane SP |
-| Owner privilege | Service Principal | App Registration | IsOwner | SP owner can add credentials |
-| AU scope bypass | Non-CP admin | CP object | NotInRMAU | Unprotected objects |
-
-**Recommended library for v1 graph feature:** **Cytoscape.js** (MIT, React wrapper `react-cytoscapejs`) — handles graphs up to ~5,000 nodes; has built-in layouts (dagre for hierarchy, cola for force-directed); better performance than D3-force for security dashboard use cases; active development. Alternative: **Sigma.js v3** for tenants with >1,000 unique ControlPlane paths (WebGL rendering).
-
-**Data already available in EntraOps:** `Get-EntraOpsWorkloadIdentityAttackPaths` queries Defender for Cloud attack paths via Azure Resource Graph. The `TransitiveByObjectId` / `TransitiveByObjectDisplayName` fields on EAM objects expose group-based transitivity. Building the UI overlay requires only connecting these data sources to a graph renderer.
-
-### Phase 5+: AI / Copilot Integration
-
-**Complexity:** Medium-High — requires LLM API integration; model selection and cost management.
-
-**State of the art in 2025:**
-- Copilot in Defender XDR (GA): natural language incident summaries, KQL query generation, remediation step explanation
-- Microsoft Security Copilot: standalone LLM-powered security analyst assistant
-- Emerging pattern: "explain this alert/identity in plain English" as a right-click action on any entity
-
-**EntraOps-specific high-value use cases:**
-
-| Use Case | Input | Output | Complexity |
-|----------|-------|--------|------------|
-| Explain classification | Why is this Service Principal ControlPlane? | Plain English: "This SP holds the `Application.ReadWrite.All` permission, which allows creating new app registrations and is tier 0 because it can modify authentication configuration" | Low (prompt engineering over known data) |
-| Suggest remediation | Identity X is permanently assigned ControlPlane | "Consider converting to PIM-eligible assignment, or scoping to a specific Admin Unit if RMAU is not yet applied" | Medium |
-| Natural language filter | "Show me all Service Principals with permanent ControlPlane access" | Pre-populated filter state | Medium (NLU → filter params) |
-| Change explanation | New ControlPlane service principal detected since last run | "This new registration, added 2 days ago, has `RoleManagement.ReadWrite.Directory` — a ControlPlane API permission allowing full role manipulation" | Low-Medium |
-
-**Privacy consideration:** Attack path and identity data must not be sent to external LLM APIs without explicit user consent. Recommend opt-in with a local model option (Ollama) or a settings flag for API key entry.
-
-### Phase 5+: Alerting
-
-**Complexity:** Medium — requires a persistent background process; notification delivery mechanism.
-
-**State of the art:** Defender XDR alerts on new ControlPlane assignments; EntraOps already supports Sentinel watchlists for this. The GUI layer should surface alerts passively (dashboard badge: "3 new ControlPlane objects since last run") before building push notifications.
-
-**Delivery options in priority order:**
-1. **In-app badge** (Phase 1 stretch) — passive; no new infrastructure; show "new since last run" count on dashboard
-2. **Desktop notification** (medium-term) — browser Notification API; works when GUI is open
-3. **Webhook / Teams message** (long-term) — requires backend config and persistent process
-
----
-
-## Confidence Assessment
-
-| Area | Confidence | Source |
-|------|------------|--------|
-| Table stakes features | HIGH | Microsoft Entra PIM docs, Defender XDR identity page docs, verified 2026 |
-| Differentiator identification | HIGH | Analysis of EntraOps data schema + competitive gap analysis |
-| Anti-feature rationale | HIGH | PRD Non-Goals section + scope reasoning |
-| Attack path SOTA (Exposure Management) | HIGH | Official Microsoft docs (work-attack-paths-overview, verified 2026) |
-| Attack path library recommendations | MEDIUM | Cytoscape.js/Sigma.js community patterns; training data aligned with current versions |
-| AI integration patterns | MEDIUM | Known from Copilot in Defender XDR (GA); implementation details are training data |
-| Graph data model for EntraOps paths | HIGH | Derived from actual EntraOps codebase (`TransitiveByObjectId`, attack paths cmdlet) |
+- [ ] `contributing/api-reference.md` — correct but low urgency; no external consumers yet
+- [ ] `contributing/data-model.md` — valuable but requires deep source reading
+- [ ] Annotated screenshots (complex screens) — plain screenshots first; annotate in v1.4
 
 ---
 
 ## Sources
 
-- Microsoft Entra PIM documentation: https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure (verified March 2026)
-- Microsoft Defender XDR — Investigate an identity: https://learn.microsoft.com/en-us/defender-xdr/investigate-users (verified March 2026)
-- Microsoft Security Exposure Management — Attack paths: https://learn.microsoft.com/en-us/security-exposure-management/work-attack-paths-overview (verified March 2026)
-- AzurePrivilegedIAM GitHub (EntraOps classification source): https://github.com/Cloud-Architekt/AzurePrivilegedIAM (verified March 2026)
-- EntraOps codebase analysis: `.planning/codebase/ARCHITECTURE.md`, `.planning/codebase/STRUCTURE.md`, `.planning/codebase/INTEGRATIONS.md`
-- EntraOps GUI PRD: `GUI-PRD.md` (v0.1 draft)
-- Classification template files: `Classification/Templates/Classification_AadResources.json`, `Classification_AppRoles.json`
+- ArgoCD official docs: https://argo-cd.readthedocs.io/en/stable/ — numbered getting-started, screenshot-per-action, user/operator/developer separation (HIGH — verified April 2026)
+- ArgoCD FAQ: https://argo-cd.readthedocs.io/en/stable/faq/ — Q&A format, symptom → cause → fix pattern (HIGH)
+- Grafana OSS docs: https://grafana.com/docs/grafana/latest/ — section structure, troubleshooting topics (HIGH)
+- Portainer CE install guide: https://docs.portainer.io/start/install-ce/server/docker/linux — prerequisites, numbered steps with expected output (HIGH)
+- HashiCorp Vault docs: https://developer.hashicorp.com/vault/docs — use-case entry point, config reference structure (HIGH)

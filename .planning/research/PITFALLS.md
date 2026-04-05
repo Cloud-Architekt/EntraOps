@@ -1,519 +1,393 @@
-# Domain Pitfalls: EntraOps GUI
+# Domain Pitfalls: Documentation for EntraOps GUI
 
-**Domain:** Local-first React + Express security dashboard (file system, git, PowerShell process spawning)
-**Researched:** 2026-03-24
-**Sources:** OWASP Top 10 (2021), Node.js child_process docs, TanStack Table v8 docs, Vite proxy docs, codebase analysis (CONCERNS.md)
-
----
-
-## Critical Pitfalls — Security
-
-These can cause data loss, privilege escalation, or remote code execution. Address in Phase 1 or Phase 3 before any user testing.
+**Domain:** Writing/adding documentation to an existing security administration GUI (local-first, PowerShell-backed, JSON-driven)
+**Researched:** 2026-04-05
+**Confidence:** HIGH — codebase analysis + Diátaxis framework + Write the Docs community conventions
 
 ---
 
-### PITFALL-S1: Shell Injection via PowerShell Invocation
+## Critical Pitfalls
 
-**Category:** Security (OWASP A03: Injection)
-**Phase to address:** Phase 3 (Command Runner)
+### PITFALL-D1: Screenshot Drift
 
 **What goes wrong:**
-Using `child_process.exec()` or string interpolation to build a shell command for PowerShell. Even with an allowlist, if parameters are assembled into a string and passed via `exec()` or `-Command "..."`, an attacker (or a malformed parameter value) can inject `; Remove-Item -Recurse` or similar.
-
-```js
-// DANGEROUS — never do this
-exec(`pwsh -Command "${allowlistedCommand} -TenantId ${tenantId}"`)
-```
+Screenshots captured during documentation authoring become stale as the UI evolves. EntraOps ships frequently (3 milestones, 12+ screens). A screenshot of ObjectBrowser showing v1.0 columns, or ApplyPage without the dry-run amber indicators, actively misleads users and erodes trust in the docs.
 
 **Why it happens:**
-Developers use `exec()` because it's familiar and simple. The command string looks harmless until a parameter contains a semicolon, backtick, `$()`, or quote.
+Screenshots are expensive to maintain. Writers take them once during authoring and never update them because there is no process to flag staleness when UI changes ship.
 
-**Consequences:**
-Arbitrary PowerShell execution on the local machine with the process owner's privileges. This is a local tool, so that means the security administrator's credentials and file system.
-
-**Prevention:**
-- Use `child_process.spawn()` with arguments as an **array** — never as a concatenated string
-- Pass `-NonInteractive -NoProfile` flags to PowerShell to prevent profile-level injection
-- Validate the command name against the allowlist with **exact equality** (`=== 'Save-EntraOpsPrivilegedEAMJson'`), not substring or regex match
-- Validate each parameter value against a per-command schema (Zod) before passing to spawn
-- Never pass user-controlled values via `-Command`; use named parameter arguments
-
-```js
-// SAFE
-const proc = spawn('pwsh', [
-  '-NonInteractive', '-NoProfile', '-Command',
-  allowlistedCmd,      // validated by exact equality against ALLOWLIST set
-  '-TenantId', validatedTenantId  // validated type: UUID only
-])
-```
+**How to avoid:**
+- Use alt-text as a self-check: the description should remain accurate even if the image is stale ("Object Browser showing filterable tier column with dashed computed-tier badge")
+- Avoid screenshots of transient/state-heavy UI (SSE streaming log mid-run, empty states, loading skeletons) — these are impossible to keep current
+- Prefer annotated screenshots over raw UI dumps — annotations survive minor visual changes
+- Add a comment like `<!-- screenshot: screens/object-browser.png, taken v1.2 -->` so staleness is traceable
+- Limit screenshots to structural orientation (sidebar nav, top-level page layout) — not pixel-precise feature walkthroughs
 
 **Warning signs:**
-- Any `exec()`, `execSync()`, or `shell: true` in the process manager
-- String template literals building `-Command "..."` arguments
-- Parameters passed without per-command Zod schema validation
+- Screenshot shows fewer sidebar items than the current app (e.g., missing Exclusions or Apply nav items)
+- Badge/chip styles in screenshot don't match the current amber/dashed visual system
+- Settings page screenshot shows fewer config fields than `EntraOpsConfig.json` actually has
+
+**Phase to address:** Getting Started + Feature Walkthrough phases. Establish screenshot policy before any screenshots are taken.
 
 ---
 
-### PITFALL-S2: Path Traversal in File System API Endpoints
-
-**Category:** Security (OWASP A01: Broken Access Control)
-**Phase to address:** Phase 1 (data pipeline) and Phase 2 (template editor write path)
+### PITFALL-D2: Audience Mismatch — Writing for the Developer, Not the Security Admin
 
 **What goes wrong:**
-Express endpoints that accept a filename or path segment resolve user-supplied values without confirming the resolved path stays within the allowed directory.
-
-```js
-// DANGEROUS
-app.get('/api/eam/:file', (req, res) => {
-  const filePath = path.join(EAM_DIR, req.params.file)
-  res.json(JSON.parse(fs.readFileSync(filePath, 'utf8')))
-})
-// GET /api/eam/../../.env  →  reads .env
-// GET /api/eam/../Classification/Templates/AadResources.json  →  reads outside EAM_DIR
-```
-
-`path.join()` does NOT prevent traversal — it resolves `../` cleanly.
+Documentation written by the developer reads as if the audience is another developer. It explains component hierarchy, API endpoints, and internal architecture — when the real primary audience is a security administrator who knows Entra ID, RBAC, and Conditional Access deeply but doesn't care about the Express server or React state management.
 
 **Why it happens:**
-Developers assume `path.join` normalizes away traversal attempts. It normalizes the separators but resolves the traversal.
+The author knows the internals and keeps reaching for familiar language. "The client calls `/api/objects` which reads from `PrivilegedEAM/*.json`" is developer-framing. The security admin wants: "The dashboard reads the classification data that EntraOps produced the last time you ran `Save-EntraOpsPrivilegedEAMJson`."
 
-**Consequences:**
-Read access to any file readable by the Node process (`.env`, SSH keys, PowerShell credential files). Write access to `Classification/Templates/` endpoints means arbitrary JSON overwrite.
-
-**Prevention:**
-After resolving, verify the resolved path **starts with** the allowed base directory:
-
-```js
-const BASE = path.resolve(process.cwd(), 'PrivilegedEAM')
-function safePath(userInput: string): string {
-  const resolved = path.resolve(BASE, userInput)
-  if (!resolved.startsWith(BASE + path.sep)) {
-    throw new Error('Path traversal attempt blocked')
-  }
-  return resolved
-}
-```
-
-Apply this guard to **every** route that takes a path-like parameter. The template editor's write endpoint is higher risk than the read endpoints — double-check both.
+**How to avoid:**
+- Define two distinct personas before writing a single sentence: Security Admin (end user) and Contributor (developer). Assign every doc section to exactly one persona.
+- End-user docs: measure success by whether someone with zero React/Node knowledge can complete the task described
+- Use Entra/RBAC terminology the admin already knows: "ControlPlane principal", "PIM eligible assignment", "Administrative Unit scope" — not "row data" or "JSON object"
+- Never surface internal routes, component names, or server file paths in end-user docs
+- Contributor docs can and should reference internals — but only in contributor-labelled sections
 
 **Warning signs:**
-- `path.join(SOME_DIR, req.params.anything)` without a `startsWith` guard
-- Any endpoint that takes a filename string and passes it to `fs` functions
+- A sentence contains both "the user" and "the server" in the same step
+- API endpoints appear in getting-started content
+- File paths like `gui/server/routes/objects.ts` appear outside the Architecture section
+- A Troubleshooting entry explains a React error boundary instead of a user-visible symptom
+
+**Phase to address:** All phases — establish persona assignment in doc structure before any content is authored.
 
 ---
 
-### PITFALL-S3: Express Server Binding to 0.0.0.0 (Network Exposure)
-
-**Category:** Security (OWASP A01: Broken Access Control — unintended exposure)
-**Phase to address:** Phase 1 (server scaffold)
+### PITFALL-D3: Missing the "Why" Behind Tier Model and Security Concepts
 
 **What goes wrong:**
-`app.listen(3001)` without an explicit host binds to `0.0.0.0` on most systems — all network interfaces. On a laptop connected to a corporate network or a shared Wi-Fi, the API becomes accessible to other machines on the network. Since there is no authentication, any host on the LAN can read classified identity data and trigger PowerShell commands.
-
-Additionally, DNS rebinding attacks can exploit a localhost-only server via a malicious webpage that resolves a custom domain to `127.0.0.1`.
+Docs describe what each screen does ("The Dashboard shows KPI cards for each tier") without explaining why the tier model matters. A new user who doesn't understand why ControlPlane is dangerous can't evaluate what they're seeing, can't make classification decisions, and can't understand why the Apply workflow exists.
 
 **Why it happens:**
-Developers rarely think about binding host in local tools. Express defaults and tutorial examples never specify a host.
+The author assumes the reader is already familiar with EntraOps concepts. The README and upstream PowerShell module docs exist but aren't part of the GUI docs. Users who forked the repo specifically for the GUI may never read them.
 
-**Consequences:**
-Full API access (including the command runner in Phase 3) from any host on the same network segment.
-
-**Prevention:**
-- Always bind explicitly to `127.0.0.1`:
-  ```js
-  app.listen(PORT, '127.0.0.1', () => { ... })
-  ```
-- Add a CORS policy allowing only `http://localhost:5173` and `http://127.0.0.1:5173` as origins — reject all others
-- Add a `Host` header validation middleware that rejects requests where `Host` is not `localhost` or `127.0.0.1` (DNS rebinding mitigation)
+**How to avoid:**
+- Include a Concepts or Background section early in the docs covering: ControlPlane / ManagementPlane / UserAccess tier definitions, why tier separation matters, what "applied" vs "suggested" means, and what `Save-EntraOpsPrivilegedEAMJson` produces
+- This section doesn't explain button mechanics — it explains the mental model the entire GUI is built around
+- Link to it from every screen doc that uses tier terminology
+- Keep it short: 300-500 words with a tier comparison table. Not a thesis.
 
 **Warning signs:**
-- `app.listen(PORT)` or `app.listen(PORT, callback)` with no host argument
-- Missing CORS configuration or overly permissive `cors({ origin: '*' })`
+- Dashboard docs say "KPI cards show ControlPlane counts" without explaining what ControlPlane means or why it matters
+- Classification Template docs describe the JSON syntax without explaining what a "classification template" is in identity governance terms
+- A user could follow all doc steps perfectly and still not know whether what they see in the UI is a problem or expected
+
+**Phase to address:** Concepts/Background doc — must be the first authored section, referenced everywhere else.
 
 ---
 
-### PITFALL-S4: Arbitrary File Write Without Schema Validation (Template Editor)
-
-**Category:** Security (OWASP A03: Injection; Data Integrity)
-**Phase to address:** Phase 2 (template editor)
+### PITFALL-D4: Poor Troubleshooting Content — Symptoms Not Covered
 
 **What goes wrong:**
-The template editor write endpoint accepts JSON from the frontend and writes it to `Classification/Templates/*.json`. If Zod validation is skipped (e.g., during error handling or a bypass path), malformed or malicious JSON can corrupt classification templates. Corrupted templates mean PowerShell misclassifies privileged identities — a silent, high-impact security regression.
+Troubleshooting section covers error codes and technical exceptions, but not the symptom a security admin actually experiences. The most common failure modes for this tool are invisible to technical docs:
+- Dashboard shows zeros / "No data" after running the wizard
+- PowerShell command runner hangs or shows no output
+- Classification changes "saved" but don't appear on restart
+- Port 3001 already in use on startup
+
+None of these produce an obvious error code — they present as UI states.
 
 **Why it happens:**
-Developers add a "just save what I have" escape hatch during development and forget to remove it. Or they validate the shape but not the content (e.g., allowing injection of arbitrary `RoleDefinitionActions` values that are never in the real schema).
+Writers document errors they encountered during development (Node exceptions, Zod validation failures) rather than failure modes that surface to the end user. Real troubleshooting trees come from user testing, not solo dev experience.
 
-**Consequences:**
-Schema corruption silently causes privileged identities to be misclassified (e.g., ControlPlane tier downgraded to UserAccess), which is the opposite of the tool's purpose.
-
-**Prevention:**
-- Validate with Zod's `.parse()` (throws on failure) — never `.safeParse()` followed by writing on parse failure
-- The Zod schema must be the **single source of truth** — import it in both the frontend form validation and the backend write handler
-- Write to a `.tmp` file first, validate the written file can be re-parsed, then rename atomically (avoids partial writes)
-- Keep the schema versioned in a `schema/` directory so mismatches between disk content and code schema produce a readable error
+**How to avoid:**
+- Structure troubleshooting by symptom ("Dashboard shows zeros", "Apply screen progress bar stopped") not by technical cause
+- For each screen, ask: "What does this page look like when something is wrong?" — document each empty/error state
+- Cover the five most common setup failures: missing `pwsh` binary, PrivilegedEAM directory empty, `EntraOpsConfig.json` missing/invalid, port conflict on 3001, device code auth timeout
+- Add a diagnosis flowchart for the getting-started path: data exists? servder started? port accessible? browser pointed at correct URL?
 
 **Warning signs:**
-- `res.json({ ok: true })` before the Zod parse result is checked
-- Separate schema definitions in frontend and backend that can diverge
-- No test that writes a malformed body to the template endpoint and expects a 400
+- Troubleshooting section starts with "Run npm install" — that is setup, not troubleshooting
+- No entries that mention empty states (empty object browser, empty dashboard, empty history list)
+- PowerShell cmdlets appear in troubleshooting without explaining how to check if `pwsh` is installed
+- No mention of the PrivilegedEAM directory or how to verify it is populated
+
+**Phase to address:** Troubleshooting/FAQ doc — requires review of the actual page empty-state components to enumerate real failure modes.
 
 ---
 
-## Critical Pitfalls — Architecture
-
----
-
-### PITFALL-A1: Blocking the Node.js Event Loop with Synchronous Large JSON Reads
-
-**Category:** Performance (architectural correctness)
-**Phase to address:** Phase 1 (data pipeline)
+### PITFALL-D5: Configuration Docs That Don't Match Actual Defaults
 
 **What goes wrong:**
-`PrivilegedEAM/` aggregate JSON files can reach hundreds of MB across all RBAC systems. Using `fs.readFileSync()` + `JSON.parse()` on the main Express thread blocks the event loop for seconds while parsing. All other requests queue behind it, making the app feel frozen.
-
-```js
-// BLOCKS the entire Express server for 2-5 seconds on large files
-app.get('/api/eam/all', (req, res) => {
-  const data = JSON.parse(fs.readFileSync('PrivilegedEAM/All.json', 'utf8'))
-  res.json(data)
-})
-```
+`EntraOpsConfig.json` has ~40 fields across nested sections (workflow triggers, RBAC system arrays, classification update config, scope update config). Docs that describe defaults from memory diverge from what the actual committed file contains. Users follow the docs, configure incorrectly, and don't know why the app behaves differently.
 
 **Why it happens:**
-`readFileSync` is simpler and synchronous, so developers reach for it first. The problem only manifests with real data at scale.
+Config docs are written once and forgotten. The config file evolves (new fields added, defaults changed) but docs don't update because there is no coupling between config schema and docs.
 
-**Consequences:**
-Dashboard becomes unresponsive whenever a large file is re-read. If the frontend polls frequently (TanStack Query refetchInterval), the server is perpetually blocked.
-
-**Prevention:**
-- Use `fs.promises.readFile()` (async) for all file reads
-- For files >5MB, consider streaming with `stream-json` (parses incrementally without loading the full payload into memory)
-- Cache parsed results in memory with a file watcher (`fs.watch`) to invalidate on change — avoid re-parsing on every API call
-- Add a file size check before parsing; surface a warning in the UI if a single file exceeds a configurable threshold
+**How to avoid:**
+- Source truth from the actual file: generate the config reference by reading `EntraOpsConfig.json` and `Classification/Global.json` directly — don't write it from memory
+- List every top-level field with: current default value, type, which GUI screen exposes it (Settings page / Classification editor / not exposed), and what happens if omitted
+- Explicitly call out GUI-only fields vs PowerShell module fields vs shared fields — users want to know which config changes require a GUI restart
+- Note that `EntraOpsConfig.json` is both read by the PowerShell module and the GUI server — changes made via the Settings page are immediately visible to both
 
 **Warning signs:**
-- Any `readFileSync` in an Express route handler
-- `JSON.parse` called on the result of a full file read in a route handler
-- TanStack Query `refetchInterval` set below 30 seconds without server-side caching
+- Config docs show fewer fields than the actual `EntraOpsConfig.json`
+- Docs describe a field as "optional" but omitting it causes a server startup error
+- `RbacSystems` default in docs doesn't match the committed version
+- No distinction between "requires app restart" and "hot-reloaded"
+
+**Phase to address:** Configuration Reference doc. Audit against live `EntraOpsConfig.json` before publishing.
 
 ---
 
-### PITFALL-A2: Orphaned PowerShell Processes on Client Disconnect
-
-**Category:** Process Lifecycle / Resource Leak
-**Phase to address:** Phase 3 (Command Runner)
+### PITFALL-D6: Missing Quick-Start Path — No Clear "Zero to Dashboard" Flow
 
 **What goes wrong:**
-The command runner streams PowerShell output via SSE (Server-Sent Events). If the user:
-- Closes the browser tab
-- Navigates away
-- Clicks Stop but the `fetch`/EventSource is already torn down
-
-...the SSE connection drops but the `child_process` spawned for PowerShell continues running. It can hold open Graph API connections, write partial JSON to `PrivilegedEAM/`, or consume 100% CPU indefinitely.
+Comprehensive docs cover every feature in depth but the user who just forked the repo can't find the five-step path to a working dashboard. They read about classification templates before they've started the server. They arrive at "Apply to Entra" before understanding what tier classification means.
 
 **Why it happens:**
-SSE is fire-and-forget from the client side. Developers focus on the happy path (process completes normally) and miss the cleanup path.
+Feature-complete docs are organized by feature, not by user journey. The writer documents what they built, not what the user needs to do first.
 
-**Consequences:**
-Multiple orphaned `pwsh` processes accumulate per developer session. Partial writes corrupt EAM JSON files. Graph API rate limits are consumed.
-
-**Prevention:**
-- Attach a `req.on('close', cleanup)` handler to the SSE route — this fires when the client disconnects
-- In `cleanup`, call `proc.kill('SIGTERM')` and after a 2-second timeout, `proc.kill('SIGKILL')`
-- Track the active process in a module-level `Map<string, ChildProcess>` keyed by a run ID
-- On Express server `SIGTERM`/`SIGINT` (e.g., `npm run dev` Ctrl+C), kill all tracked processes before exit
-- In the frontend, use `useEffect` cleanup to close the `EventSource` when the component unmounts
+**How to avoid:**
+- Make the getting-started guide the only entry point for new users — it should take someone from `git clone` to seeing real data in the Dashboard in under 10 minutes
+- The quick-start path has exactly one happy path: fork → `Save-EntraOpsPrivilegedEAMJson` → `cd gui && npm install && npm run dev` → open `http://localhost:3001` → authenticate → Dashboard loads
+- Everything else (Classification, Reclassify, Apply, History) is reachable from the Dashboard — the quick-start doesn't need to cover them
+- Add a "What to do next" section at the end of quick-start that links to feature docs in a recommended order
+- Do not put troubleshooting, prerequisites, or architecture in the quick-start path — link out to those
 
 **Warning signs:**
-- No `req.on('close')` handler on SSE routes
-- No `process.on('SIGTERM')` handler in the Express entry point
-- `Map` or reference to active child process not maintained
+- Quick-start page exceeds 500 words
+- PowerShell module installation is placed after the npm steps (it must come first)
+- Quick-start requires the reader to make decisions (e.g., which RBAC systems to enable) before they have a working install
+- No visual confirmation step ("You should see the Dashboard with KPI cards for each tier")
+
+**Phase to address:** Getting Started guide — must be authored first, from scratch, without referencing any other doc section.
 
 ---
 
-## Moderate Pitfalls — Cross-platform
+## Moderate Pitfalls
 
----
-
-### PITFALL-C1: PowerShell Executable Name and PATH Discovery
-
-**Category:** Cross-platform compatibility
-**Phase to address:** Phase 3 (Command Runner)
+### PITFALL-D7: Over-Documenting "How" Instead of Outcomes
 
 **What goes wrong:**
-Hardcoding `'pwsh'` as the executable works on macOS/Linux but fails on some Windows configurations where:
-- `pwsh` is not on PATH (installed to `C:\Program Files\PowerShell\7\pwsh.exe`)
-- Windows PowerShell 5 (`powershell.exe`) is on PATH but PowerShell 7 is not
-- The user has PowerShell 7 installed via Microsoft Store at a non-standard path
+Docs describe UI mechanics ("Click the dropdown, select a tier, click Save All") instead of outcomes ("Reclassify a principal to a lower-privilege tier so it no longer triggers ControlPlane alerts"). Process docs that map every click produce rote walkthroughs that users stop reading after the first paragraph.
 
 **Why it happens:**
-The developer tests on macOS where `pwsh` is consistently in PATH via Homebrew.
+The writer is thinking about the UI they built, not the task the admin is trying to accomplish. This is especially common in GUI tools where every screen has a clear interaction sequence.
 
-**Consequences:**
-`spawn('pwsh', ...)` throws `ENOENT` on Windows. The command runner shows an unhelpful "process failed" error with no indication of the real cause.
-
-**Prevention:**
-- On server startup, resolve the PowerShell executable path with `which`/`where.exe` and cache the result
-- Provide a fallback search order: `pwsh` → `pwsh.exe` → `powershell.exe` (with a warning if only the latter is found)
-- Surface the resolved path in the Settings page so users can see what the server found
-- Accept a `PWSH_PATH` environment variable override for non-standard installations
+**How to avoid:**
+- Start each screen doc with: "Use this screen when you want to [outcome]"
+- Document the intent of a workflow before the mechanics — the admin must understand why before they understand how
+- Reserve click-by-click instructions for complex workflows (Connect and Classify wizard, Apply to Entra 4-state flow) where sequence matters
+- For simple screens (History, Exclusions), a 2-sentence description plus one representative screenshot is sufficient
 
 **Warning signs:**
-- Hardcoded `'pwsh'` string in process spawn code without any OS detection
+- Every screen documentation section is the same length regardless of complexity
+- Docs say "click the button to save" rather than "changes are persisted atomically to `Classification/Overrides.json`"
+- No outcome described — just mechanics
+
+**Phase to address:** Feature Walkthrough docs — enforce outcome-first framing per section.
 
 ---
 
-### PITFALL-C2: Windows File Path Separators and Unicode in JSON
-
-**Category:** Cross-platform compatibility
-**Phase to address:** Phase 1
+### PITFALL-D8: GUI Docs and PowerShell Docs Not Integrated
 
 **What goes wrong:**
-Three related sub-problems:
-
-1. **Backslash paths in URL params**: On Windows, `path.join()` returns backslashes (`PrivilegedEAM\EntraID\All.json`). If these are sent to the frontend as part of a JSON response and then used in a subsequent API call URL, the `\` is treated as an escape character, breaking the URL.
-
-2. **UTF-16 LE BOM from Windows PowerShell**: Even with PowerShell 7, `Out-File` on Windows defaults to UTF-8 **with BOM** (`EF BB BF`). Node's `fs.readFile(..., 'utf8')` will include the BOM character (`\ufeff`) at the start of the string, causing `JSON.parse()` to throw `SyntaxError: Unexpected token`.
-
-3. **CRLF line endings**: JSON files written on Windows may have CRLF line endings. This is valid JSON but can cause git diff noise and may confuse simple string parsers.
-
-**Prevention:**
-- Normalize all paths to forward slashes before sending to frontend: `filePath.replace(/\\/g, '/')`
-- Strip BOM before JSON.parse: `content.replace(/^\uFEFF/, '')`
-- Set `PowerShellVersion` enforcement to PS 7+ and document that EntraOps PS scripts should use `-Encoding UTF8NoBOM` in `Out-File` calls
-
-**Warning signs:**
-- `JSON.parse` errors that appear only on Windows in CI or testing
-- File-path-based API routes that break only on Windows
-- `\ufeff` appearing in parsed JSON object keys
-
----
-
-### PITFALL-C3: `child_process` spawn with shell:true on Windows
-
-**Category:** Security + Cross-platform
-**Phase to address:** Phase 3
-
-**What goes wrong:**
-Setting `shell: true` in `spawn` options solves some Windows PATH issues but:
-1. Re-introduces shell injection risk (arguments are processed by cmd.exe)
-2. On Windows, the shell is `cmd.exe`, not `pwsh`, so PowerShell-specific argument quoting rules don't apply
-3. Exit codes behave differently under the shell wrapper
-
-**Prevention:**
-Never use `shell: true`. Instead, resolve the full path to `pwsh.exe` at startup (see PITFALL-C1) and pass it as the explicit executable.
-
-**Warning signs:**
-- `{ shell: true }` in any `spawn` options object
-
----
-
-## Moderate Pitfalls — Developer Experience
-
----
-
-### PITFALL-D1: Vite Proxy and Express Port Collision / Dev vs. Production Divergence
-
-**Category:** Developer Experience
-**Phase to address:** Phase 1 (scaffold)
-
-**What goes wrong:**
-The standard setup runs Vite on port 5173 and Express on 3001, with Vite proxying `/api` to Express. Three failure modes:
-
-1. **Port collision**: `concurrently` starts both servers simultaneously; if Express is slow to start, Vite proxy requests fail with ECONNREFUSED and the developer sees React Query errors that look like API bugs
-2. **CORS double-headers**: If Express also sets CORS headers AND Vite's proxy sets them, browsers see duplicate `Access-Control-Allow-Origin` headers and reject the response
-3. **dev/prod divergence**: The Vite proxy only exists in dev mode. After `npm run build`, the frontend is served as static files — but Express must also serve those static files. If this isn't set up, `npm run start` produces a blank page or 404 for all frontend routes
-
-**Prevention:**
-- Add a health check retry loop in Vite config's `proxy` option: `{ target: 'http://127.0.0.1:3001', changeOrigin: true }`
-- Remove all `cors()` middleware from Express when behind the Vite proxy in dev mode; add it only for the production static-file server if needed
-- In production Express config, add `app.use(express.static('dist'))` and a catch-all `app.get('*', ...)` to serve `index.html` for client-side routing
-- Add an `npm run start` script that skips Vite and serves the built frontend from Express so this path is tested regularly
-
-**Warning signs:**
-- ECONNREFUSED errors in the browser network tab that appear only on fresh server start
-- `Access-Control-Allow-Origin` appearing twice in response headers
-- `npm run build && npm run start` produces different behavior than `npm run dev`
-
----
-
-### PITFALL-D2: Shared Types Between Frontend and Backend Causing Bundle Leakage
-
-**Category:** Developer Experience / Architecture
-**Phase to address:** Phase 1 (scaffold)
-
-**What goes wrong:**
-Placing shared TypeScript types in files that also import `fs`, `path`, or `child_process` causes Vite to attempt to bundle those server-only Node modules into the frontend build. This either:
-1. Fails the build with "cannot find module 'fs'"
-2. Silently includes server code in the client bundle (leaking internal paths, file structure, dependency versions)
+GUI docs and PowerShell cmdlet docs are treated as separate domains. End-user docs never explain what `Save-EntraOpsPrivilegedEAMJson` actually produces, so users don't understand what the Dashboard is showing them. Developer/contributor docs don't explain which server routes call which cmdlets from the allowlist.
 
 **Why it happens:**
-It's tempting to put types and their usage together. `types/eam.ts` exports `EamObject` interface and also imports `z` from `zod` — Zod works fine in the browser, but if the same file later gets a `path`/`fs` import added, the leak begins.
+EntraOps has two surfaces (PowerShell module and GUI) developed independently. Documentation authors silo each surface.
 
-**Prevention:**
-- Create `src/shared/` (or `shared/` at root) for all types used by both frontend and backend
-- Enforce that `shared/` files have **zero** Node.js built-in imports — add an ESLint rule or CI check
-- Keep all `fs`, `path`, `child_process`, and `simple-git` imports in `server/` directory only
-- Run `vite build` in CI and check that the bundle doesn't reference Node built-ins
+**How to avoid:**
+- The Architecture / Integration Overview doc must map the data flow: `Save-EntraOpsPrivilegedEAMJson` produces `PrivilegedEAM/*.json` → Express server reads those files → React renders data
+- In end-user docs, reference PowerShell cmdlets by name where relevant ("running `Save-EntraOpsPrivilegedEAMJson` refreshes the data shown in Dashboard")
+- In the PowerShell Command Runner screen docs, list the 13 allowlisted cmdlets and their GUI-level purpose — not their implementation, just what the user can expect them to trigger
+- Document the data freshness concept: the GUI shows the last-run results. If data looks stale, the fix is to re-run the PowerShell cmdlet, not to refresh the browser.
 
 **Warning signs:**
-- Vite build warnings about "externalized" or "could not resolve" for Node built-ins
-- `process.env` references appearing in the built client bundle
+- Docs describe Dashboard data without mentioning how or when it was generated
+- Command Runner docs list cmdlets without explaining what they do to the tenant
+- No mention of "data freshness" anywhere in end-user docs
+- Getting Started assumes the user already knows what `Save-EntraOpsPrivilegedEAMJson` does
+
+**Phase to address:** Architecture/Integration Overview + Getting Started guide.
 
 ---
 
-### PITFALL-D3: TanStack Table Filter State Causing Excessive Re-renders
-
-**Category:** Performance / Developer Experience
-**Phase to address:** Phase 1 (object browser)
+### PITFALL-D9: Dry-Run / Sample Mode Not Prominently Documented
 
 **What goes wrong:**
-Two compounding problems:
-
-1. **URL-synced filter state causes double render**: Updating URL search params triggers a router-level re-render before TanStack Table processes the filter. With 5+ active filters on a 5,000-row dataset, the user sees visible lag (>200ms) on every keystroke in the search box.
-
-2. **Column filter functions recreated on every render**: If `columnFiltersFns` or `filterFns` are defined inline (as arrow functions in component body), TanStack Table treats them as new functions on every render and re-filters the entire dataset unnecessarily.
+The Apply to Entra workflow has a `-SampleMode` toggle ("Dry Run / Preview Mode") that prevents writes to the Entra tenant. Docs bury or skip this entirely. Security admins doing a first run don't know whether clicking "Apply" will immediately modify their production tenant.
 
 **Why it happens:**
-Developers wire filter state directly to `useState` and URL params simultaneously without debouncing. Column definitions are defined inside the component function.
+The feature seems obvious to the builder (it's a toggle with amber indicators). To a security admin reading about the Apply screen for the first time, the distinction between a dry run and a live run is critical and non-obvious.
 
-**Consequences:**
-The object browser feels sluggish for any tenant with more than ~500 privileged objects. This is highly likely given large enterprises using EntraOps.
-
-**Prevention:**
-- Define column definitions **outside** the component (module level or `useMemo`) — never inline
-- Separate local filter state from URL state: update local state immediately (for responsive UI), debounce URL updates by 300ms
-- For datasets >2,000 rows, consider `manualFiltering: true` with server-side filtering in Express (reads from cached, pre-parsed JSON)
-- Use `React.memo` on table row components to prevent re-renders of unchanged rows
+**How to avoid:**
+- Apply screen docs must lead with a clear statement: "Dry Run mode runs all cmdlets with `-SampleMode` — no changes are written to your Entra tenant"
+- Document what the amber visual indicators mean before describing the workflow steps
+- Include a callout: "Always run in Dry Run mode first when applying to a new tenant or after major classification changes"
+- Explain what the SSE log shows differently in dry-run vs live mode
 
 **Warning signs:**
-- Column definitions defined inside the render function body
-- `useSearchParams` setter called on every keystroke without debouncing
-- React DevTools profiler showing full table re-renders on single filter changes
+- Apply screen docs don't mention `-SampleMode` or dry-run at all
+- No warning about irreversible tenant changes
+- Dry-run is documented as an "advanced feature" rather than a first-run safety mechanism
+
+**Phase to address:** Apply to Entra screen docs — must be reviewed by someone who hasn't used the tool before.
 
 ---
 
-## Moderate Pitfalls — Schema and Data Integrity
-
----
-
-### PITFALL-M1: Zod Schema Diverging from Existing Classification Templates on Disk
-
-**Category:** Schema Migration / Data Integrity
-**Phase to address:** Phase 2 (template editor)
+### PITFALL-D10: Organic Growth Creates Inconsistent Terminology
 
 **What goes wrong:**
-The Zod schema for `Classification/Templates/*.json` is written against the current known structure. But:
-1. EntraOps has been running in the user's fork — their templates may have been edited manually and contain extra fields not in the schema
-2. A future EntraOps update adds a new field to the template format; the GUI's Zod schema rejects the new field and blocks the editor from opening
+Features added across 3 milestones use slightly different naming. The GUI says "Reclassify" in the sidebar but "Override" in the code. Docs may call the same screen "Classification Override" in one section and "Reclassification" in another. Admin searches fail because the term they encountered in one doc section doesn't appear in the troubleshooting section.
 
 **Why it happens:**
-`schema.parse()` is strict by default — it rejects unknown keys with `ZodError`.
+Milestone-by-milestone development accumulates naming drift. v1.0 used one term, v1.1 extended it, v1.2 added a different-sounding feature that does something adjacent.
 
-**Consequences:**
-The template editor throws an error on load for users with customized templates. Or worse: `.strip()` silently drops custom fields the user added, and saving overwrites them.
-
-**Prevention:**
-- Use `schema.passthrough()` on the outer template object to preserve unknown keys when loading
-- Only validate (strict) the fields the GUI **writes** — not the entire file structure
-- On load, use `.safeParse()` and display a warning badge ("This template has fields the GUI doesn't recognize — they will be preserved") rather than blocking the editor
+**How to avoid:**
+- Create a glossary of 15-20 key terms before writing any docs, aligned with what appears in the UI (nav labels, button text, page headings)
+- Lock in: "Reclassify" not "Override" (or vice versa — whichever matches the sidebar), "Applied tier" vs "Computed tier", "Exclusion" vs "Excluded object"
+- Use find-in-files across drafted docs to catch inconsistent usage before publish
+- Screen names in docs must match Sidebar nav labels exactly
 
 **Warning signs:**
-- `z.object({...}).parse(rawJson)` without `.passthrough()` on a file written by an external tool
-- No test that loads a template with an extra unknown field and verifies it round-trips without data loss
+- Same screen referred to by two different names in the same doc page
+- "Override" used in troubleshooting but "Reclassify" used in feature walkthrough
+- "Classification file" vs "template file" vs "classification template" used interchangeably
+
+**Phase to address:** Glossary — author before any feature docs. Apply consistently throughout.
 
 ---
 
-### PITFALL-M2: git Operations Failing on Edge-Case Repository States
+## Technical-Integration Pitfalls (PowerShell + JSON Specifics)
 
-**Category:** Git operations / Resilience
-**Phase to address:** Phase 1 (dashboard) and Phase 4 (change history)
+### PITFALL-D11: Missing PowerShell Prerequisite Gate
 
 **What goes wrong:**
-`simple-git` throws unhandled exceptions for:
-1. **Uninitialized repo**: User has a fresh copy of EntraOps not yet committed to git (common for local testing). `git.log()` throws `fatal: your current branch 'main' does not have any commits yet`.
-2. **Detached HEAD**: GitHub Actions checks out a specific SHA, not a branch. `git.branch()` returns empty `current`. Any code that assumes a branch name is present will crash.
-3. **Shallow clone**: `git clone --depth 1` (common in CI). `git log` returns only 1 commit; `git diff` between two commits fails if one is outside the shallow history.
-4. **Uncommitted PrivilegedEAM/ files**: If the user runs `Save-EntraOpsPrivilegedEAMJson` without committing, `git log` shows no changes but files are newer than the last commit — the "data freshness" indicator is wrong.
+Installation docs don't clearly state which PowerShell prerequisites must be installed before the GUI will work. The `pwsh` binary must exist, the EntraOps PowerShell module must be installed, and Az.Accounts / MSAL must be available for device code auth. Missing any of these produces confusing errors in the GUI (Connect page hangs, streaming output is empty, or Node process crashes with non-obvious errors).
 
-**Prevention:**
-- Wrap **every** `simple-git` call in try/catch and return a graceful empty response (`{ commits: [], error: 'No git history' }`)
-- Use `git.checkIsRepo()` before any git operations; return empty state if false
-- For data freshness, combine `fs.stat()` mtime with the git log — use the **later** of the two as the authoritative timestamp
+**How to avoid:**
+- Prerequisites section lists: `pwsh` (PowerShell 7+), EntraOps module, any Az.* module dependencies
+- Include a pre-flight check the user can run: `pwsh -Command "Get-Module -ListAvailable"` showing required modules
+- Document that `pwsh` must be on PATH (not `powershell.exe`) — this matters on macOS and Linux
+- Explain the server's behavior when `pwsh` is unavailable: does it fail on startup or at first cmdlet invocation?
 
 **Warning signs:**
-- `simple-git` calls without `try/catch`
-- Code that accesses `result.current` from `git.branch()` without null-checking
-- No test with an empty/uninitialized git repo
+- Prerequisites section says "Node.js 18+" and stops there
+- Run Commands or Connect screen docs don't mention PowerShell prerequisites
+- No guidance for macOS/Linux users about installing PowerShell 7
 
 ---
 
-## Minor Pitfalls
-
----
-
-### PITFALL-MIN1: PowerShell ANSI Output Rendering (Progress Bars)
-
-**Category:** UX / Terminal rendering
-**Phase to address:** Phase 3
+### PITFALL-D12: JSON File Location Docs Don't Match Real Path Structure
 
 **What goes wrong:**
-`ansi-to-html` handles standard SGR sequences (colors, bold) but not:
-- PowerShell progress bars (written using `Write-Progress`, which emits OSC sequences or raw ANSI that overwrite lines using `\r`)
-- Hyperlinks (`OSC 8`)
-- When progress records hit the HTML renderer, they produce a wall of garbled `\r`-prefixed lines
+Config docs refer to JSON files by relative paths that don't match where the user's files actually are. The docs might say `./Classification/Global.json` but the server resolves paths relative to the repo root, not the `gui/` directory. A user editing the wrong file won't see changes reflected.
 
-**Prevention:**
-- Strip PowerShell progress record sequences before passing to `ansi-to-html` (regex: `/\x1b\[\d+[A-G]/g` covers cursor movement)
-- Consider `xterm.js` instead of `ansi-to-html` — it handles OSC, cursor movement, and `\r` overwrites natively, rendering a true terminal experience
-- At minimum, replace `\r` (without following `\n`) with `\n` to prevent line overwrite in HTML
+**How to avoid:**
+- Always use repo-root-relative paths in docs: `Classification/Global.json`, `Classification/Overrides.json`, `EntraOpsConfig.json`, `PrivilegedEAM/`
+- State explicitly: "All JSON files are relative to the repo root, not the `gui/` subfolder"
+- Include a file map in the Architecture doc showing which GUI action writes to which JSON file:
+
+| GUI action | JSON file written |
+|---|---|
+| Save settings | `EntraOpsConfig.json` |
+| Save reclassification override | `Classification/Overrides.json` |
+| Add / remove exclusion | `Classification/Global.json` |
+| Save classification template | `Classification/Templates/*.json` |
 
 **Warning signs:**
-- PowerShell `Write-Progress` output appearing as garbled characters in the UI
-- Vertical stacks of duplicate progress lines
+- Docs use relative paths that change depending on working directory
+- No mention of which GUI actions are read-only vs write
+- Settings page docs don't mention `EntraOpsConfig.json` by name
 
 ---
 
-### PITFALL-MIN2: `npm run dev` Hot Reload Restarting Express Mid-Request
-
-**Category:** Developer Experience
-**Phase to address:** Phase 1
+### PITFALL-D13: SSE Streaming Output Is Undocumented
 
 **What goes wrong:**
-`nodemon` (or `tsx --watch`) restarts Express when any server file changes. If the developer is mid-way through a PowerShell command run, the restart kills the child process without cleanup (duplicating PITFALL-A2 at dev time) and resets all in-flight SSE connections.
+Both the Connect & Classify wizard and the Apply to Entra screen use SSE (Server-Sent Events) for real-time streaming output from PowerShell. Users who see the log stop mid-run, show an error, or produce unexpected output don't know how to interpret it or what "normal" looks like.
 
-**Prevention:**
-- Configure `nodemon` to ignore `PrivilegedEAM/` and `Classification/` change events — these are data directories that should not trigger server restarts
-- Implement the same process cleanup logic in dev mode as production (see PITFALL-A2) — nodemon's `restart` event can trigger the cleanup hook if you use `nodemon` programmatically
+**How to avoid:**
+- Include an annotated example of a successful SSE log for both screens (Connect flow output, Apply flow output per cmdlet)
+- Document what a stalled stream looks like vs a normal completion
+- Explain that the SSE log reflects raw PowerShell stdout — warnings and verbose output are expected and not errors
+- Document the per-cmdlet pass/fail outcome summary on the Apply screen and what each state means
 
 **Warning signs:**
-- `nodemon` or `tsx --watch` watching the entire project root without exclusions
-- Server restart log messages appearing during active command runs
+- Connect and Apply screen docs show a screenshot of the empty log pane rather than an in-progress or completed run
+- No guidance on interpreting stream content
+- Troubleshooting doesn't cover "stream stopped / no output"
 
 ---
 
-## Phase-Specific Warning Map
+### PITFALL-D14: Classification Template Format Undocumented for Security Admins
 
-| Phase | Feature | Most Relevant Pitfalls |
-|-------|---------|----------------------|
-| 1 | Server scaffold | S3 (network exposure), D1 (proxy setup), C2 (path separators/BOM) |
-| 1 | Data pipeline / file reads | A1 (blocking JSON parse), S2 (path traversal), M2 (git edge cases) |
-| 1 | Object browser table | D3 (filter re-renders) |
-| 1 | Type sharing | D2 (bundle leakage) |
-| 2 | Template editor | S4 (schema validation on write), M1 (Zod/disk schema drift) |
-| 3 | Command runner | S1 (shell injection), A2 (orphaned processes), C1 (pwsh path), C3 (shell:true), D2, MIN1 |
-| 3 | Hot reload in dev | MIN2 (nodemon restart) |
-| 4 | Change history | M2 (git edge cases: shallow clone, detached HEAD) |
-| 5 | Settings page | S2 (path traversal on config write), S4 (schema validation) |
+**What goes wrong:**
+The Templates screen exposes a JSON editor for classification template files. Security admins need to understand the schema to make useful edits. Docs that say "edit the JSON" without explaining what `AdminTierLevel`, `Classifications`, `RoleDefinitionId`, or `ExcludedPrincipalIds` mean leave admins unable to use the feature.
+
+**How to avoid:**
+- Include a Classification Template Schema Reference — even a minimal one covering the key fields an admin would change
+- Show a before/after example: "to add a custom ControlPlane classification for a custom role..."
+- Reference the Zod validation so admins know what errors mean when the diff preview rejects their changes
+- Distinguish between the Templates editor (structural changes to classification rules) and the Reclassify screen (per-object tier overrides) — these are commonly confused
+
+**Warning signs:**
+- Templates screen docs just say "edit classification templates here"
+- No field-level explanation for `AdminTierLevel`, `Classifications`, or `RoleDefinitionId`
+- No mention that the editor validates against a schema before saving
 
 ---
 
-## Sources
+## Technical Debt Patterns (Documentation-Specific)
 
-- [OWASP Top 10 2021](https://owasp.org/Top10/) — A01, A03 (path traversal, injection)
-- [Node.js child_process docs](https://nodejs.org/api/child_process.html) — spawn vs exec security model
-- [TanStack Table v8 performance guide](https://tanstack.com/table/v8/docs/guide/column-filtering) — memoization requirements
-- [Vite proxy configuration](https://vitejs.dev/config/server-options.html#server-proxy) — dev proxy setup
-- [simple-git README](https://github.com/steveukx/git-js) — error handling patterns
-- Codebase analysis: `/Users/nathanhutchinson/Dev/EntraOps/.planning/codebase/CONCERNS.md` — security and performance patterns in existing PS codebase
-- Codebase PRD: `/Users/nathanhutchinson/Dev/EntraOps/GUI-PRD.md` — confirmed risk areas (NF-06, NF-07)
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|---|---|---|---|
+| Copy README intro into Getting Started | Fast first draft | README is code-focused; security admin audience is lost immediately | Never — rewrite for the audience |
+| Screenshot every screen state | Feels thorough | 80% of screenshots are stale within 2 months | Structural/orientation screenshots only |
+| Single long REFERENCE.md for all config | Easy to create | Impossible to maintain and cross-reference | Never — split by audience and function |
+| Skip the Concepts section ("users already know Entra") | Saves time | Users who don't know tier model can't use Reclassify or Apply correctly | Never — Concepts doc is 300 words, not a chapter |
+| Document GUI and PowerShell module in the same page | Everything in one place | GUI audience drowns in PowerShell detail they don't need | Never — link between them instead |
+| Rely on tooltips/UI labels as documentation | Low maintenance | UI text changes break the implicit documentation contract | Only for simple confirmations |
+
+---
+
+## Integration Gotchas
+
+| Integration | Common Mistake | Correct Approach |
+|---|---|---|
+| PowerShell data flow | Documenting PS cmdlets and GUI as separate silos | Architecture doc explains the handoff: PS cmdlets write JSON, Express reads JSON, React renders |
+| `EntraOpsConfig.json` vs Settings page | Documenting all fields as "GUI settings" | Flag fields the GUI doesn't expose (module-only fields) so admins know to edit JSON directly |
+| Classification files vs Reclassify screen | Implying all classification changes happen via Templates | Reclassify writes `Overrides.json`; Templates writes `Templates/*.json` — different files, different effects |
+| SSE streaming vs user instructions | Treating streaming log as a terminal | Streaming log is read-only output — admins cannot type into it |
+| Git history vs classification changes | "History shows all changes" | History shows git commits to `PrivilegedEAM/` — if user hasn't committed after changes, history is stale |
+
+---
+
+## "Looks Done But Isn't" Checklist
+
+- [ ] **Getting Started:** Does it work on macOS with `pwsh` on PATH? Test on a clean terminal session.
+- [ ] **Config Reference:** Does every field in `EntraOpsConfig.json` appear in the docs? Audit with `jq 'keys' EntraOpsConfig.json`.
+- [ ] **Apply screen docs:** Does dry-run / sample mode appear in the first paragraph?
+- [ ] **Troubleshooting:** Does every screen have a documented empty-state / "no data" failure mode?
+- [ ] **Concepts section:** Does it explain ControlPlane / ManagementPlane / UserAccess in plain language without assuming prior EntraOps reading?
+- [ ] **Terminology:** Is "Reclassify" vs "Override" consistent with sidebar nav labels throughout?
+- [ ] **PowerShell prerequisites:** Are `pwsh` + EntraOps module listed before `npm install` in setup sequence?
+- [ ] **JSON file paths:** Are all paths repo-root-relative (not `gui/`-relative)?
+- [ ] **SSE streaming:** Is there an annotated example of a successful Apply run output?
+- [ ] **Audience assignment:** Has every doc section been labeled "Security Admin" or "Contributor"?
+
+---
+
+## Phase-Specific Warnings
+
+| Doc Section | Likely Pitfall | Mitigation |
+|---|---|---|
+| Getting Started | Missing PowerShell prereqs before npm steps | Prerequisite gate section first |
+| Dashboard walkthrough | Skipping data freshness | Lead with "data reflects last `Save-EntraOpsPrivilegedEAMJson` run" |
+| Templates screen | JSON schema opacity without field reference | Include minimal schema table for the fields admins change |
+| Connect & Classify | Device code auth flow not sequenced correctly | Step-by-step with expected screen state at each step |
+| Apply to Entra | Dry-run not explained before the 4-action toggles | Dry-run callout must appear before action selection UI |
+| Reclassify screen | Confusion between "computed tier" and "applied tier" | Reference Concepts section at top of screen doc |
+| Troubleshooting | Node stack traces documented instead of user-visible symptoms | Every entry starts with "You see: [symptom]" |
+| Configuration Reference | Settings page docs conflated with full EntraOpsConfig schema | Split: "Settings page fields" and "Full config schema" as separate sections |
+| Contributor Architecture | GUI-internal routes documented without explaining data flow | Lead with the data flow diagram before any implementation detail |
+
+---
+
+*Sources: Codebase analysis (gui/client/src/pages/, Classification/ files, EntraOpsConfig.json), Diataxis documentation framework (diataxis.fr), Write the Docs community conventions, security tooling documentation patterns.*
