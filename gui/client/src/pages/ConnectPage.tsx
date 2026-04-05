@@ -122,8 +122,8 @@ export function ConnectPage() {
   const [classifyStatus, setClassifyStatus] = useState<CommandStatus>('idle');
   const authAbortRef = useRef<AbortController | null>(null);
   const classifyAbortRef = useRef<AbortController | null>(null);
-  const authConverterRef = useRef(new AnsiConvert({ stream: true, newline: true }));
-  const classifyConverterRef = useRef(new AnsiConvert({ stream: true, newline: true }));
+  const authConverterRef = useRef(new AnsiConvert({ stream: true }));
+  const classifyConverterRef = useRef(new AnsiConvert({ stream: true }));
   const navigate = useNavigate();
 
   // Pre-populate from config on mount
@@ -213,7 +213,7 @@ export function ConnectPage() {
             } else if (event.type === 'error') {
               setAuthStatus('failed');
             } else {
-              const cleaned = event.data.replace(/\r/g, '').replace(/\n{2,}/g, '\n');
+              const cleaned = event.data.replace(/\r/g, '');
               if (cleaned.trim()) {
                 const html = authConverterRef.current.toHtml(cleaned);
                 setAuthHtml(prev => prev + html);
@@ -272,7 +272,7 @@ export function ConnectPage() {
             } else if (event.type === 'error') {
               setClassifyStatus('failed');
             } else {
-              const cleaned = event.data.replace(/\r/g, '').replace(/\n{2,}/g, '\n');
+              const cleaned = event.data.replace(/\r/g, '');
               if (cleaned.trim()) {
                 const html = classifyConverterRef.current.toHtml(cleaned);
                 setClassifyHtml(prev => prev + html);

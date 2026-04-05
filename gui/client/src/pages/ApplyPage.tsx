@@ -95,7 +95,7 @@ export function ApplyPage() {
 
   // Refs
   const abortRef = useRef<AbortController | null>(null);
-  const converterRef = useRef(new AnsiConvert({ stream: true, newline: true }));
+  const converterRef = useRef(new AnsiConvert({ stream: true }));
   const stoppedRef = useRef(false);
 
   // ------------------------------------------------------------------
