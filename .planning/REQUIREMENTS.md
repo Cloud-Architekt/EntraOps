@@ -62,4 +62,20 @@
 
 ## Traceability
 
-_(Filled by roadmapper — maps each REQ-ID to a phase)_
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| DOCS-01 | Phase 13 | Pending |
+| CONC-01 | Phase 13 | Pending |
+| CONC-02 | Phase 13 | Pending |
+| GS-01 | Phase 14 | Pending |
+| GS-02 | Phase 14 | Pending |
+| GS-03 | Phase 14 | Pending |
+| FEAT-01 | Phase 15 | Pending |
+| FEAT-02 | Phase 15 | Pending |
+| FEAT-03 | Phase 15 | Pending |
+| DOCS-02 | Phase 15 | Pending |
+| CONF-01 | Phase 16 | Pending |
+| CONF-02 | Phase 16 | Pending |
+| ARCH-01 | Phase 16 | Pending |
+| TRBL-01 | Phase 17 | Pending |
+| ROOT-01 | Phase 18 | Pending |
