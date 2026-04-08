@@ -61,7 +61,7 @@ See [archive](.planning/milestones/v1.2-ROADMAP.md) for full phase details.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 13-01-PLAN.md — docs/ folder hierarchy with all stub files (user-guide, configuration, architecture, troubleshooting, assets/screenshots)
+- [x] 13-01-PLAN.md — docs/ folder hierarchy with all stub files (user-guide, configuration, architecture, troubleshooting, assets/screenshots)
 - [ ] 13-02-PLAN.md — docs/README.md navigation hub + docs/concepts.md EAM tier model and glossary
 
 ### Phase 14: Getting Started Guide
@@ -129,7 +129,7 @@ Plans:
 | 10. Inline Exclude Actions | v1.2 | 3/3 | Complete | 2026-04-02 |
 | 11. Implementation Workflow | v1.2 | 2/2 | Complete | 2026-04-04 |
 | 12. Dry-run / Preview Mode | v1.2 | 2/2 | Complete | 2026-04-04 |
-| 13. Documentation Foundation & Concepts | v1.3 | 0/2 | Ready to execute | - |
+| 13. Documentation Foundation & Concepts | v1.3 | 1/2 | In Progress|  |
 | 14. Getting Started Guide | v1.3 | 0/TBD | Not started | - |
 | 15. Feature Walkthroughs & Screenshots | v1.3 | 0/TBD | Not started | - |
 | 16. Configuration & Architecture Reference | v1.3 | 0/TBD | Not started | - |
