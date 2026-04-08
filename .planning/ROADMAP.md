@@ -73,7 +73,10 @@ Plans:
   2. Prerequisites block states Node.js 20+, PowerShell 7+, and EntraOps PS module explicitly before any steps begin
   3. Each numbered step ends with a "you should see…" outcome line confirming success before proceeding
   4. Guide recommends dry-run / preview mode and explains what it does before describing any Apply to Entra step
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 14-01-PLAN.md — Write getting-started.md: prerequisites, two-stage first run (quick dashboard + connect tenant), dry-run Apply to Entra
 
 ### Phase 15: Feature Walkthroughs & Screenshots
 **Goal**: Every GUI screen has a discoverable, illustrated walkthrough page with real screenshots captured from the running app
@@ -84,7 +87,10 @@ Plans:
   2. Every walkthrough page includes at least one real screenshot captured from the live app at `localhost:5173`
   3. All screenshots are stored under `docs/assets/screenshots/<screen>/` with relative links from each walkthrough page
   4. Apply to Entra walkthrough explicitly depicts and describes all 4 workflow states: select, confirm, streaming, outcomes
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 14-01-PLAN.md — Write getting-started.md: prerequisites, two-stage first run (quick dashboard + connect tenant), dry-run Apply to Entra
 **UI hint**: yes
 
 ### Phase 16: Configuration & Architecture Reference
@@ -96,7 +102,10 @@ Plans:
   2. Startup environment variables and API port options are documented with correct defaults
   3. Architecture overview explains the PS module → PrivilegedEAM JSON → Express → React data pipeline in plain language
   4. A data-flow table or diagram shows which GUI action writes to which file (classification configs, Global.json, etc.)
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 14-01-PLAN.md — Write getting-started.md: prerequisites, two-stage first run (quick dashboard + connect tenant), dry-run Apply to Entra
 
 ### Phase 17: Troubleshooting / FAQ
 **Goal**: Users can diagnose and resolve common problems without developer assistance
@@ -106,7 +115,10 @@ Plans:
   1. Troubleshooting section contains 10 or more entries structured by symptom (not error code or log message)
   2. Entries cover all major failure categories: PowerShell prerequisites, empty dashboard (no data), port 3001 conflict, device-code auth timeout, template validation errors, and classification changes not persisting
   3. Every entry includes a resolution step the user can take, not just a description of the problem
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 14-01-PLAN.md — Write getting-started.md: prerequisites, two-stage first run (quick dashboard + connect tenant), dry-run Apply to Entra
 
 ### Phase 18: Root Updates & Cross-Link Audit
 **Goal**: Root `README.md` points users to the docs; the docs hub is accurate and fully consistent with committed files
@@ -116,7 +128,10 @@ Plans:
   1. Root `README.md` contains a "Documentation" section with a link to `docs/README.md`
   2. Every link in `docs/README.md` resolves to an actual file committed to the repo
   3. No doc file exists without a corresponding entry (or back-link path) in `docs/README.md`
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 14-01-PLAN.md — Write getting-started.md: prerequisites, two-stage first run (quick dashboard + connect tenant), dry-run Apply to Entra
 
 ## Progress Table
 
