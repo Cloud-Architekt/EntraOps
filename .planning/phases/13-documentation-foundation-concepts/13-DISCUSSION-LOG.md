@@ -1,6 +1,6 @@
 # Phase 13: Documentation Foundation & Concepts - Discussion Log
 
-**Session date:** 2026-04-05
+**Session date:** 2026-04-05 (updated 2026-04-08)
 **Workflow:** discuss-phase
 
 ---
@@ -67,3 +67,64 @@ All 4 areas selected for discussion:
 - Glossary: Claude's discretion on format and placement (recommended: section in concepts.md, table format)
 - README: lean, user-simplicity-first navigation index
 - Stubs: empty-header stub files for all sections authored in later phases
+
+---
+
+## Update Session — 2026-04-08
+
+**Areas discussed:** Scaffold file names, External EAM reference, Applied vs computed tier depth, docs/README.md intro scope
+
+---
+
+### Area: Scaffold File Names
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Flat files per feature in user-guide/ | one file per major feature | |
+| Subfolders within user-guide/ | nested structure | |
+| Leave naming to each downstream phase | defer entirely | |
+| **Claude's discretion — flat and simple, user simplicity** | one file per purpose | ✓ |
+
+**User's choice:** "You pick, prioritise user simplicity"
+**Notes:** File naming principle = flat and simple, one file per purpose. Claude chooses exact names guided by user simplicity.
+
+---
+
+### Area: External EAM Reference
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Yes — link to Microsoft SPA/EAM docs | link to https://aka.ms/SPA | ✓ |
+| No — self-contained only | no external links | |
+| Footnote/further reading section only | optional at end | |
+
+**User's choice:** Yes — link to Microsoft SPA/EAM docs
+**Placement follow-up:** Intro callout — one sentence up front
+
+---
+
+### Area: Applied vs Computed Tier Depth
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Dedicated subsection — full explanation | prose section with badge descriptions | |
+| Glossary entries only | define in table only | |
+| Inline paragraph within tier explanation | brief mention in context | |
+| **Claude's discretion — user simplicity first** | | ✓ |
+
+**User's choice:** "You pick, prioritise user simplicity"
+**Notes:** Must communicate dashed badge = computed, solid badge = applied. Depth is Claude's call.
+
+---
+
+### Area: docs/README.md Intro Scope
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| GUI-only, minimal — just navigate | one line, no PS context | |
+| Include PowerShell context | explain GUI's place | |
+| Short project summary + what docs covers | two sentences | |
+| **Clarification: GUI-only, PS module docs stay in root README** | | ✓ |
+
+**User's choice:** "You pick, prioritise user simplicity, original documentation relating to powershell module must remain with additional documentation for the gui"
+**Notes:** `docs/` is GUI-specific supplementary documentation. Root README PS module docs must not be touched. docs/README.md intro is GUI-scoped only.
