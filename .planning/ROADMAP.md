@@ -58,7 +58,11 @@ See [archive](.planning/milestones/v1.2-ROADMAP.md) for full phase details.
   2. User reads `docs/concepts.md` and can distinguish ControlPlane, ManagementPlane, and UserAccess tiers from each other
   3. Glossary contains all 7 defined terms: ControlPlane, ManagementPlane, UserAccess, applied tier, computed tier, exclusion, override
   4. Full `docs/` folder hierarchy exists (user-guide/, configuration/, architecture/, troubleshooting/, assets/screenshots/) so all subsequent phases write to agreed paths
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 13-01-PLAN.md — docs/ folder hierarchy with all stub files (user-guide, configuration, architecture, troubleshooting, assets/screenshots)
+- [ ] 13-02-PLAN.md — docs/README.md navigation hub + docs/concepts.md EAM tier model and glossary
 
 ### Phase 14: Getting Started Guide
 **Goal**: A security admin can go from zero (fresh fork) to a visible browser dashboard by following a single guide
@@ -125,7 +129,7 @@ See [archive](.planning/milestones/v1.2-ROADMAP.md) for full phase details.
 | 10. Inline Exclude Actions | v1.2 | 3/3 | Complete | 2026-04-02 |
 | 11. Implementation Workflow | v1.2 | 2/2 | Complete | 2026-04-04 |
 | 12. Dry-run / Preview Mode | v1.2 | 2/2 | Complete | 2026-04-04 |
-| 13. Documentation Foundation & Concepts | v1.3 | 0/TBD | Not started | - |
+| 13. Documentation Foundation & Concepts | v1.3 | 0/2 | Ready to execute | - |
 | 14. Getting Started Guide | v1.3 | 0/TBD | Not started | - |
 | 15. Feature Walkthroughs & Screenshots | v1.3 | 0/TBD | Not started | - |
 | 16. Configuration & Architecture Reference | v1.3 | 0/TBD | Not started | - |
