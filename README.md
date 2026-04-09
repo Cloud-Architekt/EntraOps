@@ -5,6 +5,7 @@
   - [Key features](#key-features)
   - [Videos and demos of EntraOps Privileged EAM](#videos-and-demos-of-entraops-privileged-eam)
   - [Quick starts](#quick-starts)
+  - [Documentation](#documentation)
   - [Executing EntraOps interactively](#executing-entraops-interactively)
     - [Import module and sign-in options](#import-module-and-sign-in-options)
     - [Export and collecting EntraOps data](#export-and-collecting-entraops-data)
@@ -76,6 +77,20 @@ EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline,
 - [SpecterOps Webinar: Defining the Undefined: What is Tier Zero Part III](https://youtu.be/ykrse1rsvy4?si=f7fLcf1rAN0MGlti&t=1223)
 
 ## Quick starts
+
+## Documentation
+
+The EntraOps GUI has full documentation in the [`docs/`](docs/README.md) folder covering concepts, getting started, walkthroughs for every screen, configuration reference, architecture overview, and troubleshooting.
+
+| Section | Description |
+|---------|-------------|
+| [Getting Started](docs/user-guide/getting-started.md) | Prerequisites and first-run guide |
+| [Feature Walkthroughs](docs/README.md#user-guide) | Per-screen guides with screenshots |
+| [Configuration Reference](docs/configuration/configuration-reference.md) | EntraOpsConfig.json fields and env vars |
+| [Architecture Overview](docs/architecture/architecture-overview.md) | GUI data pipeline and component map |
+| [Troubleshooting](docs/troubleshooting/troubleshooting.md) | Common issues and resolutions |
+
+→ **[Full documentation index](docs/README.md)**
 
 ## Executing EntraOps interactively
 
