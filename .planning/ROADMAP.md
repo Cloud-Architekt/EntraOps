@@ -42,7 +42,7 @@ See [archive](.planning/milestones/v1.2-ROADMAP.md) for full phase details.
 
 - [ ] **Phase 13: Documentation Foundation & Concepts** - docs/ scaffold, README.md navigation hub, concepts page, glossary
 - [x] **Phase 14: Getting Started Guide** - Zero-to-dashboard guide with prerequisites, numbered steps, dry-run intro (completed 2026-04-08)
-- [ ] **Phase 15: Feature Walkthroughs & Screenshots** - One walkthrough per GUI screen with real screenshots from localhost:5173
+- [x] **Phase 15: Feature Walkthroughs & Screenshots** - One walkthrough per GUI screen with real screenshots from localhost:5173 (completed 2026-04-09)
 - [ ] **Phase 16: Configuration & Architecture Reference** - EntraOpsConfig.json field reference, env vars, architecture data-flow
 - [ ] **Phase 17: Troubleshooting / FAQ** - 10+ symptom-first entries covering all common failure modes
 - [ ] **Phase 18: Root Updates & Cross-Link Audit** - Documentation section in root README, verified hub navigation
@@ -146,7 +146,7 @@ Plans:
 | 12. Dry-run / Preview Mode | v1.2 | 2/2 | Complete | 2026-04-04 |
 | 13. Documentation Foundation & Concepts | v1.3 | 1/2 | In Progress|  |
 | 14. Getting Started Guide | v1.3 | 1/1 | Complete   | 2026-04-08 |
-| 15. Feature Walkthroughs & Screenshots | v1.3 | 0/TBD | Not started | - |
+| 15. Feature Walkthroughs & Screenshots | v1.3 | 4/4 | Complete   | 2026-04-09 |
 | 16. Configuration & Architecture Reference | v1.3 | 0/TBD | Not started | - |
 | 17. Troubleshooting / FAQ | v1.3 | 0/TBD | Not started | - |
 | 18. Root Updates & Cross-Link Audit | v1.3 | 0/TBD | Not started | - |
