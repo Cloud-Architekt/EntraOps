@@ -214,6 +214,21 @@ Each entry is symptom-first so you can quickly match what you see to a concrete 
 - Use the Connect Wizard and local terminal output for diagnostics instead of sharing sensitive command output publicly.
 - Keep troubleshooting actions limited to known EntraOps commands and repository files.
 
+## Deterministic Coverage Checks
+
+Run these checks from the repo root to validate this guide's minimum structure and category coverage:
+
+```sh
+test -f docs/troubleshooting/troubleshooting.md
+grep -c '^### ' docs/troubleshooting/troubleshooting.md
+grep -nEi 'PowerShell|Save-EntraOpsPrivilegedEAMJson|3001|device|template|override|No privileged identity data yet' docs/troubleshooting/troubleshooting.md
+```
+
+Expected results:
+- The file exists.
+- Entry count is 10 or more.
+- The grep keyword scan returns at least one match per required troubleshooting domain.
+
 ## Related Documentation
 
 - [Getting Started](../user-guide/getting-started.md)
