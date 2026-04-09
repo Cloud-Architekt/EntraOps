@@ -40,7 +40,7 @@ See [archive](.planning/milestones/v1.2-ROADMAP.md) for full phase details.
 
 ### v1.3 Updated UI Documentation (Phases 13–18)
 
-- [ ] **Phase 13: Documentation Foundation & Concepts** - docs/ scaffold, README.md navigation hub, concepts page, glossary
+- [x] **Phase 13: Documentation Foundation & Concepts** - docs/ scaffold, README.md navigation hub, concepts page, glossary (completed 2026-04-09)
 - [x] **Phase 14: Getting Started Guide** - Zero-to-dashboard guide with prerequisites, numbered steps, dry-run intro (completed 2026-04-08)
 - [x] **Phase 15: Feature Walkthroughs & Screenshots** - One walkthrough per GUI screen with real screenshots from localhost:5173 (completed 2026-04-09)
 - [x] **Phase 16: Configuration & Architecture Reference** - EntraOpsConfig.json field reference, env vars, architecture data-flow (completed 2026-04-09)
@@ -62,7 +62,7 @@ See [archive](.planning/milestones/v1.2-ROADMAP.md) for full phase details.
 
 Plans:
 - [x] 13-01-PLAN.md — docs/ folder hierarchy with all stub files (user-guide, configuration, architecture, troubleshooting, assets/screenshots)
-- [ ] 13-02-PLAN.md — docs/README.md navigation hub + docs/concepts.md EAM tier model and glossary
+- [x] 13-02-PLAN.md — docs/README.md navigation hub + docs/concepts.md EAM tier model and glossary
 
 ### Phase 14: Getting Started Guide
 **Goal**: A security admin can go from zero (fresh fork) to a visible browser dashboard by following a single guide
@@ -146,7 +146,7 @@ Plans:
 | 10. Inline Exclude Actions | v1.2 | 3/3 | Complete | 2026-04-02 |
 | 11. Implementation Workflow | v1.2 | 2/2 | Complete | 2026-04-04 |
 | 12. Dry-run / Preview Mode | v1.2 | 2/2 | Complete | 2026-04-04 |
-| 13. Documentation Foundation & Concepts | v1.3 | 1/2 | In Progress|  |
+| 13. Documentation Foundation & Concepts | v1.3 | 2/2 | Complete   | 2026-04-09 |
 | 14. Getting Started Guide | v1.3 | 1/1 | Complete   | 2026-04-08 |
 | 15. Feature Walkthroughs & Screenshots | v1.3 | 4/4 | Complete   | 2026-04-09 |
 | 16. Configuration & Architecture Reference | v1.3 | 1/1 | Complete    | 2026-04-09 |
