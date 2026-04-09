@@ -45,7 +45,7 @@ See [archive](.planning/milestones/v1.2-ROADMAP.md) for full phase details.
 - [x] **Phase 15: Feature Walkthroughs & Screenshots** - One walkthrough per GUI screen with real screenshots from localhost:5173 (completed 2026-04-09)
 - [x] **Phase 16: Configuration & Architecture Reference** - EntraOpsConfig.json field reference, env vars, architecture data-flow (completed 2026-04-09)
 - [x] **Phase 17: Troubleshooting / FAQ** - 10+ symptom-first entries covering all common failure modes (completed 2026-04-09)
-- [ ] **Phase 18: Root Updates & Cross-Link Audit** - Documentation section in root README, verified hub navigation
+- [x] **Phase 18: Root Updates & Cross-Link Audit** - Documentation section in root README, verified hub navigation (completed 2026-04-09)
 
 ## Phase Details
 
@@ -133,7 +133,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 18-01-PLAN.md — Root README.md Documentation section + cross-link audit of docs/README.md
+- [x] 18-01-PLAN.md — Root README.md Documentation section + cross-link audit of docs/README.md
 
 ## Progress Table
 
