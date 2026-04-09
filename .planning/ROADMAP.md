@@ -87,11 +87,13 @@ Plans:
   2. Every walkthrough page includes at least one real screenshot captured from the live app at `localhost:5173`
   3. All screenshots are stored under `docs/assets/screenshots/<screen>/` with relative links from each walkthrough page
   4. Apply to Entra walkthrough explicitly depicts and describes all 4 workflow states: select, confirm, streaming, outcomes
-**Plans**: 1 plan
+**Plans**: 4 plans
 
 Plans:
-- [ ] 14-01-PLAN.md — Write getting-started.md: prerequisites, two-stage first run (quick dashboard + connect tenant), dry-run Apply to Entra
-**UI hint**: yes
+- [x] 15-01-PLAN.md — Dashboard + Connect Wizard screenshots and walkthroughs
+- [x] 15-02-PLAN.md — Object Browser + Object Reclassification screenshots and walkthroughs
+- [x] 15-03-PLAN.md — Template Editor + PowerShell Runner screenshots and walkthroughs
+- [x] 15-04-PLAN.md — Git History + Settings + Exclusions screenshots and walkthroughs
 
 ### Phase 16: Configuration & Architecture Reference
 **Goal**: Users and contributors can look up any configuration field and understand the full GUI data pipeline
@@ -105,7 +107,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 14-01-PLAN.md — Write getting-started.md: prerequisites, two-stage first run (quick dashboard + connect tenant), dry-run Apply to Entra
+- [ ] 16-01-PLAN.md — docs/configuration/configuration-reference.md + docs/architecture/architecture-overview.md
 
 ### Phase 17: Troubleshooting / FAQ
 **Goal**: Users can diagnose and resolve common problems without developer assistance
@@ -118,7 +120,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 14-01-PLAN.md — Write getting-started.md: prerequisites, two-stage first run (quick dashboard + connect tenant), dry-run Apply to Entra
+- [ ] 17-01-PLAN.md — docs/troubleshooting/troubleshooting.md: 10+ symptom-first entries
 
 ### Phase 18: Root Updates & Cross-Link Audit
 **Goal**: Root `README.md` points users to the docs; the docs hub is accurate and fully consistent with committed files
@@ -131,7 +133,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 14-01-PLAN.md — Write getting-started.md: prerequisites, two-stage first run (quick dashboard + connect tenant), dry-run Apply to Entra
+- [ ] 18-01-PLAN.md — Root README.md Documentation section + cross-link audit of docs/README.md
 
 ## Progress Table
 
