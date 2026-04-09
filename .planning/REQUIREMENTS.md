@@ -26,7 +26,7 @@
 
 ### ARCH — Architecture Overview
 
-- [ ] **ARCH-01**: User reads an architecture overview showing how the GUI reads from PrivilegedEAM/ JSON and writes to Classification/ files
+- [x] **ARCH-01**: User reads an architecture overview showing how the GUI reads from PrivilegedEAM/ JSON and writes to Classification/ files
 
 ### TRBL — Troubleshooting
 
@@ -34,8 +34,8 @@
 
 ### CONF — Configuration Reference
 
-- [ ] **CONF-01**: User finds a configuration reference with all EntraOpsConfig.json fields, types, and defaults
-- [ ] **CONF-02**: Configuration reference documents startup environment variables and API port options
+- [x] **CONF-01**: User finds a configuration reference with all EntraOpsConfig.json fields, types, and defaults
+- [x] **CONF-02**: Configuration reference documents startup environment variables and API port options
 
 ### ROOT — Root Updates
 
@@ -74,8 +74,8 @@
 | FEAT-02 | Phase 15 | Pending |
 | FEAT-03 | Phase 15 | Pending |
 | DOCS-02 | Phase 15 | Pending |
-| CONF-01 | Phase 16 | Pending |
-| CONF-02 | Phase 16 | Pending |
-| ARCH-01 | Phase 16 | Pending |
+| CONF-01 | Phase 16 | Complete |
+| CONF-02 | Phase 16 | Complete |
+| ARCH-01 | Phase 16 | Complete |
 | TRBL-01 | Phase 17 | Pending |
 | ROOT-01 | Phase 18 | Pending |
