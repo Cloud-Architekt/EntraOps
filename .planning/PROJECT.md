@@ -2,11 +2,15 @@
 
 ## Current State
 
-**Active: v1.3 Updated UI Documentation** 🚧 (started 2026-04-05)
+**Shipped: v1.3 Updated UI Documentation** ✅ (2026-04-09)
 
-**Shipped: v1.2 Self-Service Implementation Workflow** ✅ (2026-04-04)
+**Previous: v1.2 Self-Service Implementation Workflow** ✅ (2026-04-04)
 
-The GUI is fully functional and shipped through three milestones. A user who forks EntraOps and runs `Save-EntraOpsPrivilegedEAMJson` can then `cd gui && npm install && npm run dev` to get a working local browser dashboard with:
+The GUI is fully functional and documented through four milestones. A user who forks EntraOps and runs `Save-EntraOpsPrivilegedEAMJson` can then `cd gui && npm install && npm run dev` to get a working local browser dashboard with comprehensive documentation at `docs/`.
+
+<details>
+<summary>GUI feature list (shipped through v1.2)</summary>
+
 - Tier dashboard (ControlPlane / ManagementPlane / UserAccess KPI cards, applied + suggested counts, RBAC breakdown, PIM chart)
 - Filterable/sortable/paginated object browser with URL-bookmarkable state, detail panel, and dashed computed-tier badge for unclassified objects
 - Safe in-browser classification template editor with Zod validation and diff preview
@@ -19,21 +23,19 @@ The GUI is fully functional and shipped through three milestones. A user who for
 - **Apply to Entra workflow** — full 4-state implementation workflow (select → confirm → SSE stream → outcomes); 4 action toggles (AU, CA Groups, Unprotected AUs, ControlPlane Scope); real-time SSE log; per-cmdlet pass/fail summary
 - **Dry-run / Preview Mode** — -SampleMode toggle on Apply screen; amber visual indicators across all 4 states; server-side history exclusion guard
 
-See [.planning/milestones/v1.2-ROADMAP.md](.planning/milestones/v1.2-ROADMAP.md) for full v1.2 milestone archive.
+</details>
 
-## Current Milestone: v1.3 Updated UI Documentation
+See [.planning/milestones/v1.3-ROADMAP.md](.planning/milestones/v1.3-ROADMAP.md) for full v1.3 milestone archive.
 
-**Goal:** Create a comprehensive `docs/` folder covering the EntraOps GUI for both end users (security admins) and contributors (developers).
+## Next Milestone Goals (v1.4)
 
-**Current progress:** Phases 14, 15, and 16 are complete; remaining scope is troubleshooting/FAQ and root cross-link audit.
+Next milestone planning not yet started. Known candidates from v1.3 deferred scope:
 
-**Target deliverables:**
-- Getting started / installation guide (fork → run `Save-EntraOpsPrivilegedEAMJson` → `npm run dev` → open browser)
-- Feature walkthrough with screenshot references for each screen
-- Troubleshooting / FAQ
-- Configuration reference (EntraOpsConfig.json, API endpoints, environment variables)
-- Architecture / integration overview (GUI ↔ PowerShell module data flow)
-- Separate sections for end users and contributors
+- Contributor / developer guide (dev environment setup, adding features, testing patterns)
+- API reference for server routes
+- VitePress or GitHub Pages hosted documentation site
+
+Run `/gsd-new-milestone` to define v1.4 requirements and roadmap.
 
 ## What This Is
 
@@ -44,6 +46,31 @@ EntraOps GUI is a locally-hosted web application that gives security administrat
 A user who has run `Save-EntraOpsPrivilegedEAMJson` can open a browser and immediately understand who holds ControlPlane access in their tenant — without writing a KQL query, opening Azure Portal, or reading raw JSON.
 
 ## Requirements
+
+### Validated (v1.3)
+
+All 15 v1.3 requirements delivered. See [.planning/milestones/v1.3-REQUIREMENTS.md](.planning/milestones/v1.3-REQUIREMENTS.md) for full traceability.
+
+<details>
+<summary>v1.3 requirement list</summary>
+
+- ✓ DOCS-01: docs/README.md navigation hub — v1.3
+- ✓ DOCS-02: screenshots/<screen>/ hierarchy, 10 screens — v1.3
+- ✓ GS-01: Zero-to-dashboard getting-started guide — v1.3
+- ✓ GS-02: Prerequisites clearly stated (Node.js 22+, PS 7+, module) — v1.3
+- ✓ GS-03: Dry-run introduced before Apply to Entra — v1.3
+- ✓ FEAT-01: Walkthrough page for all 10 GUI screens — v1.3
+- ✓ FEAT-02: Real screenshot per walkthrough page — v1.3
+- ✓ FEAT-03: Apply to Entra covers all 4 workflow states — v1.3
+- ✓ CONC-01: EAM concepts page — v1.3
+- ✓ CONC-02: 7-term glossary — v1.3
+- ✓ ARCH-01: Architecture data-flow overview — v1.3
+- ✓ TRBL-01: 12 symptom-first troubleshooting entries — v1.3
+- ✓ CONF-01: EntraOpsConfig.json field reference — v1.3
+- ✓ CONF-02: Startup env vars documented — v1.3
+- ✓ ROOT-01: Documentation section in root README — v1.3
+
+</details>
 
 ### Validated (v1.0)
 
