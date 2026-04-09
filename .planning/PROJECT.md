@@ -25,6 +25,8 @@ See [.planning/milestones/v1.2-ROADMAP.md](.planning/milestones/v1.2-ROADMAP.md)
 
 **Goal:** Create a comprehensive `docs/` folder covering the EntraOps GUI for both end users (security admins) and contributors (developers).
 
+**Current progress:** Phases 14, 15, and 16 are complete; remaining scope is troubleshooting/FAQ and root cross-link audit.
+
 **Target deliverables:**
 - Getting started / installation guide (fork → run `Save-EntraOpsPrivilegedEAMJson` → `npm run dev` → open browser)
 - Feature walkthrough with screenshot references for each screen
@@ -157,4 +159,4 @@ Three milestones shipped: v1.0 (6 phases, 30 plans) → v1.1 (2 phases, 6 plans)
 Key tech debt: GlobalExclusionsTab fetches raw GUIDs (WARN-1); IMPL-03 tier scope not explicit column (WARN-2); ConnectPage terminal double-space (todo filed); Nyquist VALIDATION.md absent for v1.2 phases.
 
 ---
-*Last updated: 2026-04-05 after v1.3 milestone start*
+*Last updated: 2026-04-09 after Phase 16 completion*
