@@ -149,6 +149,6 @@ Plans:
 | 13. Documentation Foundation & Concepts | v1.3 | 1/2 | In Progress|  |
 | 14. Getting Started Guide | v1.3 | 1/1 | Complete   | 2026-04-08 |
 | 15. Feature Walkthroughs & Screenshots | v1.3 | 4/4 | Complete   | 2026-04-09 |
-| 16. Configuration & Architecture Reference | v1.3 | 1/1 | Complete   | 2026-04-09 |
+| 16. Configuration & Architecture Reference | v1.3 | 1/1 | Complete    | 2026-04-09 |
 | 17. Troubleshooting / FAQ | v1.3 | 0/TBD | Not started | - |
 | 18. Root Updates & Cross-Link Audit | v1.3 | 0/TBD | Not started | - |
