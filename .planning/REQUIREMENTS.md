@@ -30,7 +30,7 @@
 
 ### TRBL — Troubleshooting
 
-- [ ] **TRBL-01**: User finds 10+ symptom-first troubleshooting entries covering PowerShell prereqs, first-run data issues, auth failures, and template validation errors
+- [x] **TRBL-01**: User finds 10+ symptom-first troubleshooting entries covering PowerShell prereqs, first-run data issues, auth failures, and template validation errors
 
 ### CONF — Configuration Reference
 
@@ -77,5 +77,5 @@
 | CONF-01 | Phase 16 | Complete |
 | CONF-02 | Phase 16 | Complete |
 | ARCH-01 | Phase 16 | Complete |
-| TRBL-01 | Phase 17 | Pending |
+| TRBL-01 | Phase 17 | Complete |
 | ROOT-01 | Phase 18 | Pending |

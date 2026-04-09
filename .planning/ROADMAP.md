@@ -44,7 +44,7 @@ See [archive](.planning/milestones/v1.2-ROADMAP.md) for full phase details.
 - [x] **Phase 14: Getting Started Guide** - Zero-to-dashboard guide with prerequisites, numbered steps, dry-run intro (completed 2026-04-08)
 - [x] **Phase 15: Feature Walkthroughs & Screenshots** - One walkthrough per GUI screen with real screenshots from localhost:5173 (completed 2026-04-09)
 - [x] **Phase 16: Configuration & Architecture Reference** - EntraOpsConfig.json field reference, env vars, architecture data-flow (completed 2026-04-09)
-- [ ] **Phase 17: Troubleshooting / FAQ** - 10+ symptom-first entries covering all common failure modes
+- [x] **Phase 17: Troubleshooting / FAQ** - 10+ symptom-first entries covering all common failure modes (completed 2026-04-09)
 - [ ] **Phase 18: Root Updates & Cross-Link Audit** - Documentation section in root README, verified hub navigation
 
 ## Phase Details
@@ -120,7 +120,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 17-01-PLAN.md — docs/troubleshooting/troubleshooting.md: 10+ symptom-first entries
+- [x] 17-01-PLAN.md — docs/troubleshooting/troubleshooting.md: 10+ symptom-first entries
 
 ### Phase 18: Root Updates & Cross-Link Audit
 **Goal**: Root `README.md` points users to the docs; the docs hub is accurate and fully consistent with committed files
@@ -150,5 +150,5 @@ Plans:
 | 14. Getting Started Guide | v1.3 | 1/1 | Complete   | 2026-04-08 |
 | 15. Feature Walkthroughs & Screenshots | v1.3 | 4/4 | Complete   | 2026-04-09 |
 | 16. Configuration & Architecture Reference | v1.3 | 1/1 | Complete    | 2026-04-09 |
-| 17. Troubleshooting / FAQ | v1.3 | 0/TBD | Not started | - |
+| 17. Troubleshooting / FAQ | v1.3 | 1/1 | Complete    | 2026-04-09 |
 | 18. Root Updates & Cross-Link Audit | v1.3 | 0/TBD | Not started | - |
