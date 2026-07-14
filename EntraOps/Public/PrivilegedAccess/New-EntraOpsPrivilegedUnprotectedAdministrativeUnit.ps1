@@ -83,7 +83,7 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                 Write-Warning "$($AuParams.DisplayName) not available yet"
             }
         } else {
-            Write-Host "Administrativer Unit $($AdministrativeUnit.displayName) already exists"
+            Write-Host "Administrative Unit $($AdministrativeUnit.displayName) already exists"
         }
     }
     #endregion
