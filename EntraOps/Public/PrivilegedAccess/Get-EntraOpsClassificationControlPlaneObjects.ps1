@@ -166,7 +166,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     #endregion
 
     #region Get list of all privileged objects by Azure Resource Graph
-    if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "AzResourceGraph") {
+    if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "PrivilegedRolesFromAzGraph") {
         Write-Host "Get privileged objects from Azure Resource Graph..."
         # Query template and update them with parameter value of high privileged Azure roles and scopes
         $Query = 'AuthorizationResources

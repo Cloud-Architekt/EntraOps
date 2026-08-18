@@ -478,6 +478,18 @@ function Get-EntraOpsPrivilegedEntraObject {
             $ObjectSubType = 'unknown'
         }
         #endregion
+
+        #region Unhandled object type
+        # Microsoft keeps adding directory object types (agent identities being the current wave).
+        # The IsNullOrEmpty guard further down keeps a null $ObjectType from throwing in callers, but on
+        # its own it is silent - the object is tiered as 'unknown' with no clue which type caused it.
+        # Naming the type here is what makes the mis-classification diagnosable.
+        default {
+            Write-Warning "Unhandled directory object type '$($ObjectDetails.'@odata.type')' for object $($AadObjectId). Classified as 'unknown' - classification for this object is not accurate."
+            $ObjectType = 'unknown'
+            $ObjectSubType = 'unknown'
+        }
+        #endregion
     }
 
     #region Collect assigned administrative units for unsupported object types

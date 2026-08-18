@@ -26,6 +26,12 @@ permissions:
 jobs:
   Push-EntraOpsPrivilegedEAM:
     runs-on: ubuntu-latest
+    # Only upload when the preceding Pull run actually succeeded. The workflow_run trigger
+    # above fires on 'completed', which includes failure and cancellation, so without this
+    # guard a failed Pull still starts an upload of the last committed PrivilegedEAM/
+    # snapshot - stale data re-ingested with a current timestamp. Manual dispatch is exempt,
+    # since github.event.workflow_run is null there.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Checkout
         uses: actions/checkout@v4

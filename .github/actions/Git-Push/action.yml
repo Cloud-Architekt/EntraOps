@@ -10,11 +10,15 @@ runs:
       shell: bash
       run: |
         git config --global user.email "EntraOpsGHActions@ghActions.com"
-        git config --global user.name "$GITHUB_ACTOR"      
-        git config pull.rebase false
+        git config --global user.name "$GITHUB_ACTOR"
+        git config pull.rebase true
         git add --all
         git add -A
         git diff-index --quiet HEAD || git commit -m "$GITHUB_WORKFLOW #$GITHUB_RUN_NUMBER"
+        # Pull with rebase before pushing to handle upstream changes made during the run.
+        # Without this, concurrent pushes (e.g. manual commits between checkout and push)
+        # cause "rejected - fetch first" failures.
+        git pull --rebase origin "${GITHUB_REF##refs/heads/}" || git pull --rebase
         git push
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
