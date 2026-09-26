@@ -19,6 +19,79 @@ BeforeAll {
 
     function Test-EntraOpsTenantGovernancePrerequisite {}
     function Invoke-EntraOpsMsGraphQuery {}
+
+    # Save-EntraOpsTenantGovernanceSnapshotJson falls back to the loaded configuration
+    $script:PreviousEntraOpsConfig = Get-Variable EntraOpsConfig -Scope Global -ErrorAction SilentlyContinue
+    $Global:EntraOpsConfig = $null
+}
+
+AfterAll {
+    if ($script:PreviousEntraOpsConfig) {
+        Set-Variable EntraOpsConfig -Scope Global -Value $script:PreviousEntraOpsConfig.Value
+    } else {
+        Remove-Variable EntraOpsConfig -Scope Global -ErrorAction SilentlyContinue
+    }
+}
+
+Describe 'Save-EntraOpsTenantGovernanceSnapshotJson configuration fallback' {
+    BeforeEach {
+        $script:EntraOpsBaseFolder = Join-Path $TestDrive "EntraOpsConfigFallback-$([guid]::NewGuid().Guid)"
+        $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder 'TenantGovernance/Snapshots'
+        New-Item -ItemType Directory -Path $script:EntraOpsBaseFolder -Force | Out-Null
+        Mock Get-EntraOpsTenantGovernanceSnapshot {
+            [PSCustomObject]@{ SnapshotId = 'job-config'; Status = 'running'; DisplayName = $SnapshotDisplayName; CreatedDateTime = '2026-09-24T06:00:00Z'; ResourcesToInclude = $ResourcesToInclude }
+        }
+        $Global:EntraOpsConfig = @{
+            TenantGovernanceSnapshot = @{
+                ResourcesToInclude         = @('microsoft.entra.namedLocationPolicy')
+                SnapshotDisplayNamePrefix  = 'Contoso Snap'
+                SnapshotResourceFileNaming = 'ResourceId'
+            }
+        }
+    }
+
+    AfterEach {
+        $Global:EntraOpsConfig = $null
+    }
+
+    It 'uses the prefix and resources of the loaded configuration' {
+        Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -Operation Start -SkipPrerequisiteCheck | Out-Null
+
+        Should -Invoke Get-EntraOpsTenantGovernanceSnapshot -Times 1 -Exactly -ParameterFilter {
+            $SnapshotDisplayName -like 'Contoso Snap *' -and @($ResourcesToInclude) -join ',' -eq 'microsoft.entra.namedLocationPolicy'
+        }
+    }
+
+    It 'prefers explicit parameters over the configuration' {
+        Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -Operation Start -SnapshotDisplayNamePrefix 'Manual Run' -ResourcesToInclude @('microsoft.entra.conditionalAccessPolicy') -SkipPrerequisiteCheck | Out-Null
+
+        Should -Invoke Get-EntraOpsTenantGovernanceSnapshot -Times 1 -Exactly -ParameterFilter {
+            $SnapshotDisplayName -like 'Manual Run *' -and @($ResourcesToInclude) -join ',' -eq 'microsoft.entra.conditionalAccessPolicy'
+        }
+    }
+
+    It 'uses the file naming of the loaded configuration' {
+        $Type = 'microsoft.entra.namedlocationpolicy'
+        Mock Get-EntraOpsTenantGovernanceSnapshot {
+            [PSCustomObject]@{
+                SnapshotId = 'job-config-naming'; Status = 'Completed'; SnapshotJobStatus = 'succeeded'
+                DisplayName = 'Test Snapshot'; CreatedDateTime = '2026-09-24T06:00:00Z'
+                ResourcesToInclude = @($Type); ResourceCount = 1
+                Resources = @([PSCustomObject]@{ resourceType = $Type; displayName = 'AADNamedLocationPolicy-Office'; properties = [PSCustomObject]@{ Id = 'location-1' } })
+            }
+        }
+
+        Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -SkipPrerequisiteCheck -WarningAction SilentlyContinue | Out-Null
+
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder "$Type/AADNamedLocationPolicy/location-1.json") | Should -BeTrue
+    }
+
+    It 'rejects an invalid file naming value in the configuration' {
+        $Global:EntraOpsConfig.TenantGovernanceSnapshot.SnapshotResourceFileNaming = 'Guid'
+
+        { Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -Operation Start -SkipPrerequisiteCheck } |
+        Should -Throw "*Invalid TenantGovernanceSnapshot.SnapshotResourceFileNaming 'Guid'*"
+    }
 }
 
 Describe 'Get-EntraOpsTenantGovernanceSnapshot timeout handling' {
