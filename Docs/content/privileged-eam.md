@@ -248,6 +248,34 @@ $EntraOpsData | select-Object -ExpandProperty RoleAssignments `
  | Where-Object {$_.ObjectType -ne "serviceprincipal" -and $_.PIMAssignmentType -ne "Eligible"}
 ```
 
+### All agent objects (privileged or not)
+
+`Get-EntraOpsAgentObject` returns agent identities, agent identity blueprints (applications), blueprint
+principals (service principals) and agent users in the object schema of `Get-EntraOpsPrivilegedEntraObject`
+(`ObjectType`, `ObjectSubType`, owners, sponsors, `IdentityParent`, protection status, admin tier level).
+Unlike the Privileged EAM data, it also includes agents without privileged role assignments.
+
+```powershell
+# All agent objects
+$AgentObjects = Get-EntraOpsAgentObject -All
+
+# Only agent identities and agent users
+Get-EntraOpsAgentObject -All -AgentObjectType AgentIdentity, AgentUser
+
+# Agent identities that are not part of the Privileged EAM data
+$AgentObjects | Where-Object { $_.ObjectSubType -eq "AgentIdentity" -and $_.ObjectId -notin $EntraOpsData.ObjectId }
+
+# Single objects by id (objects that aren't agents are skipped with a warning)
+Get-EntraOpsAgentObject -ObjectId "<object-id>"
+```
+
+| `ObjectSubType`                   | Object                                                                |
+| --------------------------------- | --------------------------------------------------------------------- |
+| `AgentIdentity`                   | Agent identity (service principal), `IdentityParent` is the blueprint app id |
+| `AgentIdentityBlueprint`          | Agent identity blueprint (application, only in the owning tenant)    |
+| `AgentIdentityBlueprintPrincipal` | Service principal of the blueprint in this tenant                    |
+| `AgentUser`                       | Agent user, `IdentityParent` is the agent identity                   |
+
 ## Customize classification by overwrites
 
 EntraOps allows down- or upgrading the classification of individual role actions or entire role

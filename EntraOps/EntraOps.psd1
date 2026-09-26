@@ -97,6 +97,7 @@
         'Export-EntraOpsClassificationIdentityGovernanceRoles'
         'Export-EntraOpsClassificationScopes'
         'Export-EntraOpsPrivilegedEAMBloodHound'
+        'Get-EntraOpsAgentObject'
         'Get-EntraOpsCacheStatistics'
         'Get-EntraOpsClassificationControlPlaneObjects'
         'Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs'
