@@ -7,8 +7,10 @@
     non-Members group in ServiceGroups. Policies enforce:
 
     - Expiration_Admin_Eligibility: no expiration for eligible assignments.
-    - Expiration_Admin_Assignment: 15-day maximum for active assignments.
-    - Expiration_EndUser_Assignment: 10-hour maximum for activated sessions.
+    - Expiration_Admin_Assignment: 15-day maximum for active assignments
+      (ServiceEM.PIMForGroups.MaximumActiveAssignmentDuration).
+    - Expiration_EndUser_Assignment: 10-hour maximum for activated sessions
+      (ServiceEM.PIMForGroups.MaximumActivationDuration).
     - Enablement_EndUser_Assignment: MFA + Justification required on activation.
 
     When EntraOpsConfig.ServiceEM.PIMAuthenticationContext.EnableAuthenticationContext
@@ -70,10 +72,24 @@ function New-EntraOpsServicePIMPolicy {
         } else {
             Write-Verbose "$logPrefix PIM Authentication Context is disabled in configuration - will enforce MFA + Justification only"
         }
+
+        $pimForGroupsConfig = if ($null -ne $Global:EntraOpsConfig) { $Global:EntraOpsConfig.ServiceEM.PIMForGroups }
+        $pimDurations = @{}
+        foreach ($setting in @(
+                @{ Name = 'MaximumActivationDuration'; Default = 'PT10H' },
+                @{ Name = 'MaximumActiveAssignmentDuration'; Default = 'P15D' }
+            )) {
+            $value = [string]$pimForGroupsConfig.($setting.Name)
+            if ([string]::IsNullOrWhiteSpace($value)) { $value = $setting.Default }
+            if ($value -notmatch '^P(?=\d|T\d)(\d+D)?(T(?=\d)(\d+H)?(\d+M)?)?$') {
+                throw "Invalid ServiceEM.PIMForGroups.$($setting.Name) '$value' in EntraOpsConfig. Use an ISO 8601 duration in days, hours or minutes such as 'PT8H' or 'P15D'."
+            }
+            $pimDurations[$setting.Name] = $value
+        }
     }
 
     process {
-        Write-Host "$logPrefix Beginning PIM Policy"
+        Write-Verbose "$logPrefix Beginning PIM Policy"
 
         foreach ($group in $ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" }) {
             # Determine access level from group DisplayName
@@ -98,12 +114,12 @@ function New-EntraOpsServicePIMPolicy {
                         "@odata.type"        = "#microsoft.graph.unifiedRoleManagementPolicyExpirationRule"
                         id                   = "Expiration_Admin_Assignment"
                         isExpirationRequired = $true
-                        maximumDuration      = "P15D"
+                        maximumDuration      = $pimDurations.MaximumActiveAssignmentDuration
                     },
                     @{
                         "@odata.type"   = "#microsoft.graph.unifiedRoleManagementPolicyExpirationRule"
                         id              = "Expiration_EndUser_Assignment"
-                        maximumDuration = "PT10H"
+                        maximumDuration = $pimDurations.MaximumActivationDuration
                     },
                     @{
                         "@odata.type" = "#microsoft.graph.unifiedRoleManagementPolicyEnablementRule"

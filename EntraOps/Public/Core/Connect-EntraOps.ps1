@@ -49,7 +49,7 @@ function Connect-EntraOps {
         [System.String]$AuthenticationType = "AlreadyAuthenticated"
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("Report", "Automation")]
+        [ValidateSet("Report", "ServiceEM")]
         [System.String]$Scope = "Report"
         ,        
         [Parameter(Mandatory = $False)]
@@ -237,7 +237,7 @@ Community Project by Thomas Naunheim - www.entraops.com
                 "Zone.Read.All"
             )
 
-            if ($Scope -eq "Automation") {
+            if ($Scope -eq "ServiceEM") {
                 $MgGraphScopesServiceEM = @(
                     "Directory.AccessAsUser.All",
                     "EntitlementManagement.ReadWrite.All",

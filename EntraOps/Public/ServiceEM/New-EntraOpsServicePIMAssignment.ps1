@@ -3,22 +3,23 @@
     Creates PIM for Groups eligible assignments for service admin groups.
 
 .DESCRIPTION
-    For each non-Members group in ServiceGroups, creates a PIM for Groups
-    eligible assignment with no expiration. The principal assigned is the
-    corresponding Members group (or, for PIM staging groups named
-    *-PIM-<AccessLevel>-<Role>, the non-PIM group that matches the same
-    AccessLevel-Role suffix).
+    Creates PIM for Groups eligible assignments with no expiration:
+    - PIM staging groups (mailNickname PIM.<ServiceName>.<AccessLevel>.<Role>): the base group with the
+      same AccessLevel and Role (e.g. ManagementPlane-Admins) becomes eligible member.
+    - With -EnableOwnerAssignment: the workload plane admin becomes eligible owner of each admin and user group.
+
+    The Microsoft 365 group (<ServiceName> Members) never gets eligibilities; access to the admin and
+    user groups is granted through access packages.
 
     Idempotent: existing noExpiration eligible assignments are detected and
     skipped.
 
-    When all admin groups have been delegated externally and no non-Members
-    groups remain, the function returns an empty array without error.
+    When no PIM staging group exists and -EnableOwnerAssignment isn't set, the function returns an
+    empty array without error.
 
 .PARAMETER ServiceGroups
     All service group objects (owned groups only — delegated groups must be
-    excluded). PIM staging groups (*-PIM-*) are automatically matched to
-    their base group.
+    excluded). PIM staging groups are automatically matched to their base group.
 
 .PARAMETER WorkloadPlaneAdminPrincipalId
     Object ID of the workload plane admin. Required when -EnableOwnerAssignment is set.
@@ -27,8 +28,7 @@
 
 .PARAMETER EnableOwnerAssignment
     When set, creates PIM for Groups eligible-owner assignments for the workload plane admin
-    in addition to the default eligible-member assignments for the Members group.
-    Disabled by default — use this switch to opt in.
+    on each admin and user group. Disabled by default — use this switch to opt in.
 
 .PARAMETER GroupPrefix
     Prefix used in group DisplayNames (e.g. "SG"). Must match the prefix
@@ -43,8 +43,8 @@
 .EXAMPLE
     New-EntraOpsServicePIMAssignment -ServiceGroups $ownedGroups
 
-    Creates PIM eligible assignments so that members of SG-MyService-WorkloadPlane-Members
-    can activate membership in SG-MyService-WorkloadPlane-Admins via PIM.
+    Makes SG-MyService-ManagementPlane-Admins eligible member of its PIM staging group
+    SG-PIM-MyService-ManagementPlane-Admins.
 
 #>
 function New-EntraOpsServicePIMAssignment {
@@ -66,10 +66,15 @@ function New-EntraOpsServicePIMAssignment {
 
     begin {
         $pimEligibilities = @()
+        $isStagingGroup = { param($group) $group.MailNickname -like "PIM.*" -or $group.DisplayName -like "*-PIM-*" }
+        $targetGroups = @($ServiceGroups | Where-Object {
+                $_.DisplayName -notlike "*Members*" -and $_.GroupTypes -notcontains "Unified" -and
+                ((& $isStagingGroup $_) -or $EnableOwnerAssignment)
+            })
 
         $pimEligibilityParams = @{
             accessId = "member"
-            principalId = ($ServiceGroups|Where-Object{$_.DisplayName -like "* Members"}).Id
+            principalId = ""
             groupId = ""
             action = "AdminAssign"
             scheduleInfo = @{
@@ -82,9 +87,9 @@ function New-EntraOpsServicePIMAssignment {
     }
 
     process {
-        Write-Host "$logPrefix Beginning PIM Assignment"
+        Write-Verbose "$logPrefix Beginning PIM Assignment"
 
-        foreach($group in $ServiceGroups|Where-Object{$_.DisplayName -notlike "*Members*"}){
+        foreach($group in $targetGroups){
             $pimEligibilityParams.groupId = $group.Id
             Write-Verbose "$logPrefix Looking up eligibility for group ID: $($group.Id)"
 
@@ -96,22 +101,29 @@ function New-EntraOpsServicePIMAssignment {
                 continue
             }
 
-            if($group.DisplayName -like "*-PIM-*"){
-                $pimGroupPrefixLen = "$GroupPrefix$($GroupNamingDelimiter)PIM$GroupNamingDelimiter".Length
-                $pimEligibilityParams.principalId = ($ServiceGroups|Where-Object{$_.DisplayName -like "$GroupPrefix$GroupNamingDelimiter"+$group.DisplayName.Substring($pimGroupPrefixLen)}).Id
-            }
-            $ne = $pimEligibilityParams.principalId+"_noExpiration"
-            # Scope check to current group only — accumulated $pimEligibilities spans all groups,
-            # so checking the full array causes the second group to incorrectly skip its POST
-            # because the first group's matching entry is already present.
-            $ee = $pimEligibilities | Where-Object { $_.groupId -eq $group.Id } | ForEach-Object { $_.principalId+"_"+$_.targetSchedule.scheduleInfo.expiration.type }
-            if($ne -notin $ee){
-                Write-Verbose "$logPrefix $($pimEligibilityParams|ConvertTo-Json -Compress)"
-                try {
-                    Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($pimEligibilityParams | ConvertTo-Json -Depth 10) -OutputType PSObject | Out-Null
-                    $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
-                } catch {
-                    Write-Warning "$logPrefix Failed to create PIM eligible assignment for group $($group.Id). Error: $_"
+            if(& $isStagingGroup $group){
+                # mailNickname doesn't contain the GroupPrefix, so it also matches groups created with another prefix
+                $sourceGroup = if($group.MailNickname -like "PIM.*"){
+                    $ServiceGroups | Where-Object { $_.MailNickname -eq ($group.MailNickname -replace '^PIM\.', '') }
+                }
+                if(-not $sourceGroup){
+                    $pimGroupPrefixLen = "$GroupPrefix$($GroupNamingDelimiter)PIM$GroupNamingDelimiter".Length
+                    $sourceGroup = $ServiceGroups|Where-Object{$_.DisplayName -like "$GroupPrefix$GroupNamingDelimiter"+$group.DisplayName.Substring($pimGroupPrefixLen)}
+                }
+                $pimEligibilityParams.principalId = $sourceGroup.Id
+                $ne = $pimEligibilityParams.principalId+"_noExpiration"
+                # Scope check to current group only — accumulated $pimEligibilities spans all groups
+                $ee = $pimEligibilities | Where-Object { $_.groupId -eq $group.Id } | ForEach-Object { $_.principalId+"_"+$_.targetSchedule.scheduleInfo.expiration.type }
+                if([string]::IsNullOrWhiteSpace($pimEligibilityParams.principalId)){
+                    Write-Warning "$logPrefix No base group found for PIM staging group $($group.DisplayName), skipping eligible member assignment"
+                }elseif($ne -notin $ee){
+                    Write-Verbose "$logPrefix $($pimEligibilityParams|ConvertTo-Json -Compress)"
+                    try {
+                        Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($pimEligibilityParams | ConvertTo-Json -Depth 10) -OutputType PSObject | Out-Null
+                        $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
+                    } catch {
+                        Write-Warning "$logPrefix Failed to create PIM eligible assignment for group $($group.Id). Error: $_"
+                    }
                 }
             }
 
@@ -143,46 +155,34 @@ function New-EntraOpsServicePIMAssignment {
     }
 
     end {
-        $confirmed = $false
-        $i = 0
-        $nonMemberGroups = @($ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" })
-        # When no non-Members groups exist (e.g., all admin groups delegated), skip consistency check.
-        if ($nonMemberGroups.Count -eq 0) {
+        if ($targetGroups.Count -eq 0) {
+            Write-Verbose "$logPrefix No PIM staging group in this scope and -EnableOwnerAssignment not set, no PIM for Groups eligibilities to create"
             return [psobject[]]@()
         }
 
-        # Guard: if no eligibilities were successfully recorded, warn and return gracefully
         $expectedIds = @($pimEligibilities | Where-Object { $_.id } | Select-Object -ExpandProperty id)
         if ($expectedIds.Count -eq 0) {
             Write-Warning "$logPrefix No PIM eligibilities were successfully created or retrieved. Check previous warnings for permission errors (e.g., group not role-assignable, missing PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup)."
             return [psobject[]]@()
         }
 
-        while(-not $confirmed){
-            Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
-            $checkPimEligibility = @()
-            foreach($group in $nonMemberGroups){
+        $check = @{}
+        $confirmed = Wait-EntraOpsServiceEMCondition -Activity "PIM for Groups eligibilities" -logPrefix $logPrefix -Condition {
+            $check.Eligibilities = @()
+            foreach($group in $targetGroups){
                 try {
-                    $checkPimEligibility += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
+                    $check.Eligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
                 } catch {
                     Write-Verbose "$logPrefix Failed to query eligibility during consistency check for group $($group.Id): $_"
                 }
             }
-            # Handle null values in comparison
-            $actualIds = @($checkPimEligibility | Where-Object { $_.id } | Select-Object -ExpandProperty id)
-
-            if((Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0){
-                Write-Verbose "$logPrefix Graph consistency found confirming"
-                $confirmed = $true
-                continue
-            }
-            $i++
-            if($i -gt 10){
-                Write-Warning "$logPrefix PIM eligibility consistency with Entra not achieved after 10 retries. Expected $($expectedIds.Count) entries, found $($actualIds.Count). Returning best-effort results."
-                return [psobject[]]$pimEligibilities
-            }
-            Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
+            $actualIds = @($check.Eligibilities | Where-Object { $_.id } | Select-Object -ExpandProperty id)
+            (Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0
         }
-        return [psobject[]]$checkPimEligibility
+        if(-not $confirmed){
+            Write-Warning "$logPrefix PIM eligibility consistency with Entra not achieved. Expected $($expectedIds.Count) entries. Returning best-effort results."
+            return [psobject[]]$pimEligibilities
+        }
+        return [psobject[]]$check.Eligibilities
     }
 }

@@ -585,6 +585,11 @@ function New-EntraOpsConfigFile {
             ManagementPlaneDelegationGroupId = ""
             ManagementPlaneGroupName         = "PRG-Tenant-ManagementPlane-PlatformOps"
             AdministratorGroupId             = ""
+            DefaultAzureRegion               = ""
+            SkipCatalogOwnerAssignment       = $false
+            CreateM365Group                  = $false
+            AddWorkloadPlaneAdminToUsers     = $false
+            GroupPrefix                      = "SG"
             ConstrainedDelegation            = [ordered]@{
                 ManagementPlane = [ordered]@{
                     ExcludedRoleDefinitionIds = @(
@@ -631,6 +636,38 @@ function New-EntraOpsConfigFile {
                 WorkloadPlane               = [ordered]@{
                     AuthenticationContextClassReferenceId = ""
                     AuthenticationContextDisplayName      = ""
+                }
+            }
+            PIMForGroups                     = [ordered]@{
+                MaximumActivationDuration       = "PT10H"
+                MaximumActiveAssignmentDuration = "P15D"
+            }
+            AssignmentPolicies               = [ordered]@{
+                BaselinePolicy              = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
+                WorkloadPlaneUsers          = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; RequestorScope = "AllMemberUsers"; AllowExtension = $true }
+                WorkloadPlaneAdmins         = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
+                ManagementPlaneAdmins       = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P1D"; AllowExtension = $true }
+                InitialWorkloadMembership   = [ordered]@{ Expiration = "P365D" }
+                InitialManagementMembership = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D" }
+                InitialManagementAdmins     = [ordered]@{ Expiration = "P365D" }
+                InitialWorkloadUsers        = [ordered]@{ Expiration = "P365D" }
+                InitialWorkloadAdmins       = [ordered]@{ Expiration = "P365D" }
+            }
+            AccessReviews                    = [ordered]@{
+                EnableAccessReviews        = $true
+                RecurrenceIntervalInMonths = 3
+                StartAfterDays             = 4
+                ReviewDuration             = "P25D"
+                Policies                   = [ordered]@{
+                    BaselinePolicy              = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    WorkloadPlaneUsers          = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
+                    WorkloadPlaneAdmins         = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    ManagementPlaneAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialWorkloadMembership   = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialManagementMembership = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialManagementAdmins     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialWorkloadUsers        = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
+                    InitialWorkloadAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
                 }
             }
         }

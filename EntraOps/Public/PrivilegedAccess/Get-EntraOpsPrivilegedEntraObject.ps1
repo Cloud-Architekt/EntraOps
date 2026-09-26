@@ -294,8 +294,12 @@ function Get-EntraOpsPrivilegedEntraObject {
     Write-Verbose "[Performance] AAD Role protection check: $($StopwatchRegion.ElapsedMilliseconds)ms"
     #endregion
 
-    # agentIdentityBlueprintPrincipal and agentIdentity are SP subtypes; normalize so the SP branch handles them
-    if ($ObjectDetails.'@odata.type' -like '#microsoft.graph.agentIdentity*') {
+    # agentIdentityBlueprint is an application subtype; agentIdentityBlueprintPrincipal and agentIdentity
+    # are SP subtypes. Normalize so the application and SP branches handle them
+    $IsAgentIdentityBlueprint = $ObjectDetails.'@odata.type' -eq '#microsoft.graph.agentIdentityBlueprint'
+    if ($IsAgentIdentityBlueprint) {
+        Add-Member -InputObject $ObjectDetails -NotePropertyName '@odata.type' -NotePropertyValue '#microsoft.graph.application' -Force
+    } elseif ($ObjectDetails.'@odata.type' -like '#microsoft.graph.agentIdentity*') {
         Add-Member -InputObject $ObjectDetails -NotePropertyName '@odata.type' -NotePropertyValue '#microsoft.graph.servicePrincipal' -Force
     }
 
@@ -562,6 +566,14 @@ function Get-EntraOpsPrivilegedEntraObject {
             $ObjectSignInName = $AppObject.appId
             $ObjectType = 'application'
             $ObjectSubType = ""
+            if ($IsAgentIdentityBlueprint) {
+                $ObjectSubType = 'agentIdentityBlueprint'
+                try {
+                    Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/applications/$($AadObjectId)/microsoft.graph.agentIdentityBlueprint/sponsors?`$select=id" -OutputType PSObject | ForEach-Object { $Sponsors.Add($_.id) | out-null }
+                } catch {
+                    Write-Warning "No sponsors supported for $($AadObjectId)"
+                }
+            }
 
             # Administrative Units and Restricted Management does not apply to service principals
             $RestrictedManagementByRAG = $false
