@@ -425,9 +425,8 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         # Create Initial Management Admin Policy for admin-driven service owner assignment
                         $params = $initialPolicyParams.Clone()
                         $params.displayName = "Initial Management Admin Policy"
-                        # adminAdd targets must be in allowedTargetScope (notSpecified rejects all); requests stay disabled via requestorSettings
-                        $params.allowedTargetScope = "allMemberUsers"
-                        $params.Remove('specificAllowedTargets')
+                        # Keep adminAdd target scope restricted to specificDirectoryUsers from initialPolicyParams
+                        # (request-based adds remain disabled via requestorSettings)
                         $params.requestApprovalSettings = @{
                             isApprovalRequiredForAdd = $false  # No approval needed for adminAdd
                             isApprovalRequiredForUpdate = $false
