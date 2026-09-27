@@ -165,6 +165,59 @@ New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "IdentityOnly" -WorkloadPl
 
 ---
 
+## Reviewing ServiceEM Deployments with EntraOps Reporting
+
+After deploying a ServiceEM landing zone, run the EntraOps reporting pipeline to generate report objects and review the newly created resources across the reporting apps.
+
+### Step 1: Verify with the ServiceEM Report
+
+Confirm the landing zone resources were created correctly:
+
+```powershell
+Get-EntraOpsServiceEMReport
+```
+
+This returns a structured per-catalog view of all Entitlement Management resources, including catalogs, access packages, assignment policies, and active deliveries created by the deployment.
+
+### Step 2: Run the Push-Reporting Pipeline
+
+Generate the full set of EntraOps reporting artifacts so the newly created ServiceEM resources appear across all reporting apps.
+
+**Locally:**
+
+```powershell
+Import-Module ./EntraOps -Force
+New-EntraOpsReportingData
+```
+
+**Configuration-driven automation:**
+
+```powershell
+Import-Module ./EntraOps -Force
+Invoke-EntraOpsReportingGeneration -ConfigFilePath ./EntraOpsConfig.json `
+  -AuthenticationType AlreadyAuthenticated
+```
+
+**Via CI/CD:**
+
+- **GitHub Actions:** Trigger the `Push-EntraOpsPrivilegedReporting` workflow. It regenerates the selected apps, runs the offline browser smoke suite, and uploads a 30-day artifact when every report passes.
+- **Azure DevOps:** Run the `azure-pipelines-push-reporting.yml` pipeline, which calls `Invoke-EntraOpsReportingGeneration` and publishes the `Reports/` output as a pipeline artifact.
+
+### Step 3: Review New Resources in Reporting Apps
+
+Open `Reports/index.html` and use these apps to inspect the landing zone resources:
+
+| Reporting App | What to Review |
+|---------------|----------------|
+| **EAM Dashboard** | Newly created groups, their classified tier levels, and role assignments. Filter by RBAC system (`IdentityGovernance`) or principal type (`group`) to isolate ServiceEM objects. |
+| **Access Package Flow** | Access packages, assignment policies, requestor scopes, and approver chains created by ServiceEM. Validates that the approval workflow matches the intended governance model. |
+| **Configuration Analyzer** | If Tenant Governance snapshots are enabled, compare snapshots before and after the deployment to see exactly which resources were added (Change Timeline) and review their property-level configuration. |
+| **Tier Breach Analyzer** | Verify that the new landing zone does not introduce tier boundary violations (e.g., a WorkloadPlane identity with a path to ControlPlane privileges). |
+
+> **Tip:** Use the cross-tool **Review list** to bookmark findings across apps. Export filtered results as CSV or JSON for triage and remediation tracking. See the [Reportings documentation](../reportings/index.html) for detailed guidance on each app.
+
+---
+
 ## Detailed Setup Guide
 
 ### Prerequisites
