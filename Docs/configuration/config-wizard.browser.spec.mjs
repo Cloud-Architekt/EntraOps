@@ -185,6 +185,27 @@ test("preserves updater, advanced CSA and unknown settings through import and ex
     await expect(preview).toContainText('"Value": 42');
 });
 
+test("preserves Group classification filters while Custom Security Attributes stay active", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            AlternateObjectTierLevelAttributes: {
+                Enabled: false,
+                Group: { ControlPlane: '$Object.ObjectDisplayName -like "PRG-Tier0-*"', ManagementPlane: "", UserAccess: "" }
+            }
+        }))
+    });
+    await page.getByRole("button", { name: /Object Classification/ }).click();
+
+    await expect(page.locator('.wiz-tier-block[data-objtype="Group"]')).toHaveCount(3);
+    const preview = page.locator("#wizPreview");
+    await expect(preview).toContainText('"Enabled": false');
+    await expect(preview).toContainText('"Group": {');
+    await expect(preview).toContainText('PRG-Tier0-*');
+});
+
 test("exports and imports deleted Azure RBAC principal handling", async ({ page }) => {
     await page.goto(wizardUrl);
     await page.getByRole("button", { name: /Control Plane Scope/ }).click();

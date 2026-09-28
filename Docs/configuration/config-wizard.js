@@ -391,7 +391,8 @@
             AlternateEnabled: false,
             Alternate: {
                 User: { ControlPlane: emptyTier(), ManagementPlane: emptyTier(), UserAccess: emptyTier() },
-                ServicePrincipal: { ControlPlane: emptyTier(), ManagementPlane: emptyTier(), UserAccess: emptyTier() }
+                ServicePrincipal: { ControlPlane: emptyTier(), ManagementPlane: emptyTier(), UserAccess: emptyTier() },
+                Group: { ControlPlane: emptyTier(), ManagementPlane: emptyTier(), UserAccess: emptyTier() }
             }
         };
         SERVICEEM_REVIEW_POLICIES.forEach(function (p) {
@@ -407,7 +408,7 @@
     // ---------------------------------------------------------------------
     // Alternate Tier Level Attributes: the $Object properties actually built
     // by Get-EntraOpsPrivilegedEntraObject.ps1 (region "Alternate classification
-    // of User/ServicePrincipal objects") - this is the exhaustive, real list;
+    // of User/ServicePrincipal/Group objects") - this is the exhaustive, real list;
     // nothing else is available to a filter expression.
     // ---------------------------------------------------------------------
     var ATTRS = [
@@ -1178,16 +1179,27 @@
             attributeGroup.appendChild(renderField({ key: "PrivilegedServicePrincipalAdminTierLevelAttribute", label: "Service principal tier level field", type: "text", default: "adminTierLevel" }));
             attributeGroup.appendChild(renderField({ key: "PrivilegedServicePrincipalAdminTierLevelNameAttribute", label: "Service principal tier name field", type: "text", default: "adminTierLevelName" }));
             fragment.appendChild(attributeGroup);
+
+            var groupClassification = createElement("div", "wiz-group");
+            groupClassification.appendChild(createElement("h3", "wiz-group-title", "Group classification (Alternate Tier Level Attributes)"));
+            groupClassification.appendChild(createElement("p", "wiz-group-desc", "Groups don't support custom security attributes and stay Unclassified by default. Define filter expressions to classify groups - they apply whenever at least one Group filter is set, independent of the classification method above."));
+            ["ControlPlane", "ManagementPlane", "UserAccess"].forEach(function (tier) {
+                groupClassification.appendChild(renderTierBlock("Group", tier));
+            });
+            fragment.appendChild(groupClassification);
         } else {
             var alternateGroup = createElement("div", "wiz-group");
             var objectTabs = createElement("div", "wiz-object-tabs");
             OBJECT_TYPES_2.slice(0, 1); // no-op, keep linter happy about unused var patterns
-            ["User", "ServicePrincipal"].forEach(function (objectType) {
+            ["User", "ServicePrincipal", "Group"].forEach(function (objectType) {
                 var objectTab = createButton("wiz-object-tab" + (objectType === activeObjectType ? " active" : ""), objectType);
                 objectTab.dataset.objtab = objectType;
                 objectTabs.appendChild(objectTab);
             });
             alternateGroup.appendChild(objectTabs);
+            if (activeObjectType === "Group") {
+                alternateGroup.appendChild(createElement("p", "wiz-group-desc", "Groups don't support custom security attributes. Group filters apply whenever at least one is set, independent of the classification method."));
+            }
             ["ControlPlane", "ManagementPlane", "UserAccess"].forEach(function (tier) {
                 alternateGroup.appendChild(renderTierBlock(activeObjectType, tier));
             });
@@ -1525,6 +1537,11 @@
                     ControlPlane: tierExpr("ServicePrincipal", "ControlPlane"),
                     ManagementPlane: tierExpr("ServicePrincipal", "ManagementPlane"),
                     UserAccess: tierExpr("ServicePrincipal", "UserAccess")
+                },
+                Group: {
+                    ControlPlane: tierExpr("Group", "ControlPlane"),
+                    ManagementPlane: tierExpr("Group", "ManagementPlane"),
+                    UserAccess: tierExpr("Group", "UserAccess")
                 }
             },
             PrivilegeHistory: {
@@ -1770,7 +1787,7 @@
 
         var alt = cfg.AlternateObjectTierLevelAttributes || {};
         state.ClassificationMethod = alt.Enabled === true ? "alternate" : "csa";
-        ["User", "ServicePrincipal"].forEach(function (objType) {
+        ["User", "ServicePrincipal", "Group"].forEach(function (objType) {
             ["ControlPlane", "ManagementPlane", "UserAccess"].forEach(function (tier) {
                 var expr = pick(alt, objType + "." + tier, "");
                 state.Alternate[objType][tier] = parseExpression(expr);

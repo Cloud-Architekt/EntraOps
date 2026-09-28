@@ -135,7 +135,7 @@
     so every supported risk flag is reported. Use the Configuration Wizard to select flags by name.
 
 .PARAMETER EnableAlternateObjectTierLevelAttributes
-    Defines if User and ServicePrincipal objects should be classified by PowerShell filter expressions evaluated against their own resolved EntraOps details (section AlternateObjectTierLevelAttributes) instead of Custom Security Attributes. Default is false. The config file always includes the section with empty filter expressions so it can be filled in and enabled later; see README.md "Classify privileged objects by Alternate Tier Level Attributes" for the required syntax.    
+    Defines if User and ServicePrincipal objects should be classified by PowerShell filter expressions evaluated against their own resolved EntraOps details (section AlternateObjectTierLevelAttributes) instead of Custom Security Attributes. Default is false. The config file always includes the section with empty filter expressions so it can be filled in and enabled later; see README.md "Classify privileged objects by Alternate Tier Level Attributes" for the required syntax. Group objects don't support Custom Security Attributes; the 'Group' filter expressions of this section classify groups whenever at least one is set, independent of this switch.    
 
 .PARAMETER EnableTenantGovernanceSnapshot
     Defines if the EntraOps Tenant Governance Snapshot feature is enabled. Default is false.
@@ -548,6 +548,11 @@ function New-EntraOpsConfigFile {
                 UserAccess      = ""
             }
             ServicePrincipal = [ordered]@{
+                ControlPlane    = ""
+                ManagementPlane = ""
+                UserAccess      = ""
+            }
+            Group            = [ordered]@{
                 ControlPlane    = ""
                 ManagementPlane = ""
                 UserAccess      = ""

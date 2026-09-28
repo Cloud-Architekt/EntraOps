@@ -245,7 +245,7 @@
             ConfigurationAnalyzer: { ResolveGroupMembersForPrivilegedAssets: true, AllowPartialTenantGovernanceSnapshot: true, PimRequestFlowExcludedRiskFlags: [], AccessPackageFlowExcludedRiskFlags: [], ConditionalAccessAnalysisExcludedFindings: [], EidscaExcludedFindings: [] },
             AutomatedElmCatalogProtection: { ApplyPrivilegedElmCatalogProtection: false, ApplyToAccessTierLevel: ["ControlPlane"], RemovalSafetyThreshold: 0.5 },
             CustomSecurityAttributes: { PrivilegedUserAttribute: "privilegedUser", PrivilegedUserPawAttribute: "associatedSecureAdminWorkstation", PrivilegedServicePrincipalAttribute: "privilegedWorkloadIdentity", UserWorkAccountAttribute: "associatedWorkAccount", PrivilegedUserAdminTierLevelAttribute: "adminTierLevel", PrivilegedUserAdminTierLevelNameAttribute: "adminTierLevelName", PrivilegedServicePrincipalAdminTierLevelAttribute: "adminTierLevel", PrivilegedServicePrincipalAdminTierLevelNameAttribute: "adminTierLevelName" },
-            AlternateObjectTierLevelAttributes: { Enabled: false, User: { ControlPlane: "", ManagementPlane: "", UserAccess: "" }, ServicePrincipal: { ControlPlane: "", ManagementPlane: "", UserAccess: "" } },
+            AlternateObjectTierLevelAttributes: { Enabled: false, User: { ControlPlane: "", ManagementPlane: "", UserAccess: "" }, ServicePrincipal: { ControlPlane: "", ManagementPlane: "", UserAccess: "" }, Group: { ControlPlane: "", ManagementPlane: "", UserAccess: "" } },
             PrivilegeHistory: { EnablePrivilegeHistory: true, TimeRangeInDays: null, SnapshotInterval: "P2W" },
             AccessPathMap: { ResolveObjectIdsOutsidePrivilegedEAM: true },
             EamDashboard: { ResolveLinkedIdentityObjectIds: true },
