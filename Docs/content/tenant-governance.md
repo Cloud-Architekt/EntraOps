@@ -219,6 +219,12 @@ not write them. If you did not complete the workload-identity setup above, a Glo
 must first run `Register-EntraOpsTenantGovernanceServicePrincipal` once to configure the UTCM
 service principal for the resource types in `EntraOpsConfig.json`.
 
+When a configuration is loaded (`Connect-EntraOps -ConfigFilePath`), `ResourcesToInclude`,
+`SnapshotDisplayNamePrefix` and `SnapshotResourceFileNaming` of `TenantGovernanceSnapshot` are used
+unless you pass the corresponding parameter, so manual runs name files the same way as the workflow.
+Without a loaded configuration, the defaults are the recommended resource set, `EntraOps TG` and
+`DisplayName`.
+
 | `-Operation` value     | Behavior                                                                                                                      |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `RunAndWait` (default) | Creates a job and waits up to `TimeoutInSeconds`. The default timeout is `900` seconds (15 minutes).                          |
@@ -232,7 +238,7 @@ For each interactive run, connect Azure PowerShell and explicitly consent the de
 Import-Module ./EntraOps -Force
 Connect-AzAccount -Tenant "<tenant-id>"
 Connect-MgGraph -TenantId "<tenant-id>" -Scopes "ConfigurationMonitoring.ReadWrite.All"
-Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso.onmicrosoft.com"
+Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso.onmicrosoft.com" -ConfigFilePath "./EntraOpsConfig.json"
 Save-EntraOpsTenantGovernanceSnapshotJson
 ```
 

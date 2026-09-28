@@ -53,6 +53,7 @@ function New-EntraOpsServiceEMAssignment {
         [string]$ServiceCatalogId,
 
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
         [psobject[]]$ServiceMembers,
 
         [psobject]$WorkloadPlaneAdmin,
@@ -70,19 +71,22 @@ function New-EntraOpsServiceEMAssignment {
         $assignmentRequests = @()
         $assignments = @()
 
-        $assignmentRequestsUri = "/v1.0/identityGovernance/entitlementManagement/assignmentRequests?`$filter=state eq 'submitted'&`$expand=assignment(`$expand=target),accessPackage,assignment"
-        try{
-            Write-Verbose "$logPrefix Looking up Assignment Requests"
-            $assignmentRequests += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentRequestsUri -OutputType PSObject
-        }catch{
-            Write-Verbose "$logPrefix Failed to find Assignment Requests"
-            Write-Error $_
+        # Open request states; the $filter only supports one state per query
+        foreach ($openState in @('submitted', 'pendingApproval', 'delivering', 'scheduled')) {
+            $assignmentRequestsUri = "/v1.0/identityGovernance/entitlementManagement/assignmentRequests?`$filter=state eq '$openState'&`$expand=assignment(`$expand=target),accessPackage"
+            try{
+                Write-Verbose "$logPrefix Looking up assignment requests in state '$openState'"
+                $assignmentRequests += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentRequestsUri -OutputType PSObject -DisableCache
+            }catch{
+                Write-Verbose "$logPrefix Failed to find Assignment Requests"
+                Write-Error $_
+            }
         }
 
         $assignmentsSplat = "/v1.0/identityGovernance/entitlementManagement/assignments?`$filter=accessPackage/catalog/id eq '$ServiceCatalogId' and state eq 'delivered'&`$expand=accessPackage(`$expand=catalog),accessPackage,target"
         Write-Verbose "$logPrefix $($assignmentsSplat)"
         try{
-            $assignments += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentsSplat -OutputType PSObject
+            $assignments += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentsSplat -OutputType PSObject -DisableCache
             if(($assignments|Measure-Object).Count -gt 0){
                 Write-Verbose "$logPrefix Found Access Package Assignment IDs: $($assignments.Id|ConvertTo-Json -Compress)"
             }
@@ -91,12 +95,26 @@ function New-EntraOpsServiceEMAssignment {
             Write-Error $_
         }
 
+        # A user may hold one package and still need another, so existing access is keyed per target and package
+        $existingAccess = @{}
+        foreach ($assignment in @($assignments | Where-Object { $_ })) {
+            $existingAccess["$($assignment.Target.ObjectId)|$($assignment.AccessPackage.Id)"] = 'delivered'
+        }
+        foreach ($request in @($assignmentRequests | Where-Object { $_ })) {
+            $existingAccess["$($request.Assignment.Target.ObjectId)|$($request.AccessPackage.Id)"] = "request $($request.State)"
+        }
+        $getExistingAccess = { param($TargetId, $AccessPackageId) $existingAccess["$TargetId|$AccessPackageId"] }
+
         $wlMembersPackage = $ServicePackages|Where-Object{$_.DisplayName -like "*WorkloadPlane-Members"}
         $wlMembersPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Initial Workload Membership Policy"}
         # Rg scope fallback: no WorkloadPlane-Members access package - use WorkloadPlane-Users
         if(-not $wlMembersPackage){
             $wlMembersPackage = $ServicePackages|Where-Object{$_.DisplayName -like "*WorkloadPlane-Users"}
-            $wlMembersPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Workload Plane Users Policy"}
+            # Admin-only direct policy without approval; the request policy is the fallback for older landing zones
+            $wlMembersPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Initial Workload Users Policy"}
+            if(-not $wlMembersPolicy){
+                $wlMembersPolicy = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Workload Plane Users Policy"}
+            }
         }
         $assignmentParams = @{
             requestType = "adminAdd"
@@ -106,13 +124,69 @@ function New-EntraOpsServiceEMAssignment {
                 accessPackageId    = $wlMembersPackage.Id
             }
         }
-        # Track how many new requests were actually submitted so the end block can exit
-        # immediately when nothing was created (avoids an infinite wait).
-        $newAssignmentCount = 0
+        # Requests accepted by Graph in this run; only these are awaited in the end block.
+        $submittedRequests = [System.Collections.Generic.List[psobject]]::new()
+
+        $assignmentRequestUri = "/v1.0/identityGovernance/entitlementManagement/assignmentRequests"
+        $adminOnlyPolicyNames = @('Initial Workload Users Policy', 'Initial Workload Admin Policy', 'Initial Management Admin Policy')
+        $addTargetToPolicy = {
+            param($Policy, [string]$TargetId)
+            $policyUri = "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies/$($Policy.Id)"
+            $current = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "$($policyUri)?`$expand=accessPackage" -OutputType PSObject -DisableCache
+            if (-not $current -or -not $current.Id) { return $false }
+            $targets = @(if ($current.AllowedTargetScope -eq 'specificDirectoryUsers') { $current.SpecificAllowedTargets | Where-Object { $_ } })
+            if ($targets | Where-Object { $_.UserId -eq $TargetId }) { return $false }
+            $policyBody = [ordered]@{
+                displayName             = $current.DisplayName
+                description             = $current.Description
+                allowedTargetScope      = 'specificDirectoryUsers'
+                specificAllowedTargets  = @($targets) + @(@{ '@odata.type' = '#microsoft.graph.singleUser'; userId = $TargetId })
+                expiration              = $current.Expiration
+                requestorSettings       = $current.RequestorSettings
+                requestApprovalSettings = $current.RequestApprovalSettings
+                accessPackage           = @{ id = $current.AccessPackage.Id }
+            }
+            if ($current.ReviewSettings) { $policyBody.reviewSettings = $current.ReviewSettings }
+            try {
+                Invoke-EntraOpsMsGraphQuery -Method PUT -Uri $policyUri -Body ($policyBody | ConvertTo-Json -Depth 20) -OutputType PSObject -ThrowOnFailure | Out-Null
+            } catch {
+                Write-Warning "$logPrefix Failed to add $TargetId to the scope of policy '$($current.DisplayName)': $($_.Exception.Message)"
+                return $false
+            }
+            Write-Verbose "$logPrefix Added $TargetId as specific user to policy '$($current.DisplayName)'"
+            return $true
+        }
+        # Entra ID ignores "all members" policies for users in scope of a policy for specific users of the
+        # same access package (e.g. the Workload Plane Policy), so the target is added to the admin-only policy
+        $submitAssignment = {
+            param($Policy, [string]$TargetId)
+            $requestBody = $assignmentParams | ConvertTo-Json -Depth 10
+            if ($Policy.DisplayName -notin $adminOnlyPolicyNames) {
+                return Invoke-EntraOpsMsGraphQuery -Method POST -Uri $assignmentRequestUri -Body $requestBody -OutputType PSObject
+            }
+            try {
+                return Invoke-EntraOpsMsGraphQuery -Method POST -Uri $assignmentRequestUri -Body $requestBody -OutputType PSObject -ThrowOnFailure -SuppressBadRequestWarning
+            } catch {
+                if ($_.Exception.Data['StatusCode'] -ne 400) { return $null }
+            }
+            Write-Verbose "$logPrefix $TargetId isn't accepted by policy '$($Policy.DisplayName)', adding the user to its scope"
+            if (-not (& $addTargetToPolicy $Policy $TargetId)) {
+                return Invoke-EntraOpsMsGraphQuery -Method POST -Uri $assignmentRequestUri -Body $requestBody -OutputType PSObject
+            }
+            $retry = @{}
+            $accepted = Wait-EntraOpsServiceEMCondition -Activity "Updated scope of policy '$($Policy.DisplayName)'" -MaxWaitSeconds 60 -logPrefix $logPrefix -Condition {
+                try {
+                    $retry.Result = Invoke-EntraOpsMsGraphQuery -Method POST -Uri $assignmentRequestUri -Body $requestBody -OutputType PSObject -ThrowOnFailure -SuppressBadRequestWarning
+                    $null -ne $retry.Result
+                } catch { $false }
+            }
+            if ($accepted) { return $retry.Result }
+            return Invoke-EntraOpsMsGraphQuery -Method POST -Uri $assignmentRequestUri -Body $requestBody -OutputType PSObject
+        }
     }
 
     process {
-        Write-Host "$logPrefix Beginning EM Assignment"
+        Write-Verbose "$logPrefix Beginning EM Assignment"
 
         if(-not $wlMembersPackage -or -not $wlMembersPolicy){
             Write-Verbose "$logPrefix WorkloadPlane-Members access package or policy not found (Sub-only landing zone?), skipping member assignments"
@@ -120,11 +194,20 @@ function New-EntraOpsServiceEMAssignment {
             foreach($member in $ServiceMembers){
                 Write-Verbose "$logPrefix Processing Service Member ID: $($member.Id)"
                 $assignmentParams.assignment.targetId = $member.Id
-                if($member.Id -notin $assignments.Target.ObjectId -and $member.Id -notin $assignmentRequests.Assignment.Target.ObjectId){
+                $existingMemberAccess = & $getExistingAccess $member.Id $wlMembersPackage.Id
+                if($existingMemberAccess){
+                    Write-Verbose "$logPrefix Member $($member.Id) already has access package $($wlMembersPackage.DisplayName) ($existingMemberAccess), skipping"
+                } else {
                     try{
                         Write-Verbose "$logPrefix Creating Assignment Request"
-                        $postResult = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests" -Body ($assignmentParams | ConvertTo-Json -Depth 10) -OutputType PSObject
-                        if($null -ne $postResult){ $assignmentRequests += $postResult; $newAssignmentCount++ }
+                        $postResult = & $submitAssignment $wlMembersPolicy $member.Id
+                        if($null -ne $postResult){
+                            $assignmentRequests += $postResult
+                            $existingAccess["$($member.Id)|$($wlMembersPackage.Id)"] = "request $($postResult.State)"
+                            $submittedRequests.Add([pscustomobject]@{ Id = $postResult.Id; State = $postResult.State; TargetId = $member.Id; AccessPackageId = $wlMembersPackage.Id })
+                        } else {
+                            Write-Warning "$logPrefix Assignment request for member $($member.Id) was rejected. Check that the user is in the allowed target scope of policy '$($wlMembersPolicy.DisplayName)'."
+                        }
                     }catch{
                         Write-Verbose "$logPrefix Failed to create Assignment Request"
                         Write-Error $_
@@ -139,18 +222,28 @@ function New-EntraOpsServiceEMAssignment {
         $mgmtAdminsPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Initial Management Admin Policy"}
         if(-not $mgmtAdminsPackage){
             $mgmtAdminsPackage = $ServicePackages|Where-Object{$_.DisplayName -like "*WorkloadPlane-Admins"}
-            $mgmtAdminsPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Workload Plane Policy"}
+            $mgmtAdminsPolicy  = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Initial Workload Admin Policy"}
+            if(-not $mgmtAdminsPolicy){
+                $mgmtAdminsPolicy = $ServiceAssignmentPolicies|Where-Object{$_.DisplayName -eq "Workload Plane Policy"}
+            }
         }
         if($mgmtAdminsPackage -and $mgmtAdminsPolicy -and $WorkloadPlaneAdmin){
-            # Update this to `in` if upstream function ever switches to array
-            if($WorkloadPlaneAdmin.Id -notin $assignments.Target.ObjectId -and $WorkloadPlaneAdmin.Id -notin $assignmentRequests.Assignment.Target.ObjectId){
+            $existingAdminAccess = & $getExistingAccess $WorkloadPlaneAdmin.Id $mgmtAdminsPackage.Id
+            if($existingAdminAccess){
+                Write-Verbose "$logPrefix Workload plane admin $($WorkloadPlaneAdmin.Id) already has access package $($mgmtAdminsPackage.DisplayName) ($existingAdminAccess), skipping"
+            } else {
                 try{
                     $assignmentParams.assignment.targetId = $WorkloadPlaneAdmin.Id
                     $assignmentParams.assignment.assignmentPolicyId = $mgmtAdminsPolicy.Id
                     $assignmentParams.assignment.accessPackageId = $mgmtAdminsPackage.Id
                     Write-Verbose "$logPrefix Creating Assignment Request for Workload Plane Admin - $($assignmentParams|ConvertTo-Json -Compress)"
-                    $postResult = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests" -Body ($assignmentParams | ConvertTo-Json -Depth 10) -OutputType PSObject
-                    if($null -ne $postResult){ $assignmentRequests += $postResult; $newAssignmentCount++ }
+                    $postResult = & $submitAssignment $mgmtAdminsPolicy $WorkloadPlaneAdmin.Id
+                    if($null -ne $postResult){
+                        $assignmentRequests += $postResult
+                        $submittedRequests.Add([pscustomobject]@{ Id = $postResult.Id; State = $postResult.State; TargetId = $WorkloadPlaneAdmin.Id; AccessPackageId = $mgmtAdminsPackage.Id })
+                    } else {
+                        Write-Warning "$logPrefix Assignment request for workload plane admin $($WorkloadPlaneAdmin.Id) was rejected. Check that the user is in the allowed target scope of policy '$($mgmtAdminsPolicy.DisplayName)'."
+                    }
                 }catch{
                     Write-Verbose "$logPrefix Failed to create Assignment Request for Workload Plane Admin"
                     Write-Error $_
@@ -163,36 +256,45 @@ function New-EntraOpsServiceEMAssignment {
 
     end {
         # Nothing was submitted in this run — no point waiting for fulfillment.
-        if($newAssignmentCount -eq 0){
+        if($submittedRequests.Count -eq 0){
             Write-Verbose "$logPrefix No new assignment requests submitted, skipping consistency check"
             return [psobject[]]@()
         }
 
-        $confirmed = $false
-        $i = 0
-        while(-not $confirmed){
-            Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
-            $checkAssignments = @()
-            $checkAssignments += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentsSplat -OutputType PSObject -DisableCache
-            $uniqueExpected = @((@($ServiceMembers.Id) + @($WorkloadPlaneAdmin.Id)) | Where-Object { $_ } | Sort-Object -Unique)
-            $uniqueFound    = @($checkAssignments.Target.ObjectId | Where-Object { $_ } | Sort-Object -Unique)
-            Write-Verbose "$logPrefix Expected assignee IDs: $($uniqueExpected|ConvertTo-Json -Compress)"
-            Write-Verbose "$logPrefix Found assignment target IDs: $($uniqueFound|ConvertTo-Json -Compress)"
-            $missing = @($uniqueExpected | Where-Object { $_ -notin $uniqueFound })
-            if($missing.Count -eq 0){
-                Write-Verbose "$logPrefix Graph consistency found confirming"
-                $confirmed = $true
-                continue
+        $check = @{ Pending = @($submittedRequests); Checks = 0 }
+        $completed = Wait-EntraOpsServiceEMCondition -Activity "Assignment request fulfillment" -logPrefix $logPrefix -Condition {
+            $stillPending = @()
+            foreach($request in $check.Pending){
+                $current = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests/$($request.Id)" -OutputType PSObject -DisableCache
+                $state = if($current -and $current.State){ $current.State } else { $request.State }
+                $request.State = $state
+                $requestLabel = "Assignment request $($request.Id) (target $($request.TargetId), access package $($request.AccessPackageId))"
+                if($state -in @('delivered','partiallyDelivered')){
+                    Write-Verbose "$logPrefix $requestLabel is $state"
+                } elseif($state -in @('deliveryFailed','denied','canceled')){
+                    Write-Warning "$logPrefix $requestLabel ended in state '$state' (status: $($current.Status))"
+                } elseif($state -eq 'pendingApproval'){
+                    Write-Warning "$logPrefix $requestLabel is waiting for approval and is not awaited"
+                } else {
+                    $stillPending += $request
+                }
             }
-            $i++
-            if($i -eq 5){
-                Write-Warning "$logPrefix Fulfillment can take 5+ minutes to complete"
+            $check.Pending = $stillPending
+            $check.Checks++
+            if($check.Pending.Count -gt 0){
+                Write-Verbose "$logPrefix Waiting for assignment requests: $(($check.Pending | ForEach-Object { "$($_.Id)=$($_.State)" }) -join ', ')"
+                if($check.Checks -eq 5){
+                    Write-Warning "$logPrefix Fulfillment can take 5+ minutes to complete"
+                }
             }
-            if($i -gt 9){
-                throw "Access Package Assignment consistency with Entra not achieved"
-            }
-            Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
+            $check.Pending.Count -eq 0
         }
+        if(-not $completed){
+            Write-Warning "$logPrefix Assignment requests not fulfilled after 300 seconds, continuing without waiting: $(($check.Pending | ForEach-Object { "$($_.Id)=$($_.State)" }) -join ', ')"
+        }
+
+        $checkAssignments = @()
+        $checkAssignments += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentsSplat -OutputType PSObject -DisableCache
         return [psobject[]]$checkAssignments
     }
 }

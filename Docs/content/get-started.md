@@ -301,7 +301,7 @@ the full list of settings. Key things to check:
   The first setup needs Global Administrator consent so the first-party UTCM service principal can
   receive the permissions required by the selected resource types; follow the
   [Tenant Governance permission setup](../tenant-governance/index.html#permissions-and-prerequisites).
-- By default, `User` and `ServicePrincipal` objects are classified from Custom Security Attributes - see [Core &rarr; Classify by Custom Security Attributes](../core/index.html#classify-by-custom-security-attributes). The `AlternateObjectTierLevelAttributes` section allows classifying them instead with PowerShell filter expressions - see [Core &rarr; Classify by Alternate Tier Level Attributes](../core/index.html#classify-by-alternate-tier-level-attributes). Disabled by default with empty filters.
+- By default, `User` and `ServicePrincipal` objects are classified from Custom Security Attributes - see [Core &rarr; Classify by Custom Security Attributes](../core/index.html#classify-by-custom-security-attributes). The `AlternateObjectTierLevelAttributes` section allows classifying them instead with PowerShell filter expressions - see [Core &rarr; Classify by Alternate Tier Level Attributes](../core/index.html#classify-by-alternate-tier-level-attributes). Disabled by default with empty filters. `Group` objects don't support Custom Security Attributes and stay `Unclassified` unless you define `Group` filter expressions in the same section.
 
 ### 3.7 Create an application registration with the required permissions {#step-7}
 

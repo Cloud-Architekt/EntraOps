@@ -54,7 +54,7 @@ function New-EntraOpsServiceEMAccessPackage {
         Write-Verbose "$logPrefix Looking up Access Packages"
         try{
             # Use [object[]] so PSCustomObject or mixed typed entries can be appended with +=
-            [object[]]$ServiceAccessPackages = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $accessPackageUri -OutputType PSObject)
+            [object[]]$ServiceAccessPackages = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $accessPackageUri -OutputType PSObject -DisableCache)
         }catch{
             Write-Verbose "$logPrefix Failed to find Access Packages"
             Write-Error $_
@@ -62,7 +62,7 @@ function New-EntraOpsServiceEMAccessPackage {
     }
 
     process {
-        Write-Host "$logPrefix Beginning EM Access Package"
+        Write-Verbose "$logPrefix Beginning EM Access Package"
 
         Write-Verbose "$logPrefix Processing $(($ServiceRoles|Where-Object{$_.groupType -ne "Unified"}|Measure-Object).Count) Access Package Roles"
         foreach($role in $ServiceRoles|Where-Object{$_.groupType -ne "Unified" -and -not ($_.accessLevel -eq "ControlPlane" -and $_.name -eq "Admins")}){
@@ -92,24 +92,16 @@ function New-EntraOpsServiceEMAccessPackage {
             Write-Verbose "$logPrefix No access packages to verify — skipping consistency check"
             return [psobject[]]@()
         }
-        $confirmed = $false
-        $i = 0
-        while(-not $confirmed){
-            Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
-            [object[]]$checkServiceAccessPackages = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $accessPackageUri -OutputType PSObject)
-            $refIds  = @($ServiceAccessPackages.id  | Where-Object { $_ })
-            $chkIds  = @($checkServiceAccessPackages.id | Where-Object { $_ })
-            if($refIds.Count -eq 0 -or (Compare-Object $refIds $chkIds | Measure-Object).Count -eq 0){
-                Write-Verbose "$logPrefix Graph consistency found confirming"
-                $confirmed = $true
-                continue
-            }
-            $i++
-            if($i -gt 10){
-                throw "Access Package object consistency with Entra not achieved"
-            }
-            Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
+        $refIds = @($ServiceAccessPackages.id | Where-Object { $_ })
+        $check = @{}
+        $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Access packages" -logPrefix $logPrefix -Condition {
+            $check.Packages = [object[]]@(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $accessPackageUri -OutputType PSObject -DisableCache)
+            $chkIds = @($check.Packages.id | Where-Object { $_ })
+            $refIds.Count -eq 0 -or (Compare-Object $refIds $chkIds | Measure-Object).Count -eq 0
         }
-        return [psobject[]]$checkServiceAccessPackages
+        if(-not $confirmed){
+            throw "Access Package object consistency with Entra not achieved"
+        }
+        return [psobject[]]$check.Packages
     }
 }

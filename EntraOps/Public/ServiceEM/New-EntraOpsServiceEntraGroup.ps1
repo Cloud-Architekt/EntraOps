@@ -90,7 +90,7 @@ function New-EntraOpsServiceEntraGroup {
     )
 
     begin {
-        # Issue 4.1: Validate and normalize WorkloadPlaneAdmin to proper OData bind format
+        # Normalize WorkloadPlaneAdmin to the OData bind format
         if (-not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdmin)) {
             # Check if WorkloadPlaneAdmin is already in OData URL format (users or servicePrincipals)
             if ($WorkloadPlaneAdmin -match '^https://graph\.microsoft\.com/v1\.0/(users|servicePrincipals)/') {
@@ -107,16 +107,16 @@ function New-EntraOpsServiceEntraGroup {
                 }
             }
         } else {
-            Write-Verbose "$logPrefix WorkloadPlaneAdmin not provided; creating groups without owners"
+            Write-Verbose "$logPrefix No group owner requested (-AssignOwner not set); creating groups without owners"
         }
 
         try{
             #Groups
             $groups = @()
             Write-Verbose "$logPrefix Looking up Groups"
-            $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject
+            $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
             if(-not $NoPimEscalation){
-                $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:PIM.$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject
+                $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:PIM.$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
             }
         }catch{
             Write-Verbose "$logPrefix Failed processing Groups"
@@ -151,11 +151,10 @@ function New-EntraOpsServiceEntraGroup {
     }
 
     process {
-        Write-Host "$logPrefix Beginning EntraGroup"
+        Write-Verbose "$logPrefix Beginning EntraGroup"
 
         Write-Verbose "$logPrefix Processing $(($ServiceRoles|Measure-Object).Count) Groups"
         foreach($ServiceRole in $ServiceRoles){
-            # Issue 4.2: Validate and sanitize parameters
             $validationErrors = @()
             
             # Validate ServiceRole properties
@@ -204,52 +203,42 @@ function New-EntraOpsServiceEntraGroup {
                 throw "VALIDATION FAILED for ServiceRole '$($ServiceRole.Name)':`n  - $($validationErrors -join "`n  - ")"
             }
             
-            # Issue 4.2: Log payload for debugging
             Write-Verbose "$logPrefix Validated group parameters for '$($ServiceRole.Name)'"
             try{
                 if($ServiceRole.groupType -eq "Unified" -and $groups.MailNickname -notcontains $unifiedParams.MailNickname){
                     Write-Verbose "$logPrefix $($unifiedParams|ConvertTo-Json -Compress)"
-                    $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($unifiedParams | ConvertTo-Json -Depth 10) -OutputType PSObject
+                    $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($unifiedParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
                 }elseif($ServiceRole.groupType -like "" -and $groups.MailNickname -notcontains $secParams.MailNickname){
                     Write-Verbose "$logPrefix $($secParams|ConvertTo-Json -Compress)"
-                    $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject
+                    $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
                     if($ServiceRole.accessLevel -eq "ManagementPlane" -and $ServiceRole.name -eq "Admins" -and -not $NoPimEscalation){
                         $secParams.DisplayName = "$($GroupPrefix)$($GroupNamingDelimiter)PIM$($GroupNamingDelimiter)$ServiceName$($GroupNamingDelimiter)$($ServiceRole.accessLevel)$($GroupNamingDelimiter)$($ServiceRole.Name)"
                         $secParams.MailNickname = "PIM.$ServiceName.$($ServiceRole.accessLevel).$($ServiceRole.Name)"
-                        $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject
+                        $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
                     }
                 }
             }catch{
-                Write-Verbose "$logPrefix Failed processing Groups"
-                Write-Error $_
+                throw "Failed to create group for service role '$($ServiceRole.accessLevel) $($ServiceRole.Name)': $($_.Exception.Message)"
             }
         }
     }
 
     end {
-        $confirmed = $false
-        $i = 0
         Write-Verbose "$logPrefix Verifying Groups are available"
-        while(-not $confirmed){
-            Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
-            $checkGroups = @()
-            $checkGroups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
+        $refIds = @($groups.id | Where-Object { $_ })
+        $check = @{}
+        $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Groups" -logPrefix $logPrefix -Condition {
+            $check.Groups = @()
+            $check.Groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
             if(-not $NoPimEscalation){
-                $checkGroups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:PIM.$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
+                $check.Groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:PIM.$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
             }
-            $refIds = @($groups.id | Where-Object { $_ })
-            $chkIds = @($checkGroups.id | Where-Object { $_ })
-            if($refIds.Count -gt 0 -and $chkIds.Count -ge $refIds.Count -and (Compare-Object $refIds $chkIds | Measure-Object).Count -eq 0){
-                Write-Verbose "$logPrefix Graph consistency found confirming"
-                $confirmed = $true
-                continue
-            }
-            $i++
-            if($i -gt 10){
-                throw "Group object consistency with Entra not achieved"
-            }
-            Write-Verbose "$logPrefix Graph objects are not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
+            $chkIds = @($check.Groups.id | Where-Object { $_ })
+            $refIds.Count -gt 0 -and $chkIds.Count -ge $refIds.Count -and (Compare-Object $refIds $chkIds | Measure-Object).Count -eq 0
         }
-        return [psobject[]]$checkGroups
+        if(-not $confirmed){
+            throw "Group object consistency with Entra not achieved"
+        }
+        return [psobject[]]$check.Groups
     }
 }

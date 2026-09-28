@@ -134,6 +134,20 @@ function Invoke-EntraOpsMsGraphQuery {
         }
     }
 
+    #region Helper - Graph error code/message from the response body (the raw body also contains all response headers)
+    function Get-EntraOpsMsGraphErrorSummary {
+        param($ErrorRecord)
+        $Body = [string]$ErrorRecord.ErrorDetails.Message
+        if ($Body -match '(?s)(\{\s*"error".*\})\s*$') {
+            try {
+                $GraphError = ($Matches[1] | ConvertFrom-Json -ErrorAction Stop).error
+                if ($GraphError.code) { return " ($($GraphError.code): $($GraphError.message))" }
+            } catch { }
+        }
+        return ''
+    }
+    #endregion
+
     #region Helper - Acquire (and cache) a Microsoft Graph bearer token for the Invoke-RestMethod path
     function Get-EntraOpsMsGraphAccessToken {
         $Now = [DateTime]::UtcNow
@@ -472,7 +486,7 @@ function Invoke-EntraOpsMsGraphQuery {
                             if (($SuppressNotFoundWarning -and $StatusCode -eq 404) -or ($SuppressBadRequestWarning -and $StatusCode -eq 400) -or ($SuppressForbiddenWarning -and $StatusCode -eq 403)) {
                                 Write-Verbose "Failed to execute $Uri (expected $StatusCode, warning suppressed). Error: $($_.Exception.Message)"
                             } else {
-                                Write-Warning "Failed to execute $Uri (non-retryable error). Error: $($_.Exception.Message)"
+                                Write-Warning "Failed to execute $Uri (non-retryable error). Error: $($_.Exception.Message)$(Get-EntraOpsMsGraphErrorSummary -ErrorRecord $_)"
                             }
                         }
                         if ($ThrowOnFailure) {
@@ -657,7 +671,7 @@ function Invoke-EntraOpsMsGraphQuery {
                             if (($SuppressNotFoundWarning -and $StatusCode -eq 404) -or ($SuppressBadRequestWarning -and $StatusCode -eq 400) -or ($SuppressForbiddenWarning -and $StatusCode -eq 403)) {
                                 Write-Verbose "Failed to execute $Uri (expected $StatusCode, warning suppressed). Error: $($_.Exception.Message)"
                             } else {
-                                Write-Warning "Failed to execute $Uri (non-retryable error). Error: $($_.Exception.Message)"
+                                Write-Warning "Failed to execute $Uri (non-retryable error). Error: $($_.Exception.Message)$(Get-EntraOpsMsGraphErrorSummary -ErrorRecord $_)"
                             }
                         }
                         if ($ThrowOnFailure) {

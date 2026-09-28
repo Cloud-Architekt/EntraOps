@@ -135,7 +135,7 @@
     so every supported risk flag is reported. Use the Configuration Wizard to select flags by name.
 
 .PARAMETER EnableAlternateObjectTierLevelAttributes
-    Defines if User and ServicePrincipal objects should be classified by PowerShell filter expressions evaluated against their own resolved EntraOps details (section AlternateObjectTierLevelAttributes) instead of Custom Security Attributes. Default is false. The config file always includes the section with empty filter expressions so it can be filled in and enabled later; see README.md "Classify privileged objects by Alternate Tier Level Attributes" for the required syntax.    
+    Defines if User and ServicePrincipal objects should be classified by PowerShell filter expressions evaluated against their own resolved EntraOps details (section AlternateObjectTierLevelAttributes) instead of Custom Security Attributes. Default is false. The config file always includes the section with empty filter expressions so it can be filled in and enabled later; see README.md "Classify privileged objects by Alternate Tier Level Attributes" for the required syntax. Group objects don't support Custom Security Attributes; the 'Group' filter expressions of this section classify groups whenever at least one is set, independent of this switch.    
 
 .PARAMETER EnableTenantGovernanceSnapshot
     Defines if the EntraOps Tenant Governance Snapshot feature is enabled. Default is false.
@@ -552,6 +552,11 @@ function New-EntraOpsConfigFile {
                 ManagementPlane = ""
                 UserAccess      = ""
             }
+            Group            = [ordered]@{
+                ControlPlane    = ""
+                ManagementPlane = ""
+                UserAccess      = ""
+            }
         }
         PrivilegeHistory                              = [ordered]@{
             EnablePrivilegeHistory = $EnablePrivilegeHistory
@@ -585,6 +590,11 @@ function New-EntraOpsConfigFile {
             ManagementPlaneDelegationGroupId = ""
             ManagementPlaneGroupName         = "PRG-Tenant-ManagementPlane-PlatformOps"
             AdministratorGroupId             = ""
+            DefaultAzureRegion               = ""
+            SkipCatalogOwnerAssignment       = $false
+            CreateM365Group                  = $false
+            AddWorkloadPlaneAdminToUsers     = $false
+            GroupPrefix                      = "SG"
             ConstrainedDelegation            = [ordered]@{
                 ManagementPlane = [ordered]@{
                     ExcludedRoleDefinitionIds = @(
@@ -631,6 +641,38 @@ function New-EntraOpsConfigFile {
                 WorkloadPlane               = [ordered]@{
                     AuthenticationContextClassReferenceId = ""
                     AuthenticationContextDisplayName      = ""
+                }
+            }
+            PIMForGroups                     = [ordered]@{
+                MaximumActivationDuration       = "PT10H"
+                MaximumActiveAssignmentDuration = "P15D"
+            }
+            AssignmentPolicies               = [ordered]@{
+                BaselinePolicy              = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
+                WorkloadPlaneUsers          = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; RequestorScope = "AllMemberUsers"; AllowExtension = $true }
+                WorkloadPlaneAdmins         = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
+                ManagementPlaneAdmins       = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P1D"; AllowExtension = $true }
+                InitialWorkloadMembership   = [ordered]@{ Expiration = "P365D" }
+                InitialManagementMembership = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D" }
+                InitialManagementAdmins     = [ordered]@{ Expiration = "P365D" }
+                InitialWorkloadUsers        = [ordered]@{ Expiration = "P365D" }
+                InitialWorkloadAdmins       = [ordered]@{ Expiration = "P365D" }
+            }
+            AccessReviews                    = [ordered]@{
+                EnableAccessReviews        = $true
+                RecurrenceIntervalInMonths = 3
+                StartAfterDays             = 4
+                ReviewDuration             = "P25D"
+                Policies                   = [ordered]@{
+                    BaselinePolicy              = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    WorkloadPlaneUsers          = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
+                    WorkloadPlaneAdmins         = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    ManagementPlaneAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialWorkloadMembership   = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialManagementMembership = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialManagementAdmins     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialWorkloadUsers        = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
+                    InitialWorkloadAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
                 }
             }
         }

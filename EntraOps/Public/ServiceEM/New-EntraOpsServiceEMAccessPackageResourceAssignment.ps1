@@ -84,7 +84,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
     }
 
     process {
-        Write-Host "$logPrefix Beginning EM Access Package Resource Assignment"
+        Write-Verbose "$logPrefix Beginning EM Access Package Resource Assignment"
 
         Write-Verbose "$logPrefix Processing Access Package Assignments for $(($ServiceGroups|Measure-Object).Count) Groups"
         foreach($group in $ServiceGroups){
@@ -182,39 +182,27 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
     }
 
     end {
-        $confirmed = $false
-        $i = 0
         # When no role assignments were attempted (e.g. all groups skipped due to timeouts),
         # skip the consistency wait entirely.
         if (($packageRoles | Measure-Object).Count -eq 0) {
             Write-Verbose "$logPrefix No role assignments to verify — skipping consistency check"
             return [psobject[]]@()
         }
-        while(-not $confirmed){
-            Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
+        $expectedAssignments = @($packageRoles | Sort-Object -Unique)
+        $check = @{}
+        $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Access package resource roles" -logPrefix $logPrefix -Condition {
             try {
-                [object[]]$checkServiceAccessPackages = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages?`$filter=catalog/id eq '$($ServiceCatalogId)'&`$expand=resourceRoleScopes(`$expand=role,scope),catalog" -OutputType PSObject -DisableCache)
+                $check.Packages = [object[]]@(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages?`$filter=catalog/id eq '$($ServiceCatalogId)'&`$expand=resourceRoleScopes(`$expand=role,scope),catalog" -OutputType PSObject -DisableCache)
             } catch {
-                Write-Verbose "$logPrefix Consistency check lookup failed (transient?) — retrying"
-                Write-Error $_
-                $i++
-                if($i -gt 10){ throw "Access Package role assignment consistency with Entra not achieved" }
-                continue
+                Write-Verbose "$logPrefix Consistency check lookup failed (transient?) — retrying: $($_.Exception.Message)"
+                return $false
             }
-            $checkAssignments = @($checkServiceAccessPackages.ResourceRoleScopes | ForEach-Object {"$($_.Role.OriginId)_$($_.Scope.OriginId)"})
-            $expectedAssignments = @($packageRoles | Sort-Object -Unique)
-
-            if((Compare-Object $expectedAssignments $checkAssignments | Measure-Object).Count -eq 0){
-                Write-Verbose "$logPrefix Graph consistency found confirming"
-                $confirmed = $true
-                continue
-            }
-            $i++
-            if($i -gt 10){
-                throw "Access Package role assignment consistency with Entra not achieved"
-            }
-            Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
+            $checkAssignments = @($check.Packages.ResourceRoleScopes | ForEach-Object {"$($_.Role.OriginId)_$($_.Scope.OriginId)"})
+            (Compare-Object $expectedAssignments $checkAssignments | Measure-Object).Count -eq 0
         }
-        return [psobject[]]$checkServiceAccessPackages
+        if(-not $confirmed){
+            throw "Access Package role assignment consistency with Entra not achieved"
+        }
+        return [psobject[]]$check.Packages
     }
 }

@@ -30,6 +30,9 @@
     Do NOT set when a ControlPlaneDelegationGroupId is provided — in that case
     Bootstrap injects the delegated group so the Owner assignment must still run.
 
+.PARAMETER SkipCatalogOwnerAssignment
+    Skips the permanent Catalog Owner assignment for *-ControlPlane-Admins (owned or delegated group).
+
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
 
@@ -63,6 +66,8 @@ function New-EntraOpsServiceEMCatalogResourceRole {
 
         [switch]$SkipControlPlaneDelegation,        
 
+        [switch]$SkipCatalogOwnerAssignment,
+
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
@@ -72,7 +77,7 @@ function New-EntraOpsServiceEMCatalogResourceRole {
 
         try{
             Write-Verbose "$logPrefix Looking up catalog role assignments"
-            $catalogAssignments += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogRolesUri -OutputType PSObject
+            $catalogAssignments += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogRolesUri -OutputType PSObject -DisableCache
         }catch{
             Write-Verbose "$logPrefix Failed to find catalog role assignments"
             Write-Error $_
@@ -89,17 +94,18 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
     }
 
     process {
-        Write-Host "$logPrefix Beginning EM Catalog Resource Role"
+        Write-Verbose "$logPrefix Beginning EM Catalog Resource Role"
 
-        if($SkipControlPlaneDelegation){
-            Write-Verbose "$logPrefix Skipping Control Plane catalog roles"
+        if($SkipControlPlaneDelegation -or $SkipCatalogOwnerAssignment){
+            Write-Verbose "$logPrefix Skipping Catalog Owner assignment for ControlPlane-Admins"
             $catalogRoles = $catalogRoles | Where-Object { $_.displayName -ne "Owner" }
         }
 
         Write-Verbose "$logPrefix Processing $(($catalogRoles|Measure-Object).Count) catalog resource role assignments"
         foreach($catalogRole in $catalogRoles){
             $catalogRoleParams = @{
-                principalId = ($ServiceGroups|Where-Object{$_.DisplayName -like "$($catalogRole.filter)"}).Id
+                # PIM staging groups (SG-PIM-*) share the ManagementPlane-Admins suffix
+                principalId = ($ServiceGroups|Where-Object{$_.DisplayName -like "$($catalogRole.filter)" -and $_.DisplayName -notlike "*-PIM-*"}).Id
                 roleDefinitionId = $catalogRole.id
                 appScopeId = "/AccessPackageCatalog/$($ServiceCatalogId)"
             }
@@ -120,34 +126,16 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
     }
 
     end {
-        $confirmed = $false
-        $i = 0
-        while(-not $confirmed){
-            Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
-            $checkCatalogAssignments = @()
-            $checkCatalogAssignments = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogRolesUri -OutputType PSObject
-            
-            # Handle null or empty arrays
-            $expectedIds = @($catalogAssignments | Where-Object { $_.id } | Select-Object -ExpandProperty id)
-            $actualIds = @($checkCatalogAssignments | Where-Object { $_.id } | Select-Object -ExpandProperty id)
-            
-            if($expectedIds.Count -eq 0 -and $actualIds.Count -eq 0){
-                Write-Verbose "$logPrefix No catalog role assignments to verify"
-                $confirmed = $true
-                continue
-            }
-            
-            if((Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0){
-                Write-Verbose "$logPrefix Graph consistency found confirming"
-                $confirmed = $true
-                continue
-            }
-            $i++
-            if($i -gt 10){
-                throw "Catalog Resource Role Assignment consistency with Entra not achieved"
-            }
-            Write-Verbose "$logPrefix Graph objects are not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
+        $expectedIds = @($catalogAssignments | Where-Object { $_.id } | Select-Object -ExpandProperty id)
+        $check = @{}
+        $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Catalog role assignments" -logPrefix $logPrefix -Condition {
+            $check.Assignments = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogRolesUri -OutputType PSObject -DisableCache
+            $actualIds = @($check.Assignments | Where-Object { $_.id } | Select-Object -ExpandProperty id)
+            ($expectedIds.Count -eq 0 -and $actualIds.Count -eq 0) -or (Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0
         }
-        return [psobject[]]$checkCatalogAssignments
+        if(-not $confirmed){
+            throw "Catalog Resource Role Assignment consistency with Entra not achieved"
+        }
+        return [psobject[]]$check.Assignments
     }
 }

@@ -38,7 +38,7 @@ function New-EntraOpsServiceEMCatalog {
         $encodedCatalogDisplayName = ConvertTo-EntraOpsODataStringLiteral -Value $catalogDisplayName
         try {
             Write-Verbose "$logPrefix Looking up Catalog"
-            $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=accessPackages,resources" -OutputType PSObject
+            $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=accessPackages,resources" -OutputType PSObject -DisableCache
         } catch {
             Write-Verbose "$logPrefix Failed to find Catalog — will attempt create and handle DuplicateCatalog"
             Write-Error $_
@@ -46,7 +46,7 @@ function New-EntraOpsServiceEMCatalog {
     }
 
     process {
-        Write-Host "$logPrefix Beginning EM Catalog"
+        Write-Verbose "$logPrefix Beginning EM Catalog"
 
         try {
             if (-not $catalog) {
@@ -59,7 +59,7 @@ function New-EntraOpsServiceEMCatalog {
             if ($_.FullyQualifiedErrorId -like "DuplicateCatalog*" -or $_.Exception.Message -like "*DuplicateCatalog*") {
                 Write-Verbose "$logPrefix DuplicateCatalog — retrying lookup"
                 try {
-                    $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=accessPackages,resources" -OutputType PSObject
+                    $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=accessPackages,resources" -OutputType PSObject -DisableCache
                     Write-Verbose "$logPrefix Recovered catalog via retry lookup: $($catalog.Id)"
                 } catch {
                     Write-Verbose "$logPrefix Retry lookup also failed"
@@ -73,21 +73,16 @@ function New-EntraOpsServiceEMCatalog {
     }
 
     end {
-        $confirmed = $false
-        $i = 0
-        while (-not $confirmed) {
-            Start-Sleep -Seconds ([Math]::Pow(2, $i) - 1)
-            $checkCatalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=accessPackages,resources" -OutputType PSObject
-            if ($checkCatalog -and $catalog -and $checkCatalog.Id -eq $catalog.Id) {
-                Write-Verbose "$logPrefix Graph consistency found confirming"
-                $confirmed = $true
-                continue
-            }
-            $i++
-            if ($i -gt 10) {
-                throw "Catalog object consistency with Entra not achieved"
-            }
-            Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
+        if (-not $catalog -or -not $catalog.Id) {
+            throw "Catalog '$catalogDisplayName' could not be created or found. Check the previous errors and the EntitlementManagement.ReadWrite.All permission."
+        }
+        $check = @{}
+        $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Catalog $catalogDisplayName" -logPrefix $logPrefix -Condition {
+            $check.Catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=accessPackages,resources" -OutputType PSObject -DisableCache
+            $check.Catalog -and $check.Catalog.Id -eq $catalog.Id
+        }
+        if (-not $confirmed) {
+            throw "Catalog object consistency with Entra not achieved"
         }
         return [psobject]$catalog
     }

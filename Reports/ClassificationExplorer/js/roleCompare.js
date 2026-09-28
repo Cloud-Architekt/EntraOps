@@ -123,7 +123,7 @@ EOCE.roleCompare = (function () {
     // item's system may be a key like "EntraID" or a short label like "Entra ID").
     function reviewCandidates() {
         if (!window.EOReview) return [];
-        var selected = {};
+        var selected = Object.create(null);
         state.selected.forEach(function (k) { selected[k] = true; });
         var seen = {};
         var out = [];

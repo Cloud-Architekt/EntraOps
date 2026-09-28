@@ -45,13 +45,12 @@ function New-EntraOpsServiceEMCatalogResource {
     )
 
     begin {
-        $resourceRequests = @()
         $resources = @()
         Write-Verbose "$logPrefix Looking up Catalog Resources"
         try{
             #Catalog Resource Registration
             $catalogResourceUri = "/v1.0/identityGovernance/entitlementManagement/catalogs/$ServiceCatalogId/resources?`$expand=roles,scopes"
-            $resources += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogResourceUri -OutputType PSObject
+            $resources += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogResourceUri -OutputType PSObject -DisableCache
         }catch{
             Write-Verbose "$logPrefix Failed to find Catalog Resources"
             Write-Error $_
@@ -59,7 +58,7 @@ function New-EntraOpsServiceEMCatalogResource {
     }
 
     process {
-        Write-Host "$logPrefix Beginning EM Catalog Resource"
+        Write-Verbose "$logPrefix Beginning EM Catalog Resource"
 
         Write-Verbose "$logPrefix Processing $(($ServiceGroups|Measure-Object).Count) Catalog Resources"
         foreach($group in $ServiceGroups){
@@ -75,17 +74,12 @@ function New-EntraOpsServiceEMCatalogResource {
             }
 
             if($group.DisplayName -notin $resources.DisplayName){
-                $confirmed = $false
-                $i = 0
-                while(-not $confirmed){
-                    Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
+                $added = Wait-EntraOpsServiceEMCondition -Activity "Group $($group.DisplayName) in Entitlement Management" -logPrefix $logPrefix -Condition {
                     try{
                         Write-Verbose "$logPrefix $($group.DisplayName) not found as catalog resource, adding"
                         $result = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/resourceRequests" -Body ($resourceRequestParam | ConvertTo-Json -Depth 10) -OutputType PSObject -ErrorAction Stop
                         if($null -ne $result){
-                            $resourceRequests += $result
-                            $confirmed = $true
-                            continue
+                            return $true
                         }
                         # null return means wrapper absorbed the error as a warning — treat as retriable
                         Write-Verbose "$logPrefix Resource request returned null — will retry"
@@ -93,50 +87,34 @@ function New-EntraOpsServiceEMCatalogResource {
                         Write-Verbose "$logPrefix Failed to add catalog resource"
                         if($_.FullyQualifiedErrorId -like "ResourceAlreadyOnboarded*"){
                             Write-Verbose "$logPrefix Resource already onboarded"
-                            $confirmed = $true
-                            continue
+                            return $true
                         }elseif($_.FullyQualifiedErrorId -like "ResourceNotFoundInOriginSystem*"){
-                            # Group exists in Graph but has not yet propagated to EM origin system.
-                            # This is an expected transient condition after group creation — log only,
-                            # do NOT write to the error stream (Write-Error would terminate the caller
-                            # when $ErrorActionPreference = "Stop" before the retry loop can run).
+                            # Expected right after group creation; Write-Error would stop callers with ErrorActionPreference Stop
                             Write-Verbose "$logPrefix Group not yet indexed by Entitlement Management, will retry"
                         }else{
-                            # Unexpected failure — surface as a warning so it is visible without
-                            # terminating the caller; the retry loop will still run.
                             Write-Warning "$logPrefix Unexpected error adding catalog resource: $($_.Exception.Message)"
                         }
                     }
-                    $i++
-                    if($i -gt 8){
-                        throw "Group object consistency with Entitlement Management not achieved after $i retries"
-                    }
-                    Write-Verbose "$logPrefix Group objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
+                    return $false
+                }
+                if(-not $added){
+                    throw "Group object consistency with Entitlement Management not achieved for $($group.DisplayName)"
                 }
             }
         }
     }
 
     end {
-        $confirmed = $false
-        $i = 0
-        while(-not $confirmed){
-            Start-Sleep -Seconds ([Math]::Pow(2,$i)-1)
-            $checkResources = @()
-            $checkResources = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogResourceUri -OutputType PSObject -DisableCache
+        $check = @{}
+        $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Catalog resources" -logPrefix $logPrefix -Condition {
+            $check.Resources = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogResourceUri -OutputType PSObject -DisableCache
             $refNames = @($ServiceGroups.DisplayName | Where-Object { $_ })
-            $chkNames = @($checkResources.DisplayName | Where-Object { $_ })
-            if($refNames.Count -gt 0 -and $chkNames.Count -ge $refNames.Count -and (Compare-Object $refNames $chkNames | Measure-Object).Count -eq 0){
-                Write-Verbose "$logPrefix Graph consistency found confirming"
-                $confirmed = $true
-                continue
-            }
-            $i++
-            if($i -gt 10){
-                throw "Catalog Resource object consistency with Entra not achieved"
-            }
-            Write-Verbose "$logPrefix Graph objects not available, sleeping $([Math]::Pow(2,$i)-1) seconds"
+            $chkNames = @($check.Resources.DisplayName | Where-Object { $_ })
+            $refNames.Count -gt 0 -and $chkNames.Count -ge $refNames.Count -and (Compare-Object $refNames $chkNames | Measure-Object).Count -eq 0
         }
-        return [psobject[]]$checkResources
+        if(-not $confirmed){
+            throw "Catalog Resource object consistency with Entra not achieved"
+        }
+        return [psobject[]]$check.Resources
     }
 }

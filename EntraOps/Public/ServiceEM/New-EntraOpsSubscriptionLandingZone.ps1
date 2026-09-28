@@ -1,56 +1,70 @@
 <#
 .SYNOPSIS
-    Creates a two-tier (Sub + Rg split) EAM authorization structure for an Azure subscription.
+    Creates an EAM authorization structure for an Azure resource group or subscription.
 
 .DESCRIPTION
-    Provisions EAM groups, Entitlement Management catalogs, access packages,
-    PIM policies, and Azure resource groups across two separate service scopes:
+    Provisions EAM groups, an Entitlement Management catalog, access packages,
+    PIM policies and Azure role assignments. -DeploymentScope selects the layout:
 
-    Sub scope — subscription-level governance groups:
-      SG-<Prefix>-Sub-Members              (Microsoft 365 group)
-      SG-<Prefix>-Sub-CatalogPlane-Members
-      SG-<Prefix>-Sub-ManagementPlane-Members
-      SG-<Prefix>-Sub-ControlPlane-Admins  (PIM eligible: Azure User Access Administrator)
+    ResourceGroup (default) — one scope "Rg-<Prefix>": catalog Catalog-Rg-<Prefix>,
+      resource group RG-<Prefix> with all Azure role assignments on the resource group.
 
-    Rg scope — resource group-level workload groups:
-      SG-<Prefix>-Rg-Members               (Microsoft 365 group)
-      SG-<Prefix>-Rg-CatalogPlane-Members
-      SG-<Prefix>-Rg-ManagementPlane-Members
-      SG-<Prefix>-Rg-WorkloadPlane-Users
-      SG-<Prefix>-Rg-WorkloadPlane-Admins  (PIM eligible: Azure Contributor on RG)
+    Subscription — one scope "Sub-<Prefix>": catalog Catalog-Sub-<Prefix>, no resource
+      group; the same Azure role assignments are made on the subscription (-SubscriptionId).
 
-    Use this variant when subscription-level access (e.g. Azure Policy, Cost
-    Management, UAA delegation) must be separated from resource-group-level
-    workload access. Use New-EntraOpsSubscriptionLandingZoneAlt for a single-scope
-    flat structure without the Sub/Rg distinction.
+    Both — the previous two-scope layout: a "Sub-<Prefix>" scope with governance
+      groups and its own catalog (no Azure resources) and a "Rg-<Prefix>" scope with
+      the workload groups, catalog and resource group.
+
+    Groups per scope (PerService): SG-<Scope>-CatalogPlane-Members,
+    SG-<Scope>-ManagementPlane-Members, SG-<Scope>-WorkloadPlane-Users, SG-<Scope>-WorkloadPlane-Admins,
+    SG-<Scope>-ControlPlane-Admins and SG-<Scope>-ManagementPlane-Admins (+ PIM staging group), and with
+    -CreateM365Group the Microsoft 365 group <Scope> Members.
 
     Delegation and governance model behaviour:
     - When GovernanceModel = "PerService" (default), per-service groups are created
       for ControlPlane-Admins and ManagementPlane-Admins.
-    - When GovernanceModel = "Centralized", ControlPlane-Admins and
-      ManagementPlane-Admins are resolved to tenant-wide shared groups via
-      Resolve-EntraOpsServiceEMDelegationGroup for both Sub and Rg scopes.
+    - When GovernanceModel = "Centralized", ControlPlane-Admins,
+      ManagementPlane-Admins and CatalogPlane-Members are resolved to tenant-wide
+      shared groups via Resolve-EntraOpsServiceEMDelegationGroup.
     - Delegation group IDs are read from EntraOpsConfig.ServiceEM when not
       passed as parameters.
+
+.PARAMETER DeploymentScope
+    "ResourceGroup" (default), "Subscription" or "Both" (previous Sub + Rg layout with two catalogs).
+    -Smb and -LandingZoneComponents only apply to "Both".
 
 .PARAMETER ServiceMembers
     UPN(s) of users to add as initial WorkloadPlane-Members in both scopes.
     Defaults to the signed-in identity.
 
 .PARAMETER WorkloadPlaneAdmin
-    UPN of the workload plane admin (sets group ownership in both scopes). Defaults
-    to the signed-in identity.
+    UPN of the workload plane admin, assigned to the admin access package in both scopes
+    (ManagementPlane-Admins or WorkloadPlane-Admins). Defaults to the signed-in identity only
+    when -AssignOwner is set.
 
 .PARAMETER AssignOwner
     By default the module does not assign an owner to objects due to the 
-    potential privileged escalation concerns. Setting this switch will assign
-    the supplied owner from WorkloadPlaneAdmin.
+    potential privileged escalation concerns. Setting this switch sets the
+    WorkloadPlaneAdmin as owner of created groups.
 
-.PARAMETER OwnerIsNotMember
-    When set, the owner is not automatically added as a WorkloadPlane member.
+.PARAMETER AddWorkloadPlaneAdminToUsers
+    Also assigns the workload plane admin to the WorkloadPlane-Users access package, in addition to the
+    admin access package. Not set by default, so admin accounts don't get data-plane user access.
+    Defaults to EntraOpsConfig.ServiceEM.AddWorkloadPlaneAdminToUsers; an explicitly passed value wins.
 
 .PARAMETER NoPimEscalation
     When set, skips PIM policy configuration and PIM eligible assignment creation
+
+.PARAMETER CreateM365Group
+    Creates the Microsoft 365 group "<Scope>-<Prefix> Members" in each scope. It is meant for the
+    collaboration of the service team: a group mailbox and calendar for email and ChatOps notifications
+    and, when SharePoint Online or Microsoft Teams is used, a SharePoint site or team as knowledge base.
+    Intended members are the people behind the service's personas: WorkloadPlane users and admins,
+    ManagementPlane members and, in the PerService model, the ManagementPlane and ControlPlane admins.
+    ServiceEM doesn't add members to it and the group gets no PIM for Groups eligibilities or other
+    access; the admin and user groups are only granted through access packages. Not created by default.
+    Defaults to EntraOpsConfig.ServiceEM.CreateM365Group; an explicitly passed value wins.
 
 .PARAMETER EnablePIMOwnerAssignment
     When set, creates PIM for Groups eligible-owner assignments for the workload plane admin
@@ -59,11 +73,16 @@
     for all groups in both scopes.
 
 .PARAMETER SkipAzureResourceGroup
-    When set, no Azure resource groups are created for either scope.
+    When set, no Azure resource group and no Azure role assignments are created.
 
 .PARAMETER AzureRegion
-    Azure region for resource groups (e.g. "westeurope"). Required unless
-    -SkipAzureResourceGroup is set.
+    Azure region for the resource group (e.g. "westeurope"). Required unless
+    -SkipAzureResourceGroup is set or -DeploymentScope is "Subscription".
+
+.PARAMETER SubscriptionId
+    Subscription in which the resource group (or, for -DeploymentScope Subscription, the subscription
+    role assignments) is created. Required unless -SkipAzureResourceGroup is set. Validated before any
+    object is created; the previous Azure context is restored afterwards.
 
 .PARAMETER DeploymentPrefix
     Prefix used in all group DisplayNames and catalog names. Defaults to
@@ -75,6 +94,12 @@
     Owner / Azure UAA PIM eligible assignments for both scopes. Applied
     automatically when ControlPlaneDelegationGroupId is provided or when
     GovernanceModel is Centralized.
+
+.PARAMETER SkipCatalogOwnerAssignment
+    Do not assign the Catalog Owner role to ControlPlane-Admins in either catalog. Without this switch,
+    ControlPlane-Admins get a permanent (not PIM-protected) Catalog Owner assignment and can modify the
+    catalogs, access packages and policies. Prefer an eligible Identity Governance Administrator
+    assignment via PIM instead.
 
 .PARAMETER SkipManagementPlaneDelegation
     Skips creation of per-service ManagementPlane-Admins groups and their
@@ -111,6 +136,7 @@
     Object ID of an existing Entra group to use as CatalogPlane-Members across
     both scopes. Controls who can request elevated access packages and who reviews
     expiring assignments. Falls back to EntraOpsConfig.ServiceEM.AdministratorGroupId.
+    Required with GovernanceModel "Centralized".
 
 .PARAMETER ControlPlaneGroupName
     Display name of the tenant-wide ControlPlane delegation group to look up or
@@ -124,8 +150,12 @@
     "PRG-Tenant-ManagementPlane-PlatformOps". Overridden by
     EntraOpsConfig.ServiceEM.ManagementPlaneGroupName.
 
+.PARAMETER GroupPrefix
+    Prefix of the security group display names (e.g. "SG" for SG-Rg-<Prefix>-WorkloadPlane-Users).
+    Defaults to EntraOpsConfig.ServiceEM.GroupPrefix, otherwise "SG"; an explicitly passed value wins.
+
 .PARAMETER LandingZoneComponents
-    Custom landing zone scope definitions. Each entry must have a Role name
+    Custom landing zone scope definitions for -DeploymentScope Both. Each entry must have a Role name
     ("Sub", "Rg", or any custom label) and a ServiceRole array. Defaults to
     the standard Sub + Rg split structure.
 
@@ -133,32 +163,39 @@
     Text prepended to verbose messages. Defaults to the function name.
 
     .EXAMPLE
-    New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Sub-Management" `
-        -AzureRegion "westeurope" `
+    New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Management" `
+        -AzureRegion "westeurope" -SubscriptionId "<subscription-id>" `
         -WorkloadPlaneAdmin "admin@contoso.com" `
         -ServiceMembers @("alice@contoso.com", "bob@contoso.com")
 
-    Creates the full Sub + Rg EAM structure for "Sub-Management" with resource
-    groups in West Europe. Per-service admin groups are created (PerService 
-    governance model default).
+    Creates the Rg-Management scope with one catalog, the resource group RG-Management
+    in West Europe and the Azure role assignments on it. Per-service admin groups are
+    created (PerService governance model default).
 
 .EXAMPLE
-    New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Sub-Connectivity" `
-        -AzureRegion "northeurope" `
+    New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Connectivity" -DeploymentScope Subscription `
+        -SubscriptionId "<subscription-id>" -WorkloadPlaneAdmin "admin@contoso.com"
+
+    Creates the Sub-Connectivity scope with one catalog and assigns the Azure roles on
+    the subscription instead of a resource group.
+
+.EXAMPLE
+    New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Connectivity" -DeploymentScope Both `
+        -AzureRegion "northeurope" -SubscriptionId "<subscription-id>" `
         -ControlPlaneDelegationGroupId "00000000-0000-0000-0000-000000000001" `
         -ManagementPlaneDelegationGroupId "00000000-0000-0000-0000-000000000002" `
         -AdministratorGroupId "00000000-0000-0000-0000-000000000003"
 
-    Creates the Sub + Rg landing zone reusing explicit tenant-wide delegation
+    Creates the two-scope Sub + Rg landing zone reusing explicit tenant-wide delegation
     groups for ControlPlane-Admins, ManagementPlane-Admins, and CatalogPlane-Members
     across both scopes.
 
     .EXAMPLE
-    New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Sub-Dev" `
+    New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Dev" `
         -SkipAzureResourceGroup -NoPimEscalation
 
-    Creates all Entra ID groups, EM catalogs, and access packages for both Sub and
-    Rg scopes without Azure resource groups and without PIM. Useful for development
+    Creates all Entra ID groups, the EM catalog and access packages for the Rg-Dev
+    scope without Azure resources and without PIM. Useful for development
     environments or Entra-only access structures.
 
 .EXAMPLE
@@ -179,8 +216,9 @@
             )
         }
     )
-    New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Sub-Shared" `
-        -AzureRegion "westeurope" -LandingZoneComponents $CustomComponents
+    New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Sub-Shared" -DeploymentScope Both `
+        -AzureRegion "westeurope" -SubscriptionId "<subscription-id>" `
+        -LandingZoneComponents $CustomComponents
 
     Creates a reduced Sub + Rg landing zone for "Sub-Shared" with only the
     essential governance groups and no ManagementPlane separation.
@@ -194,17 +232,21 @@ function New-EntraOpsSubscriptionLandingZone {
 
         [string]$WorkloadPlaneAdmin,
 
-        [switch]$OwnerIsNotMember,
+        [switch]$AddWorkloadPlaneAdminToUsers,
 
         [switch]$AssignOwner,
 
         [switch]$NoPimEscalation,
+
+        [switch]$CreateM365Group,
 
         [switch]$EnablePIMOwnerAssignment,
 
         [switch]$SkipAzureResourceGroup,
 
         [switch]$SkipControlPlaneDelegation,
+
+        [switch]$SkipCatalogOwnerAssignment,
 
         [switch]$SkipManagementPlaneDelegation,
 
@@ -213,7 +255,13 @@ function New-EntraOpsSubscriptionLandingZone {
 
         [string]$AzureRegion,
 
+        [ValidatePattern('^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')]
+        [string]$SubscriptionId,
+
         [string]$DeploymentPrefix = "Default",
+
+        [ValidateSet("ResourceGroup", "Subscription", "Both")]
+        [string]$DeploymentScope = "ResourceGroup",
 
         [switch]$Smb,
 
@@ -226,6 +274,9 @@ function New-EntraOpsSubscriptionLandingZone {
         [string]$ControlPlaneGroupName = "PRG-Tenant-ControlPlane-IdentityOps",
 
         [string]$ManagementPlaneGroupName = "PRG-Tenant-ManagementPlane-PlatformOps",
+
+        [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_.-]*$')]
+        [string]$GroupPrefix = "SG",
 
         [pscustomobject[]]$LandingZoneComponents = @(
             [pscustomobject]@{
@@ -254,11 +305,29 @@ function New-EntraOpsSubscriptionLandingZone {
     begin {
         $report = @()
 
-        if (-not $SkipAzureResourceGroup -and [string]::IsNullOrWhiteSpace($AzureRegion)) {
-            throw "Parameter -AzureRegion is required unless -SkipAzureResourceGroup is specified."
+        if ($PSBoundParameters.ContainsKey('LandingZoneComponents')) {
+            if ($PSBoundParameters.ContainsKey('DeploymentScope') -and $DeploymentScope -ne "Both") {
+                throw "-LandingZoneComponents can only be used with -DeploymentScope Both."
+            }
+            $DeploymentScope = "Both"
+        } elseif ($DeploymentScope -ne "Both") {
+            $LandingZoneComponents = @(
+                [pscustomobject]@{
+                    Role = if ($DeploymentScope -eq "Subscription") { "Sub" } else { "Rg" }
+                    ServiceRole = @(
+                        [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"},
+                        [pscustomobject]@{accessLevel = "CatalogPlane"; name = "Members"; groupType = ""},
+                        [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Members"; groupType = ""},
+                        [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Users"; groupType = ""},
+                        [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Admins"; groupType = ""},
+                        [pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = ""}
+                    )
+                }
+            )
         }
+        Write-Verbose "$logPrefix Deployment scope: $DeploymentScope"
 
-        # Issue 3.0: Load EntraOpsConfig.json if not already loaded
+        # Load EntraOpsConfig.json if not already loaded
         if ($null -eq $Global:EntraOpsConfig) {
             $configPaths = @(
                 "$PWD/EntraOpsConfig.json"
@@ -288,64 +357,82 @@ function New-EntraOpsSubscriptionLandingZone {
             Write-Verbose "$logPrefix Using existing `$Global:EntraOpsConfig"
         }
 
-        # Read delegation Group IDs from EntraOpsConfig when not supplied as parameters.
+        # Landing zone defaults from EntraOpsConfig; explicit parameters take precedence
+        $configRegion = [string](Get-EntraOpsServiceEMConfigValue -Path 'DefaultAzureRegion')
+        if ([string]::IsNullOrWhiteSpace($AzureRegion) -and -not [string]::IsNullOrWhiteSpace($configRegion)) {
+            $AzureRegion = $configRegion
+            Write-Verbose "$logPrefix Using DefaultAzureRegion '$AzureRegion' from EntraOpsConfig"
+        }
+        foreach ($switchName in 'SkipCatalogOwnerAssignment', 'CreateM365Group', 'AddWorkloadPlaneAdminToUsers') {
+            if (-not $PSBoundParameters.ContainsKey($switchName) -and (Get-EntraOpsServiceEMConfigValue -Path $switchName) -eq $true) {
+                Set-Variable -Name $switchName -Value ([switch]$true)
+                Write-Verbose "$logPrefix Using $switchName from EntraOpsConfig"
+            }
+        }
+        $configGroupPrefix = [string](Get-EntraOpsServiceEMConfigValue -Path 'GroupPrefix')
+        if (-not $PSBoundParameters.ContainsKey('GroupPrefix') -and -not [string]::IsNullOrWhiteSpace($configGroupPrefix)) {
+            $GroupPrefix = $configGroupPrefix
+            Write-Verbose "$logPrefix Using GroupPrefix '$GroupPrefix' from EntraOpsConfig"
+        }
+
+        if (-not $SkipAzureResourceGroup -and $DeploymentScope -ne "Subscription" -and [string]::IsNullOrWhiteSpace($AzureRegion)) {
+            throw "Parameter -AzureRegion (or ServiceEM.DefaultAzureRegion) is required unless -SkipAzureResourceGroup is specified or -DeploymentScope is Subscription."
+        }
+        if (-not $SkipAzureResourceGroup) {
+            if ([string]::IsNullOrWhiteSpace($SubscriptionId)) {
+                throw "Parameter -SubscriptionId is required unless -SkipAzureResourceGroup is specified."
+            }
+            $currentAzTenantId = (Get-AzContext).Tenant.Id
+            if ([string]::IsNullOrWhiteSpace($currentAzTenantId)) {
+                throw "No Azure context found. Sign in with Connect-EntraOps before creating an Azure Resource Group."
+            }
+            # Fail before any Entra object is created if the subscription isn't accessible in the current tenant
+            Get-AzSubscription -SubscriptionId $SubscriptionId -TenantId $currentAzTenantId -ErrorAction Stop | Out-Null
+        }
+
+        # Read delegation Group IDs and group names from EntraOpsConfig when not supplied as parameters.
         # A non-empty config value also auto-activates the corresponding skip flag.
-        if ([string]::IsNullOrWhiteSpace($ControlPlaneDelegationGroupId) -and
-            $null -ne $Global:EntraOpsConfig -and
-            $Global:EntraOpsConfig.ContainsKey('ServiceEM') -and
-            -not [string]::IsNullOrWhiteSpace($Global:EntraOpsConfig.ServiceEM.ControlPlaneDelegationGroupId)) {
-            Write-Verbose "$logPrefix Reading ControlPlaneDelegationGroupId from EntraOpsConfig"
-            $ControlPlaneDelegationGroupId = $Global:EntraOpsConfig.ServiceEM.ControlPlaneDelegationGroupId
-        }
-        if ([string]::IsNullOrWhiteSpace($ManagementPlaneDelegationGroupId) -and
-            $null -ne $Global:EntraOpsConfig -and
-            $Global:EntraOpsConfig.ContainsKey('ServiceEM') -and
-            -not [string]::IsNullOrWhiteSpace($Global:EntraOpsConfig.ServiceEM.ManagementPlaneDelegationGroupId)) {
-            Write-Verbose "$logPrefix Reading ManagementPlaneDelegationGroupId from EntraOpsConfig"
-            $ManagementPlaneDelegationGroupId = $Global:EntraOpsConfig.ServiceEM.ManagementPlaneDelegationGroupId
-        }
-        if ([string]::IsNullOrWhiteSpace($AdministratorGroupId) -and
-            $null -ne $Global:EntraOpsConfig -and
-            $Global:EntraOpsConfig.ContainsKey('ServiceEM') -and
-            -not [string]::IsNullOrWhiteSpace($Global:EntraOpsConfig.ServiceEM.AdministratorGroupId)) {
-            Write-Verbose "$logPrefix Reading AdministratorGroupId from EntraOpsConfig"
-            $AdministratorGroupId = $Global:EntraOpsConfig.ServiceEM.AdministratorGroupId
+        foreach ($configName in 'ControlPlaneDelegationGroupId', 'ManagementPlaneDelegationGroupId', 'AdministratorGroupId') {
+            $configValue = [string](Get-EntraOpsServiceEMConfigValue -Path $configName)
+            if ([string]::IsNullOrWhiteSpace((Get-Variable -Name $configName -ValueOnly)) -and -not [string]::IsNullOrWhiteSpace($configValue)) {
+                Write-Verbose "$logPrefix Reading $configName from EntraOpsConfig"
+                Set-Variable -Name $configName -Value $configValue
+            }
         }
 
         # Read GovernanceModel from parameter > config > default (PerService)
         $governanceModelValue = "PerService"
         $governanceModelSource = "default"
-        
+        $configGovernanceModel = [string](Get-EntraOpsServiceEMConfigValue -Path 'GovernanceModel')
         if ($PSBoundParameters.ContainsKey('GovernanceModel')) {
             $governanceModelValue = $GovernanceModel
             $governanceModelSource = "parameter"
-        } elseif ($null -ne $Global:EntraOpsConfig -and
-            $Global:EntraOpsConfig.ContainsKey('ServiceEM') -and
-            -not [string]::IsNullOrWhiteSpace($Global:EntraOpsConfig.ServiceEM.GovernanceModel)) {
-            $governanceModelValue = $Global:EntraOpsConfig.ServiceEM.GovernanceModel
+        } elseif (-not [string]::IsNullOrWhiteSpace($configGovernanceModel)) {
+            $governanceModelValue = $configGovernanceModel
             $governanceModelSource = "config"
         }
-        
+
         Write-Verbose "$logPrefix Using governance model '$governanceModelValue' (source: $governanceModelSource)"
+        # Centralized removes CatalogPlane-Members, the requestor scope, approver and reviewer fallback of the policies
+        if ($governanceModelValue -eq "Centralized" -and [string]::IsNullOrWhiteSpace($AdministratorGroupId)) {
+            throw "The Centralized governance model requires -AdministratorGroupId (or ServiceEM.AdministratorGroupId in EntraOpsConfig): no per-service CatalogPlane-Members group is created. Use -GovernanceModel PerService or configure the administrator group."
+        }
 
         # Auto-resolve or create role-assignable delegation groups.
         # Searches by config ID, then by default group name, then creates if permissions allow.
-        # Read group names from config if available.
-        if ($null -ne $Global:EntraOpsConfig -and
-            $Global:EntraOpsConfig.ContainsKey('ServiceEM')) {
-            if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsConfig.ServiceEM.ControlPlaneGroupName)) {
-                $ControlPlaneGroupName = $Global:EntraOpsConfig.ServiceEM.ControlPlaneGroupName
-            }
-            if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsConfig.ServiceEM.ManagementPlaneGroupName)) {
-                $ManagementPlaneGroupName = $Global:EntraOpsConfig.ServiceEM.ManagementPlaneGroupName
+        # Group names from config take precedence over the parameter defaults.
+        foreach ($configName in 'ControlPlaneGroupName', 'ManagementPlaneGroupName') {
+            $configValue = [string](Get-EntraOpsServiceEMConfigValue -Path $configName)
+            if (-not [string]::IsNullOrWhiteSpace($configValue)) {
+                Set-Variable -Name $configName -Value $configValue
             }
         }
 
         if ($governanceModelValue -eq "Centralized") {
             # Centralized model: Use tenant-wide delegation groups
             Write-Verbose "$logPrefix Centralized governance model - using tenant-wide delegation groups"
-            
-            # Issue 1.5: Add graceful fallback to PerService if delegation groups not found
+
+            # Graceful fallback to PerService if delegation groups not found
             $centralizedFailed = $false
             $centralizedError = $null
             
@@ -355,6 +442,7 @@ function New-EntraOpsSubscriptionLandingZone {
                     -GroupId $ControlPlaneDelegationGroupId `
                     -DefaultGroupName $ControlPlaneGroupName `
                     -ConfigKey "ControlPlaneDelegationGroupId" `
+                    -AssignOwner:$AssignOwner `
                     -logPrefix $logPrefix
                 $SkipControlPlaneDelegation = $true
             } catch {
@@ -370,6 +458,7 @@ function New-EntraOpsSubscriptionLandingZone {
                         -GroupId $ManagementPlaneDelegationGroupId `
                         -DefaultGroupName $ManagementPlaneGroupName `
                         -ConfigKey "ManagementPlaneDelegationGroupId" `
+                        -AssignOwner:$AssignOwner `
                         -logPrefix $logPrefix
                     $SkipManagementPlaneDelegation = $true
                 } catch {
@@ -419,6 +508,7 @@ function New-EntraOpsSubscriptionLandingZone {
                     -GroupId $ControlPlaneDelegationGroupId `
                     -DefaultGroupName $ControlPlaneGroupName `
                     -ConfigKey "ControlPlaneDelegationGroupId" `
+                    -AssignOwner:$AssignOwner `
                     -logPrefix $logPrefix
                 $SkipControlPlaneDelegation = $true
             }
@@ -429,6 +519,7 @@ function New-EntraOpsSubscriptionLandingZone {
                     -GroupId $ManagementPlaneDelegationGroupId `
                     -DefaultGroupName $ManagementPlaneGroupName `
                     -ConfigKey "ManagementPlaneDelegationGroupId" `
+                    -AssignOwner:$AssignOwner `
                     -logPrefix $logPrefix
                 $SkipManagementPlaneDelegation = $true
             }
@@ -436,23 +527,21 @@ function New-EntraOpsSubscriptionLandingZone {
 
         # Add ManagementPlane-Admins to the appropriate component unless it is being delegated.
         if (-not $SkipManagementPlaneDelegation) {
-            if ($smb) {
-                $i = [array]::IndexOf($LandingZoneComponents.Role, "Rg")
-                $LandingZoneComponents[$i].ServiceRole += [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = ""}
-            } else {
-                $i = [array]::IndexOf($LandingZoneComponents.Role, "Sub")
+            $mgmtAdminsRole = if ($DeploymentScope -ne "Both") { $LandingZoneComponents[0].Role } elseif ($smb) { "Rg" } else { "Sub" }
+            $i = [array]::IndexOf(@($LandingZoneComponents.Role), $mgmtAdminsRole)
+            if ($i -ge 0) {
                 $LandingZoneComponents[$i].ServiceRole += [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = ""}
             }
         }
 
         if ($SkipControlPlaneDelegation) {
-            Write-Verbose "$logPrefix Removing ControlPlane components from Sub ServiceRoles"
-            $i = [array]::IndexOf($LandingZoneComponents.Role, "Sub")
-            $LandingZoneComponents[$i].ServiceRole = $LandingZoneComponents[$i].ServiceRole |
-                Where-Object { $_.accessLevel -ne "ControlPlane" }
+            Write-Verbose "$logPrefix Removing ControlPlane components from ServiceRoles"
+            foreach ($component in $LandingZoneComponents) {
+                $component.ServiceRole = @($component.ServiceRole | Where-Object { $_.accessLevel -ne "ControlPlane" })
+            }
         }
         
-        # Issue 2.2: Log final switch states for troubleshooting
+        # Log final switch states for troubleshooting
         Write-Verbose "$logPrefix =========================================="
         Write-Verbose "$logPrefix FINAL DELEGATION SWITCH STATES:"
         Write-Verbose "$logPrefix   SkipControlPlaneDelegation:    $SkipControlPlaneDelegation"
@@ -471,24 +560,31 @@ function New-EntraOpsSubscriptionLandingZone {
 
             $splatServiceBootstrap = @{
                 ServiceName                      = $component.Role + "-" + $DeploymentPrefix
-                OwnerIsNotMember                 = $OwnerIsNotMember
+                GroupPrefix                      = $GroupPrefix
+                AddWorkloadPlaneAdminToUsers     = $AddWorkloadPlaneAdminToUsers
                 NoPimEscalation                  = $NoPimEscalation
+                CreateM365Group                  = $CreateM365Group
                 EnablePIMOwnerAssignment         = $EnablePIMOwnerAssignment
                 AzureRegion                      = $AzureRegion
                 ServiceRoles                     = $component.ServiceRole
                 SkipControlPlaneDelegation       = $SkipControlPlaneDelegation
+                SkipCatalogOwnerAssignment       = $SkipCatalogOwnerAssignment
                 SkipManagementPlaneDelegation    = $SkipManagementPlaneDelegation
                 ControlPlaneDelegationGroupId    = $ControlPlaneDelegationGroupId
                 ManagementPlaneDelegationGroupId = $ManagementPlaneDelegationGroupId
                 AdministratorGroupId             = $AdministratorGroupId
             }
-            if ($component.Role -eq "Sub") {
+            if ($component.Role -eq "Sub" -and $DeploymentScope -eq "Both") {
                 $splatServiceBootstrap += @{
                     SkipAzureResourceGroup = $true
                 }
             } else {
                 $splatServiceBootstrap += @{
                     SkipAzureResourceGroup = $SkipAzureResourceGroup
+                    AzureScope             = if ($DeploymentScope -eq "Subscription") { "Subscription" } else { "ResourceGroup" }
+                }
+                if (-not $SkipAzureResourceGroup) {
+                    $splatServiceBootstrap.SubscriptionId = $SubscriptionId
                 }
             }
             # Forward ServiceMembers to every component so that all
@@ -498,11 +594,10 @@ function New-EntraOpsSubscriptionLandingZone {
                 $splatServiceBootstrap.ServiceMembers = $ServiceMembers
             }
 
-            # Only forward owner information when explicit owner assignment is requested.
+            if ($PSBoundParameters.ContainsKey('WorkloadPlaneAdmin') -and -not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdmin)) {
+                $splatServiceBootstrap.WorkloadPlaneAdmin = $WorkloadPlaneAdmin
+            }
             if ($AssignOwner) {
-                if ($PSBoundParameters.ContainsKey('WorkloadPlaneAdmin') -and -not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdmin)) {
-                    $splatServiceBootstrap.WorkloadPlaneAdmin = $WorkloadPlaneAdmin
-                }
                 $splatServiceBootstrap.AssignOwner = $AssignOwner
             }
 

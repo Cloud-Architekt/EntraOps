@@ -250,6 +250,14 @@ Describe "New-EntraOpsServiceEntraGroup - Unit Tests" {
             $result2 | Should -HaveCount 1
             $result2[0].MailNickname | Should -Be "TestSvc.Members"
         }
+
+        It "Should bypass the Graph cache when looking up existing groups" {
+            $roles = @([pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" })
+
+            New-EntraOpsServiceEntraGroup -ServiceName "TestSvc" -ServiceRoles $roles | Out-Null
+
+            Should -Invoke Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -ParameterFilter { $Method -eq 'GET' -and -not $DisableCache } -Times 0 -Exactly
+        }
     }
     
     Context "Owners OData Bind Format" {

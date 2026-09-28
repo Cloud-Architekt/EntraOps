@@ -23,6 +23,9 @@
 .PARAMETER ConfigFilePath
     Path to EntraOpsConfig.json for persistence.
 
+.PARAMETER AssignOwner
+    Sets the signed-in user as owner of an auto-created group. Without this switch the group is created without owner.
+
 .PARAMETER logPrefix
     Log prefix for verbose output.
 
@@ -47,6 +50,8 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
 
         [string]$ConfigFilePath = "$PWD/EntraOpsConfig.json",
 
+        [switch]$AssignOwner,
+
         [string]$logPrefix = "[Resolve-EntraOpsServiceEMDelegationGroup]"
     )
 
@@ -54,7 +59,13 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
     if (-not [string]::IsNullOrWhiteSpace($GroupId)) {
         Write-Verbose "$logPrefix $Plane delegation group ID supplied: $GroupId — validating"
         try {
-            $existing = Get-MgGroup -GroupId $GroupId -ErrorAction Stop
+            if ($GroupId -notmatch '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') {
+                throw "'$GroupId' is not a valid object ID"
+            }
+            $existing = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$GroupId" -OutputType PSObject -DisableCache -ThrowOnFailure -SuppressNotFoundWarning
+            if (-not $existing.Id) {
+                throw "Group '$GroupId' not found"
+            }
             Write-Verbose "$logPrefix Validated $Plane group: $($existing.DisplayName) ($($existing.Id))"
             return $existing.Id
         } catch {
@@ -65,8 +76,8 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
     # 2. Search by default display name.
     Write-Verbose "$logPrefix Searching for existing $Plane group by name: '$DefaultGroupName'"
     try {
-        $escapedDefaultGroupName = $DefaultGroupName.Replace("'", "''")
-        $found = Get-MgGroup -Filter "displayName eq '$escapedDefaultGroupName'" -ConsistencyLevel eventual -ErrorAction Stop
+        $encodedDefaultGroupName = ConvertTo-EntraOpsODataStringLiteral -Value $DefaultGroupName
+        $found = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$filter=displayName eq '$encodedDefaultGroupName'" -OutputType PSObject -DisableCache -ThrowOnFailure | Where-Object { $_.Id })
     } catch {
         Write-Verbose "$logPrefix Name-based lookup failed: $_"
         $found = $null
@@ -120,20 +131,25 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
 
     Write-Verbose "$logPrefix Creating role-assignable $Plane group: '$DefaultGroupName'"
     try {
-        $ownerUri = "https://graph.microsoft.com/v1.0/users/$($mgContext.Account)"
-        # Resolve owner principal for the group
-        $ownerUser = Get-MgUser -UserId $mgContext.Account -ErrorAction Stop
-
         $newGroupParams = @{
-            DisplayName         = $DefaultGroupName
-            Description         = "Tenant-wide $Plane delegation group for ServiceEM landing zones (role-assignable)"
-            MailNickname        = ($DefaultGroupName -replace '[^a-zA-Z0-9]', '')
-            SecurityEnabled     = $true
-            MailEnabled         = $false
-            IsAssignableToRole  = $true
-            "owners@odata.bind" = @("https://graph.microsoft.com/v1.0/users/$($ownerUser.Id)")
+            displayName         = $DefaultGroupName
+            description         = "Tenant-wide $Plane delegation group for ServiceEM landing zones (role-assignable)"
+            mailNickname        = ($DefaultGroupName -replace '[^a-zA-Z0-9]', '')
+            securityEnabled     = $true
+            mailEnabled         = $false
+            isAssignableToRole  = $true
         }
-        $newGroup = New-MgGroup -BodyParameter $newGroupParams -ErrorAction Stop
+        if ($AssignOwner) {
+            if ([string]::IsNullOrWhiteSpace($mgContext.Account)) {
+                throw "No signed-in user available as owner of the new group (app-only sign-in)."
+            }
+            $ownerUser = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$([uri]::EscapeDataString($mgContext.Account))" -OutputType PSObject -ThrowOnFailure
+            $newGroupParams["owners@odata.bind"] = @("https://graph.microsoft.com/v1.0/users/$($ownerUser.Id)")
+        }
+        $newGroup = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($newGroupParams | ConvertTo-Json -Depth 5) -OutputType PSObject -ThrowOnFailure
+        if (-not $newGroup.Id) {
+            throw "Group creation returned no object ID."
+        }
         Write-Verbose "$logPrefix Created role-assignable $Plane group '$DefaultGroupName' ($($newGroup.Id))"
     } catch {
         $errorMsg = @(

@@ -63,6 +63,74 @@ test("exports every Tenant Governance snapshot retry schedule", async ({ page })
     await expect(page.locator("#wizPreview")).toContainText('"SnapshotScheduledCronCompleteRetry2": "0 8 * * *"');
 });
 
+test("exports Service EM defaults and preserves imported Service EM settings", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.getByRole("button", { name: /Service EM/ }).click();
+
+    await expect(page.locator('[data-key="SemGovernanceModel"]')).toHaveValue("Centralized");
+    await expect(page.locator('[data-field="SemGovernanceModel"] .wiz-field-default')).toHaveText("Default: Centralized");
+    await expect(page.locator('[data-field="SemMpExcludedRoleDefinitionIds"] .wiz-field-default')).toHaveText("Default: Owner, User Access Administrator, Role Based Access Control Administrator");
+    let preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.ServiceEM.ControlPlaneGroupName).toBe("PRG-Tenant-ControlPlane-IdentityOps");
+    expect(preview.ServiceEM.ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds).toHaveLength(3);
+    expect(preview.ServiceEM.ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds).toHaveLength(16);
+    expect(preview.ServiceEM.PIMAuthenticationContext.EnableAuthenticationContext).toBe(false);
+    expect(preview.ServiceEM.DefaultAzureRegion).toBe("");
+    expect(preview.ServiceEM.SkipCatalogOwnerAssignment).toBe(false);
+    expect(preview.ServiceEM.CreateM365Group).toBe(false);
+    expect(preview.ServiceEM.AddWorkloadPlaneAdminToUsers).toBe(false);
+    expect(preview.ServiceEM.GroupPrefix).toBe("SG");
+    expect(preview.ServiceEM.PIMForGroups).toEqual({ MaximumActivationDuration: "PT10H", MaximumActiveAssignmentDuration: "P15D" });
+    expect(preview.ServiceEM.AssignmentPolicies.BaselinePolicy).toEqual({ Expiration: "P365D", ApprovalTimeout: "P2D", AllowExtension: true });
+    expect(preview.ServiceEM.AssignmentPolicies.WorkloadPlaneUsers.RequestorScope).toBe("AllMemberUsers");
+    expect(preview.ServiceEM.AssignmentPolicies.ManagementPlaneAdmins.ApprovalTimeout).toBe("P1D");
+    expect(preview.ServiceEM.AssignmentPolicies.InitialWorkloadUsers.Expiration).toBe("P365D");
+    expect(preview.ServiceEM.AccessReviews).toMatchObject({ EnableAccessReviews: true, RecurrenceIntervalInMonths: 3, StartAfterDays: 4, ReviewDuration: "P25D" });
+    expect(Object.keys(preview.ServiceEM.AccessReviews.Policies)).toHaveLength(9);
+    expect(preview.ServiceEM.AccessReviews.Policies.WorkloadPlaneUsers).toEqual({ ReviewerType: "Group", Reviewers: ["WorkloadPlane-Admins"] });
+    expect(preview.ServiceEM.AccessReviews.Policies.BaselinePolicy).toEqual({ ReviewerType: "Group", Reviewers: ["ManagementPlane-Admins"] });
+
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            ServiceEM: {
+                GovernanceModel: "PerService",
+                ControlPlaneDelegationGroupId: "11111111-1111-1111-1111-111111111111",
+                ConstrainedDelegation: { WorkloadPlane: { AllowedRoleDefinitionIds: ["00482a5a-887f-4fb3-b363-3b7fe8e74483"] } },
+                PIMAuthenticationContext: { EnableAuthenticationContext: true, ControlPlane: { AuthenticationContextClassReferenceId: "c1" } },
+                DefaultAzureRegion: "swedencentral",
+                CreateM365Group: true,
+                PIMForGroups: { MaximumActivationDuration: "PT8H" },
+                AssignmentPolicies: { WorkloadPlaneUsers: { RequestorScope: "CatalogPlaneMembers" } },
+                AccessReviews: { RecurrenceIntervalInMonths: 6, Policies: { WorkloadPlaneAdmins: { ReviewerType: "SpecificReviewers", Reviewers: ["admin@contoso.com"] } } }
+            }
+        }))
+    });
+
+    await expect(page.locator('[data-key="SemGovernanceModel"]')).toHaveValue("PerService");
+    await expect(page.locator('[data-key="SemEnableAuthenticationContext"]')).toBeChecked();
+    await page.locator('[data-key="SemMpExcludedRoleDefinitionIds"]').fill("8e3af657-a8ff-443c-a75c-2fe8c4bcb635,\n18d7d88d-d35e-4fb5-a5c3-7773c20a72d9");
+    preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.ServiceEM.ControlPlaneDelegationGroupId).toBe("11111111-1111-1111-1111-111111111111");
+    expect(preview.ServiceEM.ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds).toEqual(["00482a5a-887f-4fb3-b363-3b7fe8e74483"]);
+    expect(preview.ServiceEM.ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds).toEqual(["8e3af657-a8ff-443c-a75c-2fe8c4bcb635", "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9"]);
+    expect(preview.ServiceEM.PIMAuthenticationContext.ControlPlane.AuthenticationContextClassReferenceId).toBe("c1");
+    expect(preview.ServiceEM.DefaultAzureRegion).toBe("swedencentral");
+    expect(preview.ServiceEM.CreateM365Group).toBe(true);
+    await expect(page.locator('[data-key="SemCreateM365Group"]')).toBeChecked();
+    expect(preview.ServiceEM.PIMForGroups.MaximumActivationDuration).toBe("PT8H");
+    expect(preview.ServiceEM.PIMForGroups.MaximumActiveAssignmentDuration).toBe("P15D");
+    expect(preview.ServiceEM.AssignmentPolicies.WorkloadPlaneUsers.RequestorScope).toBe("CatalogPlaneMembers");
+    expect(preview.ServiceEM.AccessReviews.RecurrenceIntervalInMonths).toBe(6);
+    await expect(page.locator('[data-key="SemArWorkloadPlaneAdminsReviewerType"]')).toHaveValue("SpecificReviewers");
+    expect(preview.ServiceEM.AccessReviews.Policies.WorkloadPlaneAdmins).toEqual({ ReviewerType: "SpecificReviewers", Reviewers: ["admin@contoso.com"] });
+    expect(preview.ServiceEM.AccessReviews.Policies.InitialWorkloadUsers.Reviewers).toEqual(["WorkloadPlane-Admins"]);
+    await page.locator('[data-key="SemArBaselinePolicyReviewerType"]').selectOption("SelfReview");
+    preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.ServiceEM.AccessReviews.Policies.BaselinePolicy.ReviewerType).toBe("SelfReview");
+});
+
 test("preserves EIDSCA finding exclusions through import and export", async ({ page }) => {
     await page.goto(wizardUrl);
     await page.locator("#wizImportFile").setInputFiles({
@@ -115,6 +183,27 @@ test("preserves updater, advanced CSA and unknown settings through import and ex
     await expect(preview).toContainText('"PrivilegedUserAdminTierLevelAttribute": "customUserTier"');
     await expect(preview).toContainText('"FutureSection"');
     await expect(preview).toContainText('"Value": 42');
+});
+
+test("preserves Group classification filters while Custom Security Attributes stay active", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            AlternateObjectTierLevelAttributes: {
+                Enabled: false,
+                Group: { ControlPlane: '$Object.ObjectDisplayName -like "PRG-Tier0-*"', ManagementPlane: "", UserAccess: "" }
+            }
+        }))
+    });
+    await page.getByRole("button", { name: /Object Classification/ }).click();
+
+    await expect(page.locator('.wiz-tier-block[data-objtype="Group"]')).toHaveCount(3);
+    const preview = page.locator("#wizPreview");
+    await expect(preview).toContainText('"Enabled": false');
+    await expect(preview).toContainText('"Group": {');
+    await expect(preview).toContainText('PRG-Tier0-*');
 });
 
 test("exports and imports deleted Azure RBAC principal handling", async ({ page }) => {
