@@ -43,7 +43,7 @@ $ExcludedPathPatterns = @(
     'Docs/data/'
     'EntraOpsConfig.json'
     # This validator's own tests must contain the patterns it rejects.
-    'Tests/Test-EntraOpsReleaseContent.Tests.ps1'
+    'Tests/Reporting/Test-EntraOpsReleaseContent.Tests.ps1'
 )
 
 # Tenant and identity placeholders that are intentionally used in examples and fixtures.
@@ -108,6 +108,9 @@ foreach ($File in $Files) {
 
     foreach ($Match in [regex]::Matches($Content, '(?<Mail>[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})')) {
         $MailAddress = $Match.Groups['Mail'].Value.ToLowerInvariant()
+        if ($MailAddress -like '*@odata.bind') {
+            continue
+        }
         $MailDomain = $MailAddress.Split('@')[-1]
         if ($MailAddress -in $AllowedMailAddresses -or $MailDomain -in $AllowedMailDomains) {
             continue

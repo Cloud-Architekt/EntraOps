@@ -499,6 +499,7 @@
         "RoleDefinitionActions": [
           "AttackSimulation.ReadWrite.All",
           "AuditActivity.Write",
+          "CaseManagement.ConfigManage.All",
           "CaseManagement.ReadWrite.All",
           "ContentActivity.Write",
           "CustomDetection.ReadWrite.All",
@@ -595,6 +596,7 @@
         "RoleDefinitionActions": [
           "Group-NestingSupport.ReadWrite.All",
           "Group-OnPremisesSyncBehavior.ReadWrite.All",
+          "Group-PreferredDataLocation.ReadWrite.All",
           "Group.ReadWrite.All",
           "GroupMember.ReadWrite.All",
           "GroupSettings.ReadWrite.All",
@@ -776,6 +778,19 @@
         "RoleDefinitionActions": [
           "Directory.ReadWrite.All",
           "Domain.ReadWrite.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
+        "Service": "Lockbox",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "LockboxRequest.ReadWrite.All",
+          "LockboxSettings.ReadWrite.All"
         ]
       },
       {
@@ -1751,6 +1766,12 @@
           "Content.Process.All",
           "Content.Process.User",
           "Group.ManageProtection.All",
+          "InfoProtectABACPolicy.Read.All",
+          "InfoProtectABACPolicy.ReadWrite.All",
+          "InfoProtectAttributeAssignment.Read.All",
+          "InfoProtectAttributeAssignment.ReadWrite.All",
+          "InfoProtectAttributeDefinition.Read.All",
+          "InfoProtectAttributeDefinition.ReadWrite.All",
           "ProtectionScopes.Compute.All",
           "ProtectionScopes.Compute.User",
           "RealTimeActivityFeed.Read.All",
@@ -2621,6 +2642,8 @@
           "ConsentRequest.Read",
           "CrossTenantUserProfileSharing.Read",
           "LifecyclePolicies-Guests.Read.All",
+          "LockboxRequest.Read.All",
+          "LockboxSettings.Read.All",
           "ManagedTenants.Read.All",
           "Subscription.Read.All"
         ]
@@ -2995,7 +3018,9 @@
           "Domain-InternalFederation.Read.All",
           "Domain.Read.All",
           "Group.Read.All",
+          "Group.ReadBasic.All",
           "GroupMember.Read.All",
+          "GroupMember.ReadBasic.All",
           "GroupSettings.Read.All",
           "LicenseAssignment.Read.All",
           "Organization.Read.All",

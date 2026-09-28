@@ -49,6 +49,10 @@ function Connect-EntraOps {
         [System.String]$AuthenticationType = "AlreadyAuthenticated"
         ,
         [Parameter(Mandatory = $False)]
+        [ValidateSet("Report", "ServiceEM")]
+        [System.String]$Scope = "Report"
+        ,        
+        [Parameter(Mandatory = $False)]
         [ValidateSet("beta", "v1.0")]
         [System.String]$GraphApiVersion = "beta"
         ,
@@ -232,6 +236,19 @@ Community Project by Thomas Naunheim - www.entraops.com
                 "User.Read.All",
                 "Zone.Read.All"
             )
+
+            if ($Scope -eq "ServiceEM") {
+                $MgGraphScopesServiceEM = @(
+                    "Directory.AccessAsUser.All",
+                    "EntitlementManagement.ReadWrite.All",
+                    "RoleManagementPolicy.ReadWrite.AzureADGroup",
+                    "RoleManagementPolicy.ReadWrite.Directory",
+                    "RoleManagement.ReadWrite.Directory",
+                    "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
+                    "PrivilegedAccess.ReadWrite.AzureADGroup"
+                )
+                $Scopes += $MgGraphScopesServiceEM
+            }
         }
         #endregion
 

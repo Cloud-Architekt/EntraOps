@@ -74,6 +74,7 @@ jobs:
           # Operator-generated Tenant Governance snapshot names can contain characters (such as
           # colons) that Windows cannot materialize. They are not inputs to the regression suite.
           sparse-checkout: |
+            .azure-pipelines
             .github
             Classification
             Docs

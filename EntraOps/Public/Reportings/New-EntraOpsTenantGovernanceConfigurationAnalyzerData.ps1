@@ -385,14 +385,17 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
             [pscustomobject]@{ Sha = $parts[0]; Date = [datetimeoffset]::Parse($parts[1]); Subject = $parts[2] }
         }) | Sort-Object -Property Date
 
-    # A partial snapshot intentionally commits only its manifest, preserving the last known-good
-    # resources. Do not present that unchanged tree as a historical capture at the partial job time.
+    # A fully-stale partial snapshot (e.g. Graph returned no parseable per-type errors) commits only
+    # its manifest, preserving the last known-good resources unchanged - do not present that as a
+    # historical capture at the partial job time. A mixed partial snapshot still publishes real,
+    # changed resource files for its non-stale types (stale types simply keep their previous blob
+    # hash, so they never appear as a diff), so it must not be dropped from history wholesale.
     $commits = @($commits | Where-Object {
             $manifestAtCommit = & git -C $GitRoot show "$($_.Sha):$RelPath/.SnapshotManifest.json" 2>$null
             if ($LASTEXITCODE -ne 0 -or -not $manifestAtCommit) { return $true }
             try {
                 $commitManifest = ($manifestAtCommit -join "`n") | ConvertFrom-Json -Depth 10
-                return -not ($commitManifest.IsComplete -eq $false -or $commitManifest.SnapshotJobStatus -eq 'partiallySuccessful')
+                return -not ($commitManifest.IsComplete -eq $false -and @($commitManifest.PublishedResourceTypes).Count -eq 0)
             } catch {
                 return $true
             }
@@ -461,7 +464,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     # ---- Append the current working tree state when it adds information -------------
     if (-not $SkipWorkingTree -and (Test-Path -LiteralPath $ImportPath -PathType Container)) {
         $wtFiles = @(Get-ChildItem -LiteralPath $ImportPath -Recurse -File -Filter '*.json' |
-                Where-Object { $ExcludedFileNames -notcontains $_.Name } | Sort-Object FullName)
+            Where-Object { $ExcludedFileNames -notcontains $_.Name } | Sort-Object FullName)
         if ($wtFiles.Count -gt 0) {
             $wtResources = [System.Collections.Generic.List[object]]::new()
             # git hash-object computes the same blob hash a commit would produce, so
@@ -495,11 +498,11 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
             }
             if ($differs) {
                 $snapshots.Add([ordered]@{
-                        commitSha  = '(working tree)'
-                        commitDate = (Get-Date).ToUniversalTime().ToString('o')
-                        subject    = 'Uncommitted working tree state'
-                        hasDetail  = $false
-                        resources  = @($wtResources)
+                        commitSha   = '(working tree)'
+                        commitDate  = (Get-Date).ToUniversalTime().ToString('o')
+                        subject     = 'Uncommitted working tree state'
+                        hasDetail   = $false
+                        resources   = @($wtResources)
                         workingTree = $true
                     })
                 Write-Verbose "Appended working tree state with $($wtResources.Count) resource file(s)."
@@ -572,8 +575,8 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
                 $ObjectId = "$($Object.objectId)"
                 if (-not $ObjectId) { continue }
                 $ObjectTierNames = @("$($Object.objectAdminTierLevelName)") +
-                    @($Object.classification | ForEach-Object { "$($_.adminTierLevelName)" }) +
-                    @($Object.roleAssignments | ForEach-Object { $_.classification } | ForEach-Object { "$($_.adminTierLevelName)" })
+                @($Object.classification | ForEach-Object { "$($_.adminTierLevelName)" }) +
+                @($Object.roleAssignments | ForEach-Object { $_.classification } | ForEach-Object { "$($_.adminTierLevelName)" })
                 foreach ($TierName in $ObjectTierNames | Where-Object { $TierRank.ContainsKey($_) }) {
                     if (-not $TierByObjectId.ContainsKey($ObjectId) -or $TierRank[$TierName] -lt $TierRank[$TierByObjectId[$ObjectId]]) {
                         $TierByObjectId[$ObjectId] = $TierName
@@ -686,40 +689,40 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     # surface the health of the analyzed snapshot (partial captures with stale resource
     # types) without embedding manifest internals nothing reads.
     $SnapshotHealth = [ordered]@{
-        status             = if ($null -ne $SnapshotManifest.SnapshotJobStatus) { "$($SnapshotManifest.SnapshotJobStatus)" } else { $null }
-        capturedDateTime   = if ($null -ne $CapturedDateTime) { $CapturedDateTime.ToString('o') } else { $null }
-        isComplete         = $SnapshotManifest.IsComplete -eq $true
-        staleResourceTypes = @($SnapshotManifest.StaleResourceTypes | Where-Object { $_ } | ForEach-Object { "$_" })
-        resourceTypeStates = @($SnapshotManifest.ResourceTypeStates | ForEach-Object {
+        status                  = if ($null -ne $SnapshotManifest.SnapshotJobStatus) { "$($SnapshotManifest.SnapshotJobStatus)" } else { $null }
+        capturedDateTime        = if ($null -ne $CapturedDateTime) { $CapturedDateTime.ToString('o') } else { $null }
+        isComplete              = $SnapshotManifest.IsComplete -eq $true
+        staleResourceTypes      = @($SnapshotManifest.StaleResourceTypes | Where-Object { $_ } | ForEach-Object { "$_" })
+        resourceTypeStates      = @($SnapshotManifest.ResourceTypeStates | ForEach-Object {
                 [ordered]@{
-                    resourceType        = "$($_.ResourceType)"
-                    status              = "$($_.Status)"
+                    resourceType          = "$($_.ResourceType)"
+                    status                = "$($_.Status)"
                     retainedResourceCount = if ($null -ne $_.RetainedResourceCount) { [int]$_.RetainedResourceCount } else { 0 }
-                    publishedSnapshotId = if ($_.PublishedSnapshotId) { "$($_.PublishedSnapshotId)" } else { $null }
-                    publishedSource     = if ($_.PublishedSource) { "$($_.PublishedSource)" } else { $null }
-                    attemptSnapshotId   = if ($_.AttemptSnapshotId) { "$($_.AttemptSnapshotId)" } else { $null }
+                    publishedSnapshotId   = if ($_.PublishedSnapshotId) { "$($_.PublishedSnapshotId)" } else { $null }
+                    publishedSource       = if ($_.PublishedSource) { "$($_.PublishedSource)" } else { $null }
+                    attemptSnapshotId     = if ($_.AttemptSnapshotId) { "$($_.AttemptSnapshotId)" } else { $null }
                 }
             })
-        diagnostics         = @(
+        diagnostics             = @(
             @($SnapshotManifest.Diagnostics | ForEach-Object {
                     [ordered]@{
-                        resourceType    = "$($_.ResourceType)"
-                        errorCategory   = "$($_.ErrorCategory)"
-                        errorCode       = if ($_.ErrorCode) { "$($_.ErrorCode)" } else { $null }
-                        occurrences     = [int]$_.Occurrences
-                        message         = "$($_.Message)"
-                        remediationHint = "$($_.RemediationHint)"
+                        resourceType      = "$($_.ResourceType)"
+                        errorCategory     = "$($_.ErrorCategory)"
+                        errorCode         = if ($_.ErrorCode) { "$($_.ErrorCode)" } else { $null }
+                        occurrences       = [int]$_.Occurrences
+                        message           = "$($_.Message)"
+                        remediationHint   = "$($_.RemediationHint)"
                         attemptSnapshotId = $null
                     }
                 })
             @($LastAttemptDiagnostics | ForEach-Object {
                     [ordered]@{
-                        resourceType    = "$($_.ResourceType)"
-                        errorCategory   = "$($_.ErrorCategory)"
-                        errorCode       = if ($_.ErrorCode) { "$($_.ErrorCode)" } else { $null }
-                        occurrences     = [int]$_.Occurrences
-                        message         = "[Last attempt $($LastAttemptManifest.SnapshotId)] $($_.Message)"
-                        remediationHint = "$($_.RemediationHint)"
+                        resourceType      = "$($_.ResourceType)"
+                        errorCategory     = "$($_.ErrorCategory)"
+                        errorCode         = if ($_.ErrorCode) { "$($_.ErrorCode)" } else { $null }
+                        occurrences       = [int]$_.Occurrences
+                        message           = "[Last attempt $($LastAttemptManifest.SnapshotId)] $($_.Message)"
+                        remediationHint   = "$($_.RemediationHint)"
                         attemptSnapshotId = "$($LastAttemptManifest.SnapshotId)"
                     }
                 })
@@ -728,21 +731,21 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     }
 
     $payload = [ordered]@{
-        tenantName       = Get-EntraOpsReportingTenantName -RepoRoot $RepoRoot
-        generatedAt      = (Get-Date).ToUniversalTime().ToString('o')
-        snapshotFolder   = $RelPath
-        snapshotHealth   = $SnapshotHealth
-        timeRangeInDays  = $TimeRangeInDays
-        snapshotInterval = $SnapshotInterval
-        snapshots        = @($snapshots)
-        blobs            = $blobs
-        resolvedGroupTiers = $ResolvedGroupTiers
-        resolvedPolicyGroupIds = $ResolvedPolicyGroupIds
-        resolvedDeviceTiers = $ResolvedDeviceTiers
-        pimRequestFlowExcludedRiskFlags = $PimRequestFlowExcludedRiskFlags
-        accessPackageFlowExcludedRiskFlags = $AccessPackageFlowExcludedRiskFlags
+        tenantName                                = Get-EntraOpsReportingTenantName -RepoRoot $RepoRoot
+        generatedAt                               = (Get-Date).ToUniversalTime().ToString('o')
+        snapshotFolder                            = $RelPath
+        snapshotHealth                            = $SnapshotHealth
+        timeRangeInDays                           = $TimeRangeInDays
+        snapshotInterval                          = $SnapshotInterval
+        snapshots                                 = @($snapshots)
+        blobs                                     = $blobs
+        resolvedGroupTiers                        = $ResolvedGroupTiers
+        resolvedPolicyGroupIds                    = $ResolvedPolicyGroupIds
+        resolvedDeviceTiers                       = $ResolvedDeviceTiers
+        pimRequestFlowExcludedRiskFlags           = $PimRequestFlowExcludedRiskFlags
+        accessPackageFlowExcludedRiskFlags        = $AccessPackageFlowExcludedRiskFlags
         conditionalAccessAnalysisExcludedFindings = $ConditionalAccessAnalysisExcludedFindings
-        eidscaExcludedFindings = $EidscaExcludedFindings
+        eidscaExcludedFindings                    = $EidscaExcludedFindings
     }
 
     $json = $payload | ConvertTo-Json -Depth 25 -Compress

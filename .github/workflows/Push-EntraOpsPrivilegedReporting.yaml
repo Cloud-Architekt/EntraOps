@@ -90,7 +90,7 @@ jobs:
       # Needed by the reporting generators that enrich their local export data through Microsoft Graph.
       - name: Connect Azure OIDC
         if: env.ApplyAutomatedReportingGeneration == 'true' && (env.GenerateEamDashboard == 'true' || (env.GenerateAccessPathMap == 'true' && env.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM == 'true') || env.GenerateConfigurationAnalyzer == 'true' || env.GenerateAccessPackageFlow == 'true')
-        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{env.ClientId}}
           tenant-id: ${{env.TenantId}}

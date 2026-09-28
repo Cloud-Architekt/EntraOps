@@ -1,0 +1,107 @@
+# Azure DevOps Pipeline for EntraOps Log Analytics Ingestion
+# Pushes collected PrivilegedEAM JSON from ado/main to Log Analytics via Logs Ingestion API.
+#
+# Prerequisites:
+#   1. Data Collection Rule (DCR) and Data Collection Endpoint (DCE) must exist
+#      in the target resource group with a data flow for Custom-PrivilegedEAM_CL.
+#   2. The service principal used by the ADO Service Connection must have
+#      "Monitoring Metrics Publisher" role on the DCR (Log Analytics Contributor
+#      on the resource group is NOT sufficient for the Logs Ingestion API).
+#   3. EntraOpsConfig.json must contain a populated LogAnalytics section.
+#   4. The pull pipeline must have run and committed JSON to ado/main.
+#
+# Trigger modes:
+#   A) Automatic: after azure-pipelines-pull completes (configure build completion
+#      in ADO UI, or match the pipeline resource name below).
+#   B) Manual: run on-demand from the Pipelines UI.
+#   C) Scheduled: add a schedules block if desired.
+
+trigger: none
+pr: none
+
+# Option A: Trigger automatically when the pull pipeline completes.
+# The source name must match the pull pipeline's name as configured in ADO.
+resources:
+  pipelines:
+    - pipeline: azure-pipelines-pull
+      source: azure-pipelines-pull
+      trigger: true
+
+variables:
+  # Path to the environment-specific config file (committed in ado/main)
+  ConfigFile: ./EntraOpsConfig.json
+  # ADO Service Connection name targeting the target tenant (Workload Identity Federation)
+  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+    persistCredentials: true
+    displayName: "Checkout repository"
+
+  # Ingest collected PrivilegedEAM JSON to target tenant Log Analytics custom table.
+  # Connect-EntraOps is intentionally omitted because this step does not require
+  # Microsoft Graph access; it only reads local JSON and pushes to the DCR/DCE
+  # using the Azure PowerShell context provided by AzurePowerShell@5.
+  - task: AzurePowerShell@5
+    displayName: "Run configured push operations"
+    inputs:
+      azureSubscription: "$(AzureServiceConnection)"
+      ScriptType: InlineScript
+      Inline: |
+        Import-Module ./EntraOps
+        $ErrorActionPreference = "Stop"
+
+        $Config = Get-Content -Path '$(ConfigFile)' | ConvertFrom-Json -Depth 10 -AsHashtable
+        if ($env:BUILD_REASON -eq 'ResourceTrigger' -and $Config.WorkflowTrigger.PushAfterPullWorkflowTrigger -eq $false) {
+          Write-Host 'Push-after-pull is disabled in the configuration.'
+          exit 0
+        }
+
+        $HasConfiguredOperation = $Config.LogAnalytics.IngestToLogAnalytics -eq $true -or
+          $Config.SentinelWatchLists.IngestToWatchLists -eq $true -or
+          $Config.AutomatedAdministrativeUnitManagement.ApplyAdministrativeUnitAssignments -eq $true -or
+          $Config.AutomatedRmauAssignmentsForUnprotectedObjects.ApplyRmauAssignmentsForUnprotectedObjects -eq $true -or
+          $Config.AutomatedConditionalAccessTargetGroups.ApplyConditionalAccessTargetGroups -eq $true -or
+          $Config.AutomatedElmCatalogProtection.ApplyPrivilegedElmCatalogProtection -eq $true
+        if (-not $HasConfiguredOperation) {
+          Write-Host 'No push operation is enabled in the configuration.'
+          exit 0
+        }
+
+        Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $Config.TenantName -ConfigFilePath '$(ConfigFile)'
+        try {
+          if ($Config.LogAnalytics.IngestToLogAnalytics -eq $true) {
+            $LogAnalyticsParams = $Config.LogAnalytics
+            Save-EntraOpsPrivilegedEAMInsightsCustomTable @LogAnalyticsParams
+          }
+          if ($Config.SentinelWatchLists.IngestToWatchLists -eq $true) {
+            $WatchListParams = $Config.SentinelWatchLists
+            Save-EntraOpsPrivilegedEAMWatchLists @WatchListParams
+          }
+          if ($Config.AutomatedAdministrativeUnitManagement.ApplyAdministrativeUnitAssignments -eq $true) {
+            $AdministrativeUnitParams = $Config.AutomatedAdministrativeUnitManagement
+            New-EntraOpsPrivilegedAdministrativeUnit @AdministrativeUnitParams
+            Update-EntraOpsPrivilegedAdministrativeUnit @AdministrativeUnitParams
+          }
+          if ($Config.AutomatedRmauAssignmentsForUnprotectedObjects.ApplyRmauAssignmentsForUnprotectedObjects -eq $true) {
+            $RmauParams = $Config.AutomatedRmauAssignmentsForUnprotectedObjects
+            New-EntraOpsPrivilegedUnprotectedAdministrativeUnit @RmauParams
+            Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit @RmauParams
+          }
+          if ($Config.AutomatedConditionalAccessTargetGroups.ApplyConditionalAccessTargetGroups -eq $true) {
+            $ConditionalAccessParams = $Config.AutomatedConditionalAccessTargetGroups
+            New-EntraOpsPrivilegedConditionalAccessGroup @ConditionalAccessParams
+            Update-EntraOpsPrivilegedConditionalAccessGroup @ConditionalAccessParams
+          }
+          if ($Config.AutomatedElmCatalogProtection.ApplyPrivilegedElmCatalogProtection -eq $true) {
+            $ElmCatalogParams = $Config.AutomatedElmCatalogProtection
+            Update-EntraOpsPrivilegedUnprotectedElmCatalog @ElmCatalogParams
+          }
+        } finally {
+          Disconnect-EntraOps
+        }
+      pwsh: true
+      azurePowerShellVersion: LatestVersion

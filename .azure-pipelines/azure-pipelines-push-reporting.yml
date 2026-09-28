@@ -1,0 +1,112 @@
+# Azure DevOps Pipeline for EntraOps report generation
+
+trigger: none
+pr: none
+
+parameters:
+  - name: allowStaleTenantGovernance
+    displayName: Allow a Tenant Governance snapshot older than 30 hours
+    type: boolean
+    default: false
+  - name: allowPartialTenantGovernance
+    displayName: Allow a mixed partial Tenant Governance snapshot
+    type: boolean
+    default: true
+
+resources:
+  pipelines:
+    - pipeline: azure-pipelines-pull
+      source: azure-pipelines-pull
+      trigger: true
+
+# BEGIN EntraOps managed schedules
+# END EntraOps managed schedules
+
+variables:
+  ConfigFile: ./EntraOpsConfig.json
+  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+    displayName: "Checkout repository"
+
+  - task: AzurePowerShell@5
+    displayName: "Generate configured reports"
+    inputs:
+      azureSubscription: "$(AzureServiceConnection)"
+      ScriptType: InlineScript
+      Inline: |
+        Import-Module ./EntraOps
+        $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
+        if ($Config.AutomatedReportingGeneration.ApplyAutomatedReportingGeneration -ne $true -or
+            ($env:BUILD_REASON -eq 'ResourceTrigger' -and $Config.WorkflowTrigger.PushReportingAfterPullWorkflowTrigger -eq $false)) {
+          Write-Host 'Automated reporting is disabled for this trigger.'
+          Write-Host '##vso[task.setvariable variable=ReportingEnabled]false'
+          exit 0
+        }
+
+        Write-Host '##vso[task.setvariable variable=ReportingEnabled]true'
+        $ClassificationRepository = [string]$Config.AutomatedReportingGeneration.ClassificationExplorerRepository
+        if (-not [string]::IsNullOrWhiteSpace($ClassificationRepository)) {
+          git clone --depth 1 --filter=blob:none --sparse "https://github.com/$ClassificationRepository.git" ./.reporting/AzurePrivilegedIAM
+          if ($LASTEXITCODE -ne 0) { throw 'Could not clone the configured classification repository.' }
+          git -C ./.reporting/AzurePrivilegedIAM sparse-checkout set Classification
+          if ($LASTEXITCODE -ne 0) { throw 'Could not configure the sparse classification checkout.' }
+        }
+
+        Invoke-EntraOpsReportingGeneration -ConfigFilePath '$(ConfigFile)' -AuthenticationType FederatedCredentials `
+          -AllowStaleTenantGovernanceSnapshot:([bool]::Parse('${{ parameters.allowStaleTenantGovernance }}')) `
+          -AllowPartialTenantGovernanceSnapshot:([bool]::Parse('${{ parameters.allowPartialTenantGovernance }}')) `
+          -RemoveClassificationRepositoryAfterRun | Out-Host
+      pwsh: true
+      azurePowerShellVersion: LatestVersion
+
+  - task: UseNode@1
+    displayName: "Use Node.js 22"
+    condition: eq(variables.ReportingEnabled, 'true')
+    inputs:
+      versionSpec: "22.x"
+
+  - script: npm ci
+    displayName: "Install report test dependencies"
+    condition: eq(variables.ReportingEnabled, 'true')
+
+  - script: npx playwright install --with-deps chromium
+    displayName: "Install Chromium"
+    condition: eq(variables.ReportingEnabled, 'true')
+
+  - script: npm run test:reports
+    displayName: "Test generated reports"
+    condition: eq(variables.ReportingEnabled, 'true')
+
+  - task: PowerShell@2
+    displayName: "Check Azure DevOps project visibility"
+    condition: eq(variables.ReportingEnabled, 'true')
+    inputs:
+      targetType: inline
+      script: |
+        $Headers = @{ Authorization = "Bearer $env:SYSTEM_ACCESSTOKEN" }
+        $ProjectUri = "${env:SYSTEM_COLLECTIONURI}_apis/projects/${env:SYSTEM_TEAMPROJECTID}?api-version=7.1"
+        try {
+          $Project = Invoke-RestMethod -Uri $ProjectUri -Headers $Headers -Method Get
+          $IsPrivate = $Project.visibility -eq 'private'
+        } catch {
+          Write-Warning "Could not verify project visibility. Reporting artifacts will not be published. $($_.Exception.Message)"
+          $IsPrivate = $false
+        }
+        Write-Host "##vso[task.setvariable variable=ProjectIsPrivate]$($IsPrivate.ToString().ToLowerInvariant())"
+      pwsh: true
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish EntraOps Reporting artifact"
+    condition: and(eq(variables.ReportingEnabled, 'true'), eq(variables.ProjectIsPrivate, 'true'))
+    inputs:
+      targetPath: Reports
+      artifact: EntraOps-Reporting
+      publishLocation: pipeline

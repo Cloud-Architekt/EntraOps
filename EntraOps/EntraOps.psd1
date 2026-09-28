@@ -10,7 +10,7 @@
     RootModule           = 'EntraOps.psm1'
 
     # Version number of this module.
-    ModuleVersion        = '1.0.0'
+    ModuleVersion        = '1.1.0'
 
     # Supported PSEditions
     CompatiblePSEditions = 'Core'
@@ -97,6 +97,7 @@
         'Export-EntraOpsClassificationIdentityGovernanceRoles'
         'Export-EntraOpsClassificationScopes'
         'Export-EntraOpsPrivilegedEAMBloodHound'
+        'Get-EntraOpsAgentObject'
         'Get-EntraOpsCacheStatistics'
         'Get-EntraOpsClassificationControlPlaneObjects'
         'Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs'
@@ -172,7 +173,25 @@
         'Update-EntraOpsPrivilegedConditionalAccessGroup'
         'Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
         'Update-EntraOpsPrivilegedUnprotectedElmCatalog'
+        'Update-EntraOpsAzureDevOpsSchedules'
         'Update-EntraOpsRequiredWorkflowParameters'
+        # ServiceEM Functions
+        'Get-EntraOpsServiceEMReport'
+        'New-EntraOpsServiceAZContainer'
+        'New-EntraOpsServiceBootstrap'
+        'New-EntraOpsServiceEMAccessPackage'
+        'New-EntraOpsServiceEMAccessPackageResourceAssignment'
+        'New-EntraOpsServiceEMAssignment'
+        'New-EntraOpsServiceEMAssignmentPolicy'
+        'New-EntraOpsServiceEMCatalog'
+        'New-EntraOpsServiceEMCatalogResource'
+        'New-EntraOpsServiceEMCatalogResourceRole'
+        'New-EntraOpsServiceEntraGroup'
+        'New-EntraOpsServicePIMAssignment'
+        'New-EntraOpsServicePIMPolicy'
+        'New-EntraOpsSubscriptionLandingZone'
+        'Remove-EntraOpsServiceCatalog'
+        'Resolve-EntraOpsServiceEMDelegationGroup'
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.

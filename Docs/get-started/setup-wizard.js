@@ -19,15 +19,21 @@
         sentinelWorkspace: "",
         sentinelSubscriptionId: "",
         sentinelResourceGroup: "",
+        devOpsPlatform: "",
         githubOrg: "",
         githubRepo: "",
-        githubBranch: "main"
+        githubBranch: "main",
+        adoOrg: "",
+        adoProject: "",
+        adoRepo: "",
+        adoBranch: "main",
+        adoServiceConnection: "EntraOps-ServiceConnection"
     };
 
     var paths = {
         express: { title: "Try EntraOps now", desc: "Run locally with interactive Azure and Microsoft Graph sign-in. No config file.", badge: "Fastest" },
         local: { title: "Run locally with a config", desc: "Run locally or on a supported automation platform (for example, Azure Automation Runbooks) with EntraOpsConfig.json and selected integrations.", badge: "Flexible" },
-        github: { title: "Automate with GitHub", desc: "Create a private repository, federated workload identity and scheduled workflows.", badge: "Recommended for production" }
+        github: { title: "Automate with DevOps Platform", desc: "Create a private repository, federated workload identity and scheduled pipelines.", badge: "Recommended for production" }
     };
     var systems = [
         ["Azure", "Microsoft Azure"], ["EntraID", "Microsoft Entra ID"],
@@ -121,10 +127,17 @@
     }
 
     function renderPath() {
-        return '<div class="setup-step"><p class="setup-kicker">Start here</p><h2 id="setupStepTitle">How do you want to use EntraOps?</h2>' +
+        var html = '<div class="setup-step"><p class="setup-kicker">Start here</p><h2 id="setupStepTitle">How do you want to use EntraOps?</h2>' +
             '<p class="setup-lead">You can change this later. For a first look, choose the zero-configuration option.</p><div class="setup-choice-list">' +
             Object.keys(paths).map(function (key) { var item = paths[key]; return choiceCard("path", key, item.title, item.desc, item.badge, state.path === key, false); }).join("") +
-            '</div></div>';
+            '</div>';
+        if (state.path === "github") {
+            html += '<div class="setup-details"><h3>Which DevOps platform?</h3><div class="setup-choice-list compact">' +
+                choiceCard("devOpsPlatform", "GitHub", "GitHub", "Use GitHub Actions and GitHub workload identity federation.", "", state.devOpsPlatform === "GitHub", false) +
+                choiceCard("devOpsPlatform", "AzureDevOps", "Azure DevOps", "Use Azure Repos, Azure Pipelines and a federated Azure Resource Manager service connection.", "", state.devOpsPlatform === "AzureDevOps", false) +
+                '</div></div>';
+        }
+        return html + '</div>';
     }
 
     function renderTenant() {
@@ -187,8 +200,10 @@
             }
             html += '<div class="setup-note"><strong>Permission setup required</strong><span>When you create or update the EntraOps workload identity, it configures the UTCM service principal permissions for this selected scope. Use a <strong>Global Administrator</strong> for the initial consent, then verify the <strong>Pull-EntraOpsTenantGovernance</strong> workflow. <a href="../tenant-governance/index.html#permissions-and-prerequisites">View the full permission setup and recovery steps</a>.</span></div></div>';
         }
-        if (state.path === "github") {
+        if (state.path === "github" && state.devOpsPlatform === "GitHub") {
             html += '<div class="setup-details"><h3>Private GitHub repository</h3>' + field("githubOrg", "GitHub user or organization", "contoso", state.githubOrg, "Copy the exact owner spelling and capitalization from the repository URL; the federated identity subject is case-sensitive.") + field("githubRepo", "Repository name", "EntraOps-Contoso", state.githubRepo, "Copy the exact repository spelling and capitalization. EntraOps blocks publishing tenant data from public repositories.") + field("githubBranch", "Default branch", "main", state.githubBranch, "Enter the exact branch name that will run the workflows.") + '</div>';
+        } else if (state.path === "github" && state.devOpsPlatform === "AzureDevOps") {
+            html += '<div class="setup-details"><h3>Private Azure DevOps repository</h3>' + field("adoOrg", "Azure DevOps organization", "contoso", state.adoOrg) + field("adoProject", "Project name", "Identity Operations", state.adoProject) + field("adoRepo", "Repository name", "EntraOps-Contoso", state.adoRepo, "Keep the Azure DevOps project and repository private because generated data contains tenant information.") + field("adoBranch", "Default branch", "main", state.adoBranch) + field("adoServiceConnection", "Service connection name", "EntraOps-ServiceConnection", state.adoServiceConnection, "Create an Azure Resource Manager service connection with workload identity federation.") + '</div>';
         }
         return html + '</div>';
     }
@@ -205,18 +220,22 @@
 
     function buildDraft() {
         var tenantGovernanceEnabled = state.integrations.indexOf("tenantGovernance") >= 0;
+        var automationPlatform = state.path === "github" ? state.devOpsPlatform : "None";
+        var updateTargets = automationPlatform === "AzureDevOps"
+            ? ["./.azure-pipelines", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"]
+            : ["./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"];
         return {
             TenantId: state.tenantId.trim(), TenantName: state.tenantName.trim(), AuthenticationType: state.authType,
             ManagingTenantId: "", ManagingTenantName: "", UseInvokeRestMethodOnly: false,
             ConsoleOutput: { IncludeObjectDetails: false },
             ClientId: "Use New-EntraOpsWorkloadIdentity to create a new App Registration or enter here manually",
-            DevOpsPlatform: state.path === "github" ? "GitHub" : "None", RbacSystems: state.rbacSystems,
+            DevOpsPlatform: automationPlatform, RbacSystems: state.rbacSystems,
             AzureRbacClassification: { ClassifyConstrainedDelegationAlwaysAsControlPlane: false, UnresolvedRoleDefinitionFallbackTier: "Unclassified", DeletedPrincipalAssignmentHandling: "Filter" },
             WorkflowTrigger: { PullScheduledTrigger: true, PullScheduledCron: "30 9 * * *", PushAfterPullWorkflowTrigger: true, PushReportingAfterPullWorkflowTrigger: true, PushReportingScheduledTrigger: false, PushReportingScheduledCron: "0 9 * * 1" },
             AutomatedControlPlaneScopeUpdate: { ApplyAutomatedControlPlaneScopeUpdate: false, PrivilegedObjectClassificationSource: ["EntraOps", "PrivilegedRolesFromAzGraph", "PrivilegedEdgesFromExposureManagement"], EntraOpsScopes: state.rbacSystems.slice(), ClassificationParameterScope: state.rbacSystems.slice(), AzureHighPrivilegedRoles: ["Owner", "Role Based Access Control Administrator", "User Access Administrator"], AzureHighPrivilegedScopes: ["/", "/providers/microsoft.management/managementgroups/" + state.tenantId.trim()], ExposureCriticalityLevel: "<1" },
             AutomatedClassificationUpdate: { ApplyAutomatedClassificationUpdate: false, Classifications: "All" },
             GeneratedArtifactValidation: { FailOnContradictoryTierPair: false, FailOnPrivilegedAssignmentWithoutClassification: false },
-            AutomatedEntraOpsUpdate: { ApplyAutomatedEntraOpsUpdate: false, UpdateScheduledTrigger: false, UpdateScheduledCron: "0 9 * * 3", Repository: "EntraOps", Branch: "main", PublicationMode: "PullRequest", ValidationFrequency: "OnChange", RunBrowserTests: true, TargetUpdateFolders: ["./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"] },
+            AutomatedEntraOpsUpdate: { ApplyAutomatedEntraOpsUpdate: false, UpdateScheduledTrigger: false, UpdateScheduledCron: "0 9 * * 3", Repository: "EntraOps", Branch: "main", PublicationMode: automationPlatform === "AzureDevOps" ? "DirectPush" : "PullRequest", ValidationFrequency: "OnChange", RunBrowserTests: true, TargetUpdateFolders: updateTargets },
             LogAnalytics: { IngestToLogAnalytics: state.integrations.indexOf("logAnalytics") >= 0, DataCollectionRuleName: state.dcrName, DataCollectionRuleSubscriptionId: state.dcrSubscriptionId, DataCollectionResourceGroupName: state.dcrResourceGroup, TableName: "PrivilegedEAM_CL" },
             SentinelWatchLists: { IngestToWatchLists: state.integrations.indexOf("watchlists") >= 0, WatchListTemplates: state.integrations.indexOf("watchlists") >= 0 ? ["All"] : ["None"], WatchListWorkloadIdentity: ["None"], SentinelWorkspaceName: state.sentinelWorkspace, SentinelSubscriptionId: state.sentinelSubscriptionId, SentinelResourceGroupName: state.sentinelResourceGroup, WatchListPrefix: "EntraOps_" },
             AutomatedAdministrativeUnitManagement: { ApplyAdministrativeUnitAssignments: state.integrations.indexOf("protection") >= 0 && state.protectionFeatures.indexOf("administrativeUnits") >= 0, ApplyToAccessTierLevel: ["ControlPlane", "ManagementPlane"], FilterObjectType: ["User", "Group"], RbacSystems: ["EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement"], RestrictedAuMode: "Selected", RemovalSafetyThreshold: 0.5 },
@@ -226,7 +245,7 @@
             ConfigurationAnalyzer: { ResolveGroupMembersForPrivilegedAssets: true, AllowPartialTenantGovernanceSnapshot: true, PimRequestFlowExcludedRiskFlags: [], AccessPackageFlowExcludedRiskFlags: [], ConditionalAccessAnalysisExcludedFindings: [], EidscaExcludedFindings: [] },
             AutomatedElmCatalogProtection: { ApplyPrivilegedElmCatalogProtection: false, ApplyToAccessTierLevel: ["ControlPlane"], RemovalSafetyThreshold: 0.5 },
             CustomSecurityAttributes: { PrivilegedUserAttribute: "privilegedUser", PrivilegedUserPawAttribute: "associatedSecureAdminWorkstation", PrivilegedServicePrincipalAttribute: "privilegedWorkloadIdentity", UserWorkAccountAttribute: "associatedWorkAccount", PrivilegedUserAdminTierLevelAttribute: "adminTierLevel", PrivilegedUserAdminTierLevelNameAttribute: "adminTierLevelName", PrivilegedServicePrincipalAdminTierLevelAttribute: "adminTierLevel", PrivilegedServicePrincipalAdminTierLevelNameAttribute: "adminTierLevelName" },
-            AlternateObjectTierLevelAttributes: { Enabled: false, User: { ControlPlane: "", ManagementPlane: "", UserAccess: "" }, ServicePrincipal: { ControlPlane: "", ManagementPlane: "", UserAccess: "" } },
+            AlternateObjectTierLevelAttributes: { Enabled: false, User: { ControlPlane: "", ManagementPlane: "", UserAccess: "" }, ServicePrincipal: { ControlPlane: "", ManagementPlane: "", UserAccess: "" }, Group: { ControlPlane: "", ManagementPlane: "", UserAccess: "" } },
             PrivilegeHistory: { EnablePrivilegeHistory: true, TimeRangeInDays: null, SnapshotInterval: "P2W" },
             AccessPathMap: { ResolveObjectIdsOutsidePrivilegedEAM: true },
             EamDashboard: { ResolveLinkedIdentityObjectIds: true },
@@ -242,6 +261,7 @@
     function renderReview() {
         var selectedSystems = systems.filter(function (item) { return state.rbacSystems.indexOf(item[0]) >= 0; }).map(function (item) { return item[1]; });
         var summary = '<div class="setup-summary"><div><span>Setup</span><strong>' + esc(paths[state.path].title) + '</strong></div><div><span>Scope</span><strong>' + esc(selectedSystems.join(", ")) + '</strong></div>';
+        if (state.path === "github") summary += '<div><span>Platform</span><strong>' + esc(state.devOpsPlatform) + '</strong></div>';
         if (state.path !== "express") summary += '<div><span>Tenant</span><strong>' + esc(state.tenantName) + '<br>' + esc(state.tenantId) + '</strong></div><div><span>Authentication</span><strong>' + esc(state.authType) + (state.accountId ? '<br>' + esc(state.accountId) : '') + '</strong></div>';
         summary += '</div>';
         var commands;
@@ -250,8 +270,10 @@
             commands = '<ol class="setup-run-list"><li><h3>Sign in with read access</h3><p>Activate Global Reader and ensure your account has Reader at Azure root scope <code>/</code> before connecting. The interactive Microsoft Graph sign-in requests EntraOps delegated permissions.</p>' + commandBlock("Import-Module ./EntraOps\nConnect-EntraOps -AuthenticationType 'UserInteractive' -TenantName '" + state.tenantName.trim() + "'") + '</li><li><h3>Run the collection</h3>' + commandBlock("Invoke-EntraOpsPrivilegedEAM" + scopeArg) + '</li><li><h3>Open the reports</h3>' + commandBlock("New-EntraOpsReportingData") + '</li></ol>';
         } else {
             commands = '<ol class="setup-run-list">';
-            if (state.path === "github") {
+            if (state.path === "github" && state.devOpsPlatform === "GitHub") {
                 commands += '<li><h3>Create a private repository</h3><p>Create the repository from the EntraOps template, keep it private, then clone it or open it in Codespaces.</p><a class="btn" href="https://github.com/new?template_name=EntraOps&amp;template_owner=Cloud-Architekt&amp;name=' + encodeURIComponent(state.githubRepo) + '&amp;visibility=private" target="_blank" rel="noopener noreferrer">Create private repository</a>' + commandBlock("git clone 'https://github.com/" + state.githubOrg + "/" + state.githubRepo + ".git'\ncd '" + state.githubRepo + "'") + '</li>';
+            } else if (state.path === "github") {
+                commands += '<li><h3>Create a private Azure DevOps repository</h3><p>Import or mirror the EntraOps repository into a private Azure Repos repository, then clone it locally.</p><a class="btn" href="https://dev.azure.com/' + encodeURIComponent(state.adoOrg) + '/' + encodeURIComponent(state.adoProject) + '/_git/' + encodeURIComponent(state.adoRepo) + '" target="_blank" rel="noopener noreferrer">Open Azure Repos</a>' + commandBlock("git clone 'https://dev.azure.com/" + state.adoOrg + "/" + state.adoProject + "/_git/" + state.adoRepo + "'\ncd '" + state.adoRepo + "'") + '</li>';
             }
             commands += '<li><h3>Get your configuration</h3><p>Download <code>EntraOpsConfig.json</code> directly, or review every setting in the Configuration Wizard first.</p><button type="button" class="btn primary" id="downloadConfigDraft">Download EntraOpsConfig.json</button> <a class="btn" id="openConfigDraft" href="../configuration/index.html#onboarding=' + encodeURIComponent(JSON.stringify(buildDraft())) + '">Open in Configuration Wizard</a></li>';
             if (state.path === "local") {
@@ -269,11 +291,20 @@
                     var localIntegrationCommands = ["Import-Module ./EntraOps", localConnectCommand].concat(localOperations).concat(["Disconnect-EntraOps"]);
                     commands += '<li><h3>Prepare and run selected integrations</h3><p>The first collection above stays read-only. Before running these commands, review its output and provision the identity with the feature-specific permissions. Interactive sign-in requests collection scopes only; write operations require a pre-provisioned workload or managed identity. The command reconnects with the configured identity and disconnects again after the selected operations complete.</p>' + commandBlock(localIntegrationCommands.join("\n\n")) + '<p><a href="../core/index.html#service-principal-permissions">Review required permissions</a> and the <a href="?guide=expert#configured-local-run">configured local-run guide</a>.</p></li>';
                 }
-            } else {
+            } else if (state.devOpsPlatform === "GitHub") {
                 var tenantGovernancePermissionNote = state.integrations.indexOf("tenantGovernance") >= 0
                     ? ' Tenant Governance snapshots are selected: this also grants <code>ConfigurationMonitoring.ReadWrite.All</code> to the workload identity and configures the first-party UTCM service principal. Use a <strong>Global Administrator</strong> for this initial consent. <a href="../tenant-governance/index.html#permissions-and-prerequisites">Review the full setup and recovery steps</a>.'
                     : "";
                 commands += '<li><h3>Create the workload identity</h3><p>Run as a temporary Global Administrator and User Access Administrator. Reader at the ARM tenant root (<code>/</code>) is intentionally not granted; add <code>-GrantArmRootScopeReader</code> only when you must discover role assignments made directly at that exceptional scope. GitHub owner, repository, and branch values must match their exact capitalization because the federated identity subject is case-sensitive.' + tenantGovernancePermissionNote + '</p>' + commandBlock("Import-Module ./EntraOps\nConnect-AzAccount -Tenant '" + state.tenantId + "'\nNew-EntraOpsWorkloadIdentity -AppDisplayName 'entraops' -ConfigFile './EntraOpsConfig.json' `\n  -CreateFederatedCredential -GitHubOrg '" + state.githubOrg + "' -GitHubRepo '" + state.githubRepo + "' `\n  -FederatedEntityType 'Branch' -FederatedEntityName '" + state.githubBranch + "'") + '</li><li><h3>Configure and commit the workflows</h3>' + commandBlock("Update-EntraOpsRequiredWorkflowParameters -ConfigFile './EntraOpsConfig.json'\ngit add EntraOpsConfig.json .github/workflows\ngit commit -m 'Configure EntraOps'\ngit push") + '</li><li><h3>Run and verify collection</h3><p>From GitHub Actions, run <strong>Pull-EntraOpsPrivilegedEAM</strong>. Confirm it completes and commits files under <code>PrivilegedEAM/</code>. Then verify the reporting and optional push workflows.' + (state.integrations.indexOf("tenantGovernance") >= 0 ? ' Also run <strong>Pull-EntraOpsTenantGovernance</strong> manually and confirm the prerequisite validation succeeds before relying on its schedule.' : "") + '</p><a class="btn" href="https://github.com/' + encodeURIComponent(state.githubOrg) + '/' + encodeURIComponent(state.githubRepo) + '/actions" target="_blank" rel="noopener noreferrer">Open GitHub Actions</a></li>';
+            } else {
+                var adoTenantGovernanceNote = state.integrations.indexOf("tenantGovernance") >= 0
+                    ? ' Tenant Governance is selected, so use a Global Administrator for the initial UTCM consent and run the Tenant Governance pipeline manually before relying on its schedule.'
+                    : "";
+                commands += '<li><h3>Create the workload identity</h3><p>Run as a temporary Global Administrator and User Access Administrator. This creates the app registration, assigns configured permissions and writes its client ID to the config.' + adoTenantGovernanceNote + '</p>' + commandBlock("Import-Module ./EntraOps\nConnect-AzAccount -Tenant '" + state.tenantId + "'\nNew-EntraOpsWorkloadIdentity -AppDisplayName 'entraops-ado' -ConfigFile './EntraOpsConfig.json'") + '</li>' +
+                    '<li><h3>Create the federated service connection</h3><p>In Azure DevOps, create an Azure Resource Manager service connection using <strong>Workload Identity Federation (manual)</strong>. Name it <code>' + esc(state.adoServiceConnection) + '</code>, use the tenant and client IDs from the config, then add the exact issuer and subject shown by Azure DevOps as a federated credential on the app registration.</p><a class="btn" href="https://dev.azure.com/' + encodeURIComponent(state.adoOrg) + '/' + encodeURIComponent(state.adoProject) + '/_settings/adminservices" target="_blank" rel="noopener noreferrer">Open service connections</a></li>' +
+                    '<li><h3>Apply schedules and commit configuration</h3><p>The module command updates only the managed <code>schedules:</code> regions from <code>EntraOpsConfig.json</code>.</p>' + commandBlock("Import-Module ./EntraOps\nUpdate-EntraOpsAzureDevOpsSchedules `\n  -ConfigFile './EntraOpsConfig.json' -BranchName '" + state.adoBranch + "'\ngit add EntraOpsConfig.json .azure-pipelines\ngit commit -m 'Configure EntraOps for Azure DevOps'\ngit push") + '</li>' +
+                    '<li><h3>Import and authorize the pipelines</h3><p>Import the five production templates: <code>azure-pipelines-pull.yml</code>, <code>azure-pipelines-push.yml</code>, <code>azure-pipelines-push-reporting.yml</code>, <code>azure-pipelines-pull-tenant-governance.yml</code>, and <code>azure-pipelines-update.yml</code> from <code>.azure-pipelines/</code>. Optionally import <code>azure-pipelines-test.yml</code> for CI validation. Name the service connection <code>EntraOps-ServiceConnection</code> and do not create the <code>EntraOpsAzureServiceConnection</code> variable to use the default. If you chose a different service connection name, create that variable with value <code>' + esc(state.adoServiceConnection) + '</code> instead. Authorize the service connection and grant the Build Service Contribute permission.</p></li>' +
+                    '<li><h3>Run and verify collection</h3><p>Run <strong>azure-pipelines-pull</strong> manually and confirm it commits files under <code>PrivilegedEAM/</code>. Then verify the configured push and reporting pipelines.' + (state.integrations.indexOf("tenantGovernance") >= 0 ? ' Also run <strong>azure-pipelines-pull-tenant-governance</strong> with <strong>RunAndWait</strong> once.' : "") + '</p><a class="btn" href="https://dev.azure.com/' + encodeURIComponent(state.adoOrg) + '/' + encodeURIComponent(state.adoProject) + '/_build" target="_blank" rel="noopener noreferrer">Open Azure Pipelines</a></li>';
             }
             commands += '</ol>';
         }
@@ -281,12 +312,14 @@
     }
 
     function canContinue() {
+        if (state.step === 0 && state.path === "github" && !state.devOpsPlatform) return "Choose GitHub or Azure DevOps.";
         if (state.step === 1 && state.path === "express" && !state.tenantName.trim()) return "Enter your Microsoft Entra tenant domain.";
         if (state.step === 1 && state.path !== "express" && !/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(state.tenantId.trim())) return "Enter a valid Microsoft Entra tenant ID.";
         if (state.step === 1 && state.path !== "express" && !state.tenantName.trim()) return "Enter your Microsoft Entra tenant domain.";
         if (state.step === 1 && state.authType === "UserAssignedMSI" && !/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(state.accountId.trim())) return "Enter the user-assigned managed identity client ID.";
         if (state.step === 2 && state.rbacSystems.length === 0) return "Select at least one system to analyze.";
-        if (state.step === 3 && state.path === "github" && (!state.githubOrg.trim() || !state.githubRepo.trim() || !state.githubBranch.trim())) return "Enter the GitHub owner, private repository name, and default branch.";
+        if (state.step === 3 && state.path === "github" && state.devOpsPlatform === "GitHub" && (!state.githubOrg.trim() || !state.githubRepo.trim() || !state.githubBranch.trim())) return "Enter the GitHub owner, private repository name, and default branch.";
+        if (state.step === 3 && state.path === "github" && state.devOpsPlatform === "AzureDevOps" && (!state.adoOrg.trim() || !state.adoProject.trim() || !state.adoRepo.trim() || !state.adoBranch.trim() || !state.adoServiceConnection.trim())) return "Complete the Azure DevOps repository and service connection fields.";
         if (state.step === 3 && state.integrations.indexOf("logAnalytics") >= 0 && (!state.dcrName.trim() || !state.dcrSubscriptionId.trim() || !state.dcrResourceGroup.trim())) return "Complete all Log Analytics destination fields.";
         if (state.step === 3 && state.integrations.indexOf("watchlists") >= 0 && (!state.sentinelWorkspace.trim() || !state.sentinelSubscriptionId.trim() || !state.sentinelResourceGroup.trim())) return "Complete all Microsoft Sentinel workspace fields.";
         if (state.step === 3 && state.integrations.indexOf("tenantGovernance") >= 0 && state.tenantGovernanceScope === "categories" && state.tenantGovernanceCategories.length === 0) return "Select at least one Tenant Governance category.";
@@ -305,7 +338,7 @@
     }
 
     function collectInputs() {
-        ["tenantId", "tenantName", "accountId", "dcrName", "dcrSubscriptionId", "dcrResourceGroup", "sentinelWorkspace", "sentinelSubscriptionId", "sentinelResourceGroup", "githubOrg", "githubRepo", "githubBranch"].forEach(function (id) {
+        ["tenantId", "tenantName", "accountId", "dcrName", "dcrSubscriptionId", "dcrResourceGroup", "sentinelWorkspace", "sentinelSubscriptionId", "sentinelResourceGroup", "githubOrg", "githubRepo", "githubBranch", "adoOrg", "adoProject", "adoRepo", "adoBranch", "adoServiceConnection"].forEach(function (id) {
             var input = document.getElementById(id); if (input) state[id] = input.value;
         });
     }
@@ -324,6 +357,9 @@
         if (input.name === "path") {
             state.path = input.value;
             state.authType = state.path === "github" ? "FederatedCredentials" : "UserInteractive";
+        } else if (input.name === "devOpsPlatform") {
+            state.devOpsPlatform = input.value;
+            state.authType = "FederatedCredentials";
         } else if (input.name === "authType") state.authType = input.value;
         else if (input.name === "tenantGovernanceScope") state.tenantGovernanceScope = input.value;
         else if (input.name === "rbacSystems" || input.name === "integrations" || input.name === "protectionFeatures" || input.name === "tenantGovernanceCategories") {

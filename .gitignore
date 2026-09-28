@@ -16,3 +16,69 @@ TmpUpdate/
 
 # Exception: embeds only this repository's own git history of classification templates.
 !Reports/ClassificationExplorer/data/history-data.js
+
+# EntraOps environment-specific configuration (contains tenant IDs, client IDs)
+EntraOpsConfig.json
+
+# Generated classification output (produced by pipelines; should not be committed to source)
+PrivilegedEAM/
+
+# PowerShell module build artifacts
+*.nupkg
+
+# Certificate files (contain private keys)
+*.pfx
+*.key
+*.p12
+*.pem
+
+# Test certificates directory
+Tests/ServiceEM/TestCertificates/
+TestCertificates/
+
+# Log files
+*.log
+test-*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# PowerShell
+*.ps1.log
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+Thumbs.db
+
+# Build artifacts
+bin/
+obj/
+dist/
+build/
+TestingAl/
+
+# Python (if any)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Config files with potential secrets
+config.json
+service-principal.json

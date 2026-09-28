@@ -138,6 +138,8 @@ test("collects automated protection and Tenant Governance scope choices", async 
 test("includes every required GitHub deployment and verification step", async ({ page }) => {
     await page.goto(guideUrl);
     await page.locator('label.setup-choice:has(input[value="github"])').click();
+    await expect(page.getByRole("heading", { name: "Which DevOps platform?" })).toBeVisible();
+    await page.locator('label.setup-choice:has(input[name="devOpsPlatform"][value="GitHub"])').click();
     await page.getByRole("button", { name: "Continue" }).click();
     await page.locator("#tenantId").fill("00000000-0000-0000-0000-000000000000");
     await page.locator("#tenantName").fill("contoso.onmicrosoft.com");
@@ -170,6 +172,43 @@ test("includes every required GitHub deployment and verification step", async ({
     await expect(steps).toContainText("git push");
     await expect(steps).toContainText("Pull-EntraOpsPrivilegedEAM");
     await expect(page.getByRole("link", { name: "Open GitHub Actions" })).toHaveAttribute("href", "https://github.com/contoso/EntraOps-Contoso/actions");
+});
+
+test("builds an Azure DevOps deployment with managed schedules and all pipelines", async ({ page }) => {
+    await page.goto(guideUrl);
+    await page.locator('label.setup-choice:has(input[value="github"])').click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("alert")).toHaveText("Choose GitHub or Azure DevOps.");
+    await page.locator('label.setup-choice:has(input[name="devOpsPlatform"][value="AzureDevOps"])').click();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.locator("#tenantId").fill("00000000-0000-0000-0000-000000000000");
+    await page.locator("#tenantName").fill("contoso.onmicrosoft.com");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    await expect(page.getByRole("heading", { name: "Private Azure DevOps repository" })).toBeVisible();
+    await page.locator("#adoOrg").fill("contoso");
+    await page.locator("#adoProject").fill("Identity Operations");
+    await page.locator("#adoRepo").fill("EntraOps-Contoso");
+    await page.locator("#adoBranch").fill("production");
+    await page.locator("#adoServiceConnection").fill("EntraOps-WIF");
+    await page.getByRole("button", { name: "Continue" }).click();
+
+    const configLink = page.locator("#openConfigDraft");
+    const href = await configLink.getAttribute("href");
+    const draft = JSON.parse(decodeURIComponent(href.split("#onboarding=")[1]));
+    expect(draft.DevOpsPlatform).toBe("AzureDevOps");
+    expect(draft.AutomatedEntraOpsUpdate.PublicationMode).toBe("DirectPush");
+    expect(draft.AutomatedEntraOpsUpdate.TargetUpdateFolders).toContain("./.azure-pipelines");
+    expect(draft.AutomatedEntraOpsUpdate.TargetUpdateFolders).not.toContain("./.github/workflows");
+
+    const steps = page.locator(".setup-run-list");
+    await expect(steps).toContainText("Workload Identity Federation (manual)");
+    await expect(steps).toContainText("EntraOps-WIF");
+    await expect(steps).toContainText("Update-EntraOpsAzureDevOpsSchedules");
+    await expect(steps).toContainText("azure-pipelines-pull-tenant-governance");
+    await expect(steps).toContainText("reporting");
+    await expect(page.getByRole("link", { name: "Open Azure Pipelines" })).toHaveAttribute("href", "https://dev.azure.com/contoso/Identity%20Operations/_build");
 });
 
 test("lists selected local integrations only after the read-only review step", async ({ page }) => {

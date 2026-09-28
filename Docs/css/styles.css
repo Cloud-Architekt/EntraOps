@@ -1314,6 +1314,16 @@ a:hover {
     white-space: pre;
 }
 
+.prose .mermaid {
+    overflow-x: auto;
+    margin: 0 0 16px;
+}
+
+.prose .mermaid svg {
+    display: block;
+    max-width: none;
+}
+
 .prose table {
     display: block;
     max-width: 100%;
@@ -1908,7 +1918,7 @@ a:hover {
     background: var(--neutral-surface);
 }
 
-.tg-resource-family + .tg-resource-family {
+.tg-resource-family+.tg-resource-family {
     border-top: 1px solid var(--neutral-stroke);
 }
 

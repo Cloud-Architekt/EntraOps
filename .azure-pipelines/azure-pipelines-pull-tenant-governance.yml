@@ -1,0 +1,64 @@
+# Azure DevOps Pipeline for EntraOps Tenant Governance snapshots
+
+trigger: none
+pr: none
+
+parameters:
+  - name: operation
+    displayName: Snapshot operation for manual runs
+    type: string
+    default: RunAndWait
+    values:
+      - Start
+      - Collect
+      - RunAndWait
+  - name: timeoutInSeconds
+    displayName: Maximum wait for RunAndWait
+    type: number
+    default: 3300
+
+# BEGIN EntraOps managed schedules
+# END EntraOps managed schedules
+
+variables:
+  ConfigFile: ./EntraOpsConfig.json
+  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+    persistCredentials: true
+    displayName: "Checkout repository"
+
+  - task: AzurePowerShell@5
+    displayName: "Run Tenant Governance snapshot operation"
+    inputs:
+      azureSubscription: "$(AzureServiceConnection)"
+      ScriptType: InlineScript
+      Inline: |
+        Import-Module ./EntraOps
+        $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
+        if ($Config.TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot -ne $true) {
+          Write-Host 'Tenant Governance snapshots are disabled in the configuration.'
+          exit 0
+        }
+
+        $Operation = '${{ parameters.operation }}'
+        if ($env:BUILD_REASON -eq 'Schedule') {
+          $Operation = if ($env:BUILD_CRONSCHEDULE_DISPLAYNAME -eq 'EntraOps Tenant Governance start') { 'Start' } else { 'Collect' }
+        }
+        Invoke-EntraOpsTenantGovernanceSnapshot -ConfigFilePath '$(ConfigFile)' -AuthenticationType FederatedCredentials -Operation $Operation -TimeoutInSeconds ${{ parameters.timeoutInSeconds }} -Force | Out-Host
+      pwsh: true
+      azurePowerShellVersion: LatestVersion
+
+  - task: PowerShell@2
+    displayName: "Git Commit & Push"
+    inputs:
+      targetType: filePath
+      filePath: "./.azure-pipelines/scripts/Ado-GitPush.ps1"
+      arguments: '-CommitMessage "EntraOps Tenant Governance snapshot"'
+      pwsh: true
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)

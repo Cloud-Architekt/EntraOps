@@ -1,0 +1,58 @@
+# Azure DevOps Pipeline for EntraOps Module Self-Update
+# Equivalent to GitHub Actions: Update-EntraOps.yaml
+#
+# Prerequisites:
+#   1. Create an Azure DevOps Service Connection with Workload Identity Federation
+#   2. Configure pipeline variables (see below) or link a Variable Group
+#   3. If updating from a private upstream, set ENTRAOPS_PAT as a secret pipeline variable
+#
+# Scheduling: Run Update-EntraOpsAzureDevOpsSchedules from the EntraOps module
+# after changing EntraOpsConfig.json.
+
+trigger: none
+pr: none
+
+# BEGIN EntraOps managed schedules
+# END EntraOps managed schedules
+
+variables:
+  ConfigFile: ./EntraOpsConfig.json
+  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+    persistCredentials: true
+    displayName: "Checkout repository"
+
+  - task: AzurePowerShell@5
+    displayName: "Update EntraOps Module & Resources"
+    inputs:
+      azureSubscription: "$(AzureServiceConnection)"
+      ScriptType: InlineScript
+      Inline: |
+        Import-Module ./EntraOps
+        $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
+        if ($Config.AutomatedEntraOpsUpdate.ApplyAutomatedEntraOpsUpdate -ne $true) {
+          Write-Host 'Automated EntraOps updates are disabled in the configuration.'
+          exit 0
+        }
+        Update-EntraOps -ConfigFile '$(ConfigFile)'
+      pwsh: true
+      azurePowerShellVersion: LatestVersion
+    env:
+      # Optional: Personal Access Token for private upstream repos
+      ENTRAOPS_PAT: $(EntraOpsUpdatePat)
+
+  # Commit updated module/resources back to the repo
+  - task: PowerShell@2
+    displayName: "Git Commit & Push"
+    inputs:
+      targetType: filePath
+      filePath: "./.azure-pipelines/scripts/Ado-GitPush.ps1"
+      arguments: '-CommitMessage "EntraOps Update"'
+      pwsh: true
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
