@@ -51,6 +51,13 @@ no web server, no internet connection, no backend.
 1. Export your Privileged EAM data with the EntraOps module
    (`Save-EntraOpsPrivilegedEAMJson`), producing
    `PrivilegedEAM/<RbacSystem>/<RbacSystem>.json`.
+
+   Accepted `-RbacSystems` values are `Azure`, `EntraID`, `IdentityGovernance`,
+   `DeviceManagement`, `ResourceApps`, and `Defender`.
+
+   ```powershell
+   Save-EntraOpsPrivilegedEAMJson -RbacSystems @("EntraID", "Azure")
+   ```
 2. Generate the dataset:
 
    ```powershell

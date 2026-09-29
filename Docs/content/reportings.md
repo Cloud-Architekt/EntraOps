@@ -13,6 +13,14 @@ the landing page, which links to all apps and their cross-navigation.
 
 ![EntraOps reporting portal with links to the reporting apps](../assets/reporting/reporting-portal.png)
 
+> **Prerequisite:** Most reporting apps are built from a Privileged EAM export. If you have not
+> collected data yet, run `Save-EntraOpsPrivilegedEAMJson` first. Accepted `-RbacSystems` values
+> are `Azure`, `EntraID`, `IdentityGovernance`, `DeviceManagement`, `ResourceApps`, and `Defender`.
+>
+> ```powershell
+> Save-EntraOpsPrivilegedEAMJson -RbacSystems @("EntraID", "Azure")
+> ```
+
 Generate or refresh the data for all apps in one call:
 
 ```powershell
@@ -34,6 +42,13 @@ when a selected generator fails. Checkout, workload-identity bootstrap, report t
 upload, and release publication remain responsibilities of the surrounding GitHub Actions, GitLab CI,
 Azure Pipelines, or local runner. If no Tenant Governance snapshot manifest exists, Configuration
 Analyzer is skipped with a warning, matching the shipped workflow behavior.
+
+> **Shipped automation.** `Invoke-EntraOpsReportingGeneration` is already wired into the v1.1
+> pipelines — you do not need to call it manually in CI:
+> - **GitHub Actions:** `.github/workflows/Push-EntraOpsPrivilegedReporting.yaml`
+> - **Azure DevOps:** `.azure-pipelines/azure-pipelines-push-reporting.yml`
+> Both pipelines read `EntraOpsConfig.json`, establish the required authentication context, invoke
+> the cmdlet, run the Playwright smoke-test suite, and publish the `Reports/` artifact.
 
 - `New-EntraOpsClassificationExplorerData` / `New-EntraOpsTierBreachAnalyzerData` / `New-EntraOpsPrivilegedEamDashboardData` / `New-EntraOpsPrivilegedEamPrivilegeHistoryData` / `New-EntraOpsAccessPathMapData` / `New-EntraOpsTenantGovernanceConfigurationAnalyzerData` generate the data bundle for the individual apps. `New-EntraOpsReportingData` is a convenience wrapper that runs them in one call and can also generate Access Package Flow enrichment. It forwards parameters such as `-ClassificationExplorerRepoRoot`, `-TierBreachImportPath`, `-EamDashboardImportPath`, `-AccessPathMapImportPath`, `-SkipClassificationExplorer`, `-SkipTierBreachAnalyzer`, `-SkipEamDashboard`, `-SkipPrivilegeHistory`, `-SkipAccessPathMap`, `-SkipConfigurationAnalyzer`, and `-SkipAccessPackageFlow`.
 - `Remove-EntraOpsReportingData` deletes the generated data bundles again (`-WhatIf`, the same seven `-Skip*` switches, and `-PassThru` are supported). Run it before sharing or committing a checkout to remove tenant-specific reporting data.
@@ -80,6 +95,9 @@ cross-filterable sync-source, restricted-management, assignment-type and classif
 three drill-down grids (privileged assets, related role assignments, related role classification),
 all with CSV export.
 
+Prerequisite: a Privileged EAM export must exist (see the prerequisite note above). Generate the
+dataset with `New-EntraOpsPrivilegedEamDashboardData` (or `New-EntraOpsReportingData`).
+
 The dashboard's drill-down view keeps privileged assets, assignments, and their classification
 evidence together for investigation and export.
 
@@ -96,6 +114,10 @@ cross-referenced with the Classification Explorer's attack-path catalog, scope a
 classification-provenance drill-down ("Other privileged objects sharing this scope", "Show full
 context in graph"), a right-click context menu on graph nodes, bookmarkable node/edge selections
 via URL hash, and a CSV-exportable attack path table.
+
+Prerequisite: a Privileged EAM export must exist (see the prerequisite note above), including
+`PrivilegedEAM/Azure/Azure.json` if you want Azure RBAC visualization. Generate the dataset with
+`New-EntraOpsAccessPathMapData` (or `New-EntraOpsReportingData`).
 
 Azure RBAC assignments are fully represented in Access Path Map as `EO_AzureRole` and
 `EO_AzureRoleAssignment` nodes with active, eligible, assignment, ownership and scope-reasoning
@@ -115,11 +137,23 @@ reports the lookup duration and recommends disabling it when resolution takes 30
 ### Tier Breach Analyzer
 
 [Reports/TierBreachAnalyzer](../../Reports/TierBreachAnalyzer/README.md) visualizes Enterprise
-Access Model **tier boundary violations** from a Privileged EAM export
-(`Save-EntraOpsPrivilegedEAMJson`) as a Sankey flow - `Object Tier -> Object -> Role -> Service ->
-Service Tier`. It highlights Tier 0 breaches (a Tier 1/Tier 2 object reaching a Control Plane
-service), and offers filterable views (Tier 0 breaches, all tier breaches, all assignment paths),
-a detailed breach table with PIM/transitivity context, and CSV export for follow-up.
+Access Model **tier boundary violations** from a Privileged EAM export as a Sankey flow -
+`Object Tier -> Object -> Role -> Service -> Service Tier`. It highlights Tier 0 breaches (a Tier 1
+/ Tier 2 object reaching a Control Plane service), and offers filterable views (Tier 0 breaches,
+all tier breaches, all assignment paths), a detailed breach table with PIM/transitivity context,
+and CSV export for follow-up.
+
+1. Export the Privileged EAM data (skip this if the export already exists):
+
+   ```powershell
+   Save-EntraOpsPrivilegedEAMJson -RbacSystems @("EntraID", "Azure")
+   ```
+
+2. Generate the Tier Breach Analyzer dataset:
+
+   ```powershell
+   New-EntraOpsTierBreachAnalyzerData
+   ```
 
 The detailed analysis view connects the selected tier-breach path to its underlying assignments
 and classification context for follow-up.

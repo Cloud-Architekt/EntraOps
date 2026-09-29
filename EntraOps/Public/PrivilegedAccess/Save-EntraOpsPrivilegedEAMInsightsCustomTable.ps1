@@ -67,6 +67,9 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
         [Parameter(Mandatory = $false)]
         [ValidateSet("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
         [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
+        ,
+        [Parameter(Mandatory = $False)]
+        [boolean]$IngestToLogAnalytics = $false
     )
 
     $OriginalAzContext = Get-AzContext

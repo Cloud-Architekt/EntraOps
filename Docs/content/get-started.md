@@ -104,7 +104,15 @@ Before automating collection, review the PrivilegedEAM export from
 your expectations. Generate the
 [reporting apps](../reportings/index.html#entraops-reporting-apps) against the local export -
 Classification Explorer and EAM Dashboard are built entirely from it, no Log Analytics workspace or
-Azure subscription required:
+Azure subscription required.
+
+If you skipped the interactive export in step 1, produce it first:
+
+```powershell
+Save-EntraOpsPrivilegedEAMJson -RbacSystems @("EntraID", "Azure")
+```
+
+Then generate the reports:
 
 ```powershell
 New-EntraOpsReportingData

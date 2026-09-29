@@ -82,7 +82,10 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         [object]$WatchListWorkloadIdentity = "None"
         ,
         [Parameter(Mandatory = $False)]
-        [boolean]$SkipUploadSaveLocal = $false        
+        [boolean]$SkipUploadSaveLocal = $false
+        ,
+        [Parameter(Mandatory = $False)]
+        [boolean]$IngestToWatchLists = $false
     )
 
     # --- Path safety: ensure ImportPath is under the expected base directory ---
