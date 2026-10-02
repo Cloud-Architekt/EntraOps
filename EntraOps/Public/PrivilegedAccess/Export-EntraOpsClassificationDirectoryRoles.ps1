@@ -23,6 +23,11 @@ function Export-EntraOpsClassificationDirectoryRoles {
         and as role actions of the inheriting role. Resolution is recursive (inherited roles may themselves inherit
         from another role) and protected against circular references. Default is $True.
 
+    .PARAMETER RoleDefinitionOverwritesFilePath
+        Path to the EntraOps role definition overwrites file. Roles listed there (RbacSystem "EntraID") are pinned
+        to the overwrite tier because their sensitivity is not visible in their role actions.
+        Default is "./EntraOps_Classification/Classification_RoleDefinitionOverwrites.json".
+
     .EXAMPLE
         Export all classified Entra ID Directory roles to "Classification\Classification_EntraIdDirectoryRoles.json".
         Export-EntraOpsClassificationDirectoryRoles
@@ -46,6 +51,9 @@ function Export-EntraOpsClassificationDirectoryRoles {
         ,
         [Parameter(Mandatory = $false)]
         $IncludeInheritedPermissions = $false
+        ,
+        [Parameter(Mandatory = $false)]
+        [string]$RoleDefinitionOverwritesFilePath = "./EntraOps_Classification/Classification_RoleDefinitionOverwrites.json"
     )
 
     # Keep the owner-only exclusion mandatory even when a caller supplies a custom filter list.
@@ -88,19 +96,8 @@ function Export-EntraOpsClassificationDirectoryRoles {
         return $InheritedActions
     }
 
-    # Define sensitive role definitions without actions to classify
-    $ControlPlaneRolesWithoutRoleActions = @(
-        'd29b2b05-8046-44ba-8758-1e26182fcf32', # Directory Synchronization Accounts
-        'a92aed5d-d78a-4d16-b381-09adb37eb3b0', # On Premises Directory Sync Account
-        '9f06204d-73c1-4d4c-880a-6edb90606fd8' # Azure AD Joined Device Local Administrator
-        'db506228-d27e-4b7d-95e5-295956d6615f' # Agent ID Administrator is sensitive but has no corresponding role action
-    )
-
-    $ManagementPlaneRolesWithoutRoleActions = @(
-        '3f04f91a-4ad7-4bd3-bcfa-49882ea1a88a', # Purview Workload Content Administrator
-        'e07494ad-1654-4dd2-922e-6f81a71bf00f', # Purview Workload Content Reader
-        '02d5655b-c1cf-4e5f-98da-5fb919085bf6'  # Purview Workload Content Writer
-    )    
+    # Roles whose sensitivity is not visible in their role actions (same source EntraOps applies at runtime)
+    $RoleDefinitionOverwrites = Get-EntraOpsRoleDefinitionOverwrites -Path $RoleDefinitionOverwritesFilePath -RbacSystem 'EntraID'
 
     # Get EntraOps Classification
     $Classification = Get-Content -Path ./EntraOps_Classification/Classification_AadResources.json -Encoding UTF8 | ConvertFrom-Json -Depth 10
@@ -125,7 +122,8 @@ function Export-EntraOpsClassificationDirectoryRoles {
 
     $DirectoryRoles = $DirectoryRoleDefinitions | foreach-object {
 
-        $DirectoryRolePermissions = @(($_.RolePermissions | Where-Object { "$($_.condition)".Trim() -notin $FilteredConditions }).allowedResourceActions)
+        # Roles without role actions (e.g. Device Join) would otherwise yield a single $null action
+        $DirectoryRolePermissions = @(($_.RolePermissions | Where-Object { "$($_.condition)".Trim() -notin $FilteredConditions }).allowedResourceActions | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
         # Include role actions inherited via inheritsPermissionsFrom (e.g. custom roles based on a built-in template)
         $InheritsPermissionsFromIds = @($_.inheritsPermissionsFrom | Select-Object -ExpandProperty id | Sort-Object -Unique)
@@ -171,6 +169,18 @@ function Export-EntraOpsClassificationDirectoryRoles {
         }
         $ClassifiedDirectoryRolePermissions = $ClassifiedDirectoryRolePermissions | sort-object EAMTierLevelTagValue, Category, AuthorizedResourceAction
 
+        # Keep one Unclassified placeholder for roles without role actions: KQL mv-expand drops rows with empty arrays
+        if (@($ClassifiedDirectoryRolePermissions).Count -eq 0) {
+            $ClassifiedDirectoryRolePermissions = @(
+                [PSCustomObject]@{
+                    "AuthorizedResourceAction" = $null
+                    "Category"                 = "Unclassified"
+                    "EAMTierLevelName"         = "Unclassified"
+                    "EAMTierLevelTagValue"     = "Unclassified"
+                }
+            )
+        }
+
         if ($SingleClassification -eq $True) {
             $RoleDefinitionClassification = ($ClassifiedDirectoryRolePermissions | select-object -ExcludeProperty AuthorizedResourceAction, Category -Unique | Sort-Object EAMTierLevelTagValue | select-object -First 1)
         } else {
@@ -179,18 +189,8 @@ function Export-EntraOpsClassificationDirectoryRoles {
             $RoleDefinitionClassification.Add($FilteredRoleClassifications)        
         }
 
-        if ($ControlPlaneRolesWithoutRoleActions -contains $_.templateId) {
-            $RoleDefinitionClassification = [PSCustomObject]@{
-                "EAMTierLevelName"     = "ControlPlane"
-                "EAMTierLevelTagValue" = "0"
-            }
-        }
-
-        if ($ManagementPlaneRolesWithoutRoleActions -contains $_.templateId) {
-            $RoleDefinitionClassification = [PSCustomObject]@{
-                "EAMTierLevelName"     = "ManagementPlane"
-                "EAMTierLevelTagValue" = "1"
-            }
+        if ($RoleDefinitionOverwrites.ContainsKey([string]$_.templateId)) {
+            $RoleDefinitionClassification = $RoleDefinitionOverwrites[[string]$_.templateId]
         }
 
         [PSCustomObject]@{

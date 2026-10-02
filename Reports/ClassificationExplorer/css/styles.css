@@ -127,6 +127,7 @@ mark {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    white-space: nowrap;
 }
 
 .appbar .appbar-link:hover {
@@ -539,6 +540,10 @@ a.nav-item:hover {
     .grid.cols-4 {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+
+    .appbar .brand .sub {
+        display: none;
+    }
 }
 
 @media (max-width: 720px) {
@@ -682,6 +687,12 @@ a.nav-item:hover {
     cursor: help;
 }
 
+.chip.attack.cell-mono {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    max-width: 100%;
+}
+
 .chip.docdiff {
     background: rgba(135, 100, 184, .12);
     border-color: rgba(135, 100, 184, .40);
@@ -696,6 +707,35 @@ a.nav-item:hover {
     color: #005a9e;
     font-weight: 600;
     cursor: help;
+}
+
+/* Implicit permissions (role definition overwrites) */
+.chip.implicit {
+    background: rgba(0, 120, 120, .10);
+    border-color: rgba(0, 120, 120, .40);
+    color: #00666b;
+    font-weight: 600;
+    cursor: help;
+}
+
+.info-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 120, 120, .45);
+    background: rgba(0, 120, 120, .08);
+    color: #00666b;
+    font: italic 600 12px Georgia, "Times New Roman", serif;
+    cursor: pointer;
+}
+
+.info-btn[aria-expanded="true"],
+.info-btn:hover {
+    background: rgba(0, 120, 120, .18);
 }
 
 /* ---------- Toolbar / filters ------------------------------------------- */
@@ -760,6 +800,8 @@ select.filter:focus {
 
 .seg-group {
     display: inline-flex;
+    flex-wrap: wrap;
+    max-width: 100%;
     border: 1px solid var(--neutral-stroke-strong);
     border-radius: var(--radius);
     overflow: hidden;
@@ -770,8 +812,12 @@ select.filter:focus {
     border-right: 1px solid var(--neutral-stroke);
     border-radius: 0;
     height: 34px;
+    flex: 1 0 auto;
     background: var(--neutral-surface);
     white-space: nowrap;
+    /* Separates rows when the group wraps; the group's overflow clips it on the last row. */
+    border-bottom: 1px solid var(--neutral-stroke);
+    margin-bottom: -1px;
 }
 
 .seg-group .seg:last-child {
@@ -782,6 +828,10 @@ select.filter:focus {
     background: var(--brand);
     color: #fff;
     font-weight: 600;
+}
+
+.seg-group .seg.active .muted {
+    color: rgba(255, 255, 255, .85);
 }
 
 .toolbar-meta {
@@ -920,6 +970,35 @@ table.grid-table tbody td {
        its column (and the whole page, since .table-wrap uses overflow: visible
        for the sticky header) wider than the viewport, causing horizontal scroll. */
     overflow-wrap: anywhere;
+}
+
+/* Name cells only break between words; with "anywhere" nowrap siblings squeeze them to a few letters per line. */
+table.grid-table tbody td.cell-strong,
+table.grid-table tbody td.cell-words {
+    overflow-wrap: break-word;
+}
+
+/* Long placeholder / action chips inside table cells must wrap instead of widening the column. */
+table.grid-table tbody td .chip.cell-mono {
+    white-space: normal;
+    max-width: 100%;
+}
+
+@media (max-width: 1100px) {
+
+    table.grid-table thead th,
+    table.grid-table tbody td {
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+
+    /* With the sidebar visible the content area is too narrow for the wider tables;
+       scroll them in place (sticky header is traded off, as on small screens). */
+    .table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+    }
 }
 
 table.grid-table tbody tr {
@@ -1191,6 +1270,11 @@ table.grid-table tbody tr.selected {
 .callout.docdiff {
     border-left-color: #8764b8;
     background: rgba(135, 100, 184, .07);
+}
+
+.callout.implicit {
+    border-left-color: #038387;
+    background: rgba(0, 120, 120, .07);
 }
 
 /* Attack path escalation chain */
@@ -1652,6 +1736,37 @@ table.grid-table tbody tr.selected {
     color: var(--neutral-fg-secondary);
 }
 
+.action-row.implicit {
+    border-style: dashed;
+    border-color: rgba(0, 120, 120, .45);
+    background: rgba(0, 120, 120, .05);
+}
+
+.action-row.implicit .a-name {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.implicit-sep {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 18px 0 4px;
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--neutral-fg-secondary);
+}
+
+.implicit-sep::before,
+.implicit-sep::after {
+    content: "";
+    flex: 1;
+    border-top: 1px solid var(--neutral-stroke);
+}
+
 /* ---------- EAM model diagram ------------------------------------------- */
 .eam-stack {
     display: flex;
@@ -1980,6 +2095,7 @@ table.grid-table tbody tr.selected {
 
     .seg-group {
         flex: 1 1 100%;
+        flex-wrap: nowrap;
         width: 100%;
         max-width: 100%;
         overflow-x: auto;

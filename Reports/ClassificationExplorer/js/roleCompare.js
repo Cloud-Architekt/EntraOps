@@ -123,9 +123,9 @@ EOCE.roleCompare = (function () {
     // item's system may be a key like "EntraID" or a short label like "Entra ID").
     function reviewCandidates() {
         if (!window.EOReview) return [];
-        var selected = Object.create(null);
-        state.selected.forEach(function (k) { selected[k] = true; });
-        var seen = {};
+        var selected = new Map();
+        state.selected.forEach(function (k) { selected.set(k, true); });
+        var seen = new Map();
         var out = [];
         EOReview.all().forEach(function (item) {
             if (item.kind !== 'Role' || !item.name) return;
@@ -144,8 +144,8 @@ EOCE.roleCompare = (function () {
             }
             matches.forEach(function (r) {
                 var key = keyOf(r);
-                if (selected[key] || seen[key]) return;
-                seen[key] = true;
+                if (selected.has(key) || seen.has(key)) return;
+                seen.set(key, true);
                 out.push({ role: r, item: item });
             });
         });
