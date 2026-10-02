@@ -18,6 +18,7 @@ BeforeAll {
         return $Value
     }
 
+    . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsRoleDefinitionOverwrites.ps1"
     . "$script:ExportRoot/Export-EntraOpsClassificationDeviceManagementRoles.ps1"
     . "$script:ExportRoot/Export-EntraOpsClassificationIdentityGovernanceRoles.ps1"
     . "$script:ExportRoot/Export-EntraOpsClassificationDirectoryRoles.ps1"
@@ -47,9 +48,9 @@ BeforeAll {
 
         return @(
             [ordered]@{
-                EAMTierLevelName    = 'ControlPlane'
+                EAMTierLevelName     = 'ControlPlane'
                 EAMTierLevelTagValue = '0'
-                TierLevelDefinition = @(
+                TierLevelDefinition  = @(
                     [ordered]@{
                         Category                        = 'Test'
                         Service                         = $Service
@@ -184,9 +185,9 @@ Describe 'Classification export JSON shapes' {
     It 'keeps AuthorizedApiCalls an array and does not carry Graph calls over to other resources' {
         $Classification = @(
             [ordered]@{
-                EAMTierLevelName    = 'ControlPlane'
+                EAMTierLevelName     = 'ControlPlane'
                 EAMTierLevelTagValue = '0'
-                TierLevelDefinition = @(
+                TierLevelDefinition  = @(
                     [ordered]@{
                         Service               = 'Directory Write'
                         ResourceScope         = 'Application'
@@ -241,9 +242,9 @@ Describe 'Classification export JSON shapes' {
     It 'keeps delegated AuthorizedApiCalls an array and does not carry Graph calls over to other resources' {
         $Classification = @(
             [ordered]@{
-                EAMTierLevelName    = 'ControlPlane'
+                EAMTierLevelName     = 'ControlPlane'
                 EAMTierLevelTagValue = '0'
-                TierLevelDefinition = @(
+                TierLevelDefinition  = @(
                     [ordered]@{
                         Service               = 'Directory Write'
                         ResourceScope         = 'Delegation'
