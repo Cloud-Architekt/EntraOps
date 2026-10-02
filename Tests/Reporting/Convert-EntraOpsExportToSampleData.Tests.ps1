@@ -111,15 +111,16 @@ Describe 'Convert-EntraOpsExportToSampleData' {
             -ReportDestinationPath $ReportDestination -ProgressAction SilentlyContinue
 
         $Result.ReportPath | Should -Be $ReportDestination
-        $Result.GeneratedReports | Should -Be @('EamDashboard', 'TierBreachAnalyzer', 'AccessPathMap')
+        $Result.GeneratedReports | Should -Be @('EamDashboard', 'TierBreachAnalyzer', 'AccessPathMap', 'PrivilegedAssets')
         Test-Path -LiteralPath (Join-Path $ReportDestination 'index.html') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $ReportDestination 'EamDashboard/data/eam-dashboard-data.js') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $ReportDestination 'TierBreachAnalyzer/data/tier-breach-data.js') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $ReportDestination 'AccessPathMap/data/access-path-map-data.js') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $ReportDestination 'PrivilegedAssets/data/privileged-assets-data.js') | Should -BeTrue
 
         $Manifest = Get-Content -LiteralPath (Join-Path $DestinationPath 'anonymization-manifest.json') -Raw | ConvertFrom-Json
         $Manifest.reportPath | Should -Be 'StaticReports'
-        $Manifest.generatedReports | Should -Be @('EamDashboard', 'TierBreachAnalyzer', 'AccessPathMap')
+        $Manifest.generatedReports | Should -Be @('EamDashboard', 'TierBreachAnalyzer', 'AccessPathMap', 'PrivilegedAssets')
 
         $ReportText = Get-ChildItem -LiteralPath $ReportDestination -Recurse -File -Filter '*.js' |
         Get-Content -Raw | Out-String

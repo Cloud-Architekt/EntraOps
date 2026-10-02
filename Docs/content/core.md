@@ -111,7 +111,9 @@ controls almost every aspect of automated execution. The most relevant sections:
 | `ConfigurationAnalyzer.AccessPackageFlowExcludedRiskFlags`                                                                                                                     | Optional array of Access Package Flow risk-flag IDs to omit from the report. Defaults to `[]`. Select the IDs in the Configuration Wizard; the supported ID mapping is in the [Access Package Flow documentation](../../Reports/AccessPackageFlow/README.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `ConfigurationAnalyzer.ConditionalAccessAnalysisExcludedFindings`                                                                                                              | Optional array of Conditional Access Analysis finding IDs to omit from the report. Defaults to `[]`. Select the IDs in the Configuration Wizard; the supported ID mapping is in the [Conditional Access Analysis documentation](../../Reports/ConditionalAccessAnalysis/README.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `ConfigurationAnalyzer.EidscaExcludedFindings`                                                                                                                                 | Optional array of EIDSCA check IDs to omit from the report. Defaults to `[]`; use the check IDs shown beside each EIDSCA finding.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `AlternateObjectTierLevelAttributes`                                                                                                                                           | Classify `User`/`ServicePrincipal` objects via PowerShell filter expressions instead of Custom Security Attributes, and `Group` objects (which don't support Custom Security Attributes) - see [Classify by Alternate Tier Level Attributes](#classify-by-alternate-tier-level-attributes). Disabled by default with empty filters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `AlternateObjectTierLevelAttributes`                                                                                                                                           | Classify `User`, `ServicePrincipal` and `Group` objects via PowerShell filter expressions, enabled per object type (`User.Enabled`, `ServicePrincipal.Enabled`, `Group.Enabled`). For users and service principals the filters apply when the object has no Custom Security Attribute tier; groups don't support Custom Security Attributes - see [Classify by Alternate Tier Level Attributes](#classify-by-alternate-tier-level-attributes). Disabled by default with empty filters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `ObjectClassificationFile` | Classify objects by a list of object IDs and tiers in the repository (`Enabled`, `FilePath`). Can be combined with Custom Security Attributes (`CustomSecurityAttributes.Enabled`) and Alternate Tier Level Attributes; the file is used for objects they don't classify - see [Classification sources](#classification-sources). Disabled by default. |
+| `PrivilegedAssets.ResolveRelatedObjectIds` | Resolve owners, sponsors, owned objects and devices, identity parents and associated accounts outside the Privileged EAM export through Microsoft Graph when generating Privileged Assets. Enabled by default. |
 | `TenantGovernanceSnapshot`                                                                                                                                                     | Capture and version Microsoft Entra, Intune, and Security & Compliance configuration through Microsoft Graph UTCM. Disabled by default. See [Tenant Governance Snapshots](../tenant-governance/index.html#tenant-governance-snapshots) for resource selection, permissions, schedules, and retention.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 See [Get Started &rarr; Review and customize configuration](../get-started/index.html#step-6-review-and-customize-the-entraopsconfig-file)
@@ -136,6 +138,40 @@ configuration snapshots. It is disabled by default and has dedicated documentati
 permissions, automation workflow, scripts, Git-backed snapshot storage, and Configuration Analyzer
 integration. See [Tenant Governance](../tenant-governance/index.html).
 
+## Classification sources
+
+The object tier (`ObjectAdminTierLevel` / `ObjectAdminTierLevelName`) of privileged users, groups,
+service principals and applications comes from up to three sources. You can enable any combination
+of them in `EntraOpsConfig.json` or in the Configuration Wizard (tab *Object Classification*). They
+are used in this order:
+
+| Order | Source | Setting | Object types |
+| --- | --- | --- | --- |
+| 1 | [Custom Security Attributes](#classify-by-custom-security-attributes) | `CustomSecurityAttributes.Enabled` | User, ServicePrincipal, Application |
+| 2 | [Alternate Tier Level Attributes](#classify-by-alternate-tier-level-attributes) | `AlternateObjectTierLevelAttributes.<Type>.Enabled` | User, ServicePrincipal, Group (per type) |
+| 3 | [Object Classification File](#classify-by-object-classification-file) | `ObjectClassificationFile.Enabled` | User, Group, ServicePrincipal, Application |
+
+The first enabled source that returns a tier wins. When a source has no tier for the object (empty
+or `Unclassified`), the next enabled source is used:
+
+1. **Custom Security Attributes** - the tier attributes of the object.
+2. **Alternate Tier Level Attributes** - the first matching filter of the object type.
+3. **Object Classification File** - the entry for the object ID.
+4. Otherwise the object is `Unclassified`.
+
+For example, keep Custom Security Attributes as the authoritative source and use `Group` filters
+for groups (which don't support Custom Security Attributes), or list objects without attributes in
+the Object Classification File. To change the tier of an object that already has a Custom Security
+Attribute tier, change the attribute - a filter or file entry doesn't override it.
+
+Older config files without `CustomSecurityAttributes.Enabled` keep their behavior: Custom Security
+Attributes are not used when the Object Classification File is enabled, or for users and service
+principals whose Alternate Tier Level Attributes are enabled (the filters replaced them). Older
+versions of the Configuration Wizard offered one classification method only, so the wizard imports
+such a file with Custom Security Attributes turned off when the Alternate Tier Level Attributes
+(top-level `Enabled: true`) or the Object Classification File were selected. Applications, which
+filters don't classify, then no longer use Custom Security Attributes either.
+
 ## Classify by Custom Security Attributes
 
 You might want to classify privileged users on the target Enterprise Access Level and their
@@ -159,12 +195,18 @@ values come from a **paired set of custom security attribute fields** within the
 `PrivilegedUserAdminTierLevelNameAttribute` for users, and
 `PrivilegedServicePrincipalAdminTierLevelAttribute` / `PrivilegedServicePrincipalAdminTierLevelNameAttribute`
 for service principals). Both fields must be tagged consistently by your provisioning process.
+Applications, including agent identity blueprints, use the attributes of their service principal
+(for blueprints, the agent identity blueprint principal).
 
 In addition, custom security attributes are used to build a correlation between the privileged
 user and their associated PAW device and regular work account:
 
 - `associatedSecureAdminWorkstation`
 - `associatedWorkAccount`
+
+`CustomSecurityAttributes.Enabled` (default `true`) controls only the tier: set it to `false` to
+ignore the tier attributes, e.g. when you classify by the Object Classification File only. The PAW
+device and work account attributes are always read.
 
 Permissions to read the custom security attributes need to be granted manually to the service
 principal used by EntraOps.
@@ -206,22 +248,24 @@ Microsoft Entra doesn't support Custom Security Attributes on groups.
 
 This is configured in the `AlternateObjectTierLevelAttributes` section of `EntraOpsConfig.json`. It
 is always included (with empty filters) when a new config file is created by
-`New-EntraOpsConfigFile`, but is **disabled by default**:
+`New-EntraOpsConfigFile`, but is **disabled by default** for every object type:
 
 ```json
 "AlternateObjectTierLevelAttributes": {
-  "Enabled": false,
   "User": {
+    "Enabled": false,
     "ControlPlane": "",
     "ManagementPlane": "",
     "UserAccess": ""
   },
   "ServicePrincipal": {
+    "Enabled": false,
     "ControlPlane": "",
     "ManagementPlane": "",
     "UserAccess": ""
   },
   "Group": {
+    "Enabled": false,
     "ControlPlane": "",
     "ManagementPlane": "",
     "UserAccess": ""
@@ -229,11 +273,15 @@ is always included (with empty filters) when a new config file is created by
 }
 ```
 
-| Property                    | Description                                                                                                                                                                                                                                                               |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Enabled`                   | Set to `true` to use this alternate classification instead of Custom Security Attributes for `User` and `ServicePrincipal` objects. When `false` or the whole section is missing (e.g. an older config file), Custom Security Attribute classification is used unchanged. |
-| `User` / `ServicePrincipal` | One PowerShell filter expression per Enterprise Access Level (`ControlPlane`, `ManagementPlane`, `UserAccess`). Leave a filter as an empty string `""` to skip that tier.                                                                                                 |
-| `Group`                     | Same filter syntax for `Group` objects. Groups don't support Custom Security Attributes, so these filters apply whenever at least one of them is set - **independent of `Enabled`**. This lets you keep Custom Security Attributes for users and service principals while classifying groups by filter. Without any `Group` filter, groups stay `Unclassified`. |
+| Property                                | Description                                                                                                                                                                                                                                                                                  |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `User` / `ServicePrincipal` / `Group`   | One section per object type, each with its own `Enabled` switch and one PowerShell filter expression per Enterprise Access Level (`ControlPlane`, `ManagementPlane`, `UserAccess`). Leave a filter as an empty string `""` to skip that tier.                                                |
+| `Enabled` (per object type)             | Set to `true` to classify this object type by its filters. The filters apply to objects without a Custom Security Attribute tier; groups don't support Custom Security Attributes. An object that matches no filter falls back to the Object Classification File or stays `Unclassified`. You can enable any combination, e.g. only `Group`. |
+
+Older config files without a per-type `Enabled` keep their behavior: `User` and `ServicePrincipal`
+follow the former top-level `Enabled` switch, and `Group` filters apply when at least one is set.
+The per-type `Enabled` wins when both exist; the Configuration Wizard converts the section when
+you import and download the file.
 
 Each filter expression is a PowerShell expression that must evaluate to `$true`/`$false`; the
 object's own resolved details are exposed as the `$Object` variable. For example, to classify a
@@ -242,18 +290,20 @@ principal as Control Plane by a naming convention:
 
 ```json
 "AlternateObjectTierLevelAttributes": {
-  "Enabled": true,
   "User": {
+    "Enabled": true,
     "ControlPlane": "$Object.AssignedAdministrativeUnits.displayName -contains \"Tier0-ControlPlane.EntraID\"",
     "ManagementPlane": "$Object.AssignedAdministrativeUnits.displayName -contains \"Tier1-ManagementPlane.EntraID\"",
     "UserAccess": ""
   },
   "ServicePrincipal": {
+    "Enabled": true,
     "ControlPlane": "$Object.ObjectDisplayName -like \"*-tier0-*\"",
     "ManagementPlane": "$Object.ObjectDisplayName -like \"*-tier1-*\"",
     "UserAccess": ""
   },
   "Group": {
+    "Enabled": true,
     "ControlPlane": "$Object.AssignedAdministrativeUnits.displayName -contains \"Tier0-ControlPlane.EntraID\" -or $Object.ObjectDisplayName -like \"PRG-Tier0-*\"",
     "ManagementPlane": "$Object.ObjectDisplayName -like \"PRG-Tier1-*\"",
     "UserAccess": ""
@@ -270,10 +320,63 @@ principal as Control Plane by a naming convention:
 
 Filters are evaluated in order of decreasing privilege (`ControlPlane`, then `ManagementPlane`,
 then `UserAccess`) and the **first matching tier wins**. If none of the filters for an enabled
-object type match - or a filter expression fails to evaluate (e.g. a typo) - the object is
-classified as `Unclassified` rather than falling back to Custom Security Attributes. Applications,
+object type match - or a filter expression fails to evaluate (e.g. a typo) - the object falls back
+to the Object Classification File, if enabled, or stays `Unclassified`. An object type
+that is enabled without any filter expression logs a warning. Applications,
 remote tenant groups (cross-tenant `ForeignGroup` references) and objects unresolved in the current
 tenant are not affected by this feature and always keep their existing classification behavior.
+
+## Classify by Object Classification File
+
+The Object Classification File is a list of object IDs with their Enterprise Access Level, stored
+in the repository. It works for **User**, **Group**, **ServicePrincipal** and **Application**
+objects and can be combined with the other [classification sources](#classification-sources):
+
+1. **The file is the last source.** An entry only applies when Custom Security Attributes and
+   Alternate Tier Level Attributes don't return a tier for the object, e.g. for objects without
+   attributes or groups that match no filter.
+2. Objects without any match stay `Unclassified`.
+
+To classify by the file only, set `CustomSecurityAttributes.Enabled` to `false` and keep the
+Alternate Tier Level Attributes disabled.
+
+Select *Object Classification File* as classification source in the Configuration Wizard (tab
+*Object Classification*), or enable it in `EntraOpsConfig.json`:
+
+```json
+"ObjectClassificationFile": {
+  "Enabled": true,
+  "FilePath": "./Classification/ObjectClassification.json"
+}
+```
+
+`FilePath` is relative to the repository root, must stay inside it, and can be a `.json` array or a
+`.csv` file with the same columns:
+
+```json
+[
+  {
+    "ObjectId": "11111111-1111-1111-1111-111111111111",
+    "ObjectType": "group",
+    "ObjectDisplayName": "PRG-Tier0-IdentityOps",
+    "AdminTierLevelName": "ControlPlane",
+    "Justification": "Holds Privileged Role Administrator eligibility"
+  }
+]
+```
+
+| Column               | Description                                                                                                                                  |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ObjectId`           | Required. Object ID (GUID) of the object.                                                                                                    |
+| `AdminTierLevelName` | Required. `ControlPlane`, `ManagementPlane`, `WorkloadPlane` or `UserAccess`. The tier level (`0`/`1`/`1`/`2`) is derived from the name, so an entry can't create a contradictory tier pair. |
+| `ObjectType`         | Optional. `user`, `group`, `serviceprincipal` or `application`. When set and different from the resolved object, the entry is ignored with a warning. |
+| `ObjectDisplayName`  | Optional, informational.                                                                                                                     |
+| `Justification`      | Optional, recommended for reviews.                                                                                                           |
+
+The file is data, not code: entries are matched by object ID only. Invalid rows are skipped with a
+warning; when an object is listed with different tiers, the most privileged tier is used. Maintain
+the file in [Privileged Assets &rsaquo; Object Classification](../reportings/index.html#privileged-assets)
+reporting app, download it, commit it to the repository, and the next Privileged EAM pull applies it.
 
 ## Why was this classification chosen for the role? {#why-was-this-classification-chosen}
 

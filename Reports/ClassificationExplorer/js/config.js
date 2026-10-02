@@ -50,6 +50,7 @@ EOCE.PORTAL_NAV = EOCE.isEntraOpsMode() ? [
     { label: 'Home', href: '../index.html', icon: '&#8962;' },
     { label: 'Classification Explorer', current: true, icon: '&#9737;' },
     { label: 'EAM Dashboard', href: '../EamDashboard/index.html', icon: '&#9635;' },
+    { label: 'Privileged Assets', href: '../PrivilegedAssets/index.html', icon: '&#9776;' },
     { label: 'Access Path Map', href: '../AccessPathMap/index.html', icon: '&#10565;' },
     { label: 'Tier Breach Analyzer', href: '../TierBreachAnalyzer/index.html', icon: '&#9888;' },
     { label: 'Privilege History', href: '../PrivilegeHistory/index.html', icon: '&#8635;' }

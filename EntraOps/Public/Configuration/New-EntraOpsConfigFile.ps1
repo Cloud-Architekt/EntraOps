@@ -114,6 +114,10 @@
     Defines if New-EntraOpsPrivilegedEamDashboardData should resolve linked identity object IDs outside the Privileged EAM export to display names through Microsoft Graph. Default is true.
     Requires an active Microsoft Graph connection with directory read permissions when generating EAM Dashboard data.
 
+.PARAMETER PrivilegedAssetsResolveRelatedObjectIds
+    Defines if New-EntraOpsPrivilegedAssetsData should resolve related object IDs outside the Privileged EAM export (owners, sponsors, owned objects, owned devices, identity parent, associated work account and PAW device) to display name and object type through Microsoft Graph. Default is true.
+    Requires an active Microsoft Graph connection with directory read permissions when generating Privileged Assets data.
+
 .PARAMETER ClassificationExplorerGenerateChangeHistory
     Defines if New-EntraOpsClassificationExplorerData should derive the classification change history
     from the source repository's git log. Default is false because the derivation requires a full
@@ -134,8 +138,17 @@
     Array of PIM Request Flow risk-flag IDs to exclude from the generated report. Default is empty,
     so every supported risk flag is reported. Use the Configuration Wizard to select flags by name.
 
+.PARAMETER EnableCustomSecurityAttributeClassification
+    Defines if the tier of User, ServicePrincipal and Application objects is read from Custom Security Attributes (CustomSecurityAttributes.Enabled). Can be combined with Alternate Tier Level Attributes and the Object Classification File: Custom Security Attributes win, an object without tier falls back to the filters of its object type, then to the file. Default is true, or false when -EnableObjectClassificationFile is $true and this parameter isn't passed. The PAW device and work account attributes are always read.
+
 .PARAMETER EnableAlternateObjectTierLevelAttributes
-    Defines if User and ServicePrincipal objects should be classified by PowerShell filter expressions evaluated against their own resolved EntraOps details (section AlternateObjectTierLevelAttributes) instead of Custom Security Attributes. Default is false. The config file always includes the section with empty filter expressions so it can be filled in and enabled later; see README.md "Classify privileged objects by Alternate Tier Level Attributes" for the required syntax. Group objects don't support Custom Security Attributes; the 'Group' filter expressions of this section classify groups whenever at least one is set, independent of this switch.    
+    Defines if User and ServicePrincipal objects should be classified by PowerShell filter expressions evaluated against their own resolved EntraOps details (section AlternateObjectTierLevelAttributes) when they have no Custom Security Attribute tier. Sets User.Enabled and ServicePrincipal.Enabled; Group.Enabled is always created as false. Default is false. The config file always includes the section with empty filter expressions so it can be filled in and enabled per object type later; see Docs "Classify by Alternate Tier Level Attributes" for the required syntax.
+
+.PARAMETER EnableObjectClassificationFile
+    Defines if the Object Classification File (section ObjectClassificationFile) is used to classify User, Group, ServicePrincipal and Application objects by ObjectId. A file entry applies to objects that neither Custom Security Attributes nor Alternate Tier Level Attributes classify. Default is false. The file can be maintained in the Object Classification view of the Privileged Assets reporting app.
+
+.PARAMETER ObjectClassificationFilePath
+    Path of the Object Classification File (.json or .csv), relative to the EntraOps repository root. Default is "./Classification/ObjectClassification.json".
 
 .PARAMETER EnableTenantGovernanceSnapshot
     Defines if the EntraOps Tenant Governance Snapshot feature is enabled. Default is false.
@@ -297,6 +310,9 @@ function New-EntraOpsConfigFile {
         [boolean]$EamDashboardResolveLinkedIdentityObjectIds = $true,
 
         [Parameter(Mandatory = $false)]
+        [boolean]$PrivilegedAssetsResolveRelatedObjectIds = $true,
+
+        [Parameter(Mandatory = $false)]
         [boolean]$ClassificationExplorerGenerateChangeHistory = $false,
 
         [Parameter(Mandatory = $false)]
@@ -321,7 +337,17 @@ function New-EntraOpsConfigFile {
         [string[]]$EidscaExcludedFindings = @(),
 
         [Parameter(Mandatory = $false)]
+        [boolean]$EnableCustomSecurityAttributeClassification = $true,
+
+        [Parameter(Mandatory = $false)]
         [boolean]$EnableAlternateObjectTierLevelAttributes = $false,        
+
+        [Parameter(Mandatory = $false)]
+        [boolean]$EnableObjectClassificationFile = $false,
+
+        [Parameter(Mandatory = $false)]
+        [ValidatePattern('\.(json|csv)$')]
+        [string]$ObjectClassificationFilePath = "./Classification/ObjectClassification.json",
 
         [Parameter(Mandatory = $false)]
         [boolean]$EnableTenantGovernanceSnapshot = $false,
@@ -393,6 +419,9 @@ function New-EntraOpsConfigFile {
         @("./.azure-pipelines", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
     } else {
         @("./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
+    }
+    if (-not $PSBoundParameters.ContainsKey('EnableCustomSecurityAttributeClassification')) {
+        $EnableCustomSecurityAttributeClassification = -not $EnableObjectClassificationFile
     }
     $DefaultUpdatePublicationMode = if ($DevOpsPlatform -eq 'AzureDevOps' -and -not $PSBoundParameters.ContainsKey('UpdatePublicationMode')) {
         'DirectPush'
@@ -515,6 +544,7 @@ function New-EntraOpsConfigFile {
             GenerateConfigurationAnalyzer     = $true
             GenerateAccessPackageFlow         = $true
             GeneratePrivilegeHistory          = $true
+            GeneratePrivilegedAssets          = $true
             ClassificationExplorerRepository  = "Cloud-Architekt/AzurePrivilegedIAM"
         }
         ConfigurationAnalyzer                         = [ordered]@{
@@ -531,6 +561,7 @@ function New-EntraOpsConfigFile {
             RemovalSafetyThreshold              = $RemovalSafetyThreshold
         }
         CustomSecurityAttributes                      = [ordered]@{
+            Enabled                                               = $EnableCustomSecurityAttributeClassification
             PrivilegedUserAttribute                               = "privilegedUser"
             PrivilegedUserPawAttribute                            = "associatedSecureAdminWorkstation"
             PrivilegedServicePrincipalAttribute                   = "privilegedWorkloadIdentity"
@@ -541,22 +572,28 @@ function New-EntraOpsConfigFile {
             PrivilegedServicePrincipalAdminTierLevelNameAttribute = "adminTierLevelName"
         }
         AlternateObjectTierLevelAttributes            = [ordered]@{
-            Enabled          = $EnableAlternateObjectTierLevelAttributes
             User             = [ordered]@{
+                Enabled         = $EnableAlternateObjectTierLevelAttributes
                 ControlPlane    = ""
                 ManagementPlane = ""
                 UserAccess      = ""
             }
             ServicePrincipal = [ordered]@{
+                Enabled         = $EnableAlternateObjectTierLevelAttributes
                 ControlPlane    = ""
                 ManagementPlane = ""
                 UserAccess      = ""
             }
             Group            = [ordered]@{
+                Enabled         = $false
                 ControlPlane    = ""
                 ManagementPlane = ""
                 UserAccess      = ""
             }
+        }
+        ObjectClassificationFile                      = [ordered]@{
+            Enabled  = $EnableObjectClassificationFile
+            FilePath = $ObjectClassificationFilePath
         }
         PrivilegeHistory                              = [ordered]@{
             EnablePrivilegeHistory = $EnablePrivilegeHistory
@@ -568,6 +605,9 @@ function New-EntraOpsConfigFile {
         }
         EamDashboard                                  = [ordered]@{
             ResolveLinkedIdentityObjectIds = $EamDashboardResolveLinkedIdentityObjectIds
+        }
+        PrivilegedAssets                              = [ordered]@{
+            ResolveRelatedObjectIds = $PrivilegedAssetsResolveRelatedObjectIds
         }
         ClassificationExplorer                        = [ordered]@{
             GenerateChangeHistory = $ClassificationExplorerGenerateChangeHistory

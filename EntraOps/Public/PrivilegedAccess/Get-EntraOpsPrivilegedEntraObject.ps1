@@ -39,7 +39,13 @@
     CSA field name for the admin tier level name on service principal and application objects. Defaults to 'adminTierLevelName'. Override via EntraOpsConfig.CustomSecurityAttributes.PrivilegedServicePrincipalAdminTierLevelNameAttribute.
 
 .PARAMETER AlternateObjectTierLevelAttributes
-    Alternate classification of User and ServicePrincipal objects by PowerShell filter expressions evaluated against the object's own resolved EntraOps details (e.g. AssignedAdministrativeUnits, ObjectDisplayName), instead of Custom Security Attributes. Default will be set by EntraOpsConfig.json section AlternateObjectTierLevelAttributes. Only takes effect when its 'Enabled' property is $true; otherwise Custom Security Attribute classification is used unchanged. Group objects (which do not support Custom Security Attributes) are classified by the 'Group' filter expressions whenever at least one is defined, independent of 'Enabled'. See README.md "Classify privileged objects by Alternate Tier Level Attributes" for details and syntax.
+    Alternate classification of User, ServicePrincipal and Group objects by PowerShell filter expressions evaluated against the object's own resolved EntraOps details (e.g. AssignedAdministrativeUnits, ObjectDisplayName). Default will be set by EntraOpsConfig.json section AlternateObjectTierLevelAttributes. The filters of an object type only take effect when its 'Enabled' property (e.g. User.Enabled) is $true and the object has no Custom Security Attribute tier. Config files without per-type 'Enabled' keep the previous behavior (top-level 'Enabled' for User/ServicePrincipal, any Group filter set for Group). See Docs "Classify by Alternate Tier Level Attributes" for details and syntax.
+
+.PARAMETER ObjectClassificationFile
+    Object Classification File settings (Enabled, FilePath). Default will be set by EntraOpsConfig.json section ObjectClassificationFile. When enabled, a User, Group, ServicePrincipal or Application object that neither Custom Security Attributes nor Alternate Tier Level Attributes classify takes its tier from its entry in the file (matched by ObjectId).
+
+.PARAMETER CustomSecurityAttributeClassification
+    Defines if the tier of User, ServicePrincipal and Application objects is read from Custom Security Attributes. Default will be set by EntraOpsConfig.json CustomSecurityAttributes.Enabled. Custom Security Attributes win over Alternate Tier Level Attributes and the Object Classification File; an object without tier falls back to them. When absent, Custom Security Attributes are used unless the Object Classification File or, for users and service principals, the Alternate Tier Level Attributes of the object type are enabled (behavior of older config files). The PAW device and work account attributes are always read.
 
 .EXAMPLE
     Details of privileged object by using ObjectId
@@ -92,6 +98,14 @@ function Get-EntraOpsPrivilegedEntraObject {
         [Parameter(Mandatory = $false)]
         [AllowNull()]
         [PSObject]$AlternateObjectTierLevelAttributes = $EntraOpsConfig.AlternateObjectTierLevelAttributes
+        ,
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [PSObject]$ObjectClassificationFile = $EntraOpsConfig.ObjectClassificationFile
+        ,
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$CustomSecurityAttributeClassification = $EntraOpsConfig.CustomSecurityAttributes.Enabled
     )
 
     $StopwatchTotal = [System.Diagnostics.Stopwatch]::StartNew()
@@ -686,14 +700,28 @@ function Get-EntraOpsPrivilegedEntraObject {
         }
     }
 
-    #region Alternate classification of User/ServicePrincipal/Group objects by AlternateObjectTierLevelAttributes
-    # User/ServicePrincipal: overrides the Custom Security Attribute-based $AdminTierLevel/$AdminTierLevelName
-    # above, only when explicitly enabled via EntraOpsConfig.json. Group: groups have no Custom Security
-    # Attributes, so the resolver applies Group filters whenever any are defined. Applications and
-    # unresolved objects are unaffected.
-    if ($null -ne $AlternateObjectTierLevelAttributes -and (
-            ($ObjectType -in @('user', 'servicePrincipal') -and $AlternateObjectTierLevelAttributes.Enabled -eq $true) -or
-            ($ObjectType -eq 'group' -and $null -ne $AlternateObjectTierLevelAttributes.Group))) {
+    #region Object tier by Custom Security Attributes, Alternate Tier Level Attributes and Object Classification File
+    # Precedence: Custom Security Attributes (read above), then enabled filters, then the file entry.
+    # A source without tier (empty or Unclassified) falls through to the next enabled source.
+    $CsaObjectTypeName = switch ($ObjectType) {
+        'user' { 'User' }
+        'serviceprincipal' { 'ServicePrincipal' }
+        'application' { 'Application' }
+        default { $null }
+    }
+    if ($null -ne $CsaObjectTypeName -and -not (Test-EntraOpsCustomSecurityAttributeClassificationEnabled -ObjectType $CsaObjectTypeName -Enabled $CustomSecurityAttributeClassification -ObjectClassificationFile $ObjectClassificationFile -AlternateObjectTierLevelAttributes $AlternateObjectTierLevelAttributes)) {
+        $AdminTierLevel = $null
+        $AdminTierLevelName = $null
+    }
+
+    $AlternateObjectTypeName = switch ($ObjectType) {
+        'user' { 'User' }
+        'group' { 'Group' }
+        'serviceprincipal' { 'ServicePrincipal' }
+        default { $null }
+    }
+    if (([string]::IsNullOrWhiteSpace("$AdminTierLevelName") -or "$AdminTierLevelName" -eq 'Unclassified') -and $null -ne $AlternateObjectTypeName -and
+        (Test-EntraOpsAlternateObjectTierLevelEnabled -ObjectType $AlternateObjectTypeName -AlternateObjectTierLevelAttributes $AlternateObjectTierLevelAttributes)) {
         $Object = [PSCustomObject]@{
             ObjectId                      = $ObjectDetails.Id
             ObjectDisplayName             = $ObjectDetails.displayName
@@ -710,15 +738,31 @@ function Get-EntraOpsPrivilegedEntraObject {
             OutsideOfHomeTenant           = $OutsideOfAadTenant
         }
 
-        $AlternateObjectTypeName = switch ($ObjectType) {
-            'user' { 'User' }
-            'group' { 'Group' }
-            default { 'ServicePrincipal' }
-        }
         $AlternateResult = Resolve-EntraOpsAlternateObjectTierLevel -ObjectType $AlternateObjectTypeName -Object $Object -AlternateObjectTierLevelAttributes $AlternateObjectTierLevelAttributes
-        if ($null -ne $AlternateResult) {
+        if ($null -ne $AlternateResult -and $AlternateResult.AdminTierLevelName -ne 'Unclassified') {
             $AdminTierLevel = $AlternateResult.AdminTierLevel
             $AdminTierLevelName = $AlternateResult.AdminTierLevelName
+        }
+    }
+
+    if (([string]::IsNullOrWhiteSpace("$AdminTierLevelName") -or "$AdminTierLevelName" -eq 'Unclassified') -and
+        $null -ne $ObjectClassificationFile -and $ObjectClassificationFile.Enabled -eq $true -and
+        $ObjectType -in @('user', 'group', 'serviceprincipal', 'application') -and -not [string]::IsNullOrWhiteSpace($ObjectClassificationFile.FilePath)) {
+        $ObjectClassificationFileEntry = $null
+        try {
+            $ObjectClassificationFileEntries = Import-EntraOpsObjectClassificationFile -FilePath $ObjectClassificationFile.FilePath
+            $ObjectClassificationFileEntry = $ObjectClassificationFileEntries["$($ObjectDetails.Id)".ToLowerInvariant()]
+        } catch {
+            Write-Warning "Object Classification File could not be used for $($AadObjectId): $($_.Exception.Message)"
+        }
+        if ($null -ne $ObjectClassificationFileEntry -and -not [string]::IsNullOrEmpty($ObjectClassificationFileEntry.ObjectType) -and $ObjectClassificationFileEntry.ObjectType -ne $ObjectType) {
+            Write-Warning "Object Classification File entry for $AadObjectId declares ObjectType '$($ObjectClassificationFileEntry.ObjectType)' but the object is '$ObjectType'. Entry ignored."
+            $ObjectClassificationFileEntry = $null
+        }
+        if ($null -ne $ObjectClassificationFileEntry) {
+            $AdminTierLevel = $ObjectClassificationFileEntry.AdminTierLevel
+            $AdminTierLevelName = $ObjectClassificationFileEntry.AdminTierLevelName
+            Write-Verbose "Object $AadObjectId classified as $AdminTierLevelName by Object Classification File."
         }
     }
     #endregion
