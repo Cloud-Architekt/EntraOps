@@ -53,13 +53,26 @@ html,
 body {
     margin: 0;
     padding: 0;
-    min-height: 100%;
+    height: 100%;
     font-family: var(--font);
     color: var(--neutral-fg);
     background: var(--neutral-bg);
     font-size: 14px;
     line-height: 1.45;
     -webkit-font-smoothing: antialiased;
+}
+
+/* Make body the explicit scroll container.
+   When html+body both have height:100%, the viewport becomes the scroll owner
+   and position:sticky on elements inside body can fail (notably in Safari on
+   file:// URLs). Setting overflow-y:auto on body hands scrolling to the body
+   element, so every position:sticky (appbar top:0, nav top:48px, thead top:48px)
+   reliably activates during normal page scroll. */
+body {
+    overflow-y: auto;
+    /* Compensates for .appbar switching to position:fixed below, which removes
+       it from normal flow. */
+    padding-top: var(--header-h);
 }
 
 a {
@@ -87,8 +100,13 @@ mark {
     align-items: center;
     padding: 0 16px;
     gap: 12px;
-    position: sticky;
+    /* fixed (not sticky): wide tables/filter rows can force page-level
+       horizontal scroll on narrower/laptop widths, and a sticky top:0 with
+       no left offset scrolls away with the page in that direction. */
+    position: fixed;
     top: 0;
+    left: 0;
+    right: 0;
     z-index: 50;
 }
 
@@ -127,7 +145,6 @@ mark {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    white-space: nowrap;
 }
 
 .appbar .appbar-link:hover {
@@ -135,192 +152,12 @@ mark {
     text-decoration: none;
 }
 
-.eo-notification-button {
-    position: relative;
-    width: 36px;
-    height: 36px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    color: #fff;
-    cursor: pointer;
-    padding: 0;
-}
-
-.eo-notification-button:hover,
-.eo-notification-button:focus-visible {
-    background: rgba(255, 255, 255, .12);
-    outline: none;
-}
-
-.eo-notification-bell {
-    position: absolute;
-    top: 9px;
-    left: 10px;
-    width: 14px;
-    height: 15px;
-    border: 2px solid currentColor;
-    border-bottom: 0;
-    border-radius: 8px 8px 3px 3px;
-}
-
-.eo-notification-bell::before {
-    content: "";
-    position: absolute;
-    right: -4px;
-    bottom: -4px;
-    left: -4px;
-    height: 2px;
-    background: currentColor;
-    border-radius: 1px;
-}
-
-.eo-notification-bell::after {
-    content: "";
-    position: absolute;
-    bottom: -7px;
-    left: 5px;
-    width: 4px;
-    height: 3px;
-    background: currentColor;
-    border-radius: 0 0 2px 2px;
-}
-
-.eo-notification-count {
-    position: absolute;
-    top: 1px;
-    right: 0;
-    min-width: 16px;
-    padding: 0 4px;
-    border: 0;
-    border-radius: 0;
-    height: 16px;
-    background: #fff;
-    color: #1f1f1f;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 16px;
-}
-
-.eo-notification-backdrop {
-    position: fixed;
-    inset: var(--header-h) 0 0;
-    z-index: 78;
-    display: none;
-    background: rgba(0, 0, 0, .18);
-}
-
-.eo-notification-backdrop.open {
-    display: block;
-}
-
-.eo-notification-panel {
-    position: fixed;
-    top: var(--header-h);
-    right: 0;
-    bottom: 0;
-    z-index: 79;
-    width: min(440px, 100vw);
-    background: var(--neutral-surface);
-    box-shadow: -8px 0 24px rgba(0, 0, 0, .18);
-    transform: translateX(102%);
-    transition: transform .18s ease;
-}
-
-.eo-notification-panel.open {
-    transform: translateX(0);
-}
-
-.eo-notification-head {
-    min-height: 72px;
-    padding: 16px 18px;
-    border-bottom: 1px solid var(--neutral-stroke);
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-}
-
-.eo-notification-head strong,
-.eo-notification-head span {
-    display: block;
-}
-
-.eo-notification-head span {
-    margin-top: 4px;
-    color: var(--neutral-fg-secondary);
-    font-size: 12px;
-}
-
-.eo-notification-close {
-    border: 0;
-    background: transparent;
-    cursor: pointer;
-    font-size: 16px;
-}
-
-.eo-notification-body {
-    height: calc(100% - 72px);
-    overflow: auto;
-}
-
-.eo-notification-item {
-    display: block;
-    padding: 14px 18px;
-    border-bottom: 1px solid var(--neutral-stroke);
-    color: inherit;
-}
-
-.eo-notification-item:hover {
-    background: var(--brand-bg);
-    text-decoration: none;
-}
-
-.eo-notification-kind {
-    display: block;
-    color: var(--brand);
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-}
-
-.eo-notification-title {
-    display: block;
-    margin-top: 4px;
-    font-weight: 600;
-}
-
-.eo-notification-detail {
-    display: block;
-    margin-top: 4px;
-    color: var(--neutral-fg-secondary);
-    font-size: 12px;
-}
-
-.eo-notification-empty {
-    padding: 28px 18px;
-    color: var(--neutral-fg-secondary);
-}
-
-/* Classification source selector (built-in template vs. tenant-specific, entraops mode only) */
+/* Classification source selector (built-in template vs. tenant-specific) */
 .appbar .variant-picker {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     margin-right: 8px;
-}
-
-/* The native `hidden` attribute is used throughout the app (mode-gated elements, see
-   js/app.js) to hide elements regardless of their own display rules - without this,
-   author styles like `.variant-picker { display: inline-flex }` above would win over the
-   browser's default `[hidden] { display: none }` UA rule and the element would stay
-   visible even while `hidden` is set. */
-[hidden] {
-    display: none !important;
-}
-
-.hidden {
-    display: none !important;
 }
 
 .appbar .variant-picker span {
@@ -355,12 +192,14 @@ mark {
     width: var(--nav-w);
     background: var(--nav-bg-2);
     color: var(--nav-fg);
-    display: flex;
-    flex-direction: column;
     flex-shrink: 0;
     padding: 8px 0;
     position: sticky;
     top: var(--header-h);
+    /* left:0 keeps the rail pinned during page-level horizontal scroll (see
+       .appbar comment above); z-index keeps it above sticky theads (z-index:1). */
+    left: 0;
+    z-index: 40;
     height: calc(100vh - var(--header-h));
     overflow-y: auto;
 }
@@ -391,18 +230,6 @@ mark {
     color: #fff;
 }
 
-.nav-item:focus-visible {
-    outline: 2px solid #fff;
-    outline-offset: -3px;
-}
-
-/* Portal-wide navigation entries (entraops mode only, injected by js/app.js
-   renderPortalNav) are plain links to sibling apps. */
-a.nav-item,
-a.nav-item:hover {
-    text-decoration: none;
-}
-
 .nav-item.active {
     background: rgba(0, 120, 212, 0.16);
     color: #fff;
@@ -425,35 +252,25 @@ a.nav-item:hover {
     padding: 1px 8px;
 }
 
+.nav-item.nav-subitem {
+    padding-left: 40px;
+    font-size: 12.5px;
+}
+
+.nav-item.nav-subitem .ico {
+    width: 14px;
+    font-size: 12px;
+}
+
+.nav.collapsed .nav-item.nav-subitem {
+    display: none;
+}
+
 .main {
     flex: 1;
     min-width: 0;
     padding: 24px 28px 64px;
     max-width: none;
-}
-
-/* ---------- App footer ---------------------------------------------------- */
-.app-footer {
-    margin-top: auto;
-    padding: 10px 20px 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 10px;
-    line-height: 1.3;
-    color: var(--nav-fg-muted);
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    background: var(--nav-bg-2);
-}
-
-.app-footer a {
-    color: var(--nav-fg-muted);
-    text-decoration: underline;
-}
-
-.app-footer a:hover,
-.app-footer a:focus-visible {
-    color: #fff;
 }
 
 /* ---------- Page header -------------------------------------------------- */
@@ -484,10 +301,6 @@ a.nav-item:hover {
     color: var(--neutral-fg-secondary);
 }
 
-.drawer-eyebrow {
-    margin: 0 0 4px;
-}
-
 /* ---------- Cards & surfaces -------------------------------------------- */
 .card {
     background: var(--neutral-surface);
@@ -498,6 +311,11 @@ a.nav-item:hover {
 
 .card-pad {
     padding: 18px 20px;
+}
+
+#pimEmptyState code {
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .card-head {
@@ -540,10 +358,6 @@ a.nav-item:hover {
     .grid.cols-4 {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-
-    .appbar .brand .sub {
-        display: none;
-    }
 }
 
 @media (max-width: 720px) {
@@ -553,6 +367,26 @@ a.nav-item:hover {
     .grid.cols-4 {
         grid-template-columns: 1fr;
     }
+
+    .appbar {
+        padding: 0 10px;
+        gap: 8px;
+    }
+
+    .appbar .brand {
+        min-width: 0;
+    }
+
+    .appbar .brand>span:not(.sub) {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .appbar .brand .sub,
+    .appbar .appbar-link {
+        display: none;
+    }
+
 }
 
 /* ---------- Stat tiles --------------------------------------------------- */
@@ -591,6 +425,29 @@ a.nav-item:hover {
     bottom: 0;
     width: 4px;
     background: var(--brand);
+}
+
+.stat-action {
+    width: 100%;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.stat-action:hover {
+    border-color: var(--brand);
+    box-shadow: var(--shadow-8);
+}
+
+.stat-action.selected {
+    border-color: var(--brand);
+    background: var(--brand-bg);
+}
+
+.stat-action:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
 }
 
 /* ---------- Tier badges -------------------------------------------------- */
@@ -687,12 +544,6 @@ a.nav-item:hover {
     cursor: help;
 }
 
-.chip.attack.cell-mono {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    max-width: 100%;
-}
-
 .chip.docdiff {
     background: rgba(135, 100, 184, .12);
     border-color: rgba(135, 100, 184, .40);
@@ -701,41 +552,27 @@ a.nav-item:hover {
     cursor: help;
 }
 
-.chip.dataplane {
-    background: rgba(0, 120, 212, .10);
-    border-color: rgba(0, 120, 212, .35);
-    color: #005a9e;
+/* Template Comparison diff chips (tenant additions / removals vs. template) */
+.chip.diff-add {
+    background: rgba(46, 158, 91, .12);
+    border-color: rgba(46, 158, 91, .40);
+    color: #1d7a44;
     font-weight: 600;
-    cursor: help;
 }
 
-/* Implicit permissions (role definition overwrites) */
-.chip.implicit {
-    background: rgba(0, 120, 120, .10);
-    border-color: rgba(0, 120, 120, .40);
-    color: #00666b;
+.chip.diff-del {
+    background: rgba(200, 69, 44, .10);
+    border-color: rgba(200, 69, 44, .40);
+    color: #b23a22;
     font-weight: 600;
-    cursor: help;
 }
 
-.info-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid rgba(0, 120, 120, .45);
-    background: rgba(0, 120, 120, .08);
-    color: #00666b;
-    font: italic 600 12px Georgia, "Times New Roman", serif;
-    cursor: pointer;
-}
-
-.info-btn[aria-expanded="true"],
-.info-btn:hover {
-    background: rgba(0, 120, 120, .18);
+/* Same value on both sides, but classified under a different plane or service */
+.chip.diff-move {
+    background: rgba(214, 143, 0, .12);
+    border-color: rgba(214, 143, 0, .45);
+    color: #9a6700;
+    font-weight: 600;
 }
 
 /* ---------- Toolbar / filters ------------------------------------------- */
@@ -800,8 +637,6 @@ select.filter:focus {
 
 .seg-group {
     display: inline-flex;
-    flex-wrap: wrap;
-    max-width: 100%;
     border: 1px solid var(--neutral-stroke-strong);
     border-radius: var(--radius);
     overflow: hidden;
@@ -812,12 +647,8 @@ select.filter:focus {
     border-right: 1px solid var(--neutral-stroke);
     border-radius: 0;
     height: 34px;
-    flex: 1 0 auto;
     background: var(--neutral-surface);
     white-space: nowrap;
-    /* Separates rows when the group wraps; the group's overflow clips it on the last row. */
-    border-bottom: 1px solid var(--neutral-stroke);
-    margin-bottom: -1px;
 }
 
 .seg-group .seg:last-child {
@@ -828,10 +659,6 @@ select.filter:focus {
     background: var(--brand);
     color: #fff;
     font-weight: 600;
-}
-
-.seg-group .seg.active .muted {
-    color: rgba(255, 255, 255, .85);
 }
 
 .toolbar-meta {
@@ -860,11 +687,6 @@ select.filter:focus {
     align-items: center;
     gap: 6px;
     opacity: .55;
-}
-
-.tier-toggle:focus-visible {
-    outline: 2px solid var(--brand);
-    outline-offset: 2px;
 }
 
 .tier-toggle.on {
@@ -964,41 +786,6 @@ table.grid-table tbody td {
     padding: 9px 14px;
     border-bottom: 1px solid var(--neutral-stroke);
     vertical-align: middle;
-    /* Some cells embed long, unbroken technical strings (role actions, GUIDs,
-       dotted/slash-separated paths inside prose justification text, ...) with no
-       default CSS break opportunities - without this a single such value forces
-       its column (and the whole page, since .table-wrap uses overflow: visible
-       for the sticky header) wider than the viewport, causing horizontal scroll. */
-    overflow-wrap: anywhere;
-}
-
-/* Name cells only break between words; with "anywhere" nowrap siblings squeeze them to a few letters per line. */
-table.grid-table tbody td.cell-strong,
-table.grid-table tbody td.cell-words {
-    overflow-wrap: break-word;
-}
-
-/* Long placeholder / action chips inside table cells must wrap instead of widening the column. */
-table.grid-table tbody td .chip.cell-mono {
-    white-space: normal;
-    max-width: 100%;
-}
-
-@media (max-width: 1100px) {
-
-    table.grid-table thead th,
-    table.grid-table tbody td {
-        padding-left: 10px;
-        padding-right: 10px;
-    }
-
-    /* With the sidebar visible the content area is too narrow for the wider tables;
-       scroll them in place (sticky header is traded off, as on small screens). */
-    .table-wrap {
-        max-width: 100%;
-        overflow-x: auto;
-        overscroll-behavior-inline: contain;
-    }
 }
 
 table.grid-table tbody tr {
@@ -1016,12 +803,18 @@ table.grid-table tbody tr.selected {
 .cell-mono {
     font-family: "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
     font-size: 12.5px;
-    /* Role action / permission strings are long, unbroken, slash- and dot-separated
-       paths (e.g. microsoft.directory/servicePrincipals/.../manage) with no default
-       CSS break opportunities - without this, a single long value forces its table
-       column (and the whole page, since .table-wrap uses overflow: visible for the
-       sticky header) wider than the viewport, causing horizontal scroll. */
-    overflow-wrap: anywhere;
+}
+
+/* Truncate long single-token values (GUIDs, ids) with an ellipsis instead of
+   wrapping character-by-character across many lines - the full value is
+   still available via the title tooltip. */
+.cell-truncate {
+    display: inline-block;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
 }
 
 .cell-strong {
@@ -1173,10 +966,6 @@ table.grid-table tbody tr.selected {
     gap: 12px;
 }
 
-.drawer-title-wrap {
-    min-width: 0;
-}
-
 .drawer-head .title {
     font-size: 18px;
     font-weight: 600;
@@ -1204,6 +993,31 @@ table.grid-table tbody tr.selected {
     padding: 18px 20px;
     overflow-y: auto;
     flex: 1;
+}
+
+.drawer-section {
+    background: var(--neutral-surface-alt);
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 6px;
+    margin-bottom: 10px;
+}
+
+.drawer-section summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 12px;
+}
+
+.drawer-section .kv {
+    border-top: 1px solid var(--neutral-stroke);
+    margin: 0;
+    padding: 10px 12px 12px;
+}
+
+.drawer-section .kv dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .kv {
@@ -1272,11 +1086,6 @@ table.grid-table tbody tr.selected {
     background: rgba(135, 100, 184, .07);
 }
 
-.callout.implicit {
-    border-left-color: #038387;
-    background: rgba(0, 120, 120, .07);
-}
-
 /* Attack path escalation chain */
 .attack-chain {
     display: grid;
@@ -1318,14 +1127,6 @@ table.grid-table tbody tr.selected {
     margin-top: 4px;
 }
 
-.attack-notes {
-    margin: 0 0 14px;
-    padding-left: 20px;
-    color: var(--neutral-fg-secondary);
-    font-size: 12.5px;
-    line-height: 1.55;
-}
-
 .attack-meta {
     display: flex;
     flex-wrap: wrap;
@@ -1350,7 +1151,7 @@ table.grid-table tbody tr.selected {
     text-decoration: underline;
 }
 
-/* Attack graph (BloodHound-style node/edge view) */
+/* Attack graph (APM-style node/edge view) */
 .ap-graph-panel {
     border: 1px solid var(--neutral-stroke);
     border-radius: 12px;
@@ -1496,10 +1297,6 @@ table.grid-table tbody tr.selected {
     background: #c07807;
 }
 
-.ap-graph-legend .lg-perm i {
-    background: #8764b8;
-}
-
 .ap-graph-legend .lg-tier i {
     background: var(--tier-control);
 }
@@ -1521,7 +1318,6 @@ table.grid-table tbody tr.selected {
 .ap-edge {
     stroke: rgba(120, 130, 150, .42);
     stroke-width: 1.4;
-    transition: opacity .12s ease, stroke .12s ease;
 }
 
 .ap-node circle {
@@ -1534,21 +1330,6 @@ table.grid-table tbody tr.selected {
     filter: brightness(1.12);
 }
 
-.ap-node.dragging circle,
-.ap-node.pinned circle {
-    stroke: var(--neutral-fg);
-    stroke-width: 3;
-}
-
-.ap-node:focus-visible {
-    outline: none;
-}
-
-.ap-node:focus-visible circle {
-    stroke: var(--neutral-fg);
-    stroke-width: 4;
-}
-
 .ap-node .ap-node-label {
     font-size: 11px;
     fill: var(--neutral-fg);
@@ -1558,37 +1339,6 @@ table.grid-table tbody tr.selected {
     stroke-linejoin: round;
     pointer-events: none;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    transition: opacity .12s ease;
-}
-
-.ap-graph-svg.dense .ap-node-label {
-    opacity: 0;
-}
-
-.ap-graph-svg.dense .ap-tier .ap-node-label,
-.ap-graph-svg.dense .ap-node.active .ap-node-label,
-.ap-graph-svg.dense .ap-node:hover .ap-node-label,
-.ap-graph-svg.dense .ap-node:focus .ap-node-label {
-    opacity: 1;
-}
-
-.ap-graph-svg.has-highlight .ap-edge {
-    opacity: .1;
-}
-
-.ap-graph-svg.has-highlight .ap-edge.active {
-    opacity: 1;
-    stroke: var(--neutral-fg-secondary);
-    stroke-width: 2;
-}
-
-.ap-graph-svg.has-highlight .ap-node {
-    opacity: .25;
-}
-
-.ap-graph-svg.has-highlight .ap-node.active,
-.ap-graph-svg.has-highlight .ap-node.adjacent {
-    opacity: 1;
 }
 
 .ap-node.ap-technique circle {
@@ -1603,16 +1353,12 @@ table.grid-table tbody tr.selected {
     fill: #c07807;
 }
 
-.ap-node.ap-perm circle {
-    fill: #8764b8;
-}
-
 .ap-node.ap-tier circle {
     fill: var(--tier-control);
     stroke-width: 3;
 }
 
-/* Per-card BloodHound-style mini graph */
+/* Per-card APM-style mini graph */
 .ap-card-graph {
     margin: 4px 0 4px;
     border: 1px solid var(--neutral-stroke);
@@ -1719,52 +1465,6 @@ table.grid-table tbody tr.selected {
 .group-head .g-count {
     color: var(--neutral-fg-secondary);
     font-weight: 400;
-}
-
-/* Actions / Data actions split within a tier group (Azure RBAC control/management
-   plane vs. data plane) - a lighter sub-header nested under .group-head. */
-.group-subhead {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 10px 0 6px;
-    padding-left: 2px;
-    font-size: 11.5px;
-}
-
-.group-subhead .g-count {
-    color: var(--neutral-fg-secondary);
-}
-
-.action-row.implicit {
-    border-style: dashed;
-    border-color: rgba(0, 120, 120, .45);
-    background: rgba(0, 120, 120, .05);
-}
-
-.action-row.implicit .a-name {
-    font-family: inherit;
-    font-size: 13px;
-    font-weight: 600;
-}
-
-.implicit-sep {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 18px 0 4px;
-    font-size: 11.5px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-    color: var(--neutral-fg-secondary);
-}
-
-.implicit-sep::before,
-.implicit-sep::after {
-    content: "";
-    flex: 1;
-    border-top: 1px solid var(--neutral-stroke);
 }
 
 /* ---------- EAM model diagram ------------------------------------------- */
@@ -1975,48 +1675,9 @@ table.grid-table tbody tr.selected {
 /* responsive nav */
 .nav-toggle {
     display: none;
-    background: transparent;
-    border: none;
-    color: #fff;
-    font-size: 18px;
 }
 
 @media (max-width: 860px) {
-    .appbar {
-        padding: 0 12px;
-        gap: 8px;
-    }
-
-    .appbar .brand {
-        min-width: 0;
-    }
-
-    .appbar .brand>span:not(.sub) {
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .appbar .brand .sub,
-    .appbar .appbar-link {
-        display: none;
-    }
-
-    .appbar .variant-picker {
-        flex: 0 1 120px;
-        min-width: 0;
-        margin-right: 0;
-    }
-
-    .appbar .variant-picker span {
-        display: none;
-    }
-
-    .appbar .variant-picker select {
-        min-width: 0;
-        width: 100%;
-        text-overflow: ellipsis;
-    }
-
     .nav {
         position: fixed;
         left: 0;
@@ -2036,111 +1697,9 @@ table.grid-table tbody tr.selected {
     .main {
         padding: 16px;
     }
-
-    .view,
-    .card,
-    .callout,
-    .ap-graph-panel,
-    .hist-detail {
-        min-width: 0;
-        max-width: 100%;
-    }
-
-    .table-wrap {
-        max-width: 100%;
-        overflow-x: auto;
-        overscroll-behavior-inline: contain;
-    }
-}
-
-@media (max-width: 480px) {
-    .eo-review-btn {
-        gap: 4px;
-        padding: 4px 8px;
-    }
-
-    .eo-review-label {
-        display: none;
-    }
-
-    table.grid-table {
-        min-width: 680px;
-    }
-
-    .attack-step .step-body,
-    .attack-refs>*,
-    .chip.attack.cell-mono,
-    .callout,
-    .page-head p {
-        min-width: 0;
-        max-width: 100%;
-        overflow-wrap: anywhere;
-    }
-
-    .chip.attack.cell-mono {
-        white-space: normal;
-    }
-
-    .card p,
-    .card .muted,
-    .chip.brand {
-        min-width: 0;
-        max-width: 100%;
-        overflow-wrap: anywhere;
-    }
-
-    .chip.brand {
-        white-space: normal;
-    }
-
-    .seg-group {
-        flex: 1 1 100%;
-        flex-wrap: nowrap;
-        width: 100%;
-        max-width: 100%;
-        overflow-x: auto;
-        overscroll-behavior-inline: contain;
-    }
-
-    .card-head {
-        flex-wrap: wrap;
-    }
-
-    .card-head .hint {
-        margin-left: 0;
-        max-width: 100%;
-        overflow-wrap: anywhere;
-    }
-
-    .ap-graph-canvas,
-    .ap-card-graph {
-        max-width: 100%;
-        overflow: hidden;
-    }
-
-    .hist-item-row {
-        align-items: flex-start;
-        flex-wrap: wrap;
-    }
 }
 
 /* ---------- Overview (Enterprise Access Model Map) Sankey -------------- */
-
-@media (prefers-reduced-motion: reduce) {
-    html {
-        scroll-behavior: auto !important;
-    }
-
-    *,
-    *::before,
-    *::after {
-        animation-duration: .01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: .01ms !important;
-        scroll-behavior: auto !important;
-    }
-}
-
 .tm-toolbar {
     align-items: flex-start;
 }
@@ -2427,39 +1986,804 @@ table.grid-table tbody tr.selected {
     stroke-width: 1.5;
 }
 
-/* Generic diff chips - added / removed / moved between two versions. Used by
-   the History view (js/views/history.js) to highlight what changed. */
-.chip.diff-add {
-    background: rgba(46, 158, 91, .12);
-    border-color: rgba(46, 158, 91, .40);
-    color: #1d7a44;
+/* =========================================================================
+   Tier Breach Analyzer specific styles
+   (appended to the shared Privileged EAM Reporting / Fluent portal base above)
+   ========================================================================= */
+
+.hidden {
+    display: none !important;
+}
+
+/* ---------- Filter checkbox groups --------------------------------------- */
+.checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+}
+
+.checks label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--neutral-fg);
+    white-space: nowrap;
+}
+
+.checks input[type="checkbox"] {
+    accent-color: var(--brand);
+}
+
+.control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 140px;
+}
+
+.control-group.grow {
+    flex: 1;
+    min-width: 220px;
+}
+
+.control-group>label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--neutral-fg-secondary);
     font-weight: 600;
 }
 
-.chip.diff-del {
-    background: rgba(200, 69, 44, .10);
-    border-color: rgba(200, 69, 44, .40);
-    color: #b23a22;
-    font-weight: 600;
+.controls-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px 28px;
+    align-items: flex-start;
 }
 
-/* Same item on both sides, but classified under a different plane or service */
-.chip.diff-move {
-    background: rgba(214, 143, 0, .12);
-    border-color: rgba(214, 143, 0, .45);
-    color: #9a6700;
-    font-weight: 600;
+/* ---------- Legend -------------------------------------------------------- */
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    align-items: center;
+    font-size: 12.5px;
+    color: var(--neutral-fg-secondary);
+}
+
+.legend .item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+    .legend .item {
+        min-width: 0;
+        white-space: normal;
+    }
+}
+
+.legend .swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+/* ---------- Sankey diagram ------------------------------------------------ */
+.diagram-wrap {
+    position: relative;
+    overflow-x: auto;
+    padding: 12px 4px 4px;
+}
+
+#pimSankey {
+    display: block;
+}
+
+.node rect {
+    cursor: pointer;
+    stroke-width: 0;
+}
+
+.node text {
+    fill: var(--neutral-fg);
+    font-size: 11px;
+    pointer-events: none;
+}
+
+.node.dim {
+    opacity: .15;
+}
+
+.link {
+    fill: none;
+}
+
+.link.dim {
+    opacity: .04 !important;
+}
+
+.tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: var(--neutral-surface);
+    color: var(--neutral-fg);
+    border: 1px solid var(--neutral-stroke-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-8);
+    padding: 8px 10px;
+    font-size: 12px;
+    max-width: 320px;
+    z-index: 100;
+    line-height: 1.4;
+}
+
+/* ---------- Breach table expandable rows ---------------------------------- */
+.caret-col {
+    width: 22px;
+}
+
+tbody tr.breach-row {
+    cursor: pointer;
+}
+
+.caret {
+    display: inline-block;
+    transition: transform .15s;
+    color: var(--neutral-fg-secondary);
+    font-size: 10px;
+}
+
+tr.open .caret {
+    transform: rotate(90deg);
+}
+
+tr.detail-row>td {
+    background: var(--neutral-surface-alt);
+    padding: 0;
+}
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 6px 24px;
+    padding: 12px 16px 14px 40px;
+}
+
+.detail-grid .field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.detail-grid .k {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--neutral-fg-secondary);
+}
+
+.detail-grid .v {
+    font-size: 13px;
+    word-break: break-word;
+}
+
+.detail-grid .v code {
+    font-size: 12px;
+    background: rgba(0, 0, 0, .05);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+/* Cross-tool navigation entries rendered as plain links */
+a.nav-item,
+a.nav-item:hover {
+    text-decoration: none;
 }
 
 /* ==========================================================================
-   Review list (roles / role actions / permissions)
+   EAM Dashboard specific styles (appended to the shared report app theme)
+   ========================================================================== */
+
+/* Workbook-like layout rows (25 / 50 percent cards) */
+.eam-row {
+    display: flex;
+    gap: 16px;
+    align-items: stretch;
+}
+
+.eam-row .card {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.eam-col-25 {
+    flex: 1 1 25%;
+}
+
+.eam-col-50 {
+    flex: 2 1 50%;
+}
+
+@media (max-width: 1000px) {
+    .eam-row {
+        flex-direction: column;
+    }
+}
+
+/* Filter row (workbook parameter pills) */
+.eam-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 18px;
+    align-items: flex-end;
+}
+
+.eam-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 150px;
+    /* All filters share the full row width evenly (same total width as the
+       full-width search row below) instead of leaving empty space behind
+       the last dropdown. */
+    flex: 1 1 0;
+}
+
+.eam-filter.grow {
+    flex: 1;
+    min-width: 220px;
+}
+
+.pim-risk-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.pim-risk-area {
+    margin-bottom: 10px;
+    border: 1px solid var(--neutral-stroke);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.pim-risk-group-head {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    padding: 10px 12px;
+    border: 0;
+    background: var(--neutral-surface-alt);
+    color: var(--neutral-fg);
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.pim-risk-group-head:hover {
+    background: var(--brand-bg-strong);
+}
+
+.pim-risk-group-head:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+}
+
+.pim-risk-group-chevron {
+    width: 12px;
+    color: var(--neutral-fg-secondary);
+}
+
+.pim-risk-group-title {
+    flex-shrink: 0;
+}
+
+.pim-risk-group-stats {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+}
+
+.pim-risk-stat-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    color: #fff;
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.pim-risk-stat-pill.fail {
+    background: #a4262c;
+}
+
+.pim-risk-stat-pill.warn {
+    background: #c07807;
+}
+
+.pim-risk-group-items {
+    padding: 4px 12px;
+}
+
+/* Dropdown buttons stretch with their (flexed) filter column. */
+.eam-filter .dd,
+.eam-filter .dd-btn {
+    width: 100%;
+    max-width: none;
+}
+
+.eam-filter>label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--neutral-fg-secondary);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+
+/* Multi-select dropdown */
+.dd {
+    position: relative;
+}
+
+.dd-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 150px;
+    max-width: 280px;
+    padding: 5px 10px;
+    background: var(--neutral-surface);
+    border: 1px solid var(--neutral-stroke-strong);
+    border-radius: 4px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--neutral-fg);
+    cursor: pointer;
+    text-align: left;
+}
+
+.dd-btn:hover {
+    border-color: var(--brand);
+}
+
+.dd-btn .dd-val {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dd-btn .dd-caret {
+    font-size: 10px;
+    color: var(--neutral-fg-secondary);
+}
+
+.dd-pop {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 60;
+    min-width: 230px;
+    max-width: 340px;
+    max-height: 300px;
+    overflow: auto;
+    background: var(--neutral-surface);
+    border: 1px solid var(--neutral-stroke-strong);
+    border-radius: 6px;
+    box-shadow: var(--shadow-8);
+    padding: 6px;
+}
+
+.dd-pop.hidden {
+    display: none;
+}
+
+.dd-pop label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.dd-pop label:hover {
+    background: var(--neutral-bg);
+}
+
+.dd-pop .dd-all {
+    border-bottom: 1px solid var(--neutral-stroke);
+    margin-bottom: 4px;
+    padding-bottom: 7px;
+    font-weight: 600;
+}
+
+/* Active exported-parameter chips (click-to-filter state) */
+.eam-active-exports {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--neutral-stroke);
+    align-items: center;
+}
+
+.eam-active-exports .lbl {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--neutral-fg-secondary);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+
+.chip .chip-x {
+    margin-left: 6px;
+    cursor: pointer;
+    font-weight: 700;
+    opacity: .65;
+}
+
+.chip .chip-x:hover {
+    opacity: 1;
+}
+
+/* KPI tiles (workbook tile visualizations).
+   CSS Grid (not flex-wrap): column tracks are shared across every row, so a
+   lone tile wrapping onto its own row (e.g. a 5th "Unclassified" tile in a
+   4-column-wide card) keeps the same column width instead of stretching to
+   fill the entire row width - the wrapping/empty-space bug seen with flexbox. */
+.eam-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px;
+    align-content: flex-start;
+}
+
+.eam-tile {
+    min-width: 0;
+    background: var(--neutral-bg);
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: border-color .1s ease, box-shadow .1s ease;
+}
+
+.eam-tile:hover {
+    border-color: var(--brand);
+    box-shadow: var(--shadow-2);
+}
+
+.eam-tile.selected {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 1px var(--brand) inset;
+    background: #eff6fc;
+}
+
+.eam-tile .t-label {
+    font-size: 12px;
+    color: var(--neutral-fg-secondary);
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.eam-tile .t-label .t-dot {
+    margin-top: 4px;
+}
+
+.eam-tile .t-value {
+    font-size: 26px;
+    font-weight: 600;
+    margin-top: 2px;
+}
+
+.eam-tile .t-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+/* Donut charts (workbook pie charts) */
+.eam-donut-wrap {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+    flex: 1;
+    min-height: 170px;
+}
+
+.eam-donut-wrap svg {
+    flex-shrink: 0;
+}
+
+.eam-donut-wrap .donut-seg {
+    cursor: pointer;
+    transition: opacity .1s ease;
+}
+
+.eam-donut-wrap .donut-seg:hover {
+    opacity: .8;
+}
+
+.eam-donut-wrap .donut-seg.dim {
+    opacity: .3;
+}
+
+.donut-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.donut-legend .li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    min-width: 0;
+}
+
+.donut-legend .li:hover {
+    background: var(--neutral-bg);
+}
+
+.donut-legend .li.selected {
+    background: #eff6fc;
+    box-shadow: 0 0 0 1px var(--brand) inset;
+}
+
+.donut-legend .sw {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.donut-legend .nm {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.donut-legend .n {
+    margin-left: auto;
+    font-weight: 600;
+    padding-left: 10px;
+}
+
+/* Icon helpers (workbook threshold icons) */
+.ico-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.ico-glyph {
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.rm-applied {
+    color: var(--tier-user);
+    font-weight: 700;
+}
+
+.rm-conflict {
+    color: var(--tier-management);
+    font-weight: 700;
+}
+
+.rm-notapplied {
+    color: var(--tier-control);
+    font-weight: 700;
+}
+
+.rm-notavailable {
+    color: var(--neutral-fg-secondary);
+    font-weight: 700;
+}
+
+/* Additional tier badge for WorkloadPlane (not in the shared theme) */
+.tier-badge.tier-workloadplane {
+    background: #eff6fc;
+    color: #004578;
+}
+
+.tier-badge.tier-workloadplane .tier-dot {
+    background: #0078d4;
+}
+
+/* Selected asset / assignment rows */
+table.grid-table tbody tr.sel-row {
+    background: #eff6fc;
+    box-shadow: 0 0 0 1px var(--brand) inset;
+}
+
+/* Clickable detail links inside grid cells (context blade) */
+.cell-link {
+    color: var(--brand);
+    cursor: pointer;
+}
+
+.cell-link:hover {
+    text-decoration: underline;
+}
+
+/* Grid containers used by the EAM Dashboard tables. The tables scroll with
+   the page (no inner scroll container), so the sticky <thead> pins below the
+   app bar (top: var(--header-h) from the shared theme) and stays permanently
+   visible while rows scroll. Long result sets are paged by the app instead of
+   being squeezed into an inner scrollbox. */
+.eam-scroll {
+    border: 0;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    box-shadow: none;
+}
+
+.eam-scroll table.grid-table thead th {
+    cursor: default;
+    box-shadow: 0 1px 0 var(--neutral-stroke);
+    /* Allow header captions to wrap so wide grids shrink to the card width
+       instead of overflowing the page horizontally. */
+    white-space: normal;
+    vertical-align: bottom;
+}
+
+.eam-scroll table.grid-table thead th:first-child,
+.eam-scroll table.grid-table thead th:last-child {
+    border-radius: 0;
+}
+
+/* Keep grid rows compact: long values wrap inside a capped column width
+   instead of forcing the table beyond the viewport (which would require an
+   inner scroll container and break the viewport-sticky header). Collection
+   values (services, administrative units, nesting) open in the detail panel. */
+.eam-scroll table.grid-table tbody td {
+    max-width: 320px;
+    /* Guarantees a usable minimum column width - without it, "anywhere" (below)
+       lets the auto table-layout algorithm shrink short/enum-like columns
+       (Type, Sync source, Object Id, ...) down to a single character wide when
+       many columns compete for space, wrapping every value character-by-character. */
+    min-width: 100px;
+    /* "anywhere" contributes break opportunities to the intrinsic (min-content)
+       sizing, which guarantees the table shrinks to the card width instead of
+       overflowing the page. Words only break when a column truly runs out of
+       space. */
+    overflow-wrap: anywhere;
+}
+
+.eam-scroll table.grid-table tbody td .ico-cell,
+.eam-scroll table.grid-table tbody td .tier-badge {
+    white-space: nowrap;
+}
+
+/* Simple list inside the detail drawer (e.g. services of a role assignment) */
+.drawer-list li {
+    padding: 7px 2px;
+    border-bottom: 1px solid var(--neutral-stroke);
+    font-size: 13px;
+}
+
+.drawer-list li:last-child {
+    border-bottom: none;
+}
+
+.role-assignment-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 6px 12px;
+    align-items: baseline;
+}
+
+.role-assignment-link {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.role-assignment-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.role-assignment-via {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 5px;
+}
+
+.role-assignment-classifications {
+    display: grid;
+    gap: 7px;
+    margin-top: 10px;
+}
+
+.role-classification-group {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.role-classification-tier {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.role-classification-services {
+    color: var(--muted);
+    line-height: 1.45;
+}
+
+/* Table pager (below each grid) */
+.eam-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    color: var(--neutral-fg-secondary);
+    border-top: 1px solid var(--neutral-stroke);
+}
+
+.eam-pager.hidden {
+    display: none;
+}
+
+/* Sticky-position fix for viewport scrolling:
+   The shared theme sets html,body { height:100% } + body { overflow-y:auto }.
+   Browsers propagate body's overflow to the viewport (html overflow is
+   visible), so body itself never scrolls - but its 100%-height box remains the
+   containing block of every position:sticky descendant. Result: appbar, nav
+   and table headers stop sticking after the first viewport height.
+   Let the page grow naturally instead, so the viewport owns scrolling and all
+   sticky elements (appbar top:0, nav top:48px, thead top:48px) stay pinned
+   permanently. */
+html,
+body {
+    height: auto;
+    min-height: 100%;
+}
+
+body {
+    overflow-y: visible;
+}
+
+/* ==========================================================================
+   Shared Review list (roles / role actions across all reporting tools)
    ========================================================================== */
 .eo-review-btn {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    flex-shrink: 0;
-    white-space: nowrap;
     background: transparent;
     border: 1px solid #4a4948;
     border-radius: 4px;
@@ -2619,15 +2943,15 @@ table.grid-table tbody tr.selected {
     gap: 10px;
 }
 
+.eo-review-source {
+    font-size: 11.5px;
+    color: var(--neutral-fg-secondary, #605e5c);
+}
+
 .eo-review-open {
     margin-left: auto;
     font-size: 12.5px;
     font-weight: 600;
-}
-
-.eo-review-source {
-    font-size: 11.5px;
-    color: var(--neutral-fg-secondary, #605e5c);
 }
 
 .eo-review-foot {
@@ -2638,7 +2962,7 @@ table.grid-table tbody tr.selected {
     border-top: 1px solid var(--neutral-stroke, #edebe9);
 }
 
-/* Star toggle buttons next to roles / role actions / permissions */
+/* Star toggle buttons next to roles / role actions */
 .eo-star {
     background: transparent;
     border: none;
@@ -2673,215 +2997,8 @@ tr.eo-flash>td {
     animation: eoFlash 2.5s ease;
 }
 
-/* =========================================================================
-   Customize Overwrites view (entraops mode only - js/views/customize.js,
-   editor for classification overwrite files)
-   ========================================================================= */
-.cust-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    font-size: 12.5px;
-    color: var(--neutral-fg-secondary);
-    margin: -6px 0 14px;
-}
-
-.cust-footer {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 16px;
-}
-
-.cust-form .f-label {
-    display: block;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--neutral-fg);
-    margin: 14px 0 4px;
-}
-
-.cust-form .f-label .muted,
-.cust-form .f-note {
-    font-weight: 400;
-    font-size: 12px;
-    color: var(--neutral-fg-secondary);
-}
-
-.cust-form .f-note {
-    margin: 4px 0 8px;
-}
-
-.cust-form .f-input {
-    width: 100%;
-    min-height: 34px;
-    border: 1px solid var(--neutral-stroke-strong);
-    border-radius: var(--radius);
-    padding: 6px 10px;
-    font-family: inherit;
-    font-size: 13.5px;
-    background: var(--neutral-surface);
-    color: var(--neutral-fg);
-    outline: none;
-}
-
-.cust-form textarea.f-input {
-    resize: vertical;
-}
-
-.cust-form .f-input:focus {
-    border-color: var(--brand);
-    box-shadow: 0 0 0 1px var(--brand);
-}
-
-.cust-form .f-input.cell-mono {
-    font-size: 12.5px;
-}
-
-.cust-pick {
-    max-height: 260px;
-    overflow-y: auto;
-    border: 1px solid var(--neutral-stroke);
-    border-radius: var(--radius);
-    margin-top: 8px;
-    background: var(--neutral-surface);
-}
-
-.cust-pick:empty {
-    display: none;
-}
-
-.cust-pick .cust-pick-row:hover {
-    background: var(--brand-bg);
-}
-
-.cust-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin: 8px 0;
-}
-
-.cust-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 100%;
-    word-break: break-all;
-}
-
-.cust-chip-x {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    color: var(--neutral-fg-secondary);
-    font-size: 11px;
-    padding: 0 2px;
-    line-height: 1;
-}
-
-.cust-chip-x:hover {
-    color: var(--tier-control);
-}
-
-.cust-addrow {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    margin-top: 6px;
-}
-
-.cust-addrow .f-input {
-    flex: 1;
-}
-
-.cust-blade-foot {
-    display: flex;
-    gap: 10px;
-    margin-top: 20px;
-    padding-top: 14px;
-    border-top: 1px solid var(--neutral-stroke);
-}
-
 /* ==========================================================================
-   Collapsible navigation rail (js/navCollapse.js)
-   Lets the left nav be minimized to an icon-only strip for more working
-   space during investigations. Icons always stay visible; labels, group
-   headers and counters are hidden while collapsed (native title tooltips
-   are added by navCollapse.js so labels stay discoverable on hover).
-   ========================================================================== */
-
-.nav {
-    transition: width .15s ease;
-}
-
-.nav-collapse-toggle {
-    /* Full-height edge handle (spans the whole navigation rail, top to
-       bottom) instead of an inline top button, so it stays reachable
-       regardless of scroll position and reads as a persistent affordance
-       (similar to an IDE sidebar resize/collapse handle). */
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    border-left: 1px solid rgba(255, 255, 255, 0.08);
-    color: var(--nav-fg-muted);
-    font-size: 10px;
-    padding: 0;
-    margin: 0;
-    cursor: pointer;
-    z-index: 5;
-}
-
-.nav-collapse-toggle:hover {
-    width: 14px;
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff;
-}
-
-.nav.collapsed {
-    width: 56px;
-}
-
-.nav.collapsed .nav-group-label {
-    display: none;
-}
-
-.nav.collapsed .nav-item {
-    justify-content: center;
-    gap: 0;
-    padding: 10px 0;
-}
-
-.nav.collapsed .nav-item>span:not(.ico) {
-    display: none;
-}
-
-.nav.collapsed .nav-item .ico {
-    width: auto;
-    font-size: 16px;
-}
-
-.nav.collapsed .app-footer {
-    display: none;
-}
-
-@media (max-width: 860px) {
-    .nav-collapse-toggle {
-        display: none;
-    }
-}
-
-/* ==========================================================================
-   Role Comparison blade (js/roleCompare.js) - contextual modal triggered from
-   the Roles table's compare checkboxes or a role's details drawer.
+   Principal comparison (compare role assignments & role actions of principals)
    ========================================================================== */
 
 .eo-cmp-backdrop {
@@ -2950,28 +3067,15 @@ tr.eo-flash>td {
     overflow: auto;
 }
 
-.eo-cmp-body .section-title {
-    font-size: 13px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-    color: var(--neutral-fg-secondary);
-    margin: 14px 0 8px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-/* Selected-role cards (header of the blade) */
-.cmp-roles-row {
+/* Principal header cards */
+.cmp-principals {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
     margin-bottom: 14px;
 }
 
-.cmp-role-card {
+.cmp-principal-card {
     flex: 1 1 220px;
     min-width: 200px;
     background: var(--neutral-surface);
@@ -2983,34 +3087,31 @@ tr.eo-flash>td {
     gap: 6px;
 }
 
-.cmp-role-card-name {
+.cmp-principal-name {
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
 }
 
-.cmp-role-card-name .cell-strong {
+.cmp-principal-name .cell-strong {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.cmp-role-card-name .chip-x {
+.cmp-principal-name .chip-x {
     margin-left: auto;
-    padding: 2px 4px;
-    border: 0;
-    background: transparent;
     cursor: pointer;
     color: var(--neutral-fg-secondary);
     font-size: 11px;
 }
 
-.cmp-role-card-name .chip-x:hover {
-    color: var(--tier-control);
+.cmp-principal-name .chip-x:hover {
+    color: #a4262c;
 }
 
-.cmp-role-card-meta {
+.cmp-principal-meta {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -3018,22 +3119,9 @@ tr.eo-flash>td {
     font-size: 12.5px;
 }
 
-.cmp-role-card-add {
+.cmp-principal-add {
     border-style: dashed;
     justify-content: center;
-}
-
-/* Compare bar shown above the Roles table once at least one role is checked */
-.cmp-bar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding: 10px 4px;
-}
-
-tr.cmp-row>td {
-    background: rgba(0, 120, 212, 0.05);
 }
 
 .cmp-add-chip {
@@ -3050,36 +3138,23 @@ tr.cmp-row>td {
 }
 
 /* Comparison tables */
-.cmp-table th {
-    vertical-align: top;
-}
-
-.cmp-prop {
+.cmp-table .cmp-prop {
     font-weight: 600;
-    color: var(--neutral-fg);
     white-space: nowrap;
 }
 
 .cmp-diff-row {
-    background: rgba(192, 120, 7, 0.06);
+    background: rgba(192, 120, 7, 0.07);
 }
 
 .cmp-diff-row:hover {
-    background: rgba(192, 120, 7, 0.10);
-}
-
-.cmp-diff-chip {
-    background: rgba(192, 120, 7, 0.12);
-    border-color: rgba(192, 120, 7, 0.4);
-    color: #8a5a00;
-    font-size: 10.5px;
-    padding: 1px 7px;
+    background: rgba(192, 120, 7, 0.11);
 }
 
 .cmp-check-col {
     text-align: center;
     white-space: nowrap;
-    max-width: 180px;
+    max-width: 170px;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -3095,9 +3170,18 @@ tr.cmp-row>td {
     opacity: .55;
 }
 
+.cmp-cell-detail {
+    font-size: 11px;
+    color: var(--neutral-fg-secondary);
+    margin-top: 2px;
+    white-space: normal;
+}
+
 .cmp-matrix-wrap {
-    max-height: 560px;
+    max-height: 46vh;
     overflow: auto;
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 6px;
 }
 
 .cmp-matrix-wrap thead th {
@@ -3107,214 +3191,322 @@ tr.cmp-row>td {
     z-index: 2;
 }
 
-.cmp-table .a-cat {
-    font-size: 11.5px;
+.cmp-stats .cmp-table {
+    margin-bottom: 4px;
+}
+
+/* Section titles inside the modal (EAM Dashboard base sheet has none). */
+.eo-cmp-body .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
     color: var(--neutral-fg-secondary);
-    margin-top: 2px;
-}
-
-/* ==========================================================================
-   History view (js/views/history.js) - browse the git history of the
-   classification files: added / removed / changed roles, role actions and
-   permissions between commits, with a per-item change timeline.
-   ========================================================================== */
-
-.hist-layout {
-    display: grid;
-    grid-template-columns: minmax(260px, 320px) 1fr;
-    gap: 18px;
-    align-items: start;
-}
-
-@media (max-width: 980px) {
-    .hist-layout {
-        grid-template-columns: 1fr;
-    }
-}
-
-.hist-timeline {
-    border: 1px solid var(--neutral-stroke);
-    border-radius: var(--radius);
-    background: var(--neutral-surface);
-    max-height: 78vh;
-    overflow: auto;
-}
-
-.hist-commit {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--neutral-stroke);
-    cursor: pointer;
-}
-
-.hist-commit:last-child {
-    border-bottom: none;
-}
-
-.hist-commit:hover {
-    background: var(--brand-bg);
-}
-
-.hist-commit.active {
-    background: var(--brand-bg);
-    border-left: 3px solid var(--brand);
-}
-
-.hist-commit-head {
+    margin: 14px 0 8px;
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* Row selected for comparison in the asset table */
+tr.cmp-row>td {
+    background: rgba(0, 120, 212, 0.05);
+}
+
+/* ==========================================================================
+   Collapsible navigation rail (js/navCollapse.js)
+   Lets the left nav be minimized to an icon-only strip for more working
+   space during investigations. Icons always stay visible; labels, group
+   headers and counters are hidden while collapsed (native title tooltips
+   are added by navCollapse.js so labels stay discoverable on hover).
+   ========================================================================== */
+
+.nav {
+    transition: width .15s ease;
+}
+
+.nav-collapse-toggle {
+    /* Full-height edge handle (spans the whole navigation rail, top to
+       bottom) instead of an inline top button, so it stays reachable
+       regardless of scroll position and reads as a persistent affordance
+       (similar to an IDE sidebar resize/collapse handle). */
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--nav-fg-muted);
+    font-size: 10px;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    z-index: 5;
+}
+
+.nav-collapse-toggle:hover {
+    width: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.nav.collapsed {
+    width: 56px;
+}
+
+.nav.collapsed .nav-group-label {
+    display: none;
+}
+
+.nav.collapsed .nav-item {
+    justify-content: center;
+    gap: 0;
+    padding: 10px 0;
+}
+
+.nav.collapsed .nav-item>span:not(.ico) {
+    display: none;
+}
+
+.nav.collapsed .nav-item .ico {
+    width: auto;
+    font-size: 16px;
+}
+
+@media (max-width: 860px) {
+    .nav-collapse-toggle {
+        display: none;
+    }
+}
+
+/* =========================================================================
+   Privilege History (historic trends built from git history)
+   ========================================================================= */
+.tm-chart-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-x: auto;
+}
+
+.tm-chart-wrap svg {
+    max-width: 100%;
+    height: auto;
+}
+
+.tm-point {
+    cursor: pointer;
+    transition: r .1s ease;
+}
+
+.tm-point:hover {
+    r: 6;
+}
+
+.tm-legend {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+}
+
+.tm-legend .li {
+    cursor: default;
+}
+
+.tm-delta {
+    display: inline-block;
+    margin-top: 4px;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 8px;
+}
+
+.tm-delta.tm-up {
+    color: var(--tier-management);
+    background: #fff4ce;
+}
+
+.tm-delta.tm-down {
+    color: var(--tier-user);
+    background: #dff6dd;
+}
+
+.tm-delta.tm-flat {
+    color: var(--neutral-fg-secondary);
+    background: var(--neutral-surface-alt);
+}
+
+/* =========================================================================
+   Configuration Analyzer specific styles (appended to the shared app CSS)
+   ========================================================================= */
+.ca-toggle-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ca-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--neutral-stroke-strong);
+    background: var(--neutral-surface);
+    color: var(--neutral-fg-secondary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.ca-toggle.on {
+    background: var(--brand-bg);
+    border-color: var(--brand);
+    color: var(--brand-pressed);
+    font-weight: 600;
+}
+
+.status-chip {
+    display: inline-flex;
+    align-items: center;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+
+.status-chip.added {
+    background: rgba(14, 112, 14, .10);
+    border-color: rgba(14, 112, 14, .35);
+    color: #0e700e;
+}
+
+.status-chip.modified {
+    background: rgba(192, 120, 7, .10);
+    border-color: rgba(192, 120, 7, .35);
+    color: #8a5a05;
+}
+
+.status-chip.removed {
+    background: rgba(164, 38, 44, .10);
+    border-color: rgba(164, 38, 44, .35);
+    color: #a4262c;
+}
+
+table.ca-diff-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    table-layout: fixed;
+}
+
+table.ca-diff-table th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--neutral-fg-secondary);
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--neutral-stroke);
+}
+
+table.ca-diff-table td {
+    padding: 5px 10px;
+    border-bottom: 1px solid var(--neutral-stroke);
+    vertical-align: top;
+    word-break: break-word;
+}
+
+table.ca-diff-table td.prop {
+    font-family: Consolas, Monaco, "Courier New", monospace;
+    font-size: 11.5px;
+    color: var(--neutral-fg-secondary);
+}
+
+table.ca-diff-table td.old {
+    background: rgba(164, 38, 44, .06);
+    color: #7a2b30;
+}
+
+table.ca-diff-table td.new {
+    background: rgba(14, 112, 14, .06);
+    color: #145214;
+}
+
+.ca-gap-row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--neutral-stroke);
+}
+
+.ca-gap-row>div {
+    min-width: 0;
+}
+
+.ca-gap-row:last-child {
+    border-bottom: none;
+}
+
+.ca-gap-icon {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.ca-gap-icon.ok {
+    background: #0e700e;
+}
+
+.ca-gap-icon.warn {
+    background: #c07807;
+}
+
+.ca-gap-icon.fail {
+    background: #a4262c;
+}
+
+.ca-gap-icon.info {
+    background: #0078d4;
+}
+
+.ca-gap-icon.unknown {
+    background: #a19f9d;
+}
+
+.ca-gap-title {
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.ca-gap-detail {
     font-size: 12.5px;
     color: var(--neutral-fg-secondary);
 }
 
-.hist-commit-subject {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--neutral-fg);
+.ca-gap-title,
+.ca-gap-detail {
     overflow-wrap: anywhere;
 }
 
-.hist-commit-chips {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-}
-
-.hist-detail {
-    border: 1px solid var(--neutral-stroke);
-    border-radius: var(--radius);
-    background: var(--neutral-surface);
-    padding: 16px 18px;
-    min-height: 200px;
-}
-
-.hist-detail-head {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 10px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--neutral-stroke);
-}
-
-.hist-item-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 4px;
-    border-bottom: 1px solid var(--neutral-stroke);
-    font-size: 13px;
-}
-
-.hist-item-row:last-child {
-    border-bottom: none;
-}
-
-.hist-item-name {
-    font-weight: 600;
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow-wrap: anywhere;
-}
-
-.hist-item-sub {
+.ca-gap-detail code {
+    background: rgba(0, 0, 0, .05);
+    padding: 0 4px;
+    border-radius: 3px;
     font-size: 11.5px;
-    color: var(--neutral-fg-secondary);
-    margin-top: 2px;
-    min-width: 0;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-}
-
-.hist-tier-arrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 12px;
-}
-
-.hist-search-hit {
-    border: 1px solid var(--neutral-stroke);
-    border-radius: 8px;
-    padding: 8px 12px;
-    margin-bottom: 8px;
-}
-
-.hist-changed-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    cursor: pointer;
-}
-
-.hist-commit-date {
-    font-weight: 600;
-    color: var(--neutral-fg);
-    font-size: 13px;
-}
-
-/* Compare-dates picker (replaces the timeline column in Compare mode) */
-.hist-compare-picker {
-    padding: 14px 16px;
-}
-
-.hist-compare-title {
-    font-weight: 600;
-    font-size: 13px;
-    margin-bottom: 12px;
-}
-
-.hist-compare-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-bottom: 12px;
-    font-size: 12px;
-    color: var(--neutral-fg-secondary);
-}
-
-.hist-compare-field select.filter {
-    width: 100%;
-}
-
-/* Per-item change timeline ("View change history" / Find) */
-.hist-track {
-    position: relative;
-    margin-left: 6px;
-    padding-left: 18px;
-    border-left: 2px solid var(--neutral-stroke);
-}
-
-.hist-track-item {
-    position: relative;
-    padding: 4px 0 14px;
-}
-
-.hist-track-item::before {
-    content: "";
-    position: absolute;
-    left: -25px;
-    top: 8px;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--brand);
-    border: 2px solid var(--neutral-surface);
-}
-
-.hist-track-date {
-    font-size: 11.5px;
-    color: var(--neutral-fg-secondary);
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-
-.hist-track-body {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
 }

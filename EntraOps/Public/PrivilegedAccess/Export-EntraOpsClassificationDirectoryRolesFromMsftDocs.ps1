@@ -26,6 +26,11 @@ function Export-EntraOpsClassificationDirectoryRolesFromMsftDocs {
     .PARAMETER SingleClassification
         Use the highest tier level classification only for each role definition. Default is $True.
 
+    .PARAMETER RoleDefinitionOverwritesFilePath
+        Path to the EntraOps role definition overwrites file. Roles listed there (RbacSystem "EntraID") are pinned
+        to the overwrite tier because their sensitivity is not visible in their role actions.
+        Default is "./EntraOps_Classification/Classification_RoleDefinitionOverwrites.json".
+
     .EXAMPLE
         Export all classified Entra ID Directory roles parsed from Microsoft Docs.
         Export-EntraOpsClassificationDirectoryRolesFromMsftDocs
@@ -45,21 +50,13 @@ function Export-EntraOpsClassificationDirectoryRolesFromMsftDocs {
         ,
         [Parameter(Mandatory = $false)]
         $SingleClassification = $True
+        ,
+        [Parameter(Mandatory = $false)]
+        [string]$RoleDefinitionOverwritesFilePath = "./EntraOps_Classification/Classification_RoleDefinitionOverwrites.json"
     )
 
-    # Define sensitive role definitions without actions to classify
-    $ControlPlaneRolesWithoutRoleActions = @(
-        'd29b2b05-8046-44ba-8758-1e26182fcf32', # Directory Synchronization Accounts
-        'a92aed5d-d78a-4d16-b381-09adb37eb3b0', # On Premises Directory Sync Account
-        '9f06204d-73c1-4d4c-880a-6edb90606fd8', # Azure AD Joined Device Local Administrator
-        'db506228-d27e-4b7d-95e5-295956d6615f'  # Agent ID Administrator is sensitive but has no corresponding role action
-    )
-
-    $ManagementPlaneRolesWithoutRoleActions = @(
-        '3f04f91a-4ad7-4bd3-bcfa-49882ea1a88a', # Purview Workload Content Administrator
-        'e07494ad-1654-4dd2-922e-6f81a71bf00f', # Purview Workload Content Reader
-        '02d5655b-c1cf-4e5f-98da-5fb919085bf6'  # Purview Workload Content Writer
-    )
+    # Roles whose sensitivity is not visible in their role actions (same source EntraOps applies at runtime)
+    $RoleDefinitionOverwrites = Get-EntraOpsRoleDefinitionOverwrites -Path $RoleDefinitionOverwritesFilePath -RbacSystem 'EntraID'
 
     #region Helper functions
     function Get-RawWebContent {
@@ -231,18 +228,8 @@ function Export-EntraOpsClassificationDirectoryRolesFromMsftDocs {
             $RoleDefinitionClassification.Add($FilteredRoleClassifications)
         }
 
-        if ($ControlPlaneRolesWithoutRoleActions -contains $RoleMetadata.RoleId) {
-            $RoleDefinitionClassification = [PSCustomObject]@{
-                "EAMTierLevelName"     = "ControlPlane"
-                "EAMTierLevelTagValue" = "0"
-            }
-        }
-
-        if ($ManagementPlaneRolesWithoutRoleActions -contains $RoleMetadata.RoleId) {
-            $RoleDefinitionClassification = [PSCustomObject]@{
-                "EAMTierLevelName"     = "ManagementPlane"
-                "EAMTierLevelTagValue" = "1"
-            }
+        if ($RoleDefinitionOverwrites.ContainsKey([string]$RoleMetadata.RoleId)) {
+            $RoleDefinitionClassification = $RoleDefinitionOverwrites[[string]$RoleMetadata.RoleId]
         }
 
         if ($null -eq $RoleDefinitionClassification) {

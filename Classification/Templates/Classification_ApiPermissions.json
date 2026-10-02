@@ -93,6 +93,7 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "AppCertTrustConfiguration.ReadWrite.All",
           "Application-RemoteDesktopConfig.ReadWrite.All",
           "Application.ReadUpdate.All",
           "Application.ReadWrite.All",
@@ -131,7 +132,6 @@
         ],
         "RoleDefinitionActions": [
           "AppCatalog.Submit",
-          "AppCertTrustConfiguration.ReadWrite.All",
           "ConsentRequest.Create",
           "ConsentRequest.ReadApprove.All"
         ]
@@ -514,6 +514,7 @@
           "SecurityIdentitiesMigration.ReadWrite.All",
           "SecurityIdentitiesSensors.Read.All",
           "SecurityIncident.ReadWrite.All",
+          "ThreatHunting.ReadWrite.All",
           "ThreatIndicators.ReadWrite.OwnedBy",
           "ThreatSubmission.ReadWrite.All",
           "ThreatSubmissionPolicy.ReadWrite.All"
@@ -1867,6 +1868,8 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "CrossTenantContentMigration.Read.All",
+          "CrossTenantContentMigration.ReadWrite.All",
           "FileIngestion.Ingest",
           "FileIngestionHybridOnboarding.Manage",
           "Sites.Archive.All"
@@ -2338,7 +2341,9 @@
           "ThreatHunting.Read.All",
           "ThreatIndicators.Read.All",
           "ThreatIntelligence.Read.All",
-          "ThreatSubmission.Read.All"
+          "ThreatSubmission.Read.All",
+          "Workbooks.Read.All",
+          "Workbooks.ReadWrite.All"
         ]
       },
       {
@@ -2561,6 +2566,7 @@
           "Agreement.Read.All",
           "AgreementAcceptance.Read.All",
           "APIConnectors.Read.All",
+          "AppCertTrustConfiguration.Read.All",
           "ConfigurationMonitoring.Read.All",
           "ConsentRequest.Read.All",
           "CrossTenantInformation.ReadBasic.All",
@@ -2638,7 +2644,6 @@
         ],
         "RoleDefinitionActions": [
           "AgreementAcceptance.Read",
-          "AppCertTrustConfiguration.Read.All",
           "ConsentRequest.Read",
           "CrossTenantUserProfileSharing.Read",
           "LifecyclePolicies-Guests.Read.All",

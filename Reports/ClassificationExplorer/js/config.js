@@ -346,11 +346,12 @@ EOCE.rolesSystemKeys = function () {
 
 // Role exports occasionally carry RolePermissions as a single object instead of an
 // array (a role with exactly one permission). Always return an array so callers can
-// iterate safely.
+// iterate safely. Entries without an action are placeholders for roles without role
+// actions (kept in the Entra ID export so KQL mv-expand doesn't drop the role).
 EOCE.rolePerms = function (role) {
     var p = role && role.RolePermissions;
     if (!p) return [];
-    return Array.isArray(p) ? p : [p];
+    return (Array.isArray(p) ? p : [p]).filter(function (x) { return x && x.AuthorizedResourceAction; });
 };
 
 // Informational callout explaining a system's advanced scope-aware tiering. Used by
@@ -953,6 +954,95 @@ EOCE.attackPathCallout = function (paths) {
     });
     html += '</div></div>';
     return html;
+};
+
+// --- Implicit permissions (role definition overwrites) ---------------------
+// Roles listed in Classification_RoleDefinitionOverwrites.json carry permissions that are
+// not visible in their role actions; EntraOps pins them to a tier (TaggedBy: RoleDefinitionOverwrites).
+EOCE.overwriteSysKey = function (rbacSystem) {
+    var map = { EntraID: 'EntraID', Azure: 'Azure', DeviceManagement: 'DeviceManagement', Intune: 'DeviceManagement', Defender: 'Defender', IdentityGovernance: 'IdentityGovernance' };
+    return map[rbacSystem] || 'EntraID';
+};
+
+// Index overwrite entries by "<sysKey>|<RoleDefinitionId>".
+EOCE.indexRoleOverwrites = function (overwrites) {
+    var idx = {};
+    (overwrites || []).forEach(function (o) {
+        if (o && o.RoleDefinitionId) idx[EOCE.overwriteSysKey(o.RbacSystem) + '|' + o.RoleDefinitionId] = o;
+    });
+    return idx;
+};
+
+// Highest tier among a role's listed role actions ('Unclassified' when none is classified).
+EOCE.highestActionTier = function (perms) {
+    var best = EOCE.TIER_ORDER.length - 1;
+    (perms || []).forEach(function (p) {
+        var i = EOCE.TIER_ORDER.indexOf(p && p.EAMTierLevelName);
+        if (i !== -1 && i < best) best = i;
+    });
+    return EOCE.TIER_ORDER[best];
+};
+
+// Compares an overwrite with the role's listed actions and the exported role classification.
+// direction: 'raised' | 'lowered' | 'confirmed' | 'classified' (actions unclassified) | 'noActions'
+EOCE.roleOverwriteInfo = function (overwrite, perms, exportedTier) {
+    if (!overwrite) return null;
+    perms = perms || [];
+    var effectiveTier = EOCE.TIERS[overwrite.EAMTierLevelName] ? overwrite.EAMTierLevelName : 'Unclassified';
+    var actionTier = EOCE.highestActionTier(perms);
+    var direction;
+    if (!perms.length) direction = 'noActions';
+    else if (actionTier === 'Unclassified') direction = 'classified';
+    else {
+        var diff = EOCE.TIER_ORDER.indexOf(effectiveTier) - EOCE.TIER_ORDER.indexOf(actionTier);
+        direction = diff < 0 ? 'raised' : (diff > 0 ? 'lowered' : 'confirmed');
+    }
+    exportedTier = exportedTier || 'Unclassified';
+    return {
+        overwrite: overwrite,
+        effectiveTier: effectiveTier,
+        actionTier: actionTier,
+        actionCount: perms.length,
+        direction: direction,
+        exportedTier: exportedTier,
+        exportedMismatch: exportedTier !== effectiveTier
+    };
+};
+
+EOCE.implicitPermissionsSummary = function (info) {
+    if (!info) return '';
+    var eff = EOCE.tier(info.effectiveTier).label;
+    var act = EOCE.tier(info.actionTier).label;
+    switch (info.direction) {
+        case 'raised': return 'Raised from ' + act + ' (listed role actions) to ' + eff + ' by a role definition overwrite.';
+        case 'lowered': return 'Lowered from ' + act + ' (listed role actions) to ' + eff + ' by a role definition overwrite.';
+        case 'confirmed': return 'Listed role actions already reach ' + eff + ', but the role carries additional permissions that are not listed as role actions.';
+        case 'classified': return 'Listed role actions are unclassified; classified as ' + eff + ' by a role definition overwrite.';
+        default: return 'No role actions are listed; classified as ' + eff + ' by a role definition overwrite.';
+    }
+};
+
+EOCE.implicitPermissionsChip = function (info) {
+    if (!info) return '';
+    var title = EOCE.implicitPermissionsSummary(info) + ' These permissions are not visible in the role definition.';
+    return '<span class="chip implicit" title="' + EOCE.util.escapeHtml(title) + '">\u25C8 implicit permissions</span>';
+};
+
+// Explanation behind the info button next to "Include implicit permissions".
+EOCE.implicitPermissionsInfoHtml = function () {
+    return '<div class="callout-title">Implicit permissions (role definition overwrites)</div>' +
+        'EntraOps normally sets a role\'s access level to the highest plane among its listed role actions. ' +
+        'Some roles hold power that is not visible there, so EntraOps pins them to a tier with a documented justification ' +
+        '(<span class="cell-mono">TaggedBy: RoleDefinitionOverwrites</span>). Typical use cases:' +
+        '<ul style="margin:8px 0 0;padding-left:18px;">' +
+        '<li><strong>Granted outside the role actions</strong> &mdash; e.g. Directory Synchronization Accounts can overwrite synced identities; Microsoft Entra Joined Device Local Administrator becomes local admin on joined devices.</li>' +
+        '<li><strong>Permissions inside another service</strong> &mdash; e.g. Purview Workload roles hold rights in Microsoft Purview workloads that Microsoft Entra ID does not list.</li>' +
+        '<li><strong>Equivalent to an unpublished role action</strong> &mdash; e.g. AI Administrator can manage permission grants like Application Administrator.</li>' +
+        '<li><strong>Sensitive regardless of scope</strong> &mdash; e.g. Privileged Authentication Administrator manages credentials of privileged accounts.</li>' +
+        '<li><strong>Deprecated roles with unpublished actions</strong> &mdash; e.g. Device Join, Workplace Device Join and Device Users.</li>' +
+        '</ul>' +
+        '<div style="margin-top:8px;">Implicit permissions are shown separately from the role actions of the role definition and are not counted as role actions. ' +
+        '<a href="#overwrites">Review all role definition overwrites &rarr;</a></div>';
 };
 
 // Permission catalogs (flat lists of individual permissions / scopes).

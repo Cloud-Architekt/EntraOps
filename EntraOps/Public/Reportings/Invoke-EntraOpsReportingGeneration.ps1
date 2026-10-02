@@ -49,11 +49,13 @@ function Invoke-EntraOpsReportingGeneration {
     $GenerateClassificationExplorer = $ReportingConfig.GenerateClassificationExplorer -ne $false
     $GenerateTierBreachAnalyzer = $ReportingConfig.GenerateTierBreachAnalyzer -ne $false
     $GenerateEamDashboard = $ReportingConfig.GenerateEamDashboard -ne $false
+    $GeneratePrivilegedAssets = $ReportingConfig.GeneratePrivilegedAssets -ne $false
     $GenerateAccessPathMap = $ReportingConfig.GenerateAccessPathMap -ne $false
     $GeneratePrivilegeHistory = $ReportingConfig.GeneratePrivilegeHistory -ne $false -and $Config.PrivilegeHistory.EnablePrivilegeHistory -ne $false
     $GenerateConfigurationAnalyzer = $ReportingConfig.GenerateConfigurationAnalyzer -ne $false
     $GenerateAccessPackageFlow = $ReportingConfig.GenerateAccessPackageFlow -ne $false
     $ResolveEamDashboardObjects = $Config.EamDashboard.ResolveLinkedIdentityObjectIds -ne $false
+    $ResolvePrivilegedAssetsObjects = $Config.PrivilegedAssets.ResolveRelatedObjectIds -ne $false
     $ResolveAccessPathObjects = $Config.AccessPathMap.ResolveObjectIdsOutsidePrivilegedEAM -ne $false
 
     if ($null -eq $AllowPartialTenantGovernanceSnapshot) {
@@ -72,6 +74,7 @@ function Invoke-EntraOpsReportingGeneration {
     }
 
     $NeedsConnection = $GenerateEamDashboard -or
+    ($GeneratePrivilegedAssets -and $ResolvePrivilegedAssetsObjects) -or
     ($GenerateAccessPathMap -and $ResolveAccessPathObjects) -or
     $GenerateConfigurationAnalyzer -or $GenerateAccessPackageFlow
     $ConnectedHere = $false
@@ -97,11 +100,13 @@ function Invoke-EntraOpsReportingGeneration {
             SkipClassificationExplorer                        = -not $GenerateClassificationExplorer
             SkipTierBreachAnalyzer                            = -not $GenerateTierBreachAnalyzer
             SkipEamDashboard                                  = -not $GenerateEamDashboard
+            SkipPrivilegedAssets                              = -not $GeneratePrivilegedAssets
             SkipAccessPathMap                                 = -not $GenerateAccessPathMap
             SkipPrivilegeHistory                              = -not $GeneratePrivilegeHistory
             SkipConfigurationAnalyzer                         = -not $GenerateConfigurationAnalyzer
             SkipAccessPackageFlow                             = -not $GenerateAccessPackageFlow
             EamDashboardResolveLinkedIdentityObjectIds        = $ResolveEamDashboardObjects
+            PrivilegedAssetsResolveRelatedObjectIds           = $ResolvePrivilegedAssetsObjects
             AccessPathMapResolveObjectIdsOutsidePrivilegedEAM = $ResolveAccessPathObjects
             AllowStaleTenantGovernanceSnapshot                = [bool]$AllowStaleTenantGovernanceSnapshot
             AllowPartialTenantGovernanceSnapshot              = [bool]$AllowPartialTenantGovernanceSnapshot

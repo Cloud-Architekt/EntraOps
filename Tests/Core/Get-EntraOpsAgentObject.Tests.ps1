@@ -12,6 +12,8 @@ BeforeAll {
     }
 
     . "$script:TestRepositoryRoot/EntraOps/Public/Core/Get-EntraOpsAgentObject.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsCustomSecurityAttributeClassificationEnabled.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsAlternateObjectTierLevelEnabled.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/PrivilegedAccess/Get-EntraOpsPrivilegedEntraObject.ps1"
 
     $script:Details = @{

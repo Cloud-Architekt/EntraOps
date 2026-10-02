@@ -15,6 +15,8 @@
             - data/tier-breach-data.js
         * EAM Dashboard (Reports/EamDashboard):
             - data/eam-dashboard-data.js
+        * Privileged Assets (Reports/PrivilegedAssets):
+            - data/privileged-assets-data.js
         * Privilege History (Reports/PrivilegeHistory):
             - data/privilege-history-data.js
         * Access Path Map (Reports/AccessPathMap):
@@ -43,6 +45,10 @@
 .PARAMETER EamDashboardAppRoot
     Path to the EAM Dashboard app folder. Defaults to Reports/EamDashboard under EntraOpsRoot.
 
+.PARAMETER PrivilegedAssetsAppRoot
+    Path to the Privileged Assets app folder. Defaults to Reports/PrivilegedAssets
+    under EntraOpsRoot.
+
 .PARAMETER PrivilegeHistoryAppRoot
     Path to the Privilege History app folder. Defaults to Reports/PrivilegeHistory under EntraOpsRoot.
 
@@ -66,6 +72,9 @@
 
 .PARAMETER SkipEamDashboard
     Do not remove EAM Dashboard generated data.
+
+.PARAMETER SkipPrivilegedAssets
+    Do not remove Privileged Assets generated data.
 
 .PARAMETER SkipPrivilegeHistory
     Do not remove Privilege History generated data.
@@ -110,6 +119,9 @@ function Remove-EntraOpsReportingData {
         [System.String]$EamDashboardAppRoot,
 
         [Parameter(Mandatory = $false)]
+        [System.String]$PrivilegedAssetsAppRoot,
+
+        [Parameter(Mandatory = $false)]
         [System.String]$PrivilegeHistoryAppRoot,
 
         [Parameter(Mandatory = $false)]
@@ -129,6 +141,9 @@ function Remove-EntraOpsReportingData {
 
         [Parameter(Mandatory = $false)]
         [switch]$SkipEamDashboard,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipPrivilegedAssets,
 
         [Parameter(Mandatory = $false)]
         [switch]$SkipPrivilegeHistory,
@@ -168,6 +183,9 @@ function Remove-EntraOpsReportingData {
     if ([string]::IsNullOrWhiteSpace($EamDashboardAppRoot)) {
         $EamDashboardAppRoot = Join-Path $EntraOpsRoot 'Reports/EamDashboard'
     }
+    if ([string]::IsNullOrWhiteSpace($PrivilegedAssetsAppRoot)) {
+        $PrivilegedAssetsAppRoot = Join-Path $EntraOpsRoot 'Reports/PrivilegedAssets'
+    }
     if ([string]::IsNullOrWhiteSpace($PrivilegeHistoryAppRoot)) {
         $PrivilegeHistoryAppRoot = Join-Path $EntraOpsRoot 'Reports/PrivilegeHistory'
     }
@@ -196,6 +214,10 @@ function Remove-EntraOpsReportingData {
 
     if (-not $SkipEamDashboard) {
         $candidateFiles.Add((Join-Path $EamDashboardAppRoot 'data/eam-dashboard-data.js'))
+    }
+
+    if (-not $SkipPrivilegedAssets) {
+        $candidateFiles.Add((Join-Path $PrivilegedAssetsAppRoot 'data/privileged-assets-data.js'))
     }
 
     if (-not $SkipPrivilegeHistory) {
