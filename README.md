@@ -13,7 +13,7 @@
 
 EntraOps is a community research project that demonstrates automated management of a Microsoft Entra ID tenant at scale using a DevOps approach. The PowerShell module and GitHub repository template analyze privileges and apply a customizable classification model to identify access sensitivity based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA). EntraOps requires PowerShell 7.4 or later and can run in GitHub Actions, custom automation, managed-identity hosts, or local environments.
 
-Start with the **[EntraOps Docs](./Docs/index.html)** and guided **[Get Started setup guide](./Docs/get-started/index.html)** for an interactive run, a local configuration, or GitHub automation.
+Start with the **[EntraOps Docs](https://www.entraops.com/docs)** and guided **[Get Started setup guide](https://www.entraops.com/docs/get-started/index.html)** for an interactive run, a local configuration, or GitHub automation.
 
 ## Key features
 
