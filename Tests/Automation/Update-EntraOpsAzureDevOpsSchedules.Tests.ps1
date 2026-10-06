@@ -1,5 +1,10 @@
 #Requires -Modules Pester
 
+BeforeDiscovery {
+    # .azure-pipelines is not part of the default Update-EntraOps targets, so deployments may not ship it.
+    $HasAdoPipelines = Test-Path -LiteralPath (Join-Path $PSScriptRoot '../../.azure-pipelines') -PathType Container
+}
+
 BeforeAll {
     $script:RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
     Import-Module (Join-Path $script:RepositoryRoot 'EntraOps/EntraOps.psd1') -Force
@@ -43,7 +48,7 @@ Describe 'Update-EntraOpsAzureDevOpsSchedules' {
         Get-Command Update-EntraOpsAzureDevOpsSchedules -Module EntraOps | Should -Not -BeNullOrEmpty
     }
 
-    It 'materializes every configured schedule and target branch' {
+    It 'materializes every configured schedule and target branch' -Skip:(-not $HasAdoPipelines) {
         $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'enabled')
 
         Update-EntraOpsAzureDevOpsSchedules -ConfigFile $Fixture.ConfigPath -PipelineFolder $Fixture.PipelineFolder -BranchName 'production'
@@ -60,7 +65,7 @@ Describe 'Update-EntraOpsAzureDevOpsSchedules' {
         @($Pull, $Reporting, $Update, $TenantGovernance) | ForEach-Object { $_ | Should -Match "- 'production'" }
     }
 
-    It 'removes managed schedules when their switches are disabled' {
+    It 'removes managed schedules when their switches are disabled' -Skip:(-not $HasAdoPipelines) {
         $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'disabled')
         $Config = Get-Content -LiteralPath $Fixture.ConfigPath -Raw | ConvertFrom-Json
         $Config.WorkflowTrigger.PullScheduledTrigger = $false
@@ -76,7 +81,7 @@ Describe 'Update-EntraOpsAzureDevOpsSchedules' {
         }
     }
 
-    It 'is idempotent' {
+    It 'is idempotent' -Skip:(-not $HasAdoPipelines) {
         $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'idempotent')
 
         Update-EntraOpsAzureDevOpsSchedules -ConfigFile $Fixture.ConfigPath -PipelineFolder $Fixture.PipelineFolder
@@ -87,7 +92,7 @@ Describe 'Update-EntraOpsAzureDevOpsSchedules' {
         $SecondRun | Should -BeExactly $FirstRun
     }
 
-    It 'rejects a malformed cron before changing its pipeline' {
+    It 'rejects a malformed cron before changing its pipeline' -Skip:(-not $HasAdoPipelines) {
         $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'invalid')
         $PullPath = Join-Path $Fixture.PipelineFolder 'azure-pipelines-pull.yml'
         $Before = Get-Content -LiteralPath $PullPath -Raw

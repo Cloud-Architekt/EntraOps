@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self';">
+    <title>EntraOps Privileged Assets</title>
+    <meta name="description"
+        content="Privileged Assets: object-centric view of privileged users, groups, service principals and applications with owners, sponsors, owned objects and devices, identity parents, administrative units and the object tier versus role assignment classification, plus an Object Classification worklist with PowerShell script generation for custom security attributes." />
+    <link rel="icon" href="assets/EntraOps.png" />
+    <script src="../shared/theme.js"></script>
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/inventory.css" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+</head>
+
+<body>
+    <header class="appbar">
+        <button class="btn nav-toggle" id="navToggle" aria-label="Toggle navigation"
+            style="background:transparent;border:none;color:#fff;font-size:18px;">&#9776;</button>
+        <div class="brand">
+            <img src="assets/EntraOps.png" alt="EntraOps logo" />
+            <span>EntraOps Privileged Assets</span>
+            <span class="sub" id="tenantName">Privileged EAM</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="appbar-link" href="https://github.com/Cloud-Architekt/EntraOps" target="_blank"
+            rel="noopener noreferrer">EntraOps on GitHub &#8599;</a>
+    </header>
+
+    <div class="layout">
+        <nav class="nav" id="nav">
+            <button type="button" class="nav-collapse-toggle" id="navCollapseToggle" title="Collapse navigation"
+                aria-label="Collapse navigation" aria-expanded="true">&#171;</button>
+            <div class="nav-group-label">Privileged EAM Reporting</div>
+            <a class="nav-item" href="../index.html"><span class="ico">&#8962;</span><span>Home</span></a>
+            <a class="nav-item" href="../ClassificationExplorer/index.html"><span
+                    class="ico">&#9737;</span><span>Classification Explorer</span></a>
+            <a class="nav-item" href="../EamDashboard/index.html"><span class="ico">&#9635;</span><span>EAM
+                    Dashboard</span></a>
+            <a class="nav-item" href="index.html" data-view-link="overview"><span
+                    class="ico">&#9776;</span><span>Privileged Assets</span></a>
+            <a class="nav-item nav-subitem" href="index.html" data-view-link="overview" data-view-nav="overview"><span
+                    class="ico">&#9636;</span><span>Overview</span></a>
+            <a class="nav-item nav-subitem" href="index.html?view=classification" data-view-link="classification"
+                data-view-nav="classification"><span class="ico">&#9998;</span><span>Object Classification</span></a>
+            <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
+                    Path Map</span></a>
+            <a class="nav-item" href="../TierBreachAnalyzer/index.html"><span class="ico">&#9888;</span><span>Tier
+                    Breach Analyzer</span></a>
+            <a class="nav-item" href="../PrivilegeHistory/index.html"><span class="ico">&#8635;</span><span>Privilege
+                    History</span></a>
+            <a class="nav-item" href="../ConfigurationAnalyzer/index.html"><span
+                    class="ico">&#9878;</span><span>Configuration Analyzer</span></a>
+            <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=resources"><span
+                    class="ico">&#9638;</span><span>Snapshot Resources</span></a>
+            <a class="nav-item nav-subitem" href="../ConfigurationAnalyzer/index.html?view=privileged"><span
+                    class="ico">&#9737;</span><span>Configuration Assets</span></a>
+            <a class="nav-item nav-subitem" href="../ConditionalAccessAnalysis/index.html"><span
+                    class="ico">&#8703;</span><span>Conditional Access Analysis</span></a>
+            <a class="nav-item nav-subitem" href="../EidscaCoverage/index.html"><span
+                    class="ico">&#9733;</span><span>EIDSCA Findings</span></a>
+            <a class="nav-item nav-subitem" href="../AccessPackageFlow/index.html"><span
+                    class="ico">&#8523;</span><span>Access Package Flow</span></a>
+            <a class="nav-item nav-subitem" href="../PimRequestFlow/index.html"><span
+                    class="ico">&#128477;&#65038;</span><span>PIM Request Flow</span></a>
+
+            <div class="nav-group-label">Sections</div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiOverview"><span
+                    class="ico">&#9636;</span><span>Metrics</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiInventory"><span
+                    class="ico">&#9776;</span><span>Inventory</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiWorklist"><span
+                    class="ico">&#9998;</span><span>Worklist</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiScript"
+                data-classification-method="csa"><span
+                    class="ico">&#8984;</span><span>PowerShell Script</span></div>
+        </nav>
+
+        <main class="main" id="app">
+            <div class="page-head">
+                <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo;
+                    <a href="index.html" data-view-link="overview">Privileged Assets</a> &rsaquo; <span
+                        id="paiViewCrumb">Overview</span></div>
+                <h1 id="paiViewTitle">Privileged Assets</h1>
+                <p data-view="overview">An object-centric view of every privileged user, group, service principal and
+                    application (including all object sub types) from the Privileged EAM export. It shows the
+                    relationships behind each object - owners, sponsors, owned objects and devices, identity parent,
+                    associated work account and PAW device, and administrative units - and compares the object tier with
+                    the classification of its role assignments. Role assignment details open in the side panel and link
+                    to the <a href="../EamDashboard/index.html">EAM Dashboard</a> and
+                    <a href="../AccessPathMap/index.html">Access Path Map</a>.
+                </p>
+                <p data-view="classification" hidden>Maintain the target tier of privileged objects with the
+                    classification method configured in <code>EntraOpsConfig.json</code>: compare the current
+                    tier of each object with its target tier and the role assignments with the highest classification,
+                    import or export the worklist as CSV or JSON, and download the <b>Object Classification
+                    File</b> or generate a PowerShell script that sets the tier custom security attributes, depending on
+                    the enabled classification sources. Select
+                    objects in the
+                    <a href="index.html" data-view-link="overview">Overview</a> or add them below.</p>
+            </div>
+
+            <div class="card-pad" id="paiEmptyState">
+                <p><strong>No Privileged Assets dataset found.</strong> Generate
+                    <code>data/privileged-assets-data.js</code> from your Privileged EAM export first:</p>
+                <p><code>Import-Module ./EntraOps -Force; New-EntraOpsPrivilegedAssetsData</code></p>
+                <p>Run <code>Save-EntraOpsPrivilegedEAMJson</code> before if no export exists yet. Then reload this
+                    page.</p>
+            </div>
+
+            <div id="paiContent" class="hidden">
+                <section id="secPaiOverview" data-view="overview" style="margin-bottom:16px;">
+                    <div class="grid cols-4" id="paiStats"></div>
+                </section>
+
+                <section class="card" style="margin-bottom:16px;" id="secPaiInventory" data-view="overview">
+                    <div class="card-head">Inventory
+                        <span class="muted pai-head-meta" id="paiResultCount"></span>
+                    </div>
+                    <div class="card-pad">
+                        <div class="eam-filter-row pai-filters">
+                            <label class="eam-filter grow">Search
+                                <input type="search" id="paiSearch" class="pai-input"
+                                    placeholder="Name, UPN, app id or object id" autocomplete="off" />
+                            </label>
+                            <label class="eam-filter">Object type<select id="paiFilterType" class="pai-input"></select></label>
+                            <label class="eam-filter">Sub type<select id="paiFilterSubType" class="pai-input"></select></label>
+                            <label class="eam-filter">Object tier<select id="paiFilterTier" class="pai-input"></select></label>
+                            <label class="eam-filter">Assignment tier<select id="paiFilterAssignmentTier" class="pai-input"></select></label>
+                        </div>
+                        <div class="eam-filter-row pai-filters">
+                            <label class="eam-filter">Administrative unit<select id="paiFilterAu" class="pai-input"></select></label>
+                            <label class="eam-filter">Restricted management<select id="paiFilterRestricted" class="pai-input"></select></label>
+                            <label class="eam-filter">Sync source<select id="paiFilterSync" class="pai-input"></select></label>
+                            <label class="eam-filter">Finding<select id="paiFilterFinding" class="pai-input"></select></label>
+                            <label class="eam-filter">Worklist<select id="paiFilterWorklist" class="pai-input"></select></label>
+                        </div>
+                        <div class="pai-toolbar">
+                            <label class="pai-check"><input type="checkbox" id="paiWhatIf" /> What-if: evaluate
+                                findings with worklist target tiers</label>
+                            <span class="spacer"></span>
+                            <button type="button" class="btn small" id="paiResetFilters">Reset filters</button>
+                            <button type="button" class="btn small" id="paiExportInventory">Export inventory (CSV)</button>
+                        </div>
+                        <div class="pai-bulk" id="paiBulk">
+                            <span id="paiSelectionCount">0 selected</span>
+                            <select id="paiBulkTier" class="pai-input" aria-label="Target tier"></select>
+                            <input type="text" id="paiBulkJustification" class="pai-input pai-justification"
+                                maxlength="200" placeholder="Justification (recommended)" />
+                            <button type="button" class="btn small primary" id="paiBulkAdd">Set target tier</button>
+                            <button type="button" class="btn small" id="paiBulkRemove">Remove from worklist</button>
+                            <button type="button" class="btn small" id="paiBulkClear">Clear selection</button>
+                        </div>
+                        <div class="table-wrap pai-table-wrap">
+                            <table class="grid-table pai-table" id="paiTable">
+                                <thead>
+                                    <tr>
+                                        <th class="no-sort pai-col-check"><input type="checkbox" id="paiSelectAll"
+                                                aria-label="Select all filtered objects" /></th>
+                                        <th data-sort="name">Object</th>
+                                        <th data-sort="type">Type</th>
+                                        <th data-sort="tier">Object tier</th>
+                                        <th data-sort="assignmentTier">Assignment tiers</th>
+                                        <th data-sort="relationships">Relationships</th>
+                                        <th class="no-sort">Administrative units</th>
+                                        <th data-sort="findings">Findings</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="paiTableBody"></tbody>
+                            </table>
+                        </div>
+                        <div class="pager" id="paiPager"></div>
+                    </div>
+                </section>
+
+                <section class="card" style="margin-bottom:16px;" id="secPaiWorklist" data-view="classification" hidden>
+                    <div class="card-head">Object Classification worklist
+                        <span class="muted pai-head-meta" id="paiWorklistMeta"></span>
+                    </div>
+                    <div class="card-pad">
+                        <div class="callout" id="paiFileStatus"></div>
+                        <div class="pai-toolbar">
+                            <input type="search" id="paiAddObject" class="pai-input pai-add-object"
+                                list="paiObjectOptions" placeholder="Add object by name or object id"
+                                autocomplete="off" aria-label="Object to add" />
+                            <datalist id="paiObjectOptions"></datalist>
+                            <select id="paiAddTier" class="pai-input" aria-label="Target tier for the added object"></select>
+                            <button type="button" class="btn small primary" id="paiAddButton">Add to worklist</button>
+                        </div>
+                        <div class="pai-toolbar">
+                            <label class="btn small pai-file-btn">Import CSV / JSON<input type="file" id="paiImport"
+                                    accept=".csv,.json,text/csv,application/json" /></label>
+                            <button type="button" class="btn small" id="paiExportCsv">Export CSV</button>
+                            <button type="button" class="btn small primary" id="paiExportFile"
+                                data-classification-method="file">Download Object
+                                Classification File</button>
+                            <span class="spacer"></span>
+                            <button type="button" class="btn small" id="paiResetWorklist"
+                                data-classification-method="file">Reset to repository
+                                file</button>
+                            <button type="button" class="btn small" id="paiClearWorklist">Clear worklist</button>
+                        </div>
+                        <div class="pai-import-result hidden" id="paiImportResult" role="status"></div>
+                        <div class="table-wrap pai-table-wrap">
+                            <table class="grid-table pai-table" id="paiWorklistTable">
+                                <thead>
+                                    <tr>
+                                        <th class="no-sort">Object</th>
+                                        <th class="no-sort">Type</th>
+                                        <th class="no-sort">Current tier</th>
+                                        <th class="no-sort">Highest-tier role assignments</th>
+                                        <th class="no-sort">Target tier</th>
+                                        <th class="no-sort">Justification</th>
+                                        <th class="no-sort">Status</th>
+                                        <th class="no-sort"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="paiWorklistBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card" style="margin-bottom:16px;" id="secPaiScript" data-view="classification"
+                    data-classification-method="csa" hidden>
+                    <div class="card-head">PowerShell script for custom security attributes</div>
+                    <div class="card-pad">
+                        <p class="muted">Generates a reviewable script that sets the tier level and tier name custom
+                            security attributes (names from <code>EntraOpsConfig.json</code> &rsaquo;
+                            <code>CustomSecurityAttributes</code>) for users, service principals and applications in
+                            the worklist whose target tier differs from the current tier. Groups are skipped because
+                            they don't support custom security attributes - classify them with Alternate Tier Level
+                            Attributes <code>Group</code> filters. Nothing is executed from this page.</p>
+                        <div class="callout scope" id="paiScriptCrossTenant" hidden></div>
+                        <div class="callout control hidden" id="paiScriptWarning"></div>
+                        <div class="pai-toolbar">
+                            <label class="pai-check"><input type="checkbox" id="paiScriptSelectedOnly" /> Limit to
+                                objects selected in the Overview</label>
+                            <span class="spacer"></span>
+                            <button type="button" class="btn small primary" id="paiGenerateScript">Generate
+                                script</button>
+                            <button type="button" class="btn small" id="paiCopyScript" disabled>Copy</button>
+                            <button type="button" class="btn small" id="paiDownloadScript" disabled>Download
+                                .ps1</button>
+                        </div>
+                        <p class="muted" id="paiScriptSummary"></p>
+                        <textarea id="paiScript" class="pai-script" readonly spellcheck="false"
+                            aria-label="Generated PowerShell script"></textarea>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div id="paiDrawerBackdrop" class="drawer-backdrop"></div>
+    <aside id="paiDrawer" class="drawer" aria-label="Object details" aria-hidden="true">
+        <div class="drawer-head">
+            <div class="title" id="paiDrawerTitle"></div>
+            <button type="button" class="close" id="paiDrawerClose" aria-label="Close details">&times;</button>
+        </div>
+        <div class="drawer-body" id="paiDrawerBody"></div>
+    </aside>
+
+    <script src="data/privileged-assets-data.js"></script>
+    <script src="js/navCollapse.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>

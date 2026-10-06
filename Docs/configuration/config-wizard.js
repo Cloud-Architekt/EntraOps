@@ -297,6 +297,7 @@
             GenerateConfigurationAnalyzer: true,
             GenerateAccessPackageFlow: true,
             GeneratePrivilegeHistory: true,
+            GeneratePrivilegedAssets: true,
             ClassificationExplorerRepository: "Cloud-Architekt/AzurePrivilegedIAM",
             ResolveGroupMembersForPrivilegedAssets: true,
             AllowPartialTenantGovernanceSnapshot: true,
@@ -311,6 +312,7 @@
 
             AccessPathMapResolveObjectIdsOutsidePrivilegedEAM: true,
             EamDashboardResolveLinkedIdentityObjectIds: true,
+            PrivilegedAssetsResolveRelatedObjectIds: true,
             ClassificationExplorerGenerateChangeHistory: false,
 
             EnableTenantGovernanceSnapshot: false,
@@ -387,8 +389,13 @@
             PrivilegedServicePrincipalAdminTierLevelAttribute: "adminTierLevel",
             PrivilegedServicePrincipalAdminTierLevelNameAttribute: "adminTierLevelName",
 
-            ClassificationMethod: "csa",
-            AlternateEnabled: false,
+            CsaEnabled: true,
+            FileEnabled: false,
+            AlternateSelected: false,
+            AlternateUserEnabled: false,
+            AlternateServicePrincipalEnabled: false,
+            AlternateGroupEnabled: false,
+            ObjectClassificationFilePath: "./Classification/ObjectClassification.json",
             Alternate: {
                 User: { ControlPlane: emptyTier(), ManagementPlane: emptyTier(), UserAccess: emptyTier() },
                 ServicePrincipal: { ControlPlane: emptyTier(), ManagementPlane: emptyTier(), UserAccess: emptyTier() },
@@ -615,6 +622,7 @@
                         { key: "GenerateConfigurationAnalyzer", label: "Generate Configuration Analyzer", type: "checkbox", default: true },
                         { key: "GenerateAccessPackageFlow", label: "Generate Access Package Flow", type: "checkbox", default: true, help: "Uses Microsoft Graph to resolve current access-package resources and requestor/approver groups from the latest Tenant Governance snapshot." },
                         { key: "GeneratePrivilegeHistory", label: "Generate Privilege History", type: "checkbox", default: true },
+                        { key: "GeneratePrivilegedAssets", label: "Generate Privileged Assets", type: "checkbox", default: true },
                         { key: "ClassificationExplorerRepository", label: "Classification Explorer repository", type: "text", default: "Cloud-Architekt/AzurePrivilegedIAM" },
                         { key: "ClassificationExplorerGenerateChangeHistory", label: "Generate Classification Explorer change history", type: "checkbox", default: false, help: "Disabled by default. Generating the history requires a full git log over the classification sources in the AzurePrivilegedIAM repository, which is slow. Enable it to populate the Change History view and its notifications." },
                         { key: "ResolveGroupMembersForPrivilegedAssets", label: "Resolve included group targets for Configuration Analyzer", type: "checkbox", default: true, help: "Expands nested and PIM-managed group membership through Microsoft Graph. Excluded targets are not evaluated." },
@@ -637,7 +645,8 @@
                     title: "Graph object resolution",
                     fields: [
                         { key: "AccessPathMapResolveObjectIdsOutsidePrivilegedEAM", label: "Resolve object ids outside Privileged EAM for Access Path Map", type: "checkbox", default: true, help: "Uses best-effort Microsoft Graph resolution and keeps unresolved placeholders when an object cannot be returned." },
-                        { key: "EamDashboardResolveLinkedIdentityObjectIds", label: "Resolve linked identity object ids for EAM Dashboard", type: "checkbox", default: true, help: "Resolves only missing linked-identity GUIDs with batched Microsoft Graph requests when EAM Dashboard data is generated." }
+                        { key: "EamDashboardResolveLinkedIdentityObjectIds", label: "Resolve linked identity object ids for EAM Dashboard", type: "checkbox", default: true, help: "Resolves only missing linked-identity GUIDs with batched Microsoft Graph requests when EAM Dashboard data is generated." },
+                        { key: "PrivilegedAssetsResolveRelatedObjectIds", label: "Resolve related object ids for Privileged Assets", type: "checkbox", default: true, help: "Resolves owners, sponsors, owned objects and devices, identity parents and associated accounts outside the Privileged EAM export with batched Microsoft Graph requests." }
                     ]
                 },
                 {
@@ -1148,28 +1157,27 @@
     // Object Classification tab (custom widget)
     // ---------------------------------------------------------------------
     var activeObjectType = "User";
+    var METHOD_STATE = { csa: "CsaEnabled", alternate: "AlternateSelected", file: "FileEnabled" };
 
     function renderClassificationPanel() {
         var fragment = document.createDocumentFragment();
         var methodGroup = createElement("div", "wiz-group");
-        methodGroup.appendChild(createElement("h3", "wiz-group-title", "Classification method"));
-        var description = createElement("p", "wiz-group-desc");
-        appendText(description, "Choose how ");
-        description.appendChild(createElement("code", "", "User"));
-        appendText(description, " and ");
-        description.appendChild(createElement("code", "", "ServicePrincipal"));
-        appendText(description, " objects are classified onto an Enterprise Access Model tier. See Core → Classify by Custom Security Attributes / Classify by Alternate Tier Level Attributes for the full reference.");
-        methodGroup.appendChild(description);
+        methodGroup.appendChild(createElement("h3", "wiz-group-title", "Classification sources"));
+        methodGroup.appendChild(createElement("p", "wiz-group-desc", "Select one or more sources for the tier of privileged objects. They are used in the order shown: custom security attributes win; an object without a tier (empty or Unclassified) is classified by the Alternate Tier Level Attributes filters of its object type, then by the Object Classification File. Objects without a match stay Unclassified. See Core → Classification sources for the full reference."));
         var methodCards = createElement("div", "wiz-method-cards");
-        methodCards.appendChild(methodCard("csa", "Custom Security Attributes", "Read the tier from Microsoft Entra custom security attributes already set on the object by your provisioning process (default)."));
-        methodCards.appendChild(methodCard("alternate", "Alternate Tier Level Attributes", "Classify by evaluating a PowerShell filter expression against the object's own EntraOps details (e.g. administrative unit membership, naming convention) - no custom security attributes required."));
+        methodCards.appendChild(methodCard("csa", "Custom Security Attributes", "Read the tier of users, service principals and applications from Microsoft Entra custom security attributes set by your provisioning process (default). Wins over the other sources."));
+        methodCards.appendChild(methodCard("alternate", "Alternate Tier Level Attributes", "Classify users, service principals or groups without custom security attribute tier by PowerShell filter expressions against the object's own EntraOps details (e.g. administrative unit membership, naming convention)."));
+        methodCards.appendChild(methodCard("file", "Object Classification File", "Classify users, groups, service principals and applications that no other source classifies by a list of object IDs and tiers in the repository, maintained in the Privileged Assets reporting app."));
         methodGroup.appendChild(methodCards);
+        if (!state.CsaEnabled && !state.FileEnabled && !(state.AlternateSelected && (state.AlternateUserEnabled || state.AlternateServicePrincipalEnabled || state.AlternateGroupEnabled))) {
+            methodGroup.appendChild(createElement("p", "wiz-field-help wiz-field-warning", "No classification source is selected - all objects stay Unclassified."));
+        }
         fragment.appendChild(methodGroup);
 
-        if (state.ClassificationMethod === "csa") {
+        if (state.CsaEnabled) {
             var attributeGroup = createElement("div", "wiz-group");
             attributeGroup.appendChild(createElement("h3", "wiz-group-title", "Custom Security Attributes"));
-            attributeGroup.appendChild(createElement("p", "wiz-group-desc", "Attribute set/name read by Get-EntraOpsPrivilegedEntraObject. Permission to read these must be granted manually to the EntraOps service principal."));
+            attributeGroup.appendChild(createElement("p", "wiz-group-desc", "Attribute set/name read by Get-EntraOpsPrivilegedEntraObject. Permission to read these must be granted manually to the EntraOps service principal. The PowerShell script of Privileged Assets writes the tier attributes."));
             attributeGroup.appendChild(renderField({ key: "PrivilegedUserAttribute", label: "Privileged User Attribute", type: "text", default: "privilegedUser" }));
             attributeGroup.appendChild(renderField({ key: "PrivilegedUserPawAttribute", label: "Privileged User PAW Attribute", type: "text", default: "associatedSecureAdminWorkstation" }));
             attributeGroup.appendChild(renderField({ key: "PrivilegedServicePrincipalAttribute", label: "Privileged Service Principal Attribute", type: "text", default: "privilegedWorkloadIdentity", help: "Double-check this matches the attribute name you actually provisioned in Entra (older EntraOps versions emitted the misspelled default 'privilegedWorkloadIdentitiy')." }));
@@ -1179,46 +1187,62 @@
             attributeGroup.appendChild(renderField({ key: "PrivilegedServicePrincipalAdminTierLevelAttribute", label: "Service principal tier level field", type: "text", default: "adminTierLevel" }));
             attributeGroup.appendChild(renderField({ key: "PrivilegedServicePrincipalAdminTierLevelNameAttribute", label: "Service principal tier name field", type: "text", default: "adminTierLevelName" }));
             fragment.appendChild(attributeGroup);
+        }
 
-            var groupClassification = createElement("div", "wiz-group");
-            groupClassification.appendChild(createElement("h3", "wiz-group-title", "Group classification (Alternate Tier Level Attributes)"));
-            groupClassification.appendChild(createElement("p", "wiz-group-desc", "Groups don't support custom security attributes and stay Unclassified by default. Define filter expressions to classify groups - they apply whenever at least one Group filter is set, independent of the classification method above."));
-            ["ControlPlane", "ManagementPlane", "UserAccess"].forEach(function (tier) {
-                groupClassification.appendChild(renderTierBlock("Group", tier));
-            });
-            fragment.appendChild(groupClassification);
-        } else {
-            var alternateGroup = createElement("div", "wiz-group");
-            var objectTabs = createElement("div", "wiz-object-tabs");
-            OBJECT_TYPES_2.slice(0, 1); // no-op, keep linter happy about unused var patterns
-            ["User", "ServicePrincipal", "Group"].forEach(function (objectType) {
-                var objectTab = createButton("wiz-object-tab" + (objectType === activeObjectType ? " active" : ""), objectType);
-                objectTab.dataset.objtab = objectType;
-                objectTabs.appendChild(objectTab);
-            });
-            alternateGroup.appendChild(objectTabs);
-            if (activeObjectType === "Group") {
-                alternateGroup.appendChild(createElement("p", "wiz-group-desc", "Groups don't support custom security attributes. Group filters apply whenever at least one is set, independent of the classification method."));
-            }
-            ["ControlPlane", "ManagementPlane", "UserAccess"].forEach(function (tier) {
-                alternateGroup.appendChild(renderTierBlock(activeObjectType, tier));
-            });
-            fragment.appendChild(alternateGroup);
+        if (state.AlternateSelected) fragment.appendChild(renderAlternateGroup());
+
+        if (state.FileEnabled) {
+            var fileGroup = createElement("div", "wiz-group");
+            fileGroup.appendChild(createElement("h3", "wiz-group-title", "Object Classification File"));
+            fileGroup.appendChild(createElement("p", "wiz-group-desc", "JSON or CSV file with the columns ObjectId, ObjectType, ObjectDisplayName, AdminTierLevelName and Justification. Download it from Privileged Assets › Object Classification and commit it to this path. A file entry only applies to objects that the other selected sources don't classify."));
+            fileGroup.appendChild(renderField({ key: "ObjectClassificationFilePath", label: "File path", type: "text", default: "./Classification/ObjectClassification.json", help: "Relative to the EntraOps repository root. Must be a .json or .csv file inside the repository.", usedIn: "Get-EntraOpsPrivilegedEntraObject" }));
+            fragment.appendChild(fileGroup);
         }
         return fragment;
     }
 
+    function renderAlternateGroup() {
+        var alternateGroup = createElement("div", "wiz-group");
+        alternateGroup.appendChild(createElement("h3", "wiz-group-title", "Alternate Tier Level Attributes"));
+        alternateGroup.appendChild(createElement("p", "wiz-group-desc", "Select the object types to classify by filter expressions. The filters apply to objects without custom security attribute tier."));
+        var objectTabs = createElement("div", "wiz-object-tabs");
+        ["User", "ServicePrincipal", "Group"].forEach(function (objectType) {
+            var objectTab = createButton("wiz-object-tab" + (objectType === activeObjectType ? " active" : ""), objectType + (state["Alternate" + objectType + "Enabled"] ? " ✓" : ""));
+            objectTab.dataset.objtab = objectType;
+            objectTabs.appendChild(objectTab);
+        });
+        alternateGroup.appendChild(objectTabs);
+        alternateGroup.appendChild(renderField({
+            key: "Alternate" + activeObjectType + "Enabled",
+            label: "Classify " + activeObjectType + " objects by filter expressions",
+            type: "checkbox",
+            default: false,
+            help: ALTERNATE_TYPE_HELP[activeObjectType]
+        }));
+        if (state["Alternate" + activeObjectType + "Enabled"]) {
+            ["ControlPlane", "ManagementPlane", "UserAccess"].forEach(function (tier) {
+                alternateGroup.appendChild(renderTierBlock(activeObjectType, tier));
+            });
+        }
+        return alternateGroup;
+    }
+
+    var ALTERNATE_TYPE_HELP = {
+        User: "Applies to users without custom security attribute tier. A user that matches no filter falls back to the Object Classification File or stays Unclassified.",
+        ServicePrincipal: "Applies to service principals without custom security attribute tier. A service principal that matches no filter falls back to the Object Classification File or stays Unclassified. Applications are not classified by filters.",
+        Group: "Groups don't support custom security attributes. A group that matches no filter falls back to the Object Classification File or stays Unclassified."
+    };
+
     function methodCard(value, title, desc) {
-        var selected = state.ClassificationMethod === value;
+        var selected = state[METHOD_STATE[value]] === true;
         var card = createElement("label", "wiz-method-card" + (selected ? " selected" : ""));
         card.dataset.method = value;
         var heading = createElement("div", "title");
-        var radio = createElement("input");
-        radio.type = "radio";
-        radio.name = "wizMethod";
-        radio.value = value;
-        radio.checked = selected;
-        heading.appendChild(radio);
+        var checkbox = createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = value;
+        checkbox.checked = selected;
+        heading.appendChild(checkbox);
         appendText(heading, title);
         card.appendChild(heading);
         card.appendChild(createElement("p", "", desc));
@@ -1369,11 +1393,32 @@
         nav.replaceChildren(fragment);
     }
 
+    // Minimized panels, keyed by tab and headline, so they stay minimized when the tab re-renders.
+    var collapsedGroups = {};
+
+    function applyGroupCollapse(container) {
+        container.querySelectorAll(".wiz-group > .wiz-group-title").forEach(function (title) {
+            title.dataset.collapseKey = activeTab + "|" + title.textContent;
+            title.setAttribute("role", "button");
+            title.tabIndex = 0;
+            title.appendChild(createElement("span", "wiz-group-toggle")).setAttribute("aria-hidden", "true");
+            setGroupCollapsed(title, collapsedGroups[title.dataset.collapseKey] === true);
+        });
+    }
+
+    function setGroupCollapsed(title, collapsed) {
+        collapsedGroups[title.dataset.collapseKey] = collapsed;
+        title.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        title.title = collapsed ? "Expand" : "Minimize";
+        title.parentElement.classList.toggle("wiz-group-collapsed", collapsed);
+    }
+
     function renderActivePanel() {
         var container = document.getElementById("wizPanels");
         var tab = TABS.filter(function (t) { return t.id === activeTab; })[0];
         container.replaceChildren(tab.custom ? renderClassificationPanel() : renderStandardPanel(tab));
         syncTgResourcePicker(container);
+        applyGroupCollapse(container);
     }
 
     function renderPreview() {
@@ -1501,6 +1546,7 @@
                 GenerateConfigurationAnalyzer: state.GenerateConfigurationAnalyzer,
                 GenerateAccessPackageFlow: state.GenerateAccessPackageFlow,
                 GeneratePrivilegeHistory: state.GeneratePrivilegeHistory,
+                GeneratePrivilegedAssets: state.GeneratePrivilegedAssets,
                 ClassificationExplorerRepository: state.ClassificationExplorerRepository
             },
             AutomatedElmCatalogProtection: {
@@ -1517,6 +1563,7 @@
                 EidscaExcludedFindings: commaListToArray(state.EidscaExcludedFindings)
             },
             CustomSecurityAttributes: {
+                Enabled: state.CsaEnabled,
                 PrivilegedUserAttribute: state.PrivilegedUserAttribute,
                 PrivilegedUserPawAttribute: state.PrivilegedUserPawAttribute,
                 PrivilegedServicePrincipalAttribute: state.PrivilegedServicePrincipalAttribute,
@@ -1527,22 +1574,28 @@
                 PrivilegedServicePrincipalAdminTierLevelNameAttribute: state.PrivilegedServicePrincipalAdminTierLevelNameAttribute
             },
             AlternateObjectTierLevelAttributes: {
-                Enabled: state.ClassificationMethod === "alternate",
                 User: {
+                    Enabled: state.AlternateSelected && state.AlternateUserEnabled,
                     ControlPlane: tierExpr("User", "ControlPlane"),
                     ManagementPlane: tierExpr("User", "ManagementPlane"),
                     UserAccess: tierExpr("User", "UserAccess")
                 },
                 ServicePrincipal: {
+                    Enabled: state.AlternateSelected && state.AlternateServicePrincipalEnabled,
                     ControlPlane: tierExpr("ServicePrincipal", "ControlPlane"),
                     ManagementPlane: tierExpr("ServicePrincipal", "ManagementPlane"),
                     UserAccess: tierExpr("ServicePrincipal", "UserAccess")
                 },
                 Group: {
+                    Enabled: state.AlternateSelected && state.AlternateGroupEnabled,
                     ControlPlane: tierExpr("Group", "ControlPlane"),
                     ManagementPlane: tierExpr("Group", "ManagementPlane"),
                     UserAccess: tierExpr("Group", "UserAccess")
                 }
+            },
+            ObjectClassificationFile: {
+                Enabled: state.FileEnabled,
+                FilePath: state.ObjectClassificationFilePath
             },
             PrivilegeHistory: {
                 EnablePrivilegeHistory: state.EnablePrivilegeHistory,
@@ -1554,6 +1607,9 @@
             },
             EamDashboard: {
                 ResolveLinkedIdentityObjectIds: state.EamDashboardResolveLinkedIdentityObjectIds
+            },
+            PrivilegedAssets: {
+                ResolveRelatedObjectIds: state.PrivilegedAssetsResolveRelatedObjectIds
             },
             ClassificationExplorer: {
                 GenerateChangeHistory: state.ClassificationExplorerGenerateChangeHistory
@@ -1633,7 +1689,16 @@
                 }
             }
         };
-        return mergeConfig(deepClone(importedConfig || {}), cfg);
+        var merged = mergeConfig(deepClone(importedConfig || {}), cfg);
+        // Per-type Enabled flags replace the legacy top-level switch of older config files.
+        var alternate = merged.AlternateObjectTierLevelAttributes;
+        delete alternate.Enabled;
+        ["User", "ServicePrincipal", "Group"].forEach(function (objType) {
+            var enabled = alternate[objType].Enabled;
+            delete alternate[objType].Enabled;
+            alternate[objType] = Object.assign({ Enabled: enabled }, alternate[objType]);
+        });
+        return merged;
     }
 
     // ---------------------------------------------------------------------
@@ -1767,6 +1832,7 @@
         state.GenerateConfigurationAnalyzer = reporting.GenerateConfigurationAnalyzer !== undefined ? reporting.GenerateConfigurationAnalyzer : state.GenerateConfigurationAnalyzer;
         state.GenerateAccessPackageFlow = reporting.GenerateAccessPackageFlow !== undefined ? reporting.GenerateAccessPackageFlow : state.GenerateAccessPackageFlow;
         state.GeneratePrivilegeHistory = reporting.GeneratePrivilegeHistory !== undefined ? reporting.GeneratePrivilegeHistory : state.GeneratePrivilegeHistory;
+        state.GeneratePrivilegedAssets = reporting.GeneratePrivilegedAssets !== undefined ? reporting.GeneratePrivilegedAssets : state.GeneratePrivilegedAssets;
         state.ClassificationExplorerRepository = reporting.ClassificationExplorerRepository || state.ClassificationExplorerRepository;
         state.ResolveGroupMembersForPrivilegedAssets = pick(cfg, "ConfigurationAnalyzer.ResolveGroupMembersForPrivilegedAssets", state.ResolveGroupMembersForPrivilegedAssets);
         state.AllowPartialTenantGovernanceSnapshot = pick(cfg, "ConfigurationAnalyzer.AllowPartialTenantGovernanceSnapshot", state.AllowPartialTenantGovernanceSnapshot);
@@ -1786,13 +1852,22 @@
         state.PrivilegedServicePrincipalAdminTierLevelNameAttribute = pick(cfg, "CustomSecurityAttributes.PrivilegedServicePrincipalAdminTierLevelNameAttribute", state.PrivilegedServicePrincipalAdminTierLevelNameAttribute);
 
         var alt = cfg.AlternateObjectTierLevelAttributes || {};
-        state.ClassificationMethod = alt.Enabled === true ? "alternate" : "csa";
+        state.FileEnabled = pick(cfg, "ObjectClassificationFile.Enabled", false) === true;
+        // Older config files had one classification method: selecting the file or the alternate filters turned custom security attributes off.
+        var csaEnabled = pick(cfg, "CustomSecurityAttributes.Enabled", null);
+        state.CsaEnabled = typeof csaEnabled === "boolean" ? csaEnabled : !(alt.Enabled === true || (state.FileEnabled && String(pick(cfg, "ObjectClassificationFile.FilePath", "") || "").trim() !== ""));
         ["User", "ServicePrincipal", "Group"].forEach(function (objType) {
             ["ControlPlane", "ManagementPlane", "UserAccess"].forEach(function (tier) {
                 var expr = pick(alt, objType + "." + tier, "");
                 state.Alternate[objType][tier] = parseExpression(expr);
             });
+            // Same fallback as Test-EntraOpsAlternateObjectTierLevelEnabled for configs without per-type Enabled.
+            var typeEnabled = pick(alt, objType + ".Enabled", null);
+            var hasFilter = ["ControlPlane", "ManagementPlane", "WorkloadPlane", "UserAccess"].some(function (tier) { return String(pick(alt, objType + "." + tier, "") || "").trim() !== ""; });
+            state["Alternate" + objType + "Enabled"] = typeof typeEnabled === "boolean" ? typeEnabled : (objType === "Group" ? hasFilter : alt.Enabled === true);
         });
+        state.AlternateSelected = state.AlternateUserEnabled || state.AlternateServicePrincipalEnabled || state.AlternateGroupEnabled;
+        state.ObjectClassificationFilePath = pick(cfg, "ObjectClassificationFile.FilePath", state.ObjectClassificationFilePath);
 
         state.EnablePrivilegeHistory = pick(cfg, "PrivilegeHistory.EnablePrivilegeHistory", state.EnablePrivilegeHistory);
         var timeRange = pick(cfg, "PrivilegeHistory.TimeRangeInDays", null);
@@ -1801,6 +1876,7 @@
 
         state.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM = pick(cfg, "AccessPathMap.ResolveObjectIdsOutsidePrivilegedEAM", state.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM);
         state.EamDashboardResolveLinkedIdentityObjectIds = pick(cfg, "EamDashboard.ResolveLinkedIdentityObjectIds", state.EamDashboardResolveLinkedIdentityObjectIds);
+        state.PrivilegedAssetsResolveRelatedObjectIds = pick(cfg, "PrivilegedAssets.ResolveRelatedObjectIds", state.PrivilegedAssetsResolveRelatedObjectIds);
         state.ClassificationExplorerGenerateChangeHistory = pick(cfg, "ClassificationExplorer.GenerateChangeHistory", state.ClassificationExplorerGenerateChangeHistory);
 
         state.EnableTenantGovernanceSnapshot = pick(cfg, "TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot", state.EnableTenantGovernanceSnapshot);
@@ -1941,8 +2017,10 @@
         var type = el.getAttribute("data-type") || (typeContainer && typeContainer.getAttribute("data-type"));
         if (!type) return;
         var key = el.closest("[data-key]").getAttribute("data-key");
-        if (type === "checkbox") setVal(key, el.checked);
-        else if (type === "multiselect") {
+        if (type === "checkbox") {
+            setVal(key, el.checked);
+            if (/^Alternate\w+Enabled$/.test(key)) renderActivePanel();
+        } else if (type === "multiselect") {
             var container = el.closest("[data-key]");
             var values = Array.prototype.slice.call(container.querySelectorAll("input:checked")).map(function (i) { return i.value; });
             applyMultiselectSelection(findFieldByKey(key), values, container);
@@ -2005,6 +2083,11 @@
     }
 
     function onPanelClick(ev) {
+        var groupTitle = ev.target.closest("[data-collapse-key]");
+        if (groupTitle) {
+            setGroupCollapsed(groupTitle, groupTitle.getAttribute("aria-expanded") === "true");
+            return;
+        }
         var providerBtn = ev.target.closest("[data-tg-provider]");
         if (providerBtn) {
             state.TgResourceProvider = providerBtn.getAttribute("data-tg-provider");
@@ -2043,7 +2126,9 @@
         }
         var methodCardEl = ev.target.closest("[data-method]");
         if (methodCardEl) {
-            state.ClassificationMethod = methodCardEl.getAttribute("data-method");
+            // A click on the card label is re-dispatched to its checkbox; handle only that one.
+            if (ev.target.tagName !== "INPUT") return;
+            state[METHOD_STATE[methodCardEl.getAttribute("data-method")]] = ev.target.checked;
             renderActivePanel();
             renderPreview();
             return;
@@ -2214,6 +2299,12 @@
 
         panelsEl.addEventListener("change", onFieldChange);
         panelsEl.addEventListener("click", onPanelClick);
+        panelsEl.addEventListener("keydown", function (ev) {
+            var groupTitle = ev.target.closest("[data-collapse-key]");
+            if (!groupTitle || (ev.key !== "Enter" && ev.key !== " ")) return;
+            ev.preventDefault();
+            setGroupCollapsed(groupTitle, groupTitle.getAttribute("aria-expanded") === "true");
+        });
         panelsEl.addEventListener("input", onPanelInput);
 
         var downloadBtn = document.getElementById("wizDownload");

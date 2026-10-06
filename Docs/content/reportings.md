@@ -35,8 +35,8 @@ upload, and release publication remain responsibilities of the surrounding GitHu
 Azure Pipelines, or local runner. If no Tenant Governance snapshot manifest exists, Configuration
 Analyzer is skipped with a warning, matching the shipped workflow behavior.
 
-- `New-EntraOpsClassificationExplorerData` / `New-EntraOpsTierBreachAnalyzerData` / `New-EntraOpsPrivilegedEamDashboardData` / `New-EntraOpsPrivilegedEamPrivilegeHistoryData` / `New-EntraOpsAccessPathMapData` / `New-EntraOpsTenantGovernanceConfigurationAnalyzerData` generate the data bundle for the individual apps. `New-EntraOpsReportingData` is a convenience wrapper that runs them in one call and can also generate Access Package Flow enrichment. It forwards parameters such as `-ClassificationExplorerRepoRoot`, `-TierBreachImportPath`, `-EamDashboardImportPath`, `-AccessPathMapImportPath`, `-SkipClassificationExplorer`, `-SkipTierBreachAnalyzer`, `-SkipEamDashboard`, `-SkipPrivilegeHistory`, `-SkipAccessPathMap`, `-SkipConfigurationAnalyzer`, and `-SkipAccessPackageFlow`.
-- `Remove-EntraOpsReportingData` deletes the generated data bundles again (`-WhatIf`, the same seven `-Skip*` switches, and `-PassThru` are supported). Run it before sharing or committing a checkout to remove tenant-specific reporting data.
+- `New-EntraOpsClassificationExplorerData` / `New-EntraOpsTierBreachAnalyzerData` / `New-EntraOpsPrivilegedEamDashboardData` / `New-EntraOpsPrivilegedAssetsData` / `New-EntraOpsPrivilegedEamPrivilegeHistoryData` / `New-EntraOpsAccessPathMapData` / `New-EntraOpsTenantGovernanceConfigurationAnalyzerData` generate the data bundle for the individual apps. `New-EntraOpsReportingData` is a convenience wrapper that runs them in one call and can also generate Access Package Flow enrichment. It forwards parameters such as `-ClassificationExplorerRepoRoot`, `-TierBreachImportPath`, `-EamDashboardImportPath`, `-AccessPathMapImportPath`, `-SkipClassificationExplorer`, `-SkipTierBreachAnalyzer`, `-SkipEamDashboard`, `-SkipPrivilegedAssets`, `-SkipPrivilegeHistory`, `-SkipAccessPathMap`, `-SkipConfigurationAnalyzer`, and `-SkipAccessPackageFlow`.
+- `Remove-EntraOpsReportingData` deletes the generated data bundles again (`-WhatIf`, the same eight `-Skip*` switches, and `-PassThru` are supported). Run it before sharing or committing a checkout to remove tenant-specific reporting data.
 - Reporting generation can be automated with the `AutomatedReportingGeneration` section in `EntraOpsConfig.json` (set with `New-EntraOpsConfigFile -ApplyAutomatedReportingGeneration`) and the `Push-EntraOpsPrivilegedReporting` GitHub workflow. The workflow regenerates the selected apps, runs the offline browser smoke suite, and uploads a 30-day build artifact in a private repository only when every report passes. A failing smoke test is reported in the workflow log and blocks the artifact upload; no artifact is produced for a failed run because report traces would contain tenant data. GitHub Release publishing is a separate, disabled-by-default option (`PublishReportsAsRelease`); when enabled, `ReportingReleasesToKeep` limits retained `reporting-*` releases because each release contains a full tenant-data snapshot.
 
 ### Classification Explorer
@@ -84,6 +84,56 @@ The dashboard's drill-down view keeps privileged assets, assignments, and their 
 evidence together for investigation and export.
 
 ![EAM Dashboard example showing privileged identity metrics and drill-down tables](../assets/examples/eam-dashboard.png)
+
+### Privileged Assets {#privileged-assets}
+
+[Reports/PrivilegedAssets](../../Reports/PrivilegedAssets/README.md) is an object-centric view of
+privileged users, groups, service principals and applications (all object sub types, including
+agent identities and guests), merged across RBAC systems. It has two views.
+
+**Overview** shows metrics and the inventory with the object details that the assignment-centric
+views don't show:
+
+- **Relationships**: owners, sponsors, owned objects and devices, identity parent, associated work
+  account and PAW device, each with its display name, type and tier. IDs outside the export are
+  resolved through Microsoft Graph (`PrivilegedAssets.ResolveRelatedObjectIds`).
+- **Tier**: the object tier next to a per-tier summary of its role assignment classification.
+- **Findings**: object tier below its role assignments, unclassified objects, owners or identity
+  parents with a lower tier, owned objects with a higher tier, non-PAW devices of privileged users,
+  missing sponsors, synchronized Control Plane identities and missing restricted management.
+- **Filters** by object type, sub type, object and assignment tier, administrative unit,
+  restricted management, sync source, finding and worklist status.
+
+The side panel lists all role assignments of an object and links each assignment to the EAM
+Dashboard (`#assignment=`), the object to the EAM Dashboard (`#asset=`) and to the Access Path Map
+(`#node=`).
+
+**Object Classification** (`index.html?view=classification`) maintains target tiers with the
+enabled [classification sources](../core/index.html#classification-sources). The
+worklist shows each object's current tier, the role assignments with the highest classification
+(linked to the EAM Dashboard), an editable target tier and justification, and its change status.
+Add objects by name or object ID, or select them in the Overview; import or export the list as CSV
+or JSON. The *what-if* option in the Overview evaluates the findings with the target tiers. The
+worklist is stored in the browser only.
+
+When the [Object Classification File](../core/index.html#classify-by-object-classification-file)
+is enabled, the worklist starts from the repository file and is downloaded as the file to commit it.
+When Custom Security Attributes are enabled, the view generates a
+reviewable PowerShell script for users, service principals and applications that sets both tier custom security attributes (names from
+`CustomSecurityAttributes`) through Microsoft Graph. With both enabled, the view offers both:
+custom security attributes win, file entries only apply to objects that the other sources don't
+classify. The script checks the attribute definitions
+first, supports `-WhatIf`, and needs `CustomSecAttributeAssignment.ReadWrite.All` and the
+Attribute Assignment Administrator role. Groups are skipped because they don't support custom
+security attributes, and objects of another tenant are skipped (and listed in a warning) because
+their attributes can't be modified from the governed/managed tenant. When [Alternate Tier Level Attributes](../core/index.html#classify-by-alternate-tier-level-attributes)
+are enabled for users or service principals, the view warns that the filters, not the script
+values, determine the tier of these object types.
+
+```powershell
+Import-Module ./EntraOps -Force
+New-EntraOpsPrivilegedAssetsData
+```
 
 ### Access Path Map
 

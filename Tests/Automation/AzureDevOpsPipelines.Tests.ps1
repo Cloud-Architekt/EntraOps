@@ -2,9 +2,11 @@
 
 BeforeDiscovery {
     $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+    # .azure-pipelines is not part of the default Update-EntraOps targets, so deployments may not ship it.
+    $script:HasAdoPipelines = Test-Path -LiteralPath (Join-Path $script:TestRepositoryRoot '.azure-pipelines') -PathType Container
 }
 
-Describe 'Azure DevOps pipeline templates' -Skip:(-not [bool](Get-Module -ListAvailable -Name powershell-yaml)) {
+Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not [bool](Get-Module -ListAvailable -Name powershell-yaml)) {
     BeforeAll {
         $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         Import-Module powershell-yaml -ErrorAction Stop

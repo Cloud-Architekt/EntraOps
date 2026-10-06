@@ -141,6 +141,7 @@
         'New-EntraOpsClassificationExplorerData'
         'New-EntraOpsConfigFile'
         'New-EntraOpsPrivilegedAdministrativeUnit'
+        'New-EntraOpsPrivilegedAssetsData'
         'New-EntraOpsPrivilegedConditionalAccessGroup'
         'New-EntraOpsPrivilegedEamDashboardData'
         'New-EntraOpsPrivilegedEamPrivilegeHistoryData'

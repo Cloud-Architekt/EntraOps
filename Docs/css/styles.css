@@ -1662,6 +1662,64 @@ a:hover {
     margin: 0 0 4px;
 }
 
+.wiz-group-title[data-collapse-key] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.wiz-group-toggle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--neutral-surface-alt);
+    transition: background 0.15s ease;
+}
+
+/* Flat chevron: up while expanded, down while minimized. */
+.wiz-group-toggle::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid var(--neutral-fg);
+    border-bottom: 2px solid var(--neutral-fg);
+    transform: translateY(2px) rotate(-135deg);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.wiz-group-collapsed .wiz-group-toggle::before {
+    transform: translateY(-2px) rotate(45deg);
+}
+
+.wiz-group-title[data-collapse-key]:hover .wiz-group-toggle {
+    background: var(--brand-bg-strong);
+}
+
+.wiz-group-title[data-collapse-key]:hover .wiz-group-toggle::before {
+    border-color: var(--brand);
+}
+
+.wiz-group-title[data-collapse-key]:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.wiz-group-collapsed > .wiz-group-title {
+    margin-bottom: 0;
+}
+
+.wiz-group-collapsed > :not(.wiz-group-title) {
+    display: none !important;
+}
+
 .wiz-group-desc {
     font-size: 12.5px;
     color: var(--neutral-fg-secondary);
@@ -2025,12 +2083,12 @@ a:hover {
 /* ---------- Configuration Wizard: classification method + filter builder --- */
 .wiz-method-cards {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
     margin-bottom: 18px;
 }
 
-@media (max-width: 700px) {
+@media (max-width: 900px) {
     .wiz-method-cards {
         grid-template-columns: 1fr;
     }

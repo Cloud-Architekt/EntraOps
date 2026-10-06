@@ -120,8 +120,9 @@ EOCE.app = (function () {
 
     // ---- Sidebar counts --------------------------------------------------
     function updateCounts() {
+        // Attack paths load on demand (ensureAttackPaths fills the badge); don't show "0" before that.
         var elA = document.getElementById('cnt-attack');
-        if (elA && EOCE.ATTACK_PATHS) elA.textContent = EOCE.util.formatNumber(EOCE.ATTACK_PATHS.length);
+        if (elA && EOCE.ATTACK_PATHS && EOCE.ATTACK_PATHS.length) elA.textContent = EOCE.util.formatNumber(EOCE.ATTACK_PATHS.length);
 
         var rolePaths = EOCE.rolesSystemKeys().map(function (k) { return EOCE.RBAC_SYSTEMS[k].file; });
         Promise.all([
@@ -308,7 +309,7 @@ EOCE.app = (function () {
             if (item.current) {
                 html += '<div class="nav-item active"><span class="ico">' + item.icon + '</span><span>' + EOCE.util.escapeHtml(item.label) + '</span></div>';
             } else {
-                html += '<a class="nav-item" href="' + EOCE.util.escapeHtml(item.href) + '"><span class="ico">' + item.icon + '</span><span>' + EOCE.util.escapeHtml(item.label) + '</span></a>';
+                html += '<a class="nav-item' + (item.sub ? ' nav-subitem' : '') + '" href="' + EOCE.util.escapeHtml(item.href) + '"><span class="ico">' + item.icon + '</span><span>' + EOCE.util.escapeHtml(item.label) + '</span></a>';
             }
         });
         anchor.insertAdjacentHTML('afterend', html);

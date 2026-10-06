@@ -185,7 +185,7 @@ test("preserves updater, advanced CSA and unknown settings through import and ex
     await expect(preview).toContainText('"Value": 42');
 });
 
-test("preserves Group classification filters while Custom Security Attributes stay active", async ({ page }) => {
+test("keeps Group filters of older configs enabled while Custom Security Attributes stay active", async ({ page }) => {
     await page.goto(wizardUrl);
     await page.locator("#wizImportFile").setInputFiles({
         name: "EntraOpsConfig.json",
@@ -199,11 +199,112 @@ test("preserves Group classification filters while Custom Security Attributes st
     });
     await page.getByRole("button", { name: /Object Classification/ }).click();
 
+    await expect(page.locator('.wiz-method-card[data-method="csa"]')).toHaveClass(/selected/);
+    await expect(page.locator('.wiz-method-card[data-method="alternate"]')).toHaveClass(/selected/);
+    await expect(page.locator('.wiz-tier-block[data-objtype="User"]')).toHaveCount(0);
+    await page.locator('[data-objtab="Group"]').click();
+    await expect(page.locator('[data-key="AlternateGroupEnabled"]')).toBeChecked();
     await expect(page.locator('.wiz-tier-block[data-objtype="Group"]')).toHaveCount(3);
+
+    const alternate = JSON.parse(await page.locator("#wizPreview").innerText()).AlternateObjectTierLevelAttributes;
+    expect(alternate.Enabled).toBeUndefined();
+    expect(alternate.User.Enabled).toBe(false);
+    expect(alternate.ServicePrincipal.Enabled).toBe(false);
+    expect(alternate.Group.Enabled).toBe(true);
+    expect(alternate.Group.ControlPlane).toContain("PRG-Tier0-*");
+});
+
+test("enables Alternate Tier Level Attributes per object type", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            AlternateObjectTierLevelAttributes: {
+                Enabled: true,
+                User: { ControlPlane: '$Object.ObjectDisplayName -like "*-tier0-*"' },
+                ServicePrincipal: { ControlPlane: '$Object.ObjectDisplayName -like "*-tier0-*"' }
+            }
+        }))
+    });
+    await page.getByRole("button", { name: /Object Classification/ }).click();
+    const exported = () => page.locator("#wizPreview").innerText().then((text) => JSON.parse(text).AlternateObjectTierLevelAttributes);
+
+    await expect(page.locator('[data-key="AlternateUserEnabled"]')).toBeChecked();
+    await expect(page.locator('.wiz-method-card[data-method="csa"]')).not.toHaveClass(/selected/);
+    expect(JSON.parse(await page.locator("#wizPreview").innerText()).CustomSecurityAttributes.Enabled).toBe(false);
+    await expect(page.locator('.wiz-tier-block[data-objtype="User"]')).toHaveCount(3);
+    expect((await exported()).Enabled).toBeUndefined();
+    expect((await exported()).User.Enabled).toBe(true);
+    expect((await exported()).Group.Enabled).toBe(false);
+
+    await page.locator('[data-objtab="ServicePrincipal"]').click();
+    await page.locator('[data-key="AlternateServicePrincipalEnabled"]').uncheck();
+    await expect(page.locator('.wiz-tier-block[data-objtype="ServicePrincipal"]')).toHaveCount(0);
+    expect((await exported()).ServicePrincipal.Enabled).toBe(false);
+    expect((await exported()).ServicePrincipal.ControlPlane).toContain("*-tier0-*");
+    expect((await exported()).User.Enabled).toBe(true);
+
+    await page.locator('.wiz-method-card[data-method="alternate"]').click();
+    await expect(page.locator(".wiz-object-tabs")).toHaveCount(0);
+    expect((await exported()).User.Enabled).toBe(false);
+    expect((await exported()).User.ControlPlane).toContain("*-tier0-*");
+});
+
+test("combines the Object Classification File with Custom Security Attributes", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            ObjectClassificationFile: { Enabled: true, FilePath: "./Classification/Tiers.csv" },
+            PrivilegedAssets: { ResolveRelatedObjectIds: false }
+        }))
+    });
+    await page.getByRole("button", { name: /Object Classification/ }).click();
+
+    await expect(page.locator(".wiz-method-card")).toHaveCount(3);
+    await expect(page.locator('.wiz-method-card[data-method="file"]')).toHaveClass(/selected/);
+    await expect(page.locator('.wiz-method-card[data-method="csa"]')).not.toHaveClass(/selected/);
+    await expect(page.locator('[data-key="ObjectClassificationFilePath"]')).toHaveValue("./Classification/Tiers.csv");
+    await expect(page.locator('[data-key="PrivilegedUserAdminTierLevelAttribute"]')).toHaveCount(0);
+
     const preview = page.locator("#wizPreview");
-    await expect(preview).toContainText('"Enabled": false');
-    await expect(preview).toContainText('"Group": {');
-    await expect(preview).toContainText('PRG-Tier0-*');
+    await expect(preview).toContainText('"FilePath": "./Classification/Tiers.csv"');
+    await expect(preview).toContainText('"ResolveRelatedObjectIds": false');
+    await expect(preview).toContainText('"GeneratePrivilegedAssets": true');
+    const exported = () => page.locator("#wizPreview").innerText().then((text) => JSON.parse(text));
+    expect((await exported()).ObjectClassificationFile.Enabled).toBe(true);
+    expect((await exported()).CustomSecurityAttributes.Enabled).toBe(false);
+
+    await page.locator('.wiz-method-card[data-method="csa"]').click();
+    await expect(page.locator('[data-key="PrivilegedUserAdminTierLevelAttribute"]')).toHaveCount(1);
+    expect((await exported()).CustomSecurityAttributes.Enabled).toBe(true);
+    expect((await exported()).ObjectClassificationFile.Enabled).toBe(true);
+
+    await page.locator('.wiz-method-card[data-method="file"]').click();
+    await expect(page.locator('[data-key="ObjectClassificationFilePath"]')).toHaveCount(0);
+    expect((await exported()).ObjectClassificationFile.Enabled).toBe(false);
+    expect((await exported()).ObjectClassificationFile.FilePath).toBe("./Classification/Tiers.csv");
+});
+
+test("minimizes panels to their headline and keeps them minimized across re-renders", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.getByRole("button", { name: /Object Classification/ }).click();
+    const sourcesTitle = page.locator(".wiz-group-title", { hasText: "Classification sources" });
+
+    await expect(sourcesTitle).toHaveAttribute("aria-expanded", "true");
+    await sourcesTitle.click();
+    await expect(sourcesTitle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator(".wiz-method-cards")).toBeHidden();
+
+    await page.getByRole("button", { name: /Tenant & Auth/ }).click();
+    await page.getByRole("button", { name: /Object Classification/ }).click();
+    await expect(page.locator(".wiz-method-cards")).toBeHidden();
+
+    await sourcesTitle.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".wiz-method-cards")).toBeVisible();
 });
 
 test("exports and imports deleted Azure RBAC principal handling", async ({ page }) => {

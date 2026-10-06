@@ -8,6 +8,8 @@ env:
   GenerateClassificationExplorer: true
   GenerateTierBreachAnalyzer: true
   GenerateEamDashboard: true
+  GeneratePrivilegedAssets: true
+  PrivilegedAssetsResolveRelatedObjectIds: true
   GenerateAccessPathMap: true
   AccessPathMapResolveObjectIdsOutsidePrivilegedEAM: true
   GeneratePrivilegeHistory: true
@@ -89,7 +91,7 @@ jobs:
 
       # Needed by the reporting generators that enrich their local export data through Microsoft Graph.
       - name: Connect Azure OIDC
-        if: env.ApplyAutomatedReportingGeneration == 'true' && (env.GenerateEamDashboard == 'true' || (env.GenerateAccessPathMap == 'true' && env.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM == 'true') || env.GenerateConfigurationAnalyzer == 'true' || env.GenerateAccessPackageFlow == 'true')
+        if: env.ApplyAutomatedReportingGeneration == 'true' && (env.GenerateEamDashboard == 'true' || (env.GeneratePrivilegedAssets == 'true' && env.PrivilegedAssetsResolveRelatedObjectIds == 'true') || (env.GenerateAccessPathMap == 'true' && env.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM == 'true') || env.GenerateConfigurationAnalyzer == 'true' || env.GenerateAccessPackageFlow == 'true')
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{env.ClientId}}
@@ -98,7 +100,7 @@ jobs:
           enable-AzPSSession: true
 
       - name: Generate configured local EntraOps reporting data
-        if: env.ApplyAutomatedReportingGeneration == 'true' && !(env.GenerateEamDashboard == 'true' || (env.GenerateAccessPathMap == 'true' && env.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM == 'true') || env.GenerateConfigurationAnalyzer == 'true' || env.GenerateAccessPackageFlow == 'true')
+        if: env.ApplyAutomatedReportingGeneration == 'true' && !(env.GenerateEamDashboard == 'true' || (env.GeneratePrivilegedAssets == 'true' && env.PrivilegedAssetsResolveRelatedObjectIds == 'true') || (env.GenerateAccessPathMap == 'true' && env.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM == 'true') || env.GenerateConfigurationAnalyzer == 'true' || env.GenerateAccessPackageFlow == 'true')
         shell: pwsh
         env:
           AllowStaleTenantGovernance: ${{ inputs.allowStaleTenantGovernance || 'false' }}
@@ -113,7 +115,7 @@ jobs:
       # bootstrap outside the module; the same module command can run in GitLab CI or Azure Pipelines
       # after those platforms establish an Az PowerShell context by their own supported mechanism.
       - name: Generate configured Graph-backed EntraOps reporting data
-        if: env.ApplyAutomatedReportingGeneration == 'true' && (env.GenerateEamDashboard == 'true' || (env.GenerateAccessPathMap == 'true' && env.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM == 'true') || env.GenerateConfigurationAnalyzer == 'true' || env.GenerateAccessPackageFlow == 'true')
+        if: env.ApplyAutomatedReportingGeneration == 'true' && (env.GenerateEamDashboard == 'true' || (env.GeneratePrivilegedAssets == 'true' && env.PrivilegedAssetsResolveRelatedObjectIds == 'true') || (env.GenerateAccessPathMap == 'true' && env.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM == 'true') || env.GenerateConfigurationAnalyzer == 'true' || env.GenerateAccessPackageFlow == 'true')
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3
         env:
           AllowStaleTenantGovernance: ${{ inputs.allowStaleTenantGovernance || 'false' }}

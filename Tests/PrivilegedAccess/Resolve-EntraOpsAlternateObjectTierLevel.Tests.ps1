@@ -7,6 +7,8 @@ BeforeAll {
         throw 'Invoke-EntraOpsMsGraphQuery must be mocked'
     }
 
+    . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsCustomSecurityAttributeClassificationEnabled.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsAlternateObjectTierLevelEnabled.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Resolve-EntraOpsAlternateObjectTierLevel.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/PrivilegedAccess/Get-EntraOpsPrivilegedEntraObject.ps1"
 
@@ -66,6 +68,49 @@ Describe 'Resolve-EntraOpsAlternateObjectTierLevel for groups' {
         $Object = [pscustomobject]@{ ObjectId = '1'; ObjectDisplayName = 'Any' }
 
         Resolve-EntraOpsAlternateObjectTierLevel -ObjectType User -Object $Object -AlternateObjectTierLevelAttributes $Config | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Alternate Tier Level Attributes enabled per object type' {
+    BeforeAll {
+        $script:Object = [pscustomobject]@{ ObjectId = '1'; ObjectDisplayName = 'PRG-Tier1-Admins'; AssignedAdministrativeUnits = @() }
+    }
+
+    It 'classifies only the object types whose Enabled is true' {
+        $Config = [pscustomobject]@{
+            User             = [pscustomobject]@{ Enabled = $true; ControlPlane = '$true' }
+            ServicePrincipal = [pscustomobject]@{ Enabled = $false; ControlPlane = '$true' }
+            Group            = [pscustomobject]@{ Enabled = $true; ManagementPlane = '$Object.ObjectDisplayName -like "PRG-Tier1-*"' }
+        }
+
+        (Resolve-EntraOpsAlternateObjectTierLevel -ObjectType User -Object $script:Object -AlternateObjectTierLevelAttributes $Config -WarningAction SilentlyContinue).AdminTierLevelName | Should -Be 'ControlPlane'
+        Resolve-EntraOpsAlternateObjectTierLevel -ObjectType ServicePrincipal -Object $script:Object -AlternateObjectTierLevelAttributes $Config | Should -BeNullOrEmpty
+        (Resolve-EntraOpsAlternateObjectTierLevel -ObjectType Group -Object $script:Object -AlternateObjectTierLevelAttributes $Config -WarningAction SilentlyContinue).AdminTierLevelName | Should -Be 'ManagementPlane'
+    }
+
+    It 'lets the per-type Enabled win over the legacy top-level Enabled and Group filter presence' {
+        $Config = [pscustomobject]@{
+            Enabled = $true
+            User    = [pscustomobject]@{ Enabled = $false; ControlPlane = '$true' }
+            Group   = [pscustomobject]@{ Enabled = $false; ControlPlane = '$true' }
+        }
+
+        Test-EntraOpsAlternateObjectTierLevelEnabled -ObjectType User -AlternateObjectTierLevelAttributes $Config | Should -BeFalse
+        Test-EntraOpsAlternateObjectTierLevelEnabled -ObjectType ServicePrincipal -AlternateObjectTierLevelAttributes $Config | Should -BeTrue
+        Test-EntraOpsAlternateObjectTierLevelEnabled -ObjectType Group -AlternateObjectTierLevelAttributes $Config | Should -BeFalse
+    }
+
+    It 'returns $false without configuration' {
+        Test-EntraOpsAlternateObjectTierLevelEnabled -ObjectType User -AlternateObjectTierLevelAttributes $null | Should -BeFalse
+    }
+
+    It 'warns and returns Unclassified when an object type is enabled without filters' {
+        $Config = [pscustomobject]@{ Group = [pscustomobject]@{ Enabled = $true; ControlPlane = ''; ManagementPlane = ''; UserAccess = '' } }
+
+        $Result = Resolve-EntraOpsAlternateObjectTierLevel -ObjectType Group -Object $script:Object -AlternateObjectTierLevelAttributes $Config -WarningVariable Warnings -WarningAction SilentlyContinue
+
+        $Result.AdminTierLevelName | Should -Be 'Unclassified'
+        ($Warnings -join ' ') | Should -Match "enabled for object type 'Group' but no filter expression"
     }
 }
 

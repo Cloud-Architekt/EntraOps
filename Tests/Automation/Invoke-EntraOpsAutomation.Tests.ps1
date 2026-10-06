@@ -77,6 +77,7 @@ Describe 'Portable automation entry points' {
                 GeneratePrivilegeHistory          = $false
                 GenerateConfigurationAnalyzer     = $true
                 GenerateAccessPackageFlow         = $false
+                GeneratePrivilegedAssets          = $false
             }
             PrivilegeHistory             = @{ EnablePrivilegeHistory = $false }
             ConfigurationAnalyzer        = @{ AllowPartialTenantGovernanceSnapshot = $true }
@@ -125,6 +126,7 @@ Describe 'Portable automation entry points' {
                 GeneratePrivilegeHistory          = $false
                 GenerateConfigurationAnalyzer     = $false
                 GenerateAccessPackageFlow         = $false
+                GeneratePrivilegedAssets          = $false
             }
             AccessPathMap                = @{ ResolveObjectIdsOutsidePrivilegedEAM = $false }
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath
@@ -136,6 +138,35 @@ Describe 'Portable automation entry points' {
 
         Should -Invoke New-EntraOpsReportingData -ModuleName EntraOps -Times 1 -ParameterFilter {
             $AccessPathMapTenantId -eq '11111111-2222-3333-4444-555555555555' -and -not $SkipAccessPathMap
+        }
+    }
+
+    It 'generates Privileged Assets without a connection when related object resolution is disabled' {
+        $ConfigPath = Join-Path $TestDrive 'reporting-privileged-assets.json'
+        @{
+            TenantName                   = 'contoso.onmicrosoft.com'
+            AutomatedReportingGeneration = @{
+                ApplyAutomatedReportingGeneration = $true
+                GenerateClassificationExplorer    = $false
+                GenerateTierBreachAnalyzer        = $false
+                GenerateEamDashboard              = $false
+                GenerateAccessPathMap             = $false
+                GeneratePrivilegeHistory          = $false
+                GenerateConfigurationAnalyzer     = $false
+                GenerateAccessPackageFlow         = $false
+                GeneratePrivilegedAssets          = $true
+            }
+            PrivilegedAssets             = @{ ResolveRelatedObjectIds = $false }
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath
+
+        Mock Connect-EntraOps -ModuleName EntraOps { throw 'Connection should not be opened.' }
+        Mock New-EntraOpsReportingData -ModuleName EntraOps { @() }
+
+        Invoke-EntraOpsReportingGeneration -ConfigFilePath $ConfigPath | Out-Null
+
+        Should -Invoke Connect-EntraOps -ModuleName EntraOps -Times 0
+        Should -Invoke New-EntraOpsReportingData -ModuleName EntraOps -Times 1 -ParameterFilter {
+            -not $SkipPrivilegedAssets -and $PrivilegedAssetsResolveRelatedObjectIds -eq $false
         }
     }
 }

@@ -593,6 +593,18 @@ the progress display, for example in non-interactive automation.
                         AppRoot                              = Join-Path $ReportRoot 'AccessPathMap'
                         ResolveObjectIdsOutsidePrivilegedEAM = $false
                     }
+                },
+                [ordered]@{
+                    Name       = 'PrivilegedAssets'
+                    Percent    = 72
+                    Command    = 'New-EntraOpsPrivilegedAssetsData'
+                    Parameters = @{
+                        RepoRoot                = $AnonymizedRoot
+                        ImportPath              = $PrivilegedEamPath
+                        AppRoot                 = Join-Path $ReportRoot 'PrivilegedAssets'
+                        ConfigFilePath          = Join-Path $AnonymizedRoot 'EntraOpsConfig.json'
+                        ResolveRelatedObjectIds = $false
+                    }
                 }
             )
             foreach ($ReportTask in $ReportTasks) {

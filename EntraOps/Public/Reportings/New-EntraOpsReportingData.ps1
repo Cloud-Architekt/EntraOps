@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Convenience wrapper around the Classification Explorer, Tier Breach Analyzer, EAM Dashboard,
-    Privilege History, Configuration Analyzer, Access Package Flow, and Access Path Map generators. It runs all
+    Privileged Assets, Privilege History, Configuration Analyzer, Access Package Flow, and Access Path Map generators. It runs all
     applicable generators in one call, so the whole
     EntraOps Reporting portal (Reports/index.html + all sub-apps) can be refreshed with a
     single cmdlet. Use Remove-EntraOpsReportingData to clear the generated data again.
@@ -47,6 +47,18 @@
     Forwarded to New-EntraOpsPrivilegedEamDashboardData. Resolves linked identity
     IDs outside the Privileged EAM export through Microsoft Graph when enabled.
     When omitted, the EAM Dashboard generator defaults this option to `$true`.
+
+.PARAMETER PrivilegedAssetsAppRoot
+    Path to the Privileged Assets app folder. Defaults to Reports/PrivilegedAssets
+    under EntraOpsRoot. The Privileged EAM export is read from the EAM Dashboard import path.
+
+.PARAMETER PrivilegedAssetsResolveRelatedObjectIds
+    Forwarded as -ResolveRelatedObjectIds to New-EntraOpsPrivilegedAssetsData. When omitted,
+    the generator falls back to `PrivilegedAssets.ResolveRelatedObjectIds` in
+    EntraOpsConfig.json, or $true.
+
+.PARAMETER SkipPrivilegedAssets
+    Do not generate Privileged Assets data.
 
 .PARAMETER AccessPathMapTenantId
     Tenant id forwarded to New-EntraOpsAccessPathMapData (used to build role node ids
@@ -192,6 +204,15 @@ function New-EntraOpsReportingData {
         [System.Nullable[bool]]$EamDashboardResolveLinkedIdentityObjectIds,
 
         [Parameter(Mandatory = $false)]
+        [System.String]$PrivilegedAssetsAppRoot,
+
+        [Parameter(Mandatory = $false)]
+        [System.Nullable[bool]]$PrivilegedAssetsResolveRelatedObjectIds,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipPrivilegedAssets,
+
+        [Parameter(Mandatory = $false)]
         [System.String]$AccessPathMapTenantId,
 
         [Parameter(Mandatory = $false)]
@@ -313,7 +334,7 @@ function New-EntraOpsReportingData {
 
     $results = [System.Collections.Generic.List[object]]::new()
 
-    Write-Verbose "Starting reporting data generation. Skipped apps: TierBreachAnalyzer=$SkipTierBreachAnalyzer; EamDashboard=$SkipEamDashboard; PrivilegeHistory=$SkipPrivilegeHistory; ConfigurationAnalyzer=$SkipConfigurationAnalyzer; AccessPackageFlow=$SkipAccessPackageFlow; AccessPathMap=$SkipAccessPathMap; ClassificationExplorer=$SkipClassificationExplorer."
+    Write-Verbose "Starting reporting data generation. Skipped apps: TierBreachAnalyzer=$SkipTierBreachAnalyzer; EamDashboard=$SkipEamDashboard; PrivilegedAssets=$SkipPrivilegedAssets; PrivilegeHistory=$SkipPrivilegeHistory; ConfigurationAnalyzer=$SkipConfigurationAnalyzer; AccessPackageFlow=$SkipAccessPackageFlow; AccessPathMap=$SkipAccessPathMap; ClassificationExplorer=$SkipClassificationExplorer."
 
     if (-not $SkipTierBreachAnalyzer) {
         $TierBreachParams = @{
@@ -348,6 +369,25 @@ function New-EntraOpsReportingData {
         $EamDashboardResult = New-EntraOpsPrivilegedEamDashboardData @EamDashboardParams
         $results.Add([pscustomobject]@{ App = 'EamDashboard'; Result = $EamDashboardResult })
         Write-Verbose "Completed EAM Dashboard data generation."
+    }
+
+    if (-not $SkipPrivilegedAssets) {
+        $PrivilegedAssetsParams = @{
+            RepoRoot       = $EntraOpsRoot
+            ConfigFilePath = $ConfigFilePath
+            Verbose        = $VerbosePreference -eq 'Continue'
+            WhatIf         = $WhatIfPreference
+            Confirm        = $false
+        }
+        if (-not [string]::IsNullOrWhiteSpace($EamDashboardImportPath)) { $PrivilegedAssetsParams.ImportPath = $EamDashboardImportPath }
+        if (-not [string]::IsNullOrWhiteSpace($PrivilegedAssetsAppRoot)) { $PrivilegedAssetsParams.AppRoot = $PrivilegedAssetsAppRoot }
+        if ($null -ne $PrivilegedAssetsResolveRelatedObjectIds) { $PrivilegedAssetsParams.ResolveRelatedObjectIds = $PrivilegedAssetsResolveRelatedObjectIds }
+        if ($PassThru) { $PrivilegedAssetsParams.PassThru = $true }
+
+        Write-Verbose "Generating Privileged Assets data..."
+        $PrivilegedAssetsResult = New-EntraOpsPrivilegedAssetsData @PrivilegedAssetsParams
+        $results.Add([pscustomobject]@{ App = 'PrivilegedAssets'; Result = $PrivilegedAssetsResult })
+        Write-Verbose "Completed Privileged Assets data generation."
     }
 
     if (-not $SkipPrivilegeHistory -and $EnablePrivilegeHistory) {

@@ -12,6 +12,7 @@ const reportApps = [
     "EamDashboard",
     "EidscaCoverage",
     "PimRequestFlow",
+    "PrivilegedAssets",
     "PrivilegeHistory",
     "TierBreachAnalyzer"
 ];
@@ -34,7 +35,7 @@ for (const reportPage of reportPages) {
     });
 }
 
-for (const reportApp of ["AccessPackageFlow", "ConditionalAccessAnalysis", "ConfigurationAnalyzer", "PimRequestFlow"]) {
+for (const reportApp of ["AccessPackageFlow", "ConditionalAccessAnalysis", "ConfigurationAnalyzer", "PimRequestFlow", "PrivilegedAssets"]) {
     test(`${reportApp} section navigation resolves every target without an uncaught exception`, async ({ page }) => {
         const pageErrors = [];
         page.on("pageerror", (error) => pageErrors.push(error.message));

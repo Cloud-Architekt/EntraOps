@@ -1398,12 +1398,12 @@
         // Snapshot health is independent of the analyzer's data views. Render it before the
         // empty-state return so partial-capture diagnostics are never hidden with caContent.
         renderSnapshotHealth();
+        applyConfigurationView();
 
         if (!DATA || !snapshots.length) return; // empty state stays visible
 
         $("caEmptyState").classList.add("hidden");
         $("caContent").classList.remove("hidden");
-        applyConfigurationView();
 
         renderStats();
         renderTypeFilter();
