@@ -593,7 +593,7 @@ function Update-EntraOpsClassificationExplorerData {
         throw "EntraOps classification templates not found: $(Join-Path $EntraOpsRoot 'Classification/Templates'). Pass -EntraOpsRoot pointing at the EntraOps repository root."
     }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
-        throw "App folder not found: $AppRoot"
+        throw "App folder not found: $AppRoot$(if ($Mode -eq 'EntraOps') { '. Run Install-EntraOpsReportingFolder to download the Reports folder.' })"
     }
     if ((Resolve-FullPath $RepoRoot) -eq (Resolve-FullPath $AppRoot)) {
         throw "RepoRoot and AppRoot must differ (the app folder is the output target, not the source)."

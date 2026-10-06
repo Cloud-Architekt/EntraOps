@@ -76,6 +76,9 @@ function Update-EntraOps {
 
     $ErrorActionPreference = "Stop"
 
+    if ([string]::IsNullOrWhiteSpace((Get-EntraOpsRepositoryRoot))) {
+        throw "Update-EntraOps updates a repository checkout of EntraOps (GitHub, Azure DevOps or local clone). This module is installed without a repository (e.g. from the PowerShell Gallery): use Update-Module EntraOps, then Initialize-EntraOpsWorkspace -Force to refresh classification templates and reporting apps."
+    }
     # Allow the config file's "AutomatedEntraOpsUpdate" section to override the default
     # Repository/Branch/TargetUpdateFolders used for self-update, unless the caller explicitly
     # passed -Repository, -Branch or -TargetUpdateFolders.

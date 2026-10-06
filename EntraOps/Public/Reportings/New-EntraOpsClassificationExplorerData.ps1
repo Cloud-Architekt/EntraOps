@@ -96,6 +96,10 @@ function New-EntraOpsClassificationExplorerData {
     # Config-driven default: the inverse of EntraOpsConfig.json
     # "ClassificationExplorer.GenerateChangeHistory".
     # An explicit -SkipHistory always wins over the config file setting when bound.
+    if (-not $PSBoundParameters.ContainsKey('EntraOpsRoot') -and -not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) {
+        $EntraOpsRoot = $Global:EntraOpsBaseFolder
+        $PSBoundParameters['EntraOpsRoot'] = $EntraOpsRoot
+    }
     if (-not $PSBoundParameters.ContainsKey('SkipHistory')) {
         $GenerateChangeHistory = $false
         $ClassificationExplorerConfigRoot = $EntraOpsRoot

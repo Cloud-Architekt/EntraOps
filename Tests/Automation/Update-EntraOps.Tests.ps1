@@ -7,6 +7,8 @@ BeforeDiscovery {
 BeforeAll {
     $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
     $script:EntraOpsBaseFolder = $script:TestRepositoryRoot
+    . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsRepositoryCheckout.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsRepositoryRoot.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Resolve-EntraOpsUpdateSource.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Test-EntraOpsUpdateContract.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Get-EntraOpsUpdateCandidate.ps1"
@@ -101,6 +103,13 @@ Describe 'Update-EntraOps update scope' {
         Should -Throw "*also requires target(s): ./.github/actions, ./.github/scripts*"
         { Update-EntraOps -ConfigFile $MissingConfig -TargetUpdateFolders @('./.github/actions', './.github/scripts', './.github/workflows') -SkipCandidateValidation } |
         Should -Throw "*validation cannot be skipped*"
+    }
+
+    It 'refuses to run when the module is not part of a repository checkout' {
+        Mock Get-EntraOpsRepositoryRoot { $null }
+
+        { Update-EntraOps -ConfigFile (Join-Path $TestDrive 'missing.json') -TargetUpdateFolders @('./Samples') } |
+        Should -Throw '*Update-Module EntraOps*'
     }
 
     It 'never imports candidate module code in the updater process' {

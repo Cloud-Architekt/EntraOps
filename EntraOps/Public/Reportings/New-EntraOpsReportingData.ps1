@@ -156,10 +156,20 @@
 .PARAMETER AllowPartialTenantGovernanceSnapshot
     Allow Configuration Analyzer generation from a partial snapshot with preserved stale resource types.
 
+.PARAMETER InstallMissingReportingFolder
+    Download the reporting apps with Install-EntraOpsReportingFolder (public EntraOps repository,
+    main branch) when the Reports folder of the EntraOps working folder is missing, e.g. for a
+    module-only installation from the PowerShell Gallery.
+
 .EXAMPLE
     New-EntraOpsReportingData
 
     Regenerates the data for all reporting apps in this repository checkout.
+
+.EXAMPLE
+    New-EntraOpsReportingData -InstallMissingReportingFolder
+
+    Downloads the Reports folder first if only the EntraOps module folder exists, then regenerates the data.
 
 .EXAMPLE
     New-EntraOpsReportingData -ClassificationExplorerRepoRoot "C:\Repos\AzurePrivilegedIAM" -WhatIf
@@ -277,7 +287,10 @@ function New-EntraOpsReportingData {
         [switch]$AllowStaleTenantGovernanceSnapshot,
 
         [Parameter(Mandatory = $false)]
-        [switch]$AllowPartialTenantGovernanceSnapshot
+        [switch]$AllowPartialTenantGovernanceSnapshot,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$InstallMissingReportingFolder
     )
 
     # Resolve the repository root relative to the module location. Prefer the module's
@@ -290,8 +303,17 @@ function New-EntraOpsReportingData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
     if ([string]::IsNullOrWhiteSpace($EntraOpsRoot)) { $EntraOpsRoot = $RepositoryRoot }
+
+    $ReportingFolder = Join-Path $RepositoryRoot 'Reports'
+    if (-not (Test-Path -LiteralPath (Join-Path $ReportingFolder 'index.html') -PathType Leaf)) {
+        if ($InstallMissingReportingFolder) {
+            Install-EntraOpsReportingFolder -DestinationPath $ReportingFolder -Force:(Test-Path -LiteralPath $ReportingFolder) | Out-Null
+        } else {
+            Write-Warning "The reporting apps folder '$ReportingFolder' is missing. Run Install-EntraOpsReportingFolder, or New-EntraOpsReportingData -InstallMissingReportingFolder, to download it."
+        }
+    }
 
     Write-Verbose "Using EntraOps repository root: $EntraOpsRoot"
 
