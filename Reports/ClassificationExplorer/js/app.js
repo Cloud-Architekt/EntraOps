@@ -309,7 +309,7 @@ EOCE.app = (function () {
             if (item.current) {
                 html += '<div class="nav-item active"><span class="ico">' + item.icon + '</span><span>' + EOCE.util.escapeHtml(item.label) + '</span></div>';
             } else {
-                html += '<a class="nav-item" href="' + EOCE.util.escapeHtml(item.href) + '"><span class="ico">' + item.icon + '</span><span>' + EOCE.util.escapeHtml(item.label) + '</span></a>';
+                html += '<a class="nav-item' + (item.sub ? ' nav-subitem' : '') + '" href="' + EOCE.util.escapeHtml(item.href) + '"><span class="ico">' + item.icon + '</span><span>' + EOCE.util.escapeHtml(item.label) + '</span></a>';
             }
         });
         anchor.insertAdjacentHTML('afterend', html);

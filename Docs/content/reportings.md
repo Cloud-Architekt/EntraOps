@@ -123,9 +123,10 @@ reviewable PowerShell script for users, service principals and applications that
 `CustomSecurityAttributes`) through Microsoft Graph. With both enabled, the view offers both:
 custom security attributes win, file entries only apply to objects that the other sources don't
 classify. The script checks the attribute definitions
-first, supports `-WhatIf`, and needs `CustomSecurityAttributeAssignment.ReadWrite.All` and the
+first, supports `-WhatIf`, and needs `CustomSecAttributeAssignment.ReadWrite.All` and the
 Attribute Assignment Administrator role. Groups are skipped because they don't support custom
-security attributes. When [Alternate Tier Level Attributes](../core/index.html#classify-by-alternate-tier-level-attributes)
+security attributes, and objects of another tenant are skipped (and listed in a warning) because
+their attributes can't be modified from the governed/managed tenant. When [Alternate Tier Level Attributes](../core/index.html#classify-by-alternate-tier-level-attributes)
 are enabled for users or service principals, the view warns that the filters, not the script
 values, determine the tier of these object types.
 

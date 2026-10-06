@@ -40,11 +40,10 @@
     var FINDINGS = [
         { id: "tierBreach", label: "Object tier below role assignments", severity: "high", help: "The object tier is less privileged than the most privileged classification of its role assignments (tier breach)." },
         { id: "unclassified", label: "Unclassified object", severity: "medium", help: "No object tier is defined by custom security attributes, the Object Classification File or Alternate Tier Level Attributes." },
-        { id: "overClassified", label: "Object tier above role assignments", severity: "info", help: "The object tier is more privileged than required by its role assignments." },
         { id: "ownerLowerTier", label: "Owner with lower tier", severity: "high", help: "An owner is less privileged than the object it owns. Owners can manage the object (e.g. add credentials) and inherit its privileges." },
         { id: "ownsHigherTier", label: "Owns higher-tier object", severity: "high", help: "The object owns another privileged object with a more privileged tier." },
         { id: "parentLowerTier", label: "Identity parent with lower tier", severity: "medium", help: "The identity parent (agent identity blueprint or agent identity) is less privileged than this object." },
-        { id: "sponsorMissing", label: "No sponsor", severity: "medium", help: "Agent identities and guest users should have an accountable sponsor." },
+        { id: "sponsorMissing", label: "No sponsor", severity: "medium", help: "Agent identities and agent users should have an accountable sponsor." },
         { id: "deviceNotPaw", label: "Owns non-PAW devices", severity: "medium", help: "A Control or Management Plane user owns devices that are not the associated privileged access workstation." },
         { id: "pawMissing", label: "No associated PAW", severity: "info", help: "A Control Plane user has no associated privileged access workstation." },
         { id: "workAccountMissing", label: "No associated work account", severity: "info", help: "A Control or Management Plane member user is not linked to a regular work account." },
@@ -71,6 +70,12 @@
         return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
             return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c];
         });
+    }
+
+    // Escaped text with line-break opportunities at separators (and optionally camelCase humps), so long identifiers don't widen table columns.
+    function breakable(value, camelCase) {
+        var html = esc(value).replace(/([.\-_\/])/g, "$1<wbr>");
+        return camelCase ? html.replace(/([a-z])(?=[A-Z])/g, "$1<wbr>") : html;
     }
 
     function tierBadge(tier) {
@@ -220,14 +225,13 @@
 
         if (assignmentLevel !== null && objectLevel > assignmentLevel) found.push("tierBreach");
         if (tier === "Unclassified") found.push("unclassified");
-        if (assignmentLevel !== null && tier !== "Unclassified" && objectLevel < assignmentLevel) found.push("overClassified");
         if ((object.owners || []).some(function (id) { return relatedLevel(id) > needed; })) found.push("ownerLowerTier");
         if ((object.ownedObjects || []).some(function (id) {
             var owned = objectsById[String(id).toLowerCase()];
             return owned && requiredLevel(owned) < needed;
         })) found.push("ownsHigherTier");
         if (object.identityParent && relatedLevel(object.identityParent) > needed) found.push("parentLowerTier");
-        if ((subType.indexOf("agent") === 0 || subType === "guest") && subType !== "agentidentityblueprint" && !(object.sponsors || []).length) found.push("sponsorMissing");
+        if (subType.indexOf("agent") === 0 && subType !== "agentidentityblueprint" && !(object.sponsors || []).length) found.push("sponsorMissing");
         if (object.objectType === "user" && needed <= 1) {
             var paw = (object.associatedPawDevice || []).map(function (id) { return String(id).toLowerCase(); });
             if ((object.ownedDevices || []).some(function (id) { return paw.indexOf(String(id).toLowerCase()) < 0; })) found.push("deviceNotPaw");
@@ -353,7 +357,7 @@
         var parts = TIERS.concat(["Unclassified"]).filter(function (tier) { return summary.byTier[tier]; }).map(function (tier) {
             return '<span class="pai-tier-count tier-' + tier.toLowerCase() + '" title="' + esc(TIER_LABEL[tier]) + '">' + esc(TIER_LABEL[tier].split(" ")[0]) + " " + summary.byTier[tier] + "</span>";
         });
-        return '<div class="pai-assign">' + (parts.join(" ") || '<span class="muted">No assignments</span>') + '</div><div class="muted pai-small">' + summary.total + " total · " + summary.eligible + " eligible · " + summary.active + " active</div>";
+        return '<div class="pai-assign">' + (parts.join(" ") || '<span class="muted">No assignments</span>') + '</div><div class="muted pai-small"><span class="pai-nowrap">' + summary.total + ' total ·</span> <span class="pai-nowrap">' + summary.eligible + ' eligible ·</span> <span class="pai-nowrap">' + summary.active + " active</span></div>";
     }
 
     function relationshipCell(object) {
@@ -384,15 +388,17 @@
             var status = worklistStatus(object.objectId);
             var tier = TIER_LABEL[object.tierName] ? object.tierName : "Unclassified";
             var target = entry && entry.adminTierLevelName !== tier ? '<div class="pai-small">Target: ' + tierBadge(entry.adminTierLevelName) + "</div>" : (entry ? '<div class="pai-small muted">In worklist</div>' : "");
-            var units = (object.administrativeUnits || []).map(function (unit) { return '<span class="chip">' + esc(unit.displayName || unit.id) + "</span>"; }).join(" ");
+            var units = (object.administrativeUnits || []).map(function (unit) {
+                return '<span class="chip pai-unit" title="' + esc(unit.displayName || unit.id) + '">' + breakable(unit.displayName || unit.id) + "</span>";
+            }).join("");
             return '<tr data-object="' + esc(object.objectId) + '">' +
                 '<td class="pai-col-check"><input type="checkbox" data-select="' + esc(object.objectId) + '"' + (state.selected.has(object.objectId) ? " checked" : "") + ' aria-label="Select ' + esc(object.displayName) + '" /></td>' +
                 '<td><button type="button" class="pai-link" data-open="' + esc(object.objectId) + '">' + esc(object.displayName) + '</button><div class="muted pai-small cell-truncate" title="' + esc(object.userPrincipalName || object.objectId) + '">' + esc(object.userPrincipalName || object.objectId) + "</div></td>" +
-                "<td>" + esc(TYPE_LABEL[object.objectType] || object.objectType) + '<div class="muted pai-small">' + esc(object.objectSubType) + "</div></td>" +
+                "<td>" + esc(TYPE_LABEL[object.objectType] || object.objectType) + '<div class="muted pai-small">' + breakable(object.objectSubType, true) + "</div></td>" +
                 "<td>" + tierBadge(tier) + target + (status && status !== "Unchanged" ? ' <span class="status-chip ' + (status === "Added" ? "added" : status === "Removed" ? "removed" : "modified") + '">' + esc(status) + "</span>" : "") + "</td>" +
                 "<td>" + assignmentCell(object) + "</td>" +
                 "<td>" + relationshipCell(object) + "</td>" +
-                "<td>" + (units || '<span class="muted">None</span>') + "</td>" +
+                "<td>" + (units ? '<div class="pai-units">' + units + "</div>" : '<span class="muted">None</span>') + "</td>" +
                 "<td>" + (findingChips(object._findings) || '<span class="muted">None</span>') + "</td></tr>";
         }).join("") || '<tr><td colspan="8" class="muted">No objects match the current filters.</td></tr>';
 
@@ -411,10 +417,20 @@
         var matching = (object.assignments || []).filter(function (assignment) { return assignment.tierName === highest; });
         if (!matching.length) return '<span class="muted">No classified role assignments</span>';
         var roles = matching.slice(0, 3).map(function (assignment) {
-            return '<li><a class="cell-link" href="../EamDashboard/index.html#assignment=' + encodeURIComponent(assignment.id) + '">' + esc(assignment.roleDefinitionName || assignment.roleDefinitionId) + '</a> <span class="muted pai-small">' + esc([assignment.roleSystem, assignment.scopeName, assignment.pimAssignmentType].filter(Boolean).join(" · ")) + "</span></li>";
+            return '<li><a class="cell-link" href="../EamDashboard/index.html#assignment=' + encodeURIComponent(assignment.id) + '">' + esc(assignment.roleDefinitionName || assignment.roleDefinitionId) + '</a> <span class="muted pai-small">' + esc([assignment.roleSystem, assignment.scopeName, assignment.pimAssignmentType, assignment.transitiveBy ? "via " + assignment.transitiveBy : ""].filter(Boolean).join(" · ")) + "</span></li>";
         });
         if (matching.length > 3) roles.push('<li><button type="button" class="pai-link pai-small" data-open="' + esc(object.objectId) + '">+' + (matching.length - 3) + " more</button></li>");
         return tierBadge(highest) + '<ul class="pai-role-list">' + roles.join("") + "</ul>";
+    }
+
+    function worklistStatusChip(status) {
+        var cls = status === "Added" ? "added" : status === "Removed" ? "removed" : status === "Changed" ? "modified" : "unchanged";
+        return '<span class="status-chip ' + cls + '">' + esc(status === "Unchanged" ? "In repository file" : status) + "</span>";
+    }
+
+    function renderWorklistMeta() {
+        var pending = pendingChanges();
+        $("paiWorklistMeta").textContent = Object.keys(state.worklistEntries).length + " entries · " + (pending.Added + pending.Changed + pending.Removed) + " pending changes";
     }
 
     function renderWorklist() {
@@ -423,8 +439,7 @@
             var left = (state.worklistEntries[a] || fileEntries[a]).objectDisplayName || a, right = (state.worklistEntries[b] || fileEntries[b]).objectDisplayName || b;
             return left.localeCompare(right);
         });
-        var pending = pendingChanges();
-        $("paiWorklistMeta").textContent = Object.keys(state.worklistEntries).length + " entries · " + (pending.Added + pending.Changed + pending.Removed) + " pending changes";
+        renderWorklistMeta();
         $("paiWorklistBody").innerHTML = ids.map(function (id) {
             var entry = state.worklistEntries[id] || fileEntries[id];
             var status = worklistStatus(id);
@@ -442,7 +457,7 @@
                 "<td>" + highestAssignmentsCell(object) + "</td>" +
                 "<td>" + target + "</td>" +
                 '<td class="pai-wrap">' + justification + "</td>" +
-                '<td><span class="status-chip ' + (status === "Added" ? "added" : status === "Removed" ? "removed" : status === "Changed" ? "modified" : "") + '">' + esc(status === "Unchanged" ? "In repository file" : status) + "</span></td>" +
+                "<td>" + worklistStatusChip(status) + "</td>" +
                 "<td>" + (status === "Removed" ? '<button type="button" class="btn small" data-restore="' + esc(id) + '">Restore</button>' : '<button type="button" class="btn small" data-remove="' + esc(id) + '">Remove</button>') + "</td></tr>";
         }).join("") || '<tr><td colspan="8" class="muted">The worklist is empty. Add objects above, select objects in the Overview and set a target tier, or import a CSV / JSON file.</td></tr>';
 
@@ -458,6 +473,21 @@
         if (!FILE_ENABLED && !CSA_ENABLED) status += "Target tiers can't be applied from this page: adjust the filters, or enable the Object Classification File or custom security attributes in EntraOpsConfig.json or the Configuration Wizard. Export the worklist as CSV to share it. ";
         $("paiFileStatus").innerHTML = status + "The worklist is stored in this browser only." +
             (FILE_ENABLED && file.error ? '<br><span class="pai-error">The repository file could not be loaded: ' + esc(file.error) + "</span>" : "");
+
+        var foreign = crossTenantScriptObjects();
+        $("paiScriptCrossTenant").hidden = !foreign.length;
+        $("paiScriptCrossTenant").innerHTML = foreign.length ? "<b>" + foreign.length + " object(s) not included in the script:</b> they belong to another tenant, and custom security attributes can only be set on objects of the home tenant" +
+            (DATA.homeTenantId ? " (" + esc(DATA.homeTenantId) + ")" : "") + ".<ul>" + foreign.map(function (object) {
+                return "<li>" + esc(object.displayName) + " - " + esc(TYPE_LABEL[object.objectType] || object.objectType) + ", tenant " + esc(object.objectTenantId || "unknown") + "</li>";
+            }).join("") + "</ul>" : "";
+    }
+
+    // Worklist changes the script would make on objects of other tenants, which can't be modified from the home tenant.
+    function crossTenantScriptObjects() {
+        return Object.keys(state.worklistEntries).sort().map(function (id) { return objectsById[id]; }).filter(function (object) {
+            return object && object.isForeign && object.objectType !== "group" &&
+                state.worklistEntries[object.objectId].adminTierLevelName !== (TIER_LABEL[object.tierName] ? object.tierName : "Unclassified");
+        });
     }
 
     function renderAll() {
@@ -526,7 +556,8 @@
     }
 
     function assignmentSection(object) {
-        var assignments = (object.assignments || []).slice().sort(function (a, b) { return TIER_ORDER[a.tierName] - TIER_ORDER[b.tierName] || a.roleDefinitionName.localeCompare(b.roleDefinitionName); });
+        var order = function (tier) { return tier in TIER_ORDER ? TIER_ORDER[tier] : TIER_ORDER.Unclassified; };
+        var assignments = (object.assignments || []).slice().sort(function (a, b) { return order(a.tierName) - order(b.tierName) || String(a.roleDefinitionName || "").localeCompare(String(b.roleDefinitionName || "")); });
         if (!assignments.length) return "";
         var rows = assignments.map(function (assignment) {
             var via = [assignment.assignmentType, assignment.assignmentSubType].filter(Boolean).join(" - ");
@@ -772,6 +803,7 @@
             var current = TIER_LABEL[object.tierName] ? object.tierName : "Unclassified";
             if (current === entry.adminTierLevelName) return;
             if (object.objectType === "group") { skipped.push(safeName(name) + " (" + id + "): groups don't support custom security attributes - use the Object Classification File"); return; }
+            if (object.isForeign) { skipped.push(safeName(name) + " (" + id + "): belongs to another tenant - custom security attributes can only be set on objects of the home tenant"); return; }
             var kind = object.objectType === "user" ? "user" : "servicePrincipal";
             var uri;
             if (object.objectType === "user") uri = "users/" + id;
@@ -805,8 +837,9 @@
         lines.push(".DESCRIPTION");
         lines.push("    Generated by EntraOps Privileged Assets" + (DATA.tenantName ? " for " + safeName(DATA.tenantName) : "") + " on " + new Date().toISOString() + ".");
         lines.push("    Review every change and run with -WhatIf first. Both fields of the tier pair are always written together.");
+        lines.push("    Pasted into a console, the last line asks for confirmation per object; run Set-EntraOpsAdminTierAttribute -WhatIf instead to preview.");
         lines.push("    Requires the Microsoft.Graph.Authentication module, the delegated permissions");
-        lines.push("    CustomSecurityAttributeAssignment.ReadWrite.All and CustomSecurityAttributeDefinition.Read.All,");
+        lines.push("    CustomSecAttributeAssignment.ReadWrite.All and CustomSecAttributeDefinition.Read.All,");
         lines.push("    and the Microsoft Entra role Attribute Assignment Administrator.");
         if (skipped.length) {
             lines.push("    Skipped objects:");
@@ -817,8 +850,16 @@
         lines.push("[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]");
         lines.push("param ()");
         lines.push("");
+        lines.push("# A function keeps -WhatIf/-Confirm working when the script is pasted instead of run as a file.");
+        lines.push("function Set-EntraOpsAdminTierAttribute {");
+        lines.push("    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]");
+        lines.push("    param ()");
+        lines.push("");
+        var header = lines;
+        lines = [];
         lines.push("$ErrorActionPreference = 'Stop'");
-        lines.push("Connect-MgGraph -Scopes 'CustomSecurityAttributeAssignment.ReadWrite.All', 'CustomSecurityAttributeDefinition.Read.All' -NoWelcome");
+        var tenantId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(DATA.homeTenantId || "") ? DATA.homeTenantId : "";
+        lines.push("Connect-MgGraph -Scopes 'CustomSecAttributeAssignment.ReadWrite.All', 'CustomSecAttributeDefinition.Read.All'" + (tenantId ? " -TenantId '" + tenantId + "'" : "") + " -NoWelcome");
         lines.push("");
         lines.push("$Attributes = @{");
         kinds.forEach(function (kind) {
@@ -830,9 +871,11 @@
         lines.push("foreach ($Attribute in $Attributes.Values) {");
         lines.push("    foreach ($Field in @($Attribute.Level, $Attribute.Name)) {");
         lines.push("        $Definition = Invoke-MgGraphRequest -Method GET -Uri \"https://graph.microsoft.com/v1.0/directory/customSecurityAttributeDefinitions/$($Attribute.Set)_$Field\"");
-        lines.push("        if ($Definition.type -ne 'String' -or $Definition.isCollection -or $Definition.status -ne 'Available') {");
-        lines.push("            throw \"Custom security attribute $($Attribute.Set)_$Field must be an available, single-valued String attribute (type: $($Definition.type), collection: $($Definition.isCollection), status: $($Definition.status)).\"");
+        lines.push("        $AllowedTypes = if ($Field -eq $Attribute.Level) { @('Integer', 'String') } else { @('String') }");
+        lines.push("        if ($Definition.type -notin $AllowedTypes -or $Definition.isCollection -or $Definition.status -ne 'Available') {");
+        lines.push("            throw \"Custom security attribute $($Attribute.Set)_$Field must be an available, single-valued $($AllowedTypes -join ' or ') attribute (type: $($Definition.type), collection: $($Definition.isCollection), status: $($Definition.status)).\"");
         lines.push("        }");
+        lines.push("        if ($Field -eq $Attribute.Level) { $Attribute.LevelType = $Definition.type }");
         lines.push("    }");
         lines.push("}");
         lines.push("");
@@ -849,7 +892,12 @@
         lines.push("    $CurrentValues = if ($Current.customSecurityAttributes) { $Current.customSecurityAttributes[$Attribute.Set] }");
         lines.push("    $Before = if ($CurrentValues) { \"$($CurrentValues[$Attribute.Level]) / $($CurrentValues[$Attribute.Name])\" } else { 'not set' }");
         lines.push("    $Value = @{ '@odata.type' = '#Microsoft.DirectoryServices.CustomSecurityAttributeValue' }");
-        lines.push("    $Value[$Attribute.Level] = $Change.TierLevel");
+        lines.push("    if ($Attribute.LevelType -eq 'Integer') {");
+        lines.push("        $Value[\"$($Attribute.Level)@odata.type\"] = '#Int32'");
+        lines.push("        $Value[$Attribute.Level] = [int]$Change.TierLevel");
+        lines.push("    } else {");
+        lines.push("        $Value[$Attribute.Level] = $Change.TierLevel");
+        lines.push("    }");
         lines.push("    $Value[$Attribute.Name] = $Change.TierName");
         lines.push("    $Body = @{ customSecurityAttributes = @{ ($Attribute.Set) = $Value } } | ConvertTo-Json -Depth 5");
         lines.push("    if ($PSCmdlet.ShouldProcess(\"$($Change.DisplayName) ($($Change.Uri))\", \"Set $($Attribute.Set) tier from '$Before' to '$($Change.TierLevel) / $($Change.TierName)'\")) {");
@@ -857,6 +905,7 @@
         lines.push("        Write-Host \"Updated $($Change.DisplayName): $Before -> $($Change.TierLevel) / $($Change.TierName)\"");
         lines.push("    }");
         lines.push("}");
+        lines = header.concat(lines.map(function (line) { return line ? "    " + line : ""; }), ["}", "", "Set-EntraOpsAdminTierAttribute"]);
         state.script = lines.join("\r\n") + "\r\n";
         $("paiScript").value = state.script;
         $("paiScriptSummary").textContent = changes.length + " change(s) generated" + (skipped.length ? ", " + skipped.length + " object(s) skipped (listed in the script header)." : ".");
@@ -945,9 +994,21 @@
             var entry = id && state.worklistEntries[id];
             if (!entry) return;
             if (tierId && normalizeTier(ev.target.value)) entry.adminTierLevelName = normalizeTier(ev.target.value);
-            if (justificationId) entry.justification = ev.target.value.trim().slice(0, 500);
+            if (justificationId) {
+                // Update in place: re-rendering the table would drop the focus or click that ended the edit.
+                entry.justification = ev.target.value.trim().slice(0, 500);
+                saveWorklist();
+                var chip = ev.target.closest("tr").querySelector(".status-chip");
+                if (chip) chip.outerHTML = worklistStatusChip(worklistStatus(id));
+                renderWorklistMeta();
+                renderStats();
+                renderInventory();
+                return;
+            }
             saveWorklist();
             renderAll();
+            var select = document.querySelector('[data-target-tier="' + id + '"]');
+            if (select) select.focus();
         });
         document.querySelectorAll("a[data-view-link]").forEach(function (link) {
             link.addEventListener("click", function (ev) {
@@ -1024,6 +1085,7 @@
 
         objects = DATA.objects.map(function (object) {
             object.objectId = String(object.objectId).toLowerCase();
+            object.displayName = object.displayName || object.objectId;
             object.assignmentSummary = object.assignmentSummary || { total: 0, eligible: 0, active: 0, byTier: {}, bySystem: {}, highestTierName: "Unclassified" };
             return object;
         });

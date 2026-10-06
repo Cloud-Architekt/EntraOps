@@ -416,6 +416,20 @@ a.nav-item:hover {
     opacity: .9;
 }
 
+.nav-item.nav-subitem {
+    padding-left: 40px;
+    font-size: 12.5px;
+}
+
+.nav-item.nav-subitem .ico {
+    width: 14px;
+    font-size: 12px;
+}
+
+.nav.collapsed .nav-item.nav-subitem {
+    display: none;
+}
+
 .nav-item .count {
     margin-left: auto;
     font-size: 11px;

@@ -43,11 +43,10 @@ Deep link to an object: `index.html#asset=<objectId>`.
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Object tier below role assignments  | The object tier is less privileged than its most privileged role assignment classification.         |
 | Unclassified object                 | No object tier is defined.                                                                           |
-| Object tier above role assignments  | The object tier is more privileged than required by its role assignments.                            |
 | Owner with lower tier               | An owner is less privileged than the object (owners not in the export count as User Access).         |
 | Owns higher-tier object             | The object owns a privileged object with a more privileged tier.                                     |
 | Identity parent with lower tier     | The agent identity blueprint or agent identity parent is less privileged than the object.            |
-| No sponsor                          | Agent identity, agent user or guest user without a sponsor.                                          |
+| No sponsor                          | Agent identity or agent user without a sponsor (not applied to regular users).                       |
 | Owns non-PAW devices                | Control or Management Plane user owning devices that aren't its associated PAW device.               |
 | No associated PAW                   | Control Plane user without an associated PAW device.                                                 |
 | No associated work account          | Control or Management Plane member user without an associated work account.                          |
@@ -70,8 +69,10 @@ Alternate Tier Level Attributes don't classify. Apply custom security attribute
 tiers with the generated script.
 
 The generated PowerShell script is never executed by the app. It uses `Invoke-MgGraphRequest`,
-checks that the configured attributes are single-valued String attributes, shows the current values,
+checks that the configured attributes are single-valued attributes (tier level as Integer or String, tier name as String), shows the current values,
 and supports `-WhatIf`. It requires the delegated permissions
-`CustomSecurityAttributeAssignment.ReadWrite.All` and `CustomSecurityAttributeDefinition.Read.All`,
+`CustomSecAttributeAssignment.ReadWrite.All` and `CustomSecAttributeDefinition.Read.All`,
 and the Microsoft Entra role Attribute Assignment Administrator. Only validated object IDs, tier
-names and sanitized display names are embedded in the script.
+names and sanitized display names are embedded in the script. Objects of another tenant are not
+included because their custom security attributes can't be modified from the home tenant; the view
+lists them in a warning above the script.

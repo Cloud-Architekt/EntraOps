@@ -21,7 +21,10 @@
 .pai-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); }
 .pai-justification { flex: 1 1 220px; }
 .pai-add-object { flex: 1 1 320px; }
-table.pai-table td .pai-justification { width: 100%; min-width: 160px; }
+table.pai-table td .pai-justification { width: 100%; min-width: 120px; }
+table.pai-table td select.pai-input { width: 100%; min-width: 130px; }
+table.pai-table .status-chip { white-space: normal; }
+.status-chip.unchanged { background: var(--neutral-surface-alt); border-color: var(--neutral-stroke); color: var(--neutral-fg-secondary); }
 .pai-role-list { list-style: none; margin: 4px 0 0; padding: 0; font-size: 12.5px; }
 .pai-role-list li { margin: 2px 0; }
 
@@ -46,7 +49,10 @@ table.pai-table td .pai-justification { width: 100%; min-width: 160px; }
 .pai-col-check { width: 32px; }
 table.pai-table tbody td { vertical-align: top; overflow-wrap: break-word; }
 table.pai-table .chip { margin: 0 2px 3px 0; white-space: normal; }
-table.pai-table .cell-truncate { display: block; max-width: 220px; }
+table.pai-table .cell-truncate { display: block; max-width: 160px; }
+.pai-nowrap { white-space: nowrap; }
+.pai-units { display: flex; flex-wrap: wrap; gap: 4px; }
+table.pai-table .pai-units .chip.pai-unit { display: inline-block; margin: 0; max-width: 240px; line-height: 1.45; overflow-wrap: anywhere; }
 table.pai-table thead th { white-space: normal; vertical-align: bottom; }
 /* Below this width the table cannot fit: scroll horizontally; a sticky header would pin inside the scroll box. */
 @media (max-width: 1480px) {

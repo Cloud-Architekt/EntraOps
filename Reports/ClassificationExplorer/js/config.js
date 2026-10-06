@@ -50,9 +50,19 @@ EOCE.PORTAL_NAV = EOCE.isEntraOpsMode() ? [
     { label: 'Home', href: '../index.html', icon: '&#8962;' },
     { label: 'Classification Explorer', current: true, icon: '&#9737;' },
     { label: 'EAM Dashboard', href: '../EamDashboard/index.html', icon: '&#9635;' },
+    { label: 'Privileged Assets', href: '../PrivilegedAssets/index.html', icon: '&#9776;' },
+    { label: 'Overview', href: '../PrivilegedAssets/index.html', icon: '&#9636;', sub: true },
+    { label: 'Object Classification', href: '../PrivilegedAssets/index.html?view=classification', icon: '&#9998;', sub: true },
     { label: 'Access Path Map', href: '../AccessPathMap/index.html', icon: '&#10565;' },
     { label: 'Tier Breach Analyzer', href: '../TierBreachAnalyzer/index.html', icon: '&#9888;' },
-    { label: 'Privilege History', href: '../PrivilegeHistory/index.html', icon: '&#8635;' }
+    { label: 'Privilege History', href: '../PrivilegeHistory/index.html', icon: '&#8635;' },
+    { label: 'Configuration Analyzer', href: '../ConfigurationAnalyzer/index.html', icon: '&#9878;' },
+    { label: 'Snapshot Resources', href: '../ConfigurationAnalyzer/index.html?view=resources', icon: '&#9638;', sub: true },
+    { label: 'Configuration Assets', href: '../ConfigurationAnalyzer/index.html?view=privileged', icon: '&#9737;', sub: true },
+    { label: 'Conditional Access Analysis', href: '../ConditionalAccessAnalysis/index.html', icon: '&#8703;', sub: true },
+    { label: 'EIDSCA Findings', href: '../EidscaCoverage/index.html', icon: '&#9733;', sub: true },
+    { label: 'Access Package Flow', href: '../AccessPackageFlow/index.html', icon: '&#8523;', sub: true },
+    { label: 'PIM Request Flow', href: '../PimRequestFlow/index.html', icon: '&#128477;&#65038;', sub: true }
 ] : [];
 
 // --- Classification source variants (entraops mode only) ------------------

@@ -196,6 +196,9 @@ test("custom security attribute method exports a guarded CSV and generates a scr
     await expect(page.locator("#paiExportFile")).toBeHidden();
     await expect(page.locator("#paiResetWorklist")).toBeHidden();
     await expect(page.locator("#secPaiScript")).toBeVisible();
+    await expect(page.locator("#paiScriptCrossTenant")).toBeVisible();
+    await expect(page.locator("#paiScriptCrossTenant")).toContainText("1 object(s) not included in the script");
+    await expect(page.locator("#paiScriptCrossTenant")).toContainText("=Guest D");
 
     await page.click("#paiExportCsv");
     await expect.poll(() => page.evaluate(() => window.__downloads.length)).toBe(1);
@@ -207,10 +210,15 @@ test("custom security attribute method exports a guarded CSV and generates a scr
     const script = await page.inputValue("#paiScript");
     expect(script).toContain(`Uri = 'servicePrincipals/${servicePrincipalId}'`);
     expect(script).toContain(`Uri = 'users/${userId}'`);
-    expect(script).toContain("DisplayName = '_Guest D'");
+    expect(script).not.toContain("Uri = 'users/77777777-7777-7777-7777-777777777777'");
+    expect(script).toContain("_Guest D (77777777-7777-7777-7777-777777777777): belongs to another tenant");
     expect(script).not.toContain(`Uri = 'groups/`);
     expect(script).toContain("groups don't support custom security attributes");
     expect(script).toContain("Set = 'privilegedWorkloadIdentity'");
+    expect(script).toContain("@('Integer', 'String')");
+    expect(script).toContain("= '#Int32'");
+    expect(script).toContain("function Set-EntraOpsAdminTierAttribute {");
+    expect(script.trimEnd().endsWith("Set-EntraOpsAdminTierAttribute")).toBe(true);
     await expect(page.locator("#paiScriptWarning")).toBeHidden();
 });
 
