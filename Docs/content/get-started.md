@@ -27,14 +27,14 @@ You can use EntraOps from a clone of the repository or install the module from t
 Gallery. Both provide the same cmdlets; they differ in where EntraOps keeps its files and how it is
 updated.
 
-|                                            | Clone the repository                                                        | PowerShell Gallery                                                                  |
-| ------------------------------------------ | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Best for                                   | Automation with GitHub Actions or Azure DevOps, version-controlled exports  | Interactive use and local scripts                                                   |
-| Import                                     | `Import-Module ./EntraOps`                                                  | `Import-Module EntraOps`                                                            |
-| Working folder                             | Repository root                                                             | `ENTRAOPS_ROOT`, the current folder with `EntraOpsConfig.json`, or `<home>/EntraOps` |
-| Classification templates, samples, reports | Included                                                                    | Downloaded with `Initialize-EntraOpsWorkspace`                                      |
-| Update                                     | `Update-EntraOps` or the Update-EntraOps workflow                           | `Update-PSResource EntraOps`, then `Initialize-EntraOpsWorkspace -Force`            |
-| Privilege History, Configuration Analyzer  | Supported (git history of the repository)                                   | Only in a working folder with git history                                           |
+|                                            | Clone the repository                                                       | PowerShell Gallery                                                                   |
+| ------------------------------------------ | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Best for                                   | Automation with GitHub Actions or Azure DevOps, version-controlled exports | Interactive use and local scripts                                                    |
+| Import                                     | `Import-Module ./EntraOps`                                                 | `Import-Module EntraOps`                                                             |
+| Working folder                             | Repository root                                                            | `ENTRAOPS_ROOT`, the current folder with `EntraOpsConfig.json`, or `<home>/EntraOps` |
+| Classification templates, samples, reports | Included                                                                   | Downloaded with `Initialize-EntraOpsWorkspace`                                       |
+| Update                                     | `Update-EntraOps` or the Update-EntraOps workflow                          | `Update-PSResource EntraOps`, then `Initialize-EntraOpsWorkspace -Force`             |
+| Privilege History, Configuration Analyzer  | Supported (git history of the repository)                                  | Only in a working folder with git history                                            |
 
 Required modules (Az.Accounts, Az.Resources and Microsoft.Graph.Authentication) are installed
 automatically when you connect with `Connect-EntraOps`.
