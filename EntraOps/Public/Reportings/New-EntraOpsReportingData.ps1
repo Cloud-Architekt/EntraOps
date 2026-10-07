@@ -159,7 +159,8 @@
 .PARAMETER InstallMissingReportingFolder
     Download the reporting apps with Install-EntraOpsReportingFolder (public EntraOps repository,
     main branch) when the Reports folder of the EntraOps working folder is missing, e.g. for a
-    module-only installation from the PowerShell Gallery.
+    module-only installation from the PowerShell Gallery. Without this switch, interactive sessions
+    are prompted to download the folder; non-interactive sessions stop with an error.
 
 .EXAMPLE
     New-EntraOpsReportingData
@@ -308,10 +309,21 @@ function New-EntraOpsReportingData {
 
     $ReportingFolder = Join-Path $RepositoryRoot 'Reports'
     if (-not (Test-Path -LiteralPath (Join-Path $ReportingFolder 'index.html') -PathType Leaf)) {
+        $MissingReportingFolderMessage = "The reporting apps folder '$ReportingFolder' is missing (e.g. module-only installation). Run Install-EntraOpsReportingFolder, or New-EntraOpsReportingData -InstallMissingReportingFolder, to download it."
+        $IsInteractiveSession = [Environment]::UserInteractive -and -not ([Environment]::GetCommandLineArgs() | Where-Object { $_ -like '-NonI*' })
+        $HasCustomAppRoot = @($PSBoundParameters.Keys | Where-Object { $_ -like '*AppRoot' }).Count -gt 0
+        if (-not $InstallMissingReportingFolder -and -not $WhatIfPreference -and -not $HasCustomAppRoot -and $IsInteractiveSession) {
+            $InstallMissingReportingFolder = $PSCmdlet.ShouldContinue("Download the reporting apps from the public EntraOps repository to '$ReportingFolder'?", 'Reporting apps folder is missing')
+        }
         if ($InstallMissingReportingFolder) {
             Install-EntraOpsReportingFolder -DestinationPath $ReportingFolder -Force:(Test-Path -LiteralPath $ReportingFolder) | Out-Null
+        } elseif ($HasCustomAppRoot) {
+            Write-Warning $MissingReportingFolderMessage
+        } elseif ($WhatIfPreference) {
+            Write-Warning $MissingReportingFolderMessage
+            return
         } else {
-            Write-Warning "The reporting apps folder '$ReportingFolder' is missing. Run Install-EntraOpsReportingFolder, or New-EntraOpsReportingData -InstallMissingReportingFolder, to download it."
+            throw $MissingReportingFolderMessage
         }
     }
 
