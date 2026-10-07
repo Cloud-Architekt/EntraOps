@@ -157,10 +157,13 @@
     Allow Configuration Analyzer generation from a partial snapshot with preserved stale resource types.
 
 .PARAMETER InstallMissingReportingFolder
-    Download the reporting apps with Install-EntraOpsReportingFolder (public EntraOps repository,
-    main branch) when the Reports folder of the EntraOps working folder is missing, e.g. for a
-    module-only installation from the PowerShell Gallery. Without this switch, interactive sessions
-    are prompted to download the folder; non-interactive sessions stop with an error.
+    Download the reporting apps (Install-EntraOpsReportingFolder) and the classification templates
+    required by the Classification Explorer (Initialize-EntraOpsWorkspace -Content Classification)
+    from the public EntraOps repository, main branch, when they are missing in the EntraOps working
+    folder, e.g. for a module-only installation from the PowerShell Gallery. Prefer
+    Initialize-EntraOpsWorkspace -Ref <release tag> beforehand, so the content matches the module version.
+    Without this switch, a missing Reports folder stops with an error and missing templates skip the
+    Classification Explorer (error with -FailureAction Stop).
 
 .EXAMPLE
     New-EntraOpsReportingData
@@ -307,23 +310,36 @@ function New-EntraOpsReportingData {
     $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
     if ([string]::IsNullOrWhiteSpace($EntraOpsRoot)) { $EntraOpsRoot = $RepositoryRoot }
 
+    # Module-only installations (e.g. PowerShell Gallery) ship neither the reporting apps nor the classification templates.
     $ReportingFolder = Join-Path $RepositoryRoot 'Reports'
-    if (-not (Test-Path -LiteralPath (Join-Path $ReportingFolder 'index.html') -PathType Leaf)) {
-        $MissingReportingFolderMessage = "The reporting apps folder '$ReportingFolder' is missing (e.g. module-only installation). Run Install-EntraOpsReportingFolder, or New-EntraOpsReportingData -InstallMissingReportingFolder, to download it."
-        $IsInteractiveSession = [Environment]::UserInteractive -and -not ([Environment]::GetCommandLineArgs() | Where-Object { $_ -like '-NonI*' })
-        $HasCustomAppRoot = @($PSBoundParameters.Keys | Where-Object { $_ -like '*AppRoot' }).Count -gt 0
-        if (-not $InstallMissingReportingFolder -and -not $WhatIfPreference -and -not $HasCustomAppRoot -and $IsInteractiveSession) {
-            $InstallMissingReportingFolder = $PSCmdlet.ShouldContinue("Download the reporting apps from the public EntraOps repository to '$ReportingFolder'?", 'Reporting apps folder is missing')
-        }
+    $ClassificationTemplatesFolder = Join-Path $EntraOpsRoot 'Classification/Templates'
+    $HasCustomAppRoot = @($PSBoundParameters.Keys | Where-Object { $_ -like '*AppRoot' }).Count -gt 0
+    $MissingReports = -not $HasCustomAppRoot -and -not (Test-Path -LiteralPath (Join-Path $ReportingFolder 'index.html') -PathType Leaf)
+    $MissingTemplates = -not $SkipClassificationExplorer -and -not (Test-Path -LiteralPath $ClassificationTemplatesFolder -PathType Container)
+
+    if ($MissingReports -or $MissingTemplates) {
+        $MissingItems = @(
+            if ($MissingReports) { "reporting apps folder '$ReportingFolder'" }
+            if ($MissingTemplates) { "classification templates folder '$ClassificationTemplatesFolder'" }
+        ) -join ' and '
+        $ModuleVersion = $MyInvocation.MyCommand.Module.Version
+        $MissingContentMessage = "The $MissingItems $(if ($MissingReports -and $MissingTemplates) { 'are' } else { 'is' }) missing (e.g. module-only installation). Run Initialize-EntraOpsWorkspace -Ref <release tag of EntraOps $ModuleVersion> to install the content that matches your module$(if ($MissingTemplates -and -not $MissingReports) { ', or run Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles to keep the classification files used for the export' }). -InstallMissingReportingFolder downloads it from the main branch instead."
+
         if ($InstallMissingReportingFolder) {
-            Install-EntraOpsReportingFolder -DestinationPath $ReportingFolder -Force:(Test-Path -LiteralPath $ReportingFolder) | Out-Null
-        } elseif ($HasCustomAppRoot) {
-            Write-Warning $MissingReportingFolderMessage
+            if ($MissingReports) {
+                Install-EntraOpsReportingFolder -DestinationPath $ReportingFolder -Force:(Test-Path -LiteralPath $ReportingFolder) | Out-Null
+            }
+            if ($MissingTemplates) {
+                Initialize-EntraOpsWorkspace -Path $EntraOpsRoot -Content Classification -KeepWorkingFolder | Out-Null
+            }
         } elseif ($WhatIfPreference) {
-            Write-Warning $MissingReportingFolderMessage
+            Write-Warning $MissingContentMessage
             return
+        } elseif ($MissingReports -or $FailureAction -eq 'Stop') {
+            throw $MissingContentMessage
         } else {
-            throw $MissingReportingFolderMessage
+            Write-Warning "$MissingContentMessage Skipping Classification Explorer data."
+            $SkipClassificationExplorer = [switch]$true
         }
     }
 

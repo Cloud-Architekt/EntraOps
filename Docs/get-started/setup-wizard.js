@@ -169,7 +169,7 @@
         if (state.moduleSource === "template") {
             html += '<div class="setup-details"><h3>Use the GitHub template</h3><p>Create a new private repository from the EntraOps template, then clone your repository and run the following commands from its root folder.</p><p><a class="btn" href="https://github.com/new?template_name=EntraOps&amp;template_owner=Cloud-Architekt&amp;visibility=private" target="_blank" rel="noopener noreferrer">Create repository from template</a></p>' + commandBlock("git clone 'https://github.com/<your-org>/<your-repo>.git'\ncd '<your-repo>'") + '</div>';
         } else if (state.moduleSource === "gallery") {
-            html += '<div class="setup-details"><h3>Install from the PowerShell Gallery</h3>' + commandBlock("Install-PSResource -Name EntraOps -Repository PSGallery -Scope CurrentUser") + '</div>';
+            html += '<div class="setup-details"><h3>Install from the PowerShell Gallery</h3><p>The module package contains no classification templates or reporting apps. <code>Initialize-EntraOpsWorkspace</code> downloads them into the EntraOps working folder, by default <code>&lt;home&gt;/EntraOps</code>. Exports and reports are written there as well. To use another folder, see <a href="?guide=expert#working-folder">Working folder</a>.</p>' + commandBlock(galleryInstallCommand()) + '</div>';
         }
         return html + '</div>';
     }
@@ -294,6 +294,10 @@
         return '<div class="setup-command"><pre><code>' + esc(command) + '</code></pre><button type="button" class="copy-command" data-copy="' + esc(command) + '" aria-label="Copy command">Copy</button></div>';
     }
 
+    function galleryInstallCommand() {
+        return "Install-PSResource -Name EntraOps -Repository PSGallery -Scope CurrentUser\nInitialize-EntraOpsWorkspace";
+    }
+
     function renderReview() {
         var selectedSystems = systems.filter(function (item) { return state.rbacSystems.indexOf(item[0]) >= 0; }).map(function (item) { return item[1]; });
         var summary = '<div class="setup-summary"><div><span>Setup</span><strong>' + esc(paths[state.path].title) + '</strong></div><div><span>Scope</span><strong>' + esc(selectedSystems.join(", ")) + '</strong></div>';
@@ -304,7 +308,7 @@
         var commands;
         if (state.path === "express") {
             var scopeArg = state.rbacSystems.length === systems.length ? "" : " -RbacSystems " + state.rbacSystems.map(function (value) { return "'" + value + "'"; }).join(",");
-            commands = '<ol class="setup-run-list">' + (state.moduleSource === "gallery" ? '<li><h3>Install EntraOps</h3>' + commandBlock("Install-PSResource -Name EntraOps -Repository PSGallery -Scope CurrentUser") + '</li>' : '') + '<li><h3>Sign in with read access</h3><p>Activate Global Reader and ensure your account has Reader at Azure root scope <code>/</code> before connecting. The interactive Microsoft Graph sign-in requests EntraOps delegated permissions.</p>' + commandBlock(moduleImportCommand() + "\nConnect-EntraOps -AuthenticationType 'UserInteractive' -TenantName '" + state.tenantName.trim() + "'") + '</li><li><h3>Run the collection</h3>' + commandBlock("Invoke-EntraOpsPrivilegedEAM" + scopeArg) + '</li><li><h3>Open the reports</h3>' + commandBlock("New-EntraOpsReportingData") + '</li></ol>';
+            commands = '<ol class="setup-run-list">' + (state.moduleSource === "gallery" ? '<li><h3>Install EntraOps</h3><p>Installs the module and downloads the classification templates and reporting apps into the EntraOps working folder, by default <code>&lt;home&gt;/EntraOps</code>. Exports and reports are written there as well. To use another folder, see <a href="?guide=expert#working-folder">Working folder</a>.</p>' + commandBlock(galleryInstallCommand()) + '</li>' : '') + '<li><h3>Sign in with read access</h3><p>Activate Global Reader and ensure your account has Reader at Azure root scope <code>/</code> before connecting. The interactive Microsoft Graph sign-in requests EntraOps delegated permissions.</p>' + commandBlock(moduleImportCommand() + "\nConnect-EntraOps -AuthenticationType 'UserInteractive' -TenantName '" + state.tenantName.trim() + "'") + '</li><li><h3>Run the collection</h3><p><code>-KeepClassificationFiles</code> keeps the classification files of this run for the Classification Explorer.</p>' + commandBlock("Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles" + scopeArg) + '</li><li><h3>Open the reports</h3><p>Generates the report data, then open <code>Reports/index.html</code> in the EntraOps working folder.</p>' + commandBlock("New-EntraOpsReportingData") + '</li></ol>';
         } else {
             commands = '<ol class="setup-run-list">';
             if (state.path === "github" && state.devOpsPlatform === "GitHub") {

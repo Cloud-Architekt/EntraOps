@@ -18,7 +18,9 @@
     are never changed.
 
 .PARAMETER Path
-    Working folder to prepare. Defaults to $EntraOpsBaseFolder.
+    Working folder to prepare. Defaults to $EntraOpsBaseFolder. A different folder becomes the EntraOps
+    working folder for the current session (sets $EntraOpsBaseFolder and ENTRAOPS_ROOT), unless
+    -KeepWorkingFolder is used. Set ENTRAOPS_ROOT for new sessions.
 
 .PARAMETER Content
     Content to install: Classification (templates and Global.json), Samples and Reports. Defaults to all.
@@ -38,10 +40,19 @@
     Replace existing files with the downloaded version (except the protected files above), e.g.
     after Update-PSResource EntraOps (or Update-Module EntraOps).
 
+.PARAMETER KeepWorkingFolder
+    Install into -Path without switching the session's EntraOps working folder, e.g. to prepare a
+    folder for another tenant or machine.
+
 .EXAMPLE
     Initialize-EntraOpsWorkspace
 
     Downloads the classification templates, samples and reporting apps into the EntraOps working folder.
+
+.EXAMPLE
+    Initialize-EntraOpsWorkspace -Path 'D:\EntraOps' -Ref 'v1.2.0'
+
+    Installs the content of release v1.2.0 into D:\EntraOps and uses it as working folder for this session.
 
 .EXAMPLE
     $env:ENTRAOPS_ROOT = 'D:\EntraOps'; Import-Module EntraOps -Force; Initialize-EntraOpsWorkspace -Ref 'v1.2.0'
@@ -77,7 +88,10 @@ function Initialize-EntraOpsWorkspace {
         [System.String]$PersonalAccessToken,
 
         [Parameter(Mandatory = $false)]
-        [switch]$Force
+        [switch]$Force,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$KeepWorkingFolder
     )
 
     $ErrorActionPreference = 'Stop'
@@ -137,12 +151,24 @@ function Initialize-EntraOpsWorkspace {
     }
 
     if (-not $WhatIfPreference) {
-        Write-Host "EntraOps working folder: $Path"
-        if (-not (Test-Path -LiteralPath (Join-Path $Path 'EntraOpsConfig.json') -PathType Leaf)) {
-            Write-Host "Next: create EntraOpsConfig.json in this folder with New-EntraOpsConfigFile."
+        $CurrentWorkingFolder = "$Global:EntraOpsBaseFolder".TrimEnd([char[]]@('/', '\'))
+        if ($Path -ne $CurrentWorkingFolder -and -not $KeepWorkingFolder) {
+            # Cmdlets read $Global:EntraOpsBaseFolder at run time, so no module re-import is needed.
+            $Global:EntraOpsBaseFolder = $Path
+            $env:ENTRAOPS_ROOT = $Path
+            Write-Host "EntraOps working folder for this session: $Path"
+            Write-Host "For new sessions, set ENTRAOPS_ROOT to '$Path' before importing the module (or run EntraOps from this folder with EntraOpsConfig.json)."
+            if (Get-Variable -Name TenantNameContext -Scope Global -ValueOnly -ErrorAction SilentlyContinue) {
+                Write-Host "Run Connect-EntraOps again to use the new working folder for the current connection."
+            }
+        } else {
+            Write-Host "EntraOps working folder: $Path"
+            if ($Path -ne $CurrentWorkingFolder) {
+                Write-Host "Set ENTRAOPS_ROOT to '$Path' (or run EntraOps from this folder) and import the module again to use it."
+            }
         }
-        if ($Path -ne $Global:EntraOpsBaseFolder) {
-            Write-Host "Set ENTRAOPS_ROOT to '$Path' (or run EntraOps from this folder) and import the module again to use it."
+        if (-not (Test-Path -LiteralPath (Join-Path $Path 'EntraOpsConfig.json') -PathType Leaf)) {
+            Write-Host "Next: create EntraOpsConfig.json in this folder with New-EntraOpsConfigFile, or run Invoke-EntraOpsPrivilegedEAM without configuration."
         }
     }
 }

@@ -20,8 +20,31 @@ Describe 'Initialize-EntraOpsWorkspace' {
 
     BeforeEach {
         $script:Workspace = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $script:OriginalBaseFolder = $Global:EntraOpsBaseFolder
+        $script:OriginalEntraOpsRoot = $env:ENTRAOPS_ROOT
         Mock -ModuleName EntraOps Invoke-WebRequest { Copy-Item -LiteralPath (Join-Path $TestDrive 'source.zip') -Destination $OutFile } -ParameterFilter { $OutFile }
         Mock -ModuleName EntraOps Write-Host {}
+    }
+
+    AfterEach {
+        $Global:EntraOpsBaseFolder = $script:OriginalBaseFolder
+        $env:ENTRAOPS_ROOT = $script:OriginalEntraOpsRoot
+    }
+
+    It 'uses -Path as working folder for the current session' {
+        Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports | Out-Null
+
+        $Global:EntraOpsBaseFolder | Should -Be $script:Workspace
+        $env:ENTRAOPS_ROOT | Should -Be $script:Workspace
+    }
+
+    It 'keeps the working folder with -KeepWorkingFolder or -WhatIf' {
+        Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports -KeepWorkingFolder | Out-Null
+        $Global:EntraOpsBaseFolder | Should -Be $script:OriginalBaseFolder
+        $env:ENTRAOPS_ROOT | Should -Be $script:OriginalEntraOpsRoot
+
+        Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports -WhatIf
+        $Global:EntraOpsBaseFolder | Should -Be $script:OriginalBaseFolder
     }
 
     It 'installs classification templates, samples and reports but not the module' {

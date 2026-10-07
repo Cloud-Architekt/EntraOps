@@ -23,10 +23,13 @@ New-EntraOpsReportingData
 The generators write into the `Reports` folder of the EntraOps working folder (the repository
 checkout, or the folder described in
 [Working folder](../get-started/index.html#working-folder)).
-If the reporting apps are missing, download them with `Initialize-EntraOpsWorkspace` or
+If the reporting apps are missing (module-only installation), `New-EntraOpsReportingData` stops with
+an error. Install them first with `Initialize-EntraOpsWorkspace` or
 `Install-EntraOpsReportingFolder` (public EntraOps repository, `main` by default; pass `-Ref` with
-the release tag or commit that matches your module), or run
-`New-EntraOpsReportingData -InstallMissingReportingFolder`. Generated report data in an existing
+the release tag or commit that matches your module), or pass
+`New-EntraOpsReportingData -InstallMissingReportingFolder` to download them from `main`. Without
+classification templates (e.g. after `Invoke-EntraOpsPrivilegedEAM` without
+`-KeepClassificationFiles`), the Classification Explorer is skipped with a warning. Generated report data in an existing
 `Reports` folder is never overwritten; updating an existing folder requires `-Force`.
 
 For configuration-driven automation on any CI platform, use the higher-level command:
