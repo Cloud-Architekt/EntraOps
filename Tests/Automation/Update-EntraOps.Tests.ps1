@@ -109,7 +109,7 @@ Describe 'Update-EntraOps update scope' {
         Mock Get-EntraOpsRepositoryRoot { $null }
 
         { Update-EntraOps -ConfigFile (Join-Path $TestDrive 'missing.json') -TargetUpdateFolders @('./Samples') } |
-        Should -Throw '*Update-Module EntraOps*'
+        Should -Throw '*Update-PSResource EntraOps*Update-Module EntraOps*'
     }
 
     It 'never imports candidate module code in the updater process' {

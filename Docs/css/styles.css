@@ -996,6 +996,8 @@ a:hover {
 }
 
 .setup-details-wide,
+.setup-details>p,
+.setup-details>.setup-command,
 .setup-category-picker {
     grid-column: 1 / -1;
 }
@@ -1712,11 +1714,11 @@ a:hover {
     border-radius: 4px;
 }
 
-.wiz-group-collapsed > .wiz-group-title {
+.wiz-group-collapsed>.wiz-group-title {
     margin-bottom: 0;
 }
 
-.wiz-group-collapsed > :not(.wiz-group-title) {
+.wiz-group-collapsed> :not(.wiz-group-title) {
     display: none !important;
 }
 

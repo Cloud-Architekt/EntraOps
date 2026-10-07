@@ -36,7 +36,7 @@
 
 .PARAMETER Force
     Replace existing files with the downloaded version (except the protected files above), e.g.
-    after Update-Module EntraOps.
+    after Update-PSResource EntraOps (or Update-Module EntraOps).
 
 .EXAMPLE
     Initialize-EntraOpsWorkspace

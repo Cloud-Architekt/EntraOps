@@ -33,7 +33,16 @@ function Install-EntraOpsRequiredModule {
     if ($null -ne $module) {
         Write-Output ('Module {0} (v{1}) is available.' -f $ModuleName, $module.Version)
     }
+    elseif (Get-Command -Name 'Install-PSResource' -ErrorAction SilentlyContinue) {
+        $optionalArgs = @{}
+        if (-not [string]::IsNullOrWhiteSpace($MinimalVersion)) {
+            $optionalArgs['Version'] = '[{0},)' -f $MinimalVersion
+        }
+        Write-Warning ('Install module {0} (version [{1}]) within scope of the current user.' -f $ModuleName, $MinimalVersion)
+        Install-PSResource -Name $ModuleName @optionalArgs -Scope CurrentUser -TrustRepository
+    }
     else {
+        # Fallback when PSResourceGet is unavailable (e.g. removed or blocked).
         Import-Module -Name 'PowershellGet'
         $installedModule = Get-InstalledModule -Name $ModuleName -ErrorAction SilentlyContinue
         if ($null -ne $installedModule) {

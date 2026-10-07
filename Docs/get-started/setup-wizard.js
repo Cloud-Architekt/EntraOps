@@ -4,6 +4,7 @@
     var state = {
         step: 0,
         path: "express",
+        moduleSource: "",
         tenantId: "",
         tenantName: "",
         authType: "UserInteractive",
@@ -107,7 +108,26 @@
         "microsoft.securityandcompliance.deviceConditionalAccessPolicy",
         "microsoft.securityandcompliance.deviceConfigurationPolicy"
     ];
-    var stepNames = ["Choose a setup", "Tenant and sign-in", "Choose scope", "Add integrations", "Review and run"];
+    var allSteps = [
+        { id: "path", name: "Choose a setup" },
+        { id: "module", name: "Get EntraOps", expressOnly: true },
+        { id: "tenant", name: "Tenant and sign-in" },
+        { id: "scope", name: "Choose scope" },
+        { id: "integrations", name: "Add integrations" },
+        { id: "review", name: "Review and run" }
+    ];
+
+    function activeSteps() {
+        return allSteps.filter(function (step) { return !step.expressOnly || state.path === "express"; });
+    }
+
+    function currentStepId() {
+        return activeSteps()[state.step].id;
+    }
+
+    function moduleImportCommand() {
+        return state.moduleSource === "gallery" ? "Import-Module EntraOps" : "Import-Module ./EntraOps";
+    }
 
     function esc(value) {
         return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -136,6 +156,20 @@
                 choiceCard("devOpsPlatform", "GitHub", "GitHub", "Use GitHub Actions and GitHub workload identity federation.", "", state.devOpsPlatform === "GitHub", false) +
                 choiceCard("devOpsPlatform", "AzureDevOps", "Azure DevOps", "Use Azure Repos, Azure Pipelines and a federated Azure Resource Manager service connection.", "", state.devOpsPlatform === "AzureDevOps", false) +
                 '</div></div>';
+        }
+        return html + '</div>';
+    }
+
+    function renderModule() {
+        var html = '<div class="setup-step"><p class="setup-kicker">Get the module</p><h2 id="setupStepTitle">How do you get EntraOps?</h2>' +
+            '<p class="setup-lead">Create your own repository from the EntraOps GitHub template, or install the published module from the PowerShell Gallery.</p><div class="setup-choice-list">' +
+            choiceCard("moduleSource", "template", "I want to use the GitHub template", "Create your own private repository from the EntraOps template, clone it and import the module from there.", "", state.moduleSource === "template", false) +
+            choiceCard("moduleSource", "gallery", "Install from the PowerShell Gallery", "Install the EntraOps module with Install-PSResource. No repository required.", "", state.moduleSource === "gallery", false) +
+            '</div>';
+        if (state.moduleSource === "template") {
+            html += '<div class="setup-details"><h3>Use the GitHub template</h3><p>Create a new private repository from the EntraOps template, then clone your repository and run the following commands from its root folder.</p><p><a class="btn" href="https://github.com/new?template_name=EntraOps&amp;template_owner=Cloud-Architekt&amp;visibility=private" target="_blank" rel="noopener noreferrer">Create repository from template</a></p>' + commandBlock("git clone 'https://github.com/<your-org>/<your-repo>.git'\ncd '<your-repo>'") + '</div>';
+        } else if (state.moduleSource === "gallery") {
+            html += '<div class="setup-details"><h3>Install from the PowerShell Gallery</h3>' + commandBlock("Install-PSResource -Name EntraOps -Repository PSGallery -Scope CurrentUser") + '</div>';
         }
         return html + '</div>';
     }
@@ -264,12 +298,13 @@
         var selectedSystems = systems.filter(function (item) { return state.rbacSystems.indexOf(item[0]) >= 0; }).map(function (item) { return item[1]; });
         var summary = '<div class="setup-summary"><div><span>Setup</span><strong>' + esc(paths[state.path].title) + '</strong></div><div><span>Scope</span><strong>' + esc(selectedSystems.join(", ")) + '</strong></div>';
         if (state.path === "github") summary += '<div><span>Platform</span><strong>' + esc(state.devOpsPlatform) + '</strong></div>';
+        if (state.path === "express") summary += '<div><span>Module</span><strong>' + (state.moduleSource === "gallery" ? "PowerShell Gallery" : "GitHub template") + '</strong></div>';
         if (state.path !== "express") summary += '<div><span>Tenant</span><strong>' + esc(state.tenantName) + '<br>' + esc(state.tenantId) + '</strong></div><div><span>Authentication</span><strong>' + esc(state.authType) + (state.accountId ? '<br>' + esc(state.accountId) : '') + '</strong></div>';
         summary += '</div>';
         var commands;
         if (state.path === "express") {
             var scopeArg = state.rbacSystems.length === systems.length ? "" : " -RbacSystems " + state.rbacSystems.map(function (value) { return "'" + value + "'"; }).join(",");
-            commands = '<ol class="setup-run-list"><li><h3>Sign in with read access</h3><p>Activate Global Reader and ensure your account has Reader at Azure root scope <code>/</code> before connecting. The interactive Microsoft Graph sign-in requests EntraOps delegated permissions.</p>' + commandBlock("Import-Module ./EntraOps\nConnect-EntraOps -AuthenticationType 'UserInteractive' -TenantName '" + state.tenantName.trim() + "'") + '</li><li><h3>Run the collection</h3>' + commandBlock("Invoke-EntraOpsPrivilegedEAM" + scopeArg) + '</li><li><h3>Open the reports</h3>' + commandBlock("New-EntraOpsReportingData") + '</li></ol>';
+            commands = '<ol class="setup-run-list">' + (state.moduleSource === "gallery" ? '<li><h3>Install EntraOps</h3>' + commandBlock("Install-PSResource -Name EntraOps -Repository PSGallery -Scope CurrentUser") + '</li>' : '') + '<li><h3>Sign in with read access</h3><p>Activate Global Reader and ensure your account has Reader at Azure root scope <code>/</code> before connecting. The interactive Microsoft Graph sign-in requests EntraOps delegated permissions.</p>' + commandBlock(moduleImportCommand() + "\nConnect-EntraOps -AuthenticationType 'UserInteractive' -TenantName '" + state.tenantName.trim() + "'") + '</li><li><h3>Run the collection</h3>' + commandBlock("Invoke-EntraOpsPrivilegedEAM" + scopeArg) + '</li><li><h3>Open the reports</h3>' + commandBlock("New-EntraOpsReportingData") + '</li></ol>';
         } else {
             commands = '<ol class="setup-run-list">';
             if (state.path === "github" && state.devOpsPlatform === "GitHub") {
@@ -314,28 +349,31 @@
     }
 
     function canContinue() {
-        if (state.step === 0 && state.path === "github" && !state.devOpsPlatform) return "Choose GitHub or Azure DevOps.";
-        if (state.step === 1 && state.path === "express" && !state.tenantName.trim()) return "Enter your Microsoft Entra tenant domain.";
-        if (state.step === 1 && state.path !== "express" && !/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(state.tenantId.trim())) return "Enter a valid Microsoft Entra tenant ID.";
-        if (state.step === 1 && state.path !== "express" && !state.tenantName.trim()) return "Enter your Microsoft Entra tenant domain.";
-        if (state.step === 1 && state.authType === "UserAssignedMSI" && !/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(state.accountId.trim())) return "Enter the user-assigned managed identity client ID.";
-        if (state.step === 2 && state.rbacSystems.length === 0) return "Select at least one system to analyze.";
-        if (state.step === 3 && state.path === "github" && state.devOpsPlatform === "GitHub" && (!state.githubOrg.trim() || !state.githubRepo.trim() || !state.githubBranch.trim())) return "Enter the GitHub owner, private repository name, and default branch.";
-        if (state.step === 3 && state.path === "github" && state.devOpsPlatform === "AzureDevOps" && (!state.adoOrg.trim() || !state.adoProject.trim() || !state.adoRepo.trim() || !state.adoBranch.trim() || !state.adoServiceConnection.trim())) return "Complete the Azure DevOps repository and service connection fields.";
-        if (state.step === 3 && state.integrations.indexOf("logAnalytics") >= 0 && (!state.dcrName.trim() || !state.dcrSubscriptionId.trim() || !state.dcrResourceGroup.trim())) return "Complete all Log Analytics destination fields.";
-        if (state.step === 3 && state.integrations.indexOf("watchlists") >= 0 && (!state.sentinelWorkspace.trim() || !state.sentinelSubscriptionId.trim() || !state.sentinelResourceGroup.trim())) return "Complete all Microsoft Sentinel workspace fields.";
-        if (state.step === 3 && state.integrations.indexOf("tenantGovernance") >= 0 && state.tenantGovernanceScope === "categories" && state.tenantGovernanceCategories.length === 0) return "Select at least one Tenant Governance category.";
+        var id = currentStepId();
+        if (id === "path" && state.path === "github" && !state.devOpsPlatform) return "Choose GitHub or Azure DevOps.";
+        if (id === "module" && !state.moduleSource) return "Choose whether you use the GitHub template or the PowerShell Gallery.";
+        if (id === "tenant" && state.path === "express" && !state.tenantName.trim()) return "Enter your Microsoft Entra tenant domain.";
+        if (id === "tenant" && state.path !== "express" && !/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(state.tenantId.trim())) return "Enter a valid Microsoft Entra tenant ID.";
+        if (id === "tenant" && state.path !== "express" && !state.tenantName.trim()) return "Enter your Microsoft Entra tenant domain.";
+        if (id === "tenant" && state.authType === "UserAssignedMSI" && !/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(state.accountId.trim())) return "Enter the user-assigned managed identity client ID.";
+        if (id === "scope" && state.rbacSystems.length === 0) return "Select at least one system to analyze.";
+        if (id === "integrations" && state.path === "github" && state.devOpsPlatform === "GitHub" && (!state.githubOrg.trim() || !state.githubRepo.trim() || !state.githubBranch.trim())) return "Enter the GitHub owner, private repository name, and default branch.";
+        if (id === "integrations" && state.path === "github" && state.devOpsPlatform === "AzureDevOps" && (!state.adoOrg.trim() || !state.adoProject.trim() || !state.adoRepo.trim() || !state.adoBranch.trim() || !state.adoServiceConnection.trim())) return "Complete the Azure DevOps repository and service connection fields.";
+        if (id === "integrations" && state.integrations.indexOf("logAnalytics") >= 0 && (!state.dcrName.trim() || !state.dcrSubscriptionId.trim() || !state.dcrResourceGroup.trim())) return "Complete all Log Analytics destination fields.";
+        if (id === "integrations" && state.integrations.indexOf("watchlists") >= 0 && (!state.sentinelWorkspace.trim() || !state.sentinelSubscriptionId.trim() || !state.sentinelResourceGroup.trim())) return "Complete all Microsoft Sentinel workspace fields.";
+        if (id === "integrations" && state.integrations.indexOf("tenantGovernance") >= 0 && state.tenantGovernanceScope === "categories" && state.tenantGovernanceCategories.length === 0) return "Select at least one Tenant Governance category.";
         return "";
     }
 
     function render() {
         var wizard = document.getElementById("setupWizard");
-        var renderers = [renderPath, renderTenant, renderScope, renderIntegrations, renderReview];
-        wizard.innerHTML = renderers[state.step]() + '<div class="setup-error" id="setupError" role="alert"></div><div class="setup-actions">' +
+        var renderers = { path: renderPath, module: renderModule, tenant: renderTenant, scope: renderScope, integrations: renderIntegrations, review: renderReview };
+        var steps = activeSteps();
+        wizard.innerHTML = renderers[steps[state.step].id]() + '<div class="setup-error" id="setupError" role="alert"></div><div class="setup-actions">' +
             (state.step > 0 ? '<button type="button" class="btn" data-action="back">Back</button>' : '<span></span>') +
-            (state.step < stepNames.length - 1 ? '<button type="button" class="btn primary" data-action="next">Continue</button>' : '<button type="button" class="btn" data-action="restart">Start over</button>') + '</div>';
-        document.getElementById("setupProgressText").textContent = "Step " + (state.step + 1) + " of " + stepNames.length + " · " + stepNames[state.step];
-        document.getElementById("setupProgressBar").style.width = ((state.step + 1) / stepNames.length * 100) + "%";
+            (state.step < steps.length - 1 ? '<button type="button" class="btn primary" data-action="next">Continue</button>' : '<button type="button" class="btn" data-action="restart">Start over</button>') + '</div>';
+        document.getElementById("setupProgressText").textContent = "Step " + (state.step + 1) + " of " + steps.length + " · " + steps[state.step].name;
+        document.getElementById("setupProgressBar").style.width = ((state.step + 1) / steps.length * 100) + "%";
         wizard.focus({ preventScroll: true });
     }
 
@@ -362,7 +400,8 @@
         } else if (input.name === "devOpsPlatform") {
             state.devOpsPlatform = input.value;
             state.authType = "FederatedCredentials";
-        } else if (input.name === "authType") state.authType = input.value;
+        } else if (input.name === "moduleSource") state.moduleSource = input.value;
+        else if (input.name === "authType") state.authType = input.value;
         else if (input.name === "tenantGovernanceScope") state.tenantGovernanceScope = input.value;
         else if (input.name === "rbacSystems" || input.name === "integrations" || input.name === "protectionFeatures" || input.name === "tenantGovernanceCategories") {
             var list = input.name === "rbacSystems" ? state.rbacSystems : input.name === "integrations" ? state.integrations : input.name === "protectionFeatures" ? state.protectionFeatures : state.tenantGovernanceCategories;

@@ -8,7 +8,7 @@ ingestion, automated protection, and full rollout.
 > [!TIP]
 > **Quick start:** sign in interactively and try EntraOps right now - no configuration file needed:
 > ```powershell
-> Import-Module ./EntraOps   # repository clone - or: Install-Module EntraOps; Import-Module EntraOps
+> Import-Module ./EntraOps   # repository clone - or: Install-PSResource EntraOps; Import-Module EntraOps
 > Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
 > Invoke-EntraOpsPrivilegedEAM
 > ```
@@ -33,7 +33,7 @@ updated.
 | Import                                     | `Import-Module ./EntraOps`                                                  | `Import-Module EntraOps`                                                            |
 | Working folder                             | Repository root                                                             | `ENTRAOPS_ROOT`, the current folder with `EntraOpsConfig.json`, or `<home>/EntraOps` |
 | Classification templates, samples, reports | Included                                                                    | Downloaded with `Initialize-EntraOpsWorkspace`                                      |
-| Update                                     | `Update-EntraOps` or the Update-EntraOps workflow                           | `Update-Module EntraOps`, then `Initialize-EntraOpsWorkspace -Force`                |
+| Update                                     | `Update-EntraOps` or the Update-EntraOps workflow                           | `Update-PSResource EntraOps`, then `Initialize-EntraOpsWorkspace -Force`            |
 | Privilege History, Configuration Analyzer  | Supported (git history of the repository)                                   | Only in a working folder with git history                                           |
 
 Required modules (Az.Accounts, Az.Resources and Microsoft.Graph.Authentication) are installed
@@ -55,15 +55,18 @@ scheduled, automated setup, create your own repository from the template instead
 ### Option B: Install from the PowerShell Gallery {#install-from-powershell-gallery}
 
 ```powershell
-Install-Module EntraOps -Scope CurrentUser
+Install-PSResource EntraOps -Scope CurrentUser
 Import-Module EntraOps
 Initialize-EntraOpsWorkspace
 ```
 
+Update the module with `Update-PSResource EntraOps`. If you installed it with `Install-Module`, use
+`Update-Module EntraOps` instead.
+
 The module package contains no classification templates, samples or reporting apps.
 `Initialize-EntraOpsWorkspace` downloads them (`Classification`, `Samples` and `Reports` from the
 `main` branch) into the working folder. Pass `-Ref` with the release tag or commit that matches your
-module version, and use `-Force` after `Update-Module` to refresh them. It never writes into the
+module version, and use `-Force` after a module update to refresh them. It never writes into the
 module folder and never replaces `Classification/Global.json`, tenant classification folders or
 generated report data. `Update-EntraOps` only updates repository clones.
 
