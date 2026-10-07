@@ -123,6 +123,11 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
                 Write-Error $_
             }
         }
+
+        $assignmentManagerGroup = $ServiceGroups | Where-Object { $_.DisplayName -like "*ManagementPlane-Admins" -and $_.DisplayName -notlike "*-PIM-*" } | Select-Object -First 1
+        if ($assignmentManagerGroup) {
+            Write-Warning "$logPrefix ManagementPlane-Admins ($($assignmentManagerGroup.Id)) hold the permanent catalog role 'Access package assignment manager': members can directly assign every access package of the catalog without approval, including ManagementPlane-Admins. Catalog roles can't be PIM-protected; to avoid this standing permission, make the membership of ManagementPlane-Admins eligible with PIM for Groups."
+        }
     }
 
     end {

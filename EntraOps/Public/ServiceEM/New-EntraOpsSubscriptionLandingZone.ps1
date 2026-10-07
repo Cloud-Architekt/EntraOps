@@ -17,9 +17,9 @@
       the workload groups, catalog and resource group.
 
     Groups per scope (PerService): SG-<Scope>-CatalogPlane-Members,
-    SG-<Scope>-ManagementPlane-Members, SG-<Scope>-WorkloadPlane-Users, SG-<Scope>-WorkloadPlane-Admins,
-    SG-<Scope>-ControlPlane-Admins and SG-<Scope>-ManagementPlane-Admins (+ PIM staging group), and with
-    -CreateM365Group the Microsoft 365 group <Scope> Members.
+    SG-<Scope>-WorkloadPlane-Users, SG-<Scope>-WorkloadPlane-Admins,
+    SG-<Scope>-ControlPlane-Admins and SG-<Scope>-ManagementPlane-Admins (+ PIM staging group with
+    -EnablePIMStagingGroup), and with -CreateM365Group the Microsoft 365 group <Scope> Members.
 
     Delegation and governance model behaviour:
     - When GovernanceModel = "PerService" (default), per-service groups are created
@@ -40,37 +40,48 @@
 
 .PARAMETER WorkloadPlaneAdmin
     UPN of the workload plane admin, assigned to the admin access package in both scopes
-    (ManagementPlane-Admins or WorkloadPlane-Admins). Defaults to the signed-in identity only
-    when -AssignOwner is set.
+    (ManagementPlane-Admins or WorkloadPlane-Admins) and to CatalogPlane-Members. Defaults to the
+    signed-in identity only when -GroupOwnership is Eligible or Permanent.
 
-.PARAMETER AssignOwner
-    By default the module does not assign an owner to objects due to the 
-    potential privileged escalation concerns. Setting this switch sets the
-    WorkloadPlaneAdmin as owner of created groups.
+.PARAMETER GroupOwnership
+    Opt-in ownership of the WorkloadPlane groups (WorkloadPlane-Admins, WorkloadPlane-Users) in all scopes for
+    the workload plane admin: "None" (default), "Eligible" (PIM for Groups eligible owner) or "Permanent"
+    (owner set when the groups are created). Owners can add members directly, bypassing access package
+    approvals and access reviews, so a warning is shown. ControlPlane, ManagementPlane, CatalogPlane and
+    tenant-wide delegation groups never get an owner.
+
+.PARAMETER ControlPlaneAdmins
+    UPN(s) of the initial members of the per-service ControlPlane-Admins group (PerService model only;
+    in the Centralized model the tenant-wide group is managed outside ServiceEM). Added permanently,
+    because the Azure roles of the group are PIM-eligible; as PIM for Groups eligible members when no
+    Azure roles are assigned (-SkipAzureResourceGroup or the Sub scope of -DeploymentScope Both).
+    Without this parameter an Entra administrator adds the members in the portal.
+
+.PARAMETER CatalogPlaneMembers
+    UPN(s) assigned to the CatalogPlane-Members access package in every scope, in addition to the
+    WorkloadPlaneAdmin. CatalogPlane-Members (the administrator group) request WorkloadPlane-Admins and
+    ManagementPlane-Admins; non-members can't request CatalogPlane-Members. Ignored with AdministratorGroupId.
 
 .PARAMETER AddWorkloadPlaneAdminToUsers
     Also assigns the workload plane admin to the WorkloadPlane-Users access package, in addition to the
     admin access package. Not set by default, so admin accounts don't get data-plane user access.
     Defaults to EntraOpsConfig.ServiceEM.AddWorkloadPlaneAdminToUsers; an explicitly passed value wins.
 
-.PARAMETER NoPimEscalation
-    When set, skips PIM policy configuration and PIM eligible assignment creation
+.PARAMETER NoPimForGroups
+    When set, skips PIM for Groups policy configuration and eligible assignment creation. Alias: NoPimEscalation.
+
+.PARAMETER EnablePIMStagingGroup
+    Creates the PIM staging group SG-PIM-<Scope>-ManagementPlane-Admins with a permanent Owner assignment on
+    the Azure scope; ManagementPlane-Admins are eligible members and can activate unconstrained Owner via
+    PIM for Groups as an escalation path. Not created by default.
 
 .PARAMETER CreateM365Group
     Creates the Microsoft 365 group "<Scope>-<Prefix> Members" in each scope. It is meant for the
     collaboration of the service team: a group mailbox and calendar for email and ChatOps notifications
     and, when SharePoint Online or Microsoft Teams is used, a SharePoint site or team as knowledge base.
-    Intended members are the people behind the service's personas: WorkloadPlane users and admins,
-    ManagementPlane members and, in the PerService model, the ManagementPlane and ControlPlane admins.
-    ServiceEM doesn't add members to it and the group gets no PIM for Groups eligibilities or other
-    access; the admin and user groups are only granted through access packages. Not created by default.
+    The group is added to every access package of its scope, so all users assigned to an access package
+    become members. It gets no PIM for Groups eligibilities or other access. Not created by default.
     Defaults to EntraOpsConfig.ServiceEM.CreateM365Group; an explicitly passed value wins.
-
-.PARAMETER EnablePIMOwnerAssignment
-    When set, creates PIM for Groups eligible-owner assignments for the workload plane admin
-    in addition to the default eligible-member assignments for the Members group.
-    Disabled by default — use this switch to opt in.
-    for all groups in both scopes.
 
 .PARAMETER SkipAzureResourceGroup
     When set, no Azure resource group and no Azure role assignments are created.
@@ -192,7 +203,7 @@
 
     .EXAMPLE
     New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "Dev" `
-        -SkipAzureResourceGroup -NoPimEscalation
+        -SkipAzureResourceGroup -NoPimForGroups
 
     Creates all Entra ID groups, the EM catalog and access packages for the Rg-Dev
     scope without Azure resources and without PIM. Useful for development
@@ -234,13 +245,19 @@ function New-EntraOpsSubscriptionLandingZone {
 
         [switch]$AddWorkloadPlaneAdminToUsers,
 
-        [switch]$AssignOwner,
+        [ValidateSet("None", "Eligible", "Permanent")]
+        [string]$GroupOwnership = "None",
 
-        [switch]$NoPimEscalation,
+        [string[]]$ControlPlaneAdmins,
+
+        [string[]]$CatalogPlaneMembers,
+
+        [Alias('NoPimEscalation')]
+        [switch]$NoPimForGroups,
+
+        [switch]$EnablePIMStagingGroup,
 
         [switch]$CreateM365Group,
-
-        [switch]$EnablePIMOwnerAssignment,
 
         [switch]$SkipAzureResourceGroup,
 
@@ -284,7 +301,6 @@ function New-EntraOpsSubscriptionLandingZone {
                 ServiceRole = @(
                     [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"},
                     [pscustomobject]@{accessLevel = "CatalogPlane"; name = "Members"; groupType = ""},
-                    [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Members"; groupType = ""},
                     [pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = ""}
                 )
             },
@@ -293,7 +309,6 @@ function New-EntraOpsSubscriptionLandingZone {
                 ServiceRole = @(
                     [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"},
                     [pscustomobject]@{accessLevel = "CatalogPlane"; name = "Members"; groupType = ""},
-                    [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Members"; groupType = ""},
                     [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Users"; groupType = ""},
                     [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Admins"; groupType = ""}
                 )
@@ -317,7 +332,6 @@ function New-EntraOpsSubscriptionLandingZone {
                     ServiceRole = @(
                         [pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified"},
                         [pscustomobject]@{accessLevel = "CatalogPlane"; name = "Members"; groupType = ""},
-                        [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Members"; groupType = ""},
                         [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Users"; groupType = ""},
                         [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Admins"; groupType = ""},
                         [pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = ""}
@@ -442,7 +456,6 @@ function New-EntraOpsSubscriptionLandingZone {
                     -GroupId $ControlPlaneDelegationGroupId `
                     -DefaultGroupName $ControlPlaneGroupName `
                     -ConfigKey "ControlPlaneDelegationGroupId" `
-                    -AssignOwner:$AssignOwner `
                     -logPrefix $logPrefix
                 $SkipControlPlaneDelegation = $true
             } catch {
@@ -458,7 +471,6 @@ function New-EntraOpsSubscriptionLandingZone {
                         -GroupId $ManagementPlaneDelegationGroupId `
                         -DefaultGroupName $ManagementPlaneGroupName `
                         -ConfigKey "ManagementPlaneDelegationGroupId" `
-                        -AssignOwner:$AssignOwner `
                         -logPrefix $logPrefix
                     $SkipManagementPlaneDelegation = $true
                 } catch {
@@ -493,7 +505,6 @@ function New-EntraOpsSubscriptionLandingZone {
                     $component.ServiceRole = @($component.ServiceRole | Where-Object {
                         -not (($_.accessLevel -eq "ControlPlane" -and $_.name -eq "Admins") -or
                               ($_.accessLevel -eq "ManagementPlane" -and $_.name -eq "Admins") -or
-                              ($_.accessLevel -eq "ManagementPlane" -and $_.name -eq "Members") -or
                               ($_.accessLevel -eq "CatalogPlane" -and $_.name -eq "Members"))
                     })
                 }
@@ -508,7 +519,6 @@ function New-EntraOpsSubscriptionLandingZone {
                     -GroupId $ControlPlaneDelegationGroupId `
                     -DefaultGroupName $ControlPlaneGroupName `
                     -ConfigKey "ControlPlaneDelegationGroupId" `
-                    -AssignOwner:$AssignOwner `
                     -logPrefix $logPrefix
                 $SkipControlPlaneDelegation = $true
             }
@@ -519,7 +529,6 @@ function New-EntraOpsSubscriptionLandingZone {
                     -GroupId $ManagementPlaneDelegationGroupId `
                     -DefaultGroupName $ManagementPlaneGroupName `
                     -ConfigKey "ManagementPlaneDelegationGroupId" `
-                    -AssignOwner:$AssignOwner `
                     -logPrefix $logPrefix
                 $SkipManagementPlaneDelegation = $true
             }
@@ -555,16 +564,24 @@ function New-EntraOpsSubscriptionLandingZone {
     process {
         Write-Verbose "$logPrefix Processing LZ"
 
+        # Approvers of the planes created in an earlier scope, for scopes without their own group (-DeploymentScope Both)
+        $approverGroupIds = @{ ControlPlane = ""; ManagementPlane = "" }
         foreach ($component in $LandingZoneComponents) {
             Write-Verbose "$logPrefix Processing LZ Role: $($component.Role)"
+            $hasRole = @{}
+            foreach ($plane in 'ControlPlane', 'ManagementPlane') {
+                $hasRole[$plane] = [bool]($component.ServiceRole | Where-Object { $_.accessLevel -eq $plane -and $_.name -eq "Admins" })
+            }
+            $hasControlPlaneAdmins = $hasRole.ControlPlane
 
             $splatServiceBootstrap = @{
                 ServiceName                      = $component.Role + "-" + $DeploymentPrefix
                 GroupPrefix                      = $GroupPrefix
                 AddWorkloadPlaneAdminToUsers     = $AddWorkloadPlaneAdminToUsers
-                NoPimEscalation                  = $NoPimEscalation
+                NoPimForGroups                   = $NoPimForGroups
+                EnablePIMStagingGroup            = $EnablePIMStagingGroup
                 CreateM365Group                  = $CreateM365Group
-                EnablePIMOwnerAssignment         = $EnablePIMOwnerAssignment
+                GroupOwnership                   = $GroupOwnership
                 AzureRegion                      = $AzureRegion
                 ServiceRoles                     = $component.ServiceRole
                 SkipControlPlaneDelegation       = $SkipControlPlaneDelegation
@@ -597,11 +614,32 @@ function New-EntraOpsSubscriptionLandingZone {
             if ($PSBoundParameters.ContainsKey('WorkloadPlaneAdmin') -and -not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdmin)) {
                 $splatServiceBootstrap.WorkloadPlaneAdmin = $WorkloadPlaneAdmin
             }
-            if ($AssignOwner) {
-                $splatServiceBootstrap.AssignOwner = $AssignOwner
+            if ($PSBoundParameters.ContainsKey('CatalogPlaneMembers')) {
+                $splatServiceBootstrap.CatalogPlaneMembers = $CatalogPlaneMembers
+            }
+            if ($hasControlPlaneAdmins -and $PSBoundParameters.ContainsKey('ControlPlaneAdmins')) {
+                $splatServiceBootstrap.ControlPlaneAdmins = $ControlPlaneAdmins
+            }
+            if (-not $hasRole.ControlPlane -and $approverGroupIds.ControlPlane) {
+                $splatServiceBootstrap.ControlPlaneApproverGroupId = $approverGroupIds.ControlPlane
+            }
+            if (-not $hasRole.ManagementPlane -and $approverGroupIds.ManagementPlane) {
+                $splatServiceBootstrap.ManagementPlaneApproverGroupId = $approverGroupIds.ManagementPlane
             }
 
-            $report += New-EntraOpsServiceBootstrap @splatServiceBootstrap
+            $componentReport = New-EntraOpsServiceBootstrap @splatServiceBootstrap
+            $report += $componentReport
+            if ($componentReport -is [System.Collections.IDictionary] -and $componentReport['Groups']) {
+                foreach ($plane in 'ControlPlane', 'ManagementPlane') {
+                    if (-not $hasRole[$plane]) { continue }
+                    $planeGroup = @($componentReport['Groups'] | Where-Object { $_.DisplayName -like "*-$plane-Admins" -and $_.DisplayName -notlike "*-PIM-*" }) | Select-Object -First 1
+                    if ($planeGroup) { $approverGroupIds[$plane] = $planeGroup.Id }
+                }
+            }
+            }
+
+        if ($PSBoundParameters.ContainsKey('ControlPlaneAdmins') -and -not ($LandingZoneComponents | Where-Object { $_.ServiceRole | Where-Object { $_.accessLevel -eq "ControlPlane" -and $_.name -eq "Admins" } })) {
+            Write-Warning "$logPrefix No per-service ControlPlane-Admins group is created (governance model '$governanceModelValue' or delegated ControlPlane); -ControlPlaneAdmins is ignored"
         }
 
         return $report

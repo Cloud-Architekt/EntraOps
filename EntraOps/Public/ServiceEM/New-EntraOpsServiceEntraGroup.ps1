@@ -6,8 +6,8 @@
     Creates one Entra group per entry in the ServiceRoles object. Security groups
     are created for all roles with an empty or set groupType. Microsoft 365
     (Unified) groups are created for roles with groupType = "Unified".
-    When NoPimEscalation is not set, PIM staging groups (*-PIM-*) are
-    also created for each non-Members admin group to support PIM for Groups.
+    With -EnablePIMStagingGroup (and without NoPimForGroups), a PIM staging group (*-PIM-*) is
+    also created for the ManagementPlane-Admins group to support PIM for Groups.
 
     Security groups are automatically created as role-assignable (isAssignableToRole = $true)
     because PIM for Groups requires this property. Unified groups cannot be role-assignable
@@ -30,8 +30,8 @@
     "https://graph.microsoft.com/v1.0/users/<ObjectId>"
     
     This can also be provided as just the ObjectId (GUID), and the function
-    will automatically construct the proper OData bind URL. Omit to create
-    groups without owners.
+    will automatically construct the proper OData bind URL. Only set as owner of
+    WorkloadPlane groups; omit to create groups without owners.
 
 .PARAMETER GroupPrefix
     Prefix prepended to all group DisplayNames and MailNicknames. Defaults to "SG".
@@ -43,9 +43,12 @@
     EntraOps service roles object. Each row produces one group. The accessLevel,
     name, and groupType columns control the group variant.
 
-.PARAMETER NoPimEscalation
-    When set, skips creation of PIM staging groups (*-PIM-*). Use this when PIM
-    for Groups is not required (e.g. access-package-only elevation).
+.PARAMETER NoPimForGroups
+    When set, no PIM staging group (*-PIM-*) is created or looked up, even with -EnablePIMStagingGroup.
+    Alias: NoPimEscalation.
+
+.PARAMETER EnablePIMStagingGroup
+    Creates the PIM staging group SG-PIM-<ServiceName>-ManagementPlane-Admins. Not created by default.
 
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
@@ -56,17 +59,16 @@
         -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/00000000-0000-0000-0000-000000000001" `
         -ServiceRoles $roles
 
-    Creates all security and Microsoft 365 groups for "MyService", including PIM
-    staging groups. Returns all group objects.
+    Creates all security and Microsoft 365 groups for "MyService". Returns all group objects.
 
 .EXAMPLE
     New-EntraOpsServiceEntraGroup `
         -ServiceName "MyService" `
         -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/00000000-0000-0000-0000-000000000001" `
         -ServiceRoles $roles `
-        -NoPimEscalation
+        -EnablePIMStagingGroup
 
-    Creates groups without PIM staging groups.
+    Creates the groups including the PIM staging group of ManagementPlane-Admins.
 
 #>
 function New-EntraOpsServiceEntraGroup {
@@ -84,12 +86,16 @@ function New-EntraOpsServiceEntraGroup {
         [Parameter(Mandatory)]
         [psobject[]]$ServiceRoles,
 
-        [switch]$NoPimEscalation,
+        [Alias('NoPimEscalation')]
+        [switch]$NoPimForGroups,
+
+        [switch]$EnablePIMStagingGroup,
 
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
     begin {
+        $createStagingGroup = $EnablePIMStagingGroup -and -not $NoPimForGroups
         # Normalize WorkloadPlaneAdmin to the OData bind format
         if (-not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdmin)) {
             # Check if WorkloadPlaneAdmin is already in OData URL format (users or servicePrincipals)
@@ -107,7 +113,7 @@ function New-EntraOpsServiceEntraGroup {
                 }
             }
         } else {
-            Write-Verbose "$logPrefix No group owner requested (-AssignOwner not set); creating groups without owners"
+            Write-Verbose "$logPrefix No group owner requested; creating groups without owners"
         }
 
         try{
@@ -115,7 +121,7 @@ function New-EntraOpsServiceEntraGroup {
             $groups = @()
             Write-Verbose "$logPrefix Looking up Groups"
             $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
-            if(-not $NoPimEscalation){
+            if ($createStagingGroup) {
                 $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:PIM.$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
             }
         }catch{
@@ -126,9 +132,6 @@ function New-EntraOpsServiceEntraGroup {
         $groupParams = @{
             description = ""
             securityEnabled = $true
-        }
-        if (-not [string]::IsNullOrWhiteSpace($ownerUri)) {
-            $groupParams["owners@odata.bind"] = @($ownerUri)
         }
 
         # Unified (Microsoft 365) groups cannot be role-assignable
@@ -204,6 +207,11 @@ function New-EntraOpsServiceEntraGroup {
             }
             
             Write-Verbose "$logPrefix Validated group parameters for '$($ServiceRole.Name)'"
+            # Owners can manage membership, so only WorkloadPlane groups get one
+            $secParams.Remove("owners@odata.bind")
+            if ($ServiceRole.accessLevel -eq "WorkloadPlane" -and -not [string]::IsNullOrWhiteSpace($ownerUri)) {
+                $secParams["owners@odata.bind"] = @($ownerUri)
+            }
             try{
                 if($ServiceRole.groupType -eq "Unified" -and $groups.MailNickname -notcontains $unifiedParams.MailNickname){
                     Write-Verbose "$logPrefix $($unifiedParams|ConvertTo-Json -Compress)"
@@ -211,11 +219,12 @@ function New-EntraOpsServiceEntraGroup {
                 }elseif($ServiceRole.groupType -like "" -and $groups.MailNickname -notcontains $secParams.MailNickname){
                     Write-Verbose "$logPrefix $($secParams|ConvertTo-Json -Compress)"
                     $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
-                    if($ServiceRole.accessLevel -eq "ManagementPlane" -and $ServiceRole.name -eq "Admins" -and -not $NoPimEscalation){
+                }
+                $stagingNickname = "PIM.$ServiceName.$($ServiceRole.accessLevel).$($ServiceRole.Name)"
+                if ($ServiceRole.accessLevel -eq "ManagementPlane" -and $ServiceRole.name -eq "Admins" -and $createStagingGroup -and $groups.MailNickname -notcontains $stagingNickname) {
                         $secParams.DisplayName = "$($GroupPrefix)$($GroupNamingDelimiter)PIM$($GroupNamingDelimiter)$ServiceName$($GroupNamingDelimiter)$($ServiceRole.accessLevel)$($GroupNamingDelimiter)$($ServiceRole.Name)"
-                        $secParams.MailNickname = "PIM.$ServiceName.$($ServiceRole.accessLevel).$($ServiceRole.Name)"
+                    $secParams.MailNickname = $stagingNickname
                         $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
-                    }
                 }
             }catch{
                 throw "Failed to create group for service role '$($ServiceRole.accessLevel) $($ServiceRole.Name)': $($_.Exception.Message)"
@@ -230,7 +239,7 @@ function New-EntraOpsServiceEntraGroup {
         $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Groups" -logPrefix $logPrefix -Condition {
             $check.Groups = @()
             $check.Groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
-            if(-not $NoPimEscalation){
+            if ($createStagingGroup) {
                 $check.Groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:PIM.$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
             }
             $chkIds = @($check.Groups.id | Where-Object { $_ })

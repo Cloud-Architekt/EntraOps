@@ -235,7 +235,7 @@ Describe "New-EntraOpsServiceEntraGroup" {
             $result.MailNickname | Should -Contain "TestService.ControlPlane.Admins"
         }
         
-        It "Should create PIM staging group when NoPimEscalation is not set" {
+        It "Should create PIM staging group with EnablePIMStagingGroup" {
             $roles = @(
                 [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = "" }
             )
@@ -243,7 +243,8 @@ Describe "New-EntraOpsServiceEntraGroup" {
             $result = New-EntraOpsServiceEntraGroup `
                 -ServiceName "TestService" `
                 -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
-                -ServiceRoles $roles
+                -ServiceRoles $roles `
+                -EnablePIMStagingGroup
             
             $result | Should -Not -BeNullOrEmpty
             $result.MailNickname | Should -Contain "PIM.TestService.ManagementPlane.Admins"
@@ -258,6 +259,7 @@ Describe "New-EntraOpsServiceEntraGroup" {
                 -ServiceName "TestService" `
                 -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                 -ServiceRoles $roles `
+                -EnablePIMStagingGroup `
                 -NoPimEscalation
             
             $result | Should -Not -BeNullOrEmpty

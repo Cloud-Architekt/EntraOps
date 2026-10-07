@@ -7,7 +7,8 @@
     corresponding access package by name and registers the group's Member
     catalog resource role into that package. Package names are matched
     using the pattern AP-<ServiceName>-<AccessLevel>-<RoleName>, derived
-    from the group's DisplayName.
+    from the group's DisplayName. The Microsoft 365 group (if created) is added
+    to every access package, so all assigned users become members of it.
 
     Idempotent: existing resource role scope assignments are detected and
     skipped to avoid duplicates.
@@ -87,20 +88,15 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
         Write-Verbose "$logPrefix Beginning EM Access Package Resource Assignment"
 
         Write-Verbose "$logPrefix Processing Access Package Assignments for $(($ServiceGroups|Measure-Object).Count) Groups"
-        foreach($group in $ServiceGroups){
+        $groupPackagePairs = foreach($group in $ServiceGroups){
             # Skip PIM groups and delegated groups — delegated groups are not catalog resources
             if($group.DisplayName -like "*-PIM-*"){ continue }
             if($group.IsDelegated -eq $true){ continue }
 
-            $resource = $ServiceCatalogResources|Where-Object{`
-                $_.DisplayName -eq $group.DisplayName -and `
-                $_.OriginSystem -eq "AadGroup"
-            }
-            if(-not $resource){
-                Write-Verbose "$logPrefix No catalog resource found for group '$($group.DisplayName)' — skipping"
+            if($group.PSObject.Properties.Name -contains 'GroupTypes' -and $group.GroupTypes -contains "Unified"){
+                foreach($unifiedPackage in $ServicePackages){ [pscustomobject]@{ Group = $group; Package = $unifiedPackage } }
                 continue
             }
-            Write-Verbose "$logPrefix Processing Access Package Resource ID: $($resource.Id)"
 
             # Derive the expected access package name from the group display name.
             # Groups are named: {Prefix}{Delim}{ServiceName}{Delim}{Plane}{Delim}{Role}
@@ -120,18 +116,38 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                 Write-Verbose "$logPrefix No matching Access Package found for group '$($group.DisplayName)', skipping"
                 continue
             }
+            [pscustomobject]@{ Group = $group; Package = $package }
+        }
+
+        $resourceRolesByResource = @{}
+        foreach($pair in @($groupPackagePairs)){
+            $group = $pair.Group
+            $package = $pair.Package
+
+            $resource = $ServiceCatalogResources|Where-Object{`
+                $_.DisplayName -eq $group.DisplayName -and `
+                $_.OriginSystem -eq "AadGroup"
+            }
+            if(-not $resource){
+                Write-Verbose "$logPrefix No catalog resource found for group '$($group.DisplayName)' — skipping"
+                continue
+            }
+            Write-Verbose "$logPrefix Processing Access Package Resource ID: $($resource.Id)"
             Write-Verbose "$logPrefix Processing Access Package ID: $($package.Id)"
 
             #Get available roles for resource in Catalog
             #Used to validate if Access Package exists for resource role
-            try{
-                Write-Verbose "$logPrefix Getting Catalog Resource Roles for Resource ID: $($resource.id)"
-                $resourceRoles = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$ServiceCatalogId/resourceRoles?`$filter=originSystem eq 'AadGroup' and resource/id eq '$($resource.id)'&`$expand=resource" -OutputType PSObject
-            }catch{
-                Write-Verbose "$logPrefix Failed to get Catalog Resource Roles — skipping group '$($group.DisplayName)'"
-                Write-Error $_
-                continue
+            if(-not $resourceRolesByResource.ContainsKey($resource.Id)){
+                try{
+                    Write-Verbose "$logPrefix Getting Catalog Resource Roles for Resource ID: $($resource.id)"
+                    $resourceRolesByResource[$resource.Id] = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$ServiceCatalogId/resourceRoles?`$filter=originSystem eq 'AadGroup' and resource/id eq '$($resource.id)'&`$expand=resource" -OutputType PSObject
+                }catch{
+                    Write-Verbose "$logPrefix Failed to get Catalog Resource Roles — skipping group '$($group.DisplayName)'"
+                    Write-Error $_
+                    continue
+                }
             }
+            $resourceRoles = $resourceRolesByResource[$resource.Id]
             if(-not $resourceRoles){
                 Write-Verbose "$logPrefix No catalog resource roles returned for '$($group.DisplayName)' (transient?) — skipping"
                 continue
@@ -197,7 +213,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                 Write-Verbose "$logPrefix Consistency check lookup failed (transient?) — retrying: $($_.Exception.Message)"
                 return $false
             }
-            $checkAssignments = @($check.Packages.ResourceRoleScopes | ForEach-Object {"$($_.Role.OriginId)_$($_.Scope.OriginId)"})
+            $checkAssignments = @($check.Packages.ResourceRoleScopes | ForEach-Object {"$($_.Role.OriginId)_$($_.Scope.OriginId)"} | Sort-Object -Unique)
             (Compare-Object $expectedAssignments $checkAssignments | Measure-Object).Count -eq 0
         }
         if(-not $confirmed){

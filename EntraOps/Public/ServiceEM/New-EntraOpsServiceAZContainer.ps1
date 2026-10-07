@@ -10,10 +10,10 @@
     subscription of the current Azure context. The following assignments
     are created by default (rbacModel=PIM):
 
-    - WorkloadPlane-Admins: permanent Reader, PIM eligible Contributor and PIM eligible
+    - WorkloadPlane-Admins: permanent Reader and PIM eligible
       constrained Role Based Access Control Administrator (may only assign the
-      ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds to WorkloadPlane-Users)
-    - ManagementPlane-Members: permanent Reader (skipped if inherited from parent scope)
+      ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds to WorkloadPlane-Users); resource-level
+      roles are assigned to them by ManagementPlane-Admins
     - ManagementPlane-Admins: PIM eligible Contributor (skipped if inherited) and PIM eligible
       constrained Role Based Access Control Administrator (may assign any role except the
       ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds to WorkloadPlane-Admins)
@@ -43,8 +43,9 @@
     ControlPlaneDelegationGroupId is provided.
 
 .PARAMETER pimForGroups
-    When set together with rbacModel Azure or Both, assigns Owner permanently to
-    the PIM staging group (*-PIM-*). Not used in the default PIM-only model.
+    Assigns Owner permanently to the PIM staging group (*-PIM-*). ManagementPlane-Admins are eligible
+    members of the staging group, so activating the membership via PIM for Groups grants unconstrained
+    Owner as an escalation path beyond the constrained delegation. Set by -EnablePIMStagingGroup.
 
 .PARAMETER Location
     Azure region for the resource group (e.g. "westeurope", "northeurope"). Not used for -AzureScope Subscription.
@@ -61,8 +62,8 @@
         -Location "westeurope"
 
     Creates RG-MyService in West Europe and assigns the default PIM eligible roles:
-    Contributor and constrained RBAC Administrator to ManagementPlane-Admins and
-    WorkloadPlane-Admins, User Access Administrator to ControlPlane-Admins, plus
+    Contributor and constrained RBAC Administrator to ManagementPlane-Admins, constrained RBAC
+    Administrator to WorkloadPlane-Admins, User Access Administrator to ControlPlane-Admins, plus
     permanent Reader to WorkloadPlane-Admins.
 
 .EXAMPLE
@@ -154,7 +155,6 @@ function New-EntraOpsServiceAZContainer {
             Write-Error $_
         }
         $pimAdmins  = $ServiceGroups|Where-Object{$_.DisplayName -like "*-PIM-*"}
-        $members    = $ServiceGroups|Where-Object{$_.DisplayName -like "*-ManagementPlane-Members"}
         if ($SkipControlPlaneDelegation) {
             Write-Verbose "$logPrefix Skipping Control Plane delegation setup"
         } else {
@@ -193,6 +193,24 @@ function New-EntraOpsServiceAZContainer {
     process {
         Write-Verbose "$logPrefix Beginning AZ Container"
 
+        if ($pimForGroups -and $pimAdmins) {
+            $pimExisting = @()
+            try {
+                $pimExisting = @(Get-AzRoleAssignment -Scope $scopeId -ObjectId $pimAdmins.Id)
+            } catch {
+                Write-Verbose "$logPrefix Failed to check existing Owner assignment for the PIM staging group: $_"
+            }
+            if ("$($pimAdmins.Id)_$($owner.Id)" -notin ($pimExisting | ForEach-Object { "$($_.ObjectId)_$($_.RoleDefinitionId)" })) {
+                try {
+                    Write-Verbose "$logPrefix Creating Owner Role Assignment for PIM staging group: $($pimAdmins.Id)"
+                    New-AzRoleAssignment -Scope $scopeId -RoleDefinitionName $owner.Name -ObjectId $pimAdmins.Id | Out-Null
+                } catch {
+                    Write-Verbose "$logPrefix Failed to create role assignment"
+                    Write-Error $_
+                }
+            }
+        }
+
         if($rbacModel -in ("Azure","Both")){
             $rbacSet = @()
             try{
@@ -204,18 +222,6 @@ function New-EntraOpsServiceAZContainer {
             }
             $rbacSplat = @{
                 Scope = $scopeId
-            }
-            if($pimForGroups -and "$($pimAdmins.Id)_$($owner.Id)" -notin ($rbacSet|ForEach-Object{"$($_.ObjectId)_$($_.RoleDefinitionId)"})){
-                $rbacSplat.RoleDefinitionName = $owner.Name
-                $rbacSplat.ObjectId = $pimAdmins.Id
-                try{
-                    Write-Verbose "$logPrefix Creating Role Assignment for ID: $($pimAdmins.Id)"
-                    Write-Verbose "$logPrefix $($rbacSplat|ConvertTo-Json -Compress)"
-                    $rbacSet += New-AzRoleAssignment @rbacSplat
-                }catch{
-                    Write-Verbose "$logPrefix Failed to create role assignment"
-                    Write-Error $_
-                }
             }
 
             # Permanent Reader for ManagementPlane-Admins (with inheritance check)
@@ -335,12 +341,11 @@ function New-EntraOpsServiceAZContainer {
                     PrincipalId = $control.Id
                 }
             }
-            if($workloadAdmins -and "$($contributor.Name)_$($workloadAdmins.Id)" -notin $eligibleRbacSet){
-                $toAdd += @{
-                    RoleDefinitionId = "$roleDefinitionPrefix/$($contributor.Id)"
-                    RoleId = $contributor.Id
-                    PrincipalId = $workloadAdmins.Id
+            if ($workloadAdmins -and "$($contributor.Name)_$($workloadAdmins.Id)" -in $eligibleRbacSet) {
+                Write-Warning "$logPrefix WorkloadPlane-Admins ($($workloadAdmins.Id)) have an eligible Contributor assignment on $scopeId from an earlier version. WorkloadPlane-Admins only get Reader and the constrained RBAC Administrator; remove the Contributor eligibility."
                 }
+            if ($workloadAdmins -and -not $management) {
+                Write-Warning "$logPrefix No ManagementPlane-Admins for $scopeId; nobody gets Contributor from ServiceEM and WorkloadPlane-Admins stay restricted to Reader and the constrained RBAC Administrator."
             }
 
             # Constrained RBAC Administrator for ManagementPlane-Admins

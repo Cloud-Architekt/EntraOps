@@ -6,7 +6,8 @@
     Creates PIM for Groups eligible assignments with no expiration:
     - PIM staging groups (mailNickname PIM.<ServiceName>.<AccessLevel>.<Role>): the base group with the
       same AccessLevel and Role (e.g. ManagementPlane-Admins) becomes eligible member.
-    - With -EnableOwnerAssignment: the workload plane admin becomes eligible owner of each admin and user group.
+    - With -EnableOwnerAssignment: the workload plane admin becomes eligible owner of each WorkloadPlane group
+      (WorkloadPlane-Admins and WorkloadPlane-Users); never of ControlPlane/ManagementPlane or staging groups.
 
     The Microsoft 365 group (<ServiceName> Members) never gets eligibilities; access to the admin and
     user groups is granted through access packages.
@@ -24,11 +25,11 @@
 .PARAMETER WorkloadPlaneAdminPrincipalId
     Object ID of the workload plane admin. Required when -EnableOwnerAssignment is set.
     When provided, an eligible-owner assignment is created so the workload plane admin
-    can activate ownership of each admin group via PIM.
+    can activate ownership of each WorkloadPlane group via PIM.
 
 .PARAMETER EnableOwnerAssignment
     When set, creates PIM for Groups eligible-owner assignments for the workload plane admin
-    on each admin and user group. Disabled by default — use this switch to opt in.
+    on each WorkloadPlane group. Disabled by default (-GroupOwnership Eligible).
 
 .PARAMETER GroupPrefix
     Prefix used in group DisplayNames (e.g. "SG"). Must match the prefix
@@ -67,9 +68,10 @@ function New-EntraOpsServicePIMAssignment {
     begin {
         $pimEligibilities = @()
         $isStagingGroup = { param($group) $group.MailNickname -like "PIM.*" -or $group.DisplayName -like "*-PIM-*" }
+        $isOwnerTarget = { param($group) $EnableOwnerAssignment -and $group.DisplayName -like "*-WorkloadPlane-*" -and -not (& $isStagingGroup $group) }
         $targetGroups = @($ServiceGroups | Where-Object {
                 $_.DisplayName -notlike "*Members*" -and $_.GroupTypes -notcontains "Unified" -and
-                ((& $isStagingGroup $_) -or $EnableOwnerAssignment)
+                ((& $isStagingGroup $_) -or (& $isOwnerTarget $_))
             })
 
         $pimEligibilityParams = @{
@@ -128,7 +130,7 @@ function New-EntraOpsServicePIMAssignment {
             }
 
             # Eligible-owner assignment for the workload plane admin (opt-in only).
-            if($EnableOwnerAssignment -and -not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdminPrincipalId)){
+            if((& $isOwnerTarget $group) -and -not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdminPrincipalId)){
                 $ownerParams = @{
                     accessId    = "owner"
                     principalId = $WorkloadPlaneAdminPrincipalId
