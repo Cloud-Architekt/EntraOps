@@ -104,8 +104,7 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
         Write-Verbose "$logPrefix Processing $(($catalogRoles|Measure-Object).Count) catalog resource role assignments"
         foreach($catalogRole in $catalogRoles){
             $catalogRoleParams = @{
-                # PIM staging groups (SG-PIM-*) share the ManagementPlane-Admins suffix
-                principalId = ($ServiceGroups|Where-Object{$_.DisplayName -like "$($catalogRole.filter)" -and $_.DisplayName -notlike "*-PIM-*"}).Id
+                principalId = ($ServiceGroups|Where-Object{$_.DisplayName -like "$($catalogRole.filter)"}).Id
                 roleDefinitionId = $catalogRole.id
                 appScopeId = "/AccessPackageCatalog/$($ServiceCatalogId)"
             }
@@ -124,9 +123,11 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
             }
         }
 
-        $assignmentManagerGroup = $ServiceGroups | Where-Object { $_.DisplayName -like "*ManagementPlane-Admins" -and $_.DisplayName -notlike "*-PIM-*" } | Select-Object -First 1
-        if ($assignmentManagerGroup) {
-            Write-Warning "$logPrefix ManagementPlane-Admins ($($assignmentManagerGroup.Id)) hold the permanent catalog role 'Access package assignment manager': members can directly assign every access package of the catalog without approval, including ManagementPlane-Admins. Catalog roles can't be PIM-protected; to avoid this standing permission, make the membership of ManagementPlane-Admins eligible with PIM for Groups."
+        $assignmentManagerGroup = $ServiceGroups | Where-Object { $_.DisplayName -like "*ManagementPlane-Admins" } | Select-Object -First 1
+        if ($assignmentManagerGroup.IsDelegated) {
+            Write-Verbose "$logPrefix Delegated ManagementPlane-Admins ($($assignmentManagerGroup.Id)) hold 'Access package assignment manager'; their own membership isn't part of this catalog"
+        } elseif ($assignmentManagerGroup) {
+            Write-Warning "$logPrefix ManagementPlane-Admins ($($assignmentManagerGroup.Id)) hold the permanent catalog role 'Access package assignment manager' on the catalog that also contains their own access package: members can directly assign every access package of the catalog without approval and add further ManagementPlane admins without the approval of ControlPlane-Admins (escalation within the ManagementPlane tier). Use -EnablePimForGroups to make this permission just-in-time, or the Centralized governance model (-GovernanceModel Centralized), where ManagementPlane-Admins is a tenant-wide group that is governed outside the service catalogs."
         }
     }
 

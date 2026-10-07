@@ -6,11 +6,9 @@
     Creates one Entra group per entry in the ServiceRoles object. Security groups
     are created for all roles with an empty or set groupType. Microsoft 365
     (Unified) groups are created for roles with groupType = "Unified".
-    With -EnablePIMStagingGroup (and without NoPimForGroups), a PIM staging group (*-PIM-*) is
-    also created for the ManagementPlane-Admins group to support PIM for Groups.
 
     Security groups are automatically created as role-assignable (isAssignableToRole = $true)
-    because PIM for Groups requires this property. Unified groups cannot be role-assignable
+    to protect their members and owners from less privileged administrators. Unified groups cannot be role-assignable
     and are created with isAssignableToRole = $false. Creating role-assignable groups
     requires the caller to have Privileged Role Administrator or Global Administrator.
 
@@ -43,13 +41,6 @@
     EntraOps service roles object. Each row produces one group. The accessLevel,
     name, and groupType columns control the group variant.
 
-.PARAMETER NoPimForGroups
-    When set, no PIM staging group (*-PIM-*) is created or looked up, even with -EnablePIMStagingGroup.
-    Alias: NoPimEscalation.
-
-.PARAMETER EnablePIMStagingGroup
-    Creates the PIM staging group SG-PIM-<ServiceName>-ManagementPlane-Admins. Not created by default.
-
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
 
@@ -60,15 +51,6 @@
         -ServiceRoles $roles
 
     Creates all security and Microsoft 365 groups for "MyService". Returns all group objects.
-
-.EXAMPLE
-    New-EntraOpsServiceEntraGroup `
-        -ServiceName "MyService" `
-        -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/00000000-0000-0000-0000-000000000001" `
-        -ServiceRoles $roles `
-        -EnablePIMStagingGroup
-
-    Creates the groups including the PIM staging group of ManagementPlane-Admins.
 
 #>
 function New-EntraOpsServiceEntraGroup {
@@ -86,16 +68,14 @@ function New-EntraOpsServiceEntraGroup {
         [Parameter(Mandatory)]
         [psobject[]]$ServiceRoles,
 
-        [Alias('NoPimEscalation')]
-        [switch]$NoPimForGroups,
-
-        [switch]$EnablePIMStagingGroup,
-
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
     begin {
-        $createStagingGroup = $EnablePIMStagingGroup -and -not $NoPimForGroups
+        # ServiceName is part of mailNickname and of the $search query below
+        if ($ServiceName -notmatch '^[A-Za-z0-9_.-]+$') {
+            throw "ServiceName '$ServiceName' is invalid. Use letters, digits, '_', '.' or '-'."
+        }
         # Normalize WorkloadPlaneAdmin to the OData bind format
         if (-not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdmin)) {
             # Check if WorkloadPlaneAdmin is already in OData URL format (users or servicePrincipals)
@@ -121,9 +101,8 @@ function New-EntraOpsServiceEntraGroup {
             $groups = @()
             Write-Verbose "$logPrefix Looking up Groups"
             $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
-            if ($createStagingGroup) {
-                $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:PIM.$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
-            }
+            # $search also matches tokens inside the nickname (e.g. PIM.<ServiceName>.*)
+            $groups = @($groups | Where-Object { $_.MailNickname -like "$ServiceName.*" })
         }catch{
             Write-Verbose "$logPrefix Failed processing Groups"
             Write-Error $_
@@ -144,7 +123,6 @@ function New-EntraOpsServiceEntraGroup {
             #"members@odata.bind" = $members
         }
 
-        # Security groups used for PIM must be role-assignable
         $secParams = $groupParams + @{
             displayName = ""
             mailNickname = ""
@@ -220,12 +198,6 @@ function New-EntraOpsServiceEntraGroup {
                     Write-Verbose "$logPrefix $($secParams|ConvertTo-Json -Compress)"
                     $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
                 }
-                $stagingNickname = "PIM.$ServiceName.$($ServiceRole.accessLevel).$($ServiceRole.Name)"
-                if ($ServiceRole.accessLevel -eq "ManagementPlane" -and $ServiceRole.name -eq "Admins" -and $createStagingGroup -and $groups.MailNickname -notcontains $stagingNickname) {
-                        $secParams.DisplayName = "$($GroupPrefix)$($GroupNamingDelimiter)PIM$($GroupNamingDelimiter)$ServiceName$($GroupNamingDelimiter)$($ServiceRole.accessLevel)$($GroupNamingDelimiter)$($ServiceRole.Name)"
-                    $secParams.MailNickname = $stagingNickname
-                        $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
-                }
             }catch{
                 throw "Failed to create group for service role '$($ServiceRole.accessLevel) $($ServiceRole.Name)': $($_.Exception.Message)"
             }
@@ -239,9 +211,7 @@ function New-EntraOpsServiceEntraGroup {
         $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Groups" -logPrefix $logPrefix -Condition {
             $check.Groups = @()
             $check.Groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
-            if ($createStagingGroup) {
-                $check.Groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:PIM.$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
-            }
+            $check.Groups = @($check.Groups | Where-Object { $_.MailNickname -like "$ServiceName.*" })
             $chkIds = @($check.Groups.id | Where-Object { $_ })
             $refIds.Count -gt 0 -and $chkIds.Count -ge $refIds.Count -and (Compare-Object $refIds $chkIds | Measure-Object).Count -eq 0
         }

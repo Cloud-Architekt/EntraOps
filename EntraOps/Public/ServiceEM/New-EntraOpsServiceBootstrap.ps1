@@ -31,9 +31,8 @@
 
 .PARAMETER ControlPlaneAdmins
     UserIds (i.e., UPNs) of the initial members of the per-service ControlPlane-Admins group (PerService model).
-    Members are added permanently when the group's Azure roles are PIM-eligible (default); without Azure
-    resources (-SkipAzureResourceGroup) they become PIM for Groups eligible members, unless -NoPimForGroups
-    is set. Without this parameter an Entra administrator adds the members in the portal.
+    Members are added permanently, or as PIM for Groups eligible members with -EnablePimForGroups.
+    Without this parameter an Entra administrator adds the members in the portal.
 
 .PARAMETER CatalogPlaneMembers
     UserIds (i.e., UPNs) assigned to the CatalogPlane-Members access package (in addition to the
@@ -46,14 +45,19 @@
     so admin accounts don't get data-plane user access. Defaults to
     EntraOpsConfig.ServiceEM.AddWorkloadPlaneAdminToUsers; an explicitly passed value wins.
 
-.PARAMETER NoPimForGroups
-    Set this flag to skip configuration of Entra Priviliged Identity Management for Groups (PIM policies,
-    eligible owners and members, PIM staging group). Alias: NoPimEscalation.
+.PARAMETER EnablePimForGroups
+    Recommended. Manages ControlPlane-Admins and ManagementPlane-Admins with PIM for Groups: their PIM
+    activation policy is configured and their access packages grant an eligible instead of an active
+    membership. Both groups hold permanent catalog roles (Catalog Owner, Access package assignment
+    manager) that can't be PIM-protected otherwise. Eligible memberships through access packages
+    require Microsoft Entra ID Governance or Microsoft Entra Suite licenses (a warning is shown).
+    Not set by default.
 
-.PARAMETER EnablePIMStagingGroup
-    Creates the PIM staging group SG-PIM-<ServiceName>-ManagementPlane-Admins with a permanent Owner
-    assignment on the Azure scope. ManagementPlane-Admins become eligible members, so they can activate
-    unconstrained Owner via PIM for Groups as an escalation path. Not created by default.
+.PARAMETER EnableWorkloadPlanePimForGroups
+    Manages WorkloadPlane-Admins with PIM for Groups in the same way, e.g. for multi-activation scenarios
+    (activate the group membership, then the PIM-eligible Azure roles of the group). The Azure roles of
+    WorkloadPlane-Admins are already PIM-eligible, so this isn't needed by default. Requires Microsoft
+    Entra ID Governance or Microsoft Entra Suite licenses (a warning is shown). Not set by default.
 
 .PARAMETER CreateM365Group
     Creates the Microsoft 365 group "<ServiceName> Members" (the Unified roles of -ServiceRoles; they are
@@ -113,17 +117,6 @@
     who reviews expiring assignments.
     Falls back to EntraOpsConfig.ServiceEM.AdministratorGroupId when not provided via landing zones.
 
-.PARAMETER ControlPlaneApproverGroupId
-    Object ID of the ControlPlane-Admins group of another scope that approves and reviews ManagementPlane-Admins
-    and gets the PIM eligible User Access Administrator on this Azure scope when this scope has no
-    ControlPlane-Admins group (set by New-EntraOpsSubscriptionLandingZone for -DeploymentScope Both).
-
-.PARAMETER ManagementPlaneApproverGroupId
-    Object ID of the ManagementPlane-Admins group of another scope that approves and reviews WorkloadPlane-Admins
-    and gets the PIM eligible Contributor and constrained RBAC Administrator on this Azure scope
-    when this scope has no ManagementPlane-Admins group (set by
-    New-EntraOpsSubscriptionLandingZone for the Rg scope of -DeploymentScope Both without -Smb).
-
 .PARAMETER ServiceRoles
     Define the functional roles of the Service as an object with the columns
     accessLevel,name,groupType. Where accessLevel is the EAM plane classification (e.g., WorkloadPlane,
@@ -132,7 +125,7 @@
     value will default to a security group). The default value will create one unified members group
     (only with -CreateM365Group), the CatalogPlane-Members (administrator) group, one security user WorkloadPlane
     group, and three security admin groups (WorkloadPlane, ControlPlane, ManagementPlane).
-    ManagementPlane-Members is no longer supported (ignored with a warning); CatalogPlane-Members request
+    ManagementPlane-Members isn't supported (ignored with a warning); CatalogPlane-Members request
     ManagementPlane-Admins.
 
 .PARAMETER logPrefix
@@ -143,7 +136,7 @@
         -SubscriptionId "<subscription-id>"
 
     Creates the full authorization structure for "MyService" with all default EAM groups, an Entra ID
-    Entitlement Management catalog and access packages, PIM policies, and an Azure resource group in
+    Entitlement Management catalog and access packages, and an Azure resource group in
     West Europe. The currently signed-in user is assigned as service member.
 
 .EXAMPLE
@@ -155,11 +148,16 @@
     The admin is also added as a member only with -AddWorkloadPlaneAdminToUsers.
 
 .EXAMPLE
-    New-EntraOpsServiceBootstrap -ServiceName "MyService" -SkipAzureResourceGroup `
-        -NoPimForGroups
+    New-EntraOpsServiceBootstrap -ServiceName "MyService" -AzureRegion "westeurope" `
+        -SubscriptionId "<subscription-id>" -EnablePimForGroups
 
-    Creates all Entra ID groups, catalog, and access packages without an Azure resource group and
-    without configuring PIM eligible assignments.
+    Same as the first example, but ControlPlane-Admins and ManagementPlane-Admins are managed by PIM for
+    Groups and their access packages grant eligible memberships.
+
+.EXAMPLE
+    New-EntraOpsServiceBootstrap -ServiceName "MyService" -SkipAzureResourceGroup
+
+    Creates all Entra ID groups, catalog, and access packages without an Azure resource group.
 
 .EXAMPLE
     New-EntraOpsServiceBootstrap -ServiceName "MyService" -AzureRegion "northeurope" `
@@ -211,10 +209,9 @@ function New-EntraOpsServiceBootstrap {
 
         [switch]$AddWorkloadPlaneAdminToUsers,
 
-        [Alias('NoPimEscalation')]
-        [switch]$NoPimForGroups,
+        [switch]$EnablePimForGroups,
 
-        [switch]$EnablePIMStagingGroup,
+        [switch]$EnableWorkloadPlanePimForGroups,
 
         [switch]$CreateM365Group,
 
@@ -229,15 +226,14 @@ function New-EntraOpsServiceBootstrap {
 
         [switch]$SkipManagementPlaneDelegation,
 
+        [ValidatePattern('^$|^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')]
         [string]$ControlPlaneDelegationGroupId = "",
 
+        [ValidatePattern('^$|^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')]
         [string]$ManagementPlaneDelegationGroupId = "",
 
+        [ValidatePattern('^$|^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')]
         [string]$AdministratorGroupId = "",
-
-        [string]$ControlPlaneApproverGroupId = "",
-
-        [string]$ManagementPlaneApproverGroupId = "",
 
         [string]$AzureRegion,
 
@@ -308,8 +304,9 @@ function New-EntraOpsServiceBootstrap {
         if ($GroupOwnership -ne "None") {
             Write-Warning "$logPrefix -GroupOwnership $GroupOwnership makes the WorkloadPlaneAdmin owner of the WorkloadPlane groups. Owners can add members directly, bypassing access package approvals and access reviews."
         }
-        if ($GroupOwnership -eq "Eligible" -and $NoPimForGroups) {
-            Write-Warning "$logPrefix -GroupOwnership Eligible is ignored with -NoPimForGroups"
+        $pimForGroupsSwitches = @(@('EnablePimForGroups', 'EnableWorkloadPlanePimForGroups') | Where-Object { (Get-Variable -Name $_ -ValueOnly).IsPresent })
+        if ($pimForGroupsSwitches.Count -gt 0) {
+            Write-Warning "$logPrefix -$($pimForGroupsSwitches -join ' and -'): eligible group memberships through access packages (PIM for Groups) are a Microsoft Entra ID Governance feature and require Microsoft Entra ID Governance or Microsoft Entra Suite licenses; Microsoft Entra ID P2 alone isn't sufficient. Users of these access packages must activate their membership with PIM for Groups."
         }
 
         #region WorkloadPlaneAdmin
@@ -378,6 +375,23 @@ function New-EntraOpsServiceBootstrap {
             })
         #endregion
 
+        #region Delegated groups
+        # Synthetic entries match the downstream filter patterns (*-ControlPlane-Admins, ...); IsDelegated keeps them out of the catalog and PIM
+        $delegatedGroups = @(foreach ($delegation in @(
+                    @{ Id = $ControlPlaneDelegationGroupId; Name = 'ControlPlane-Admins' },
+                    @{ Id = $ManagementPlaneDelegationGroupId; Name = 'ManagementPlane-Admins' },
+                    @{ Id = $AdministratorGroupId; Name = 'CatalogPlane-Members' })) {
+                if ([string]::IsNullOrWhiteSpace($delegation.Id)) { continue }
+                $delegatedGroup = & $resolveDirectoryObject "/v1.0/groups/$($delegation.Id)" "delegated $($delegation.Name) group"
+                Write-Verbose "$logPrefix Delegated $($delegation.Name): $($delegatedGroup.DisplayName) ($($delegatedGroup.Id))"
+                [PSCustomObject]@{
+                    Id          = $delegatedGroup.Id
+                    DisplayName = "$GroupPrefix$GroupNamingDelimiter$ServiceName$GroupNamingDelimiter$($delegation.Name -replace '-', $GroupNamingDelimiter)"
+                    IsDelegated = $true
+                }
+            })
+        #endregion
+
         #region ServiceRoles
         Write-Verbose "$logPrefix Service Roles validation"
         if (-not $PSBoundParameters.ContainsKey("ServiceRoles")) {
@@ -410,7 +424,7 @@ ManagementPlane,Admins,
                 }
             }
             if ($ServiceRoles | Where-Object { $_.accessLevel -eq "ManagementPlane" -and $_.name -eq "Members" }) {
-                Write-Warning "$logPrefix ManagementPlane-Members is no longer supported and is ignored; CatalogPlane-Members (the administrator group) request ManagementPlane-Admins. Remove an existing group manually."
+                Write-Warning "$logPrefix ManagementPlane-Members isn't supported and is ignored; CatalogPlane-Members (the administrator group) request ManagementPlane-Admins."
                 $ServiceRoles = @($ServiceRoles | Where-Object { -not ($_.accessLevel -eq "ManagementPlane" -and $_.name -eq "Members") })
             }
         }
@@ -501,8 +515,6 @@ ManagementPlane,Admins,
             ServiceRoles            = $ServiceRoles
             GroupPrefix             = $GroupPrefix
             GroupNamingDelimiter    = $GroupNamingDelimiter
-            NoPimForGroups        = $NoPimForGroups
-            EnablePIMStagingGroup = $EnablePIMStagingGroup
         }
         if ($GroupOwnership -eq "Permanent" -and -not [string]::IsNullOrWhiteSpace($owner)) {
             $ServiceEntraGroupOptions.WorkloadPlaneAdmin = $owner
@@ -512,58 +524,11 @@ ManagementPlane,Admins,
         # PowerShell cannot use += to append a PSCustomObject to a typed array.
         [object[]]$ServiceGroups = New-EntraOpsServiceEntraGroup @ServiceEntraGroupOptions
         if (-not $CreateM365Group) {
-            # The group lookup also returns a Microsoft 365 group left over from earlier runs
+            # The group lookup also returns a Microsoft 365 group created by a run with -CreateM365Group
             [object[]]$ServiceGroups = @($ServiceGroups | Where-Object { $_.GroupTypes -notcontains "Unified" })
         }
 
-        # Inject delegated groups as synthetic entries whose DisplayName matches the existing downstream
-        # filter patterns (*-ControlPlane-Admins, *-ManagementPlane-Admins). IsDelegated = $true prevents
-        # PIM policy and assignment functions from modifying groups owned by another service.
-        if (-not [string]::IsNullOrWhiteSpace($ControlPlaneDelegationGroupId)) {
-            Write-Verbose "$logPrefix Injecting delegated ControlPlane-Admins group (ID: $ControlPlaneDelegationGroupId)"
-            try {
-                $delegatedCtrlGroup = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$ControlPlaneDelegationGroupId" -OutputType PSObject
-                $ServiceGroups += [PSCustomObject]@{
-                    Id          = $delegatedCtrlGroup.Id
-                    DisplayName = "$GroupPrefix$GroupNamingDelimiter$ServiceName$($GroupNamingDelimiter)ControlPlane$($GroupNamingDelimiter)Admins"
-                    IsDelegated = $true
-                }
-                Write-Verbose "$logPrefix Delegated ControlPlane-Admins: $($delegatedCtrlGroup.DisplayName) ($($delegatedCtrlGroup.Id))"
-            } catch {
-                Write-Verbose "$logPrefix Failed to look up delegated ControlPlane-Admins group"
-                Write-Error $_
-            }
-        }
-        if (-not [string]::IsNullOrWhiteSpace($ManagementPlaneDelegationGroupId)) {
-            Write-Verbose "$logPrefix Injecting delegated ManagementPlane-Admins group (ID: $ManagementPlaneDelegationGroupId)"
-            try {
-                $delegatedMgmtGroup = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$ManagementPlaneDelegationGroupId" -OutputType PSObject
-                $ServiceGroups += [PSCustomObject]@{
-                    Id          = $delegatedMgmtGroup.Id
-                    DisplayName = "$GroupPrefix$GroupNamingDelimiter$ServiceName$($GroupNamingDelimiter)ManagementPlane$($GroupNamingDelimiter)Admins"
-                    IsDelegated = $true
-                }
-                Write-Verbose "$logPrefix Delegated ManagementPlane-Admins: $($delegatedMgmtGroup.DisplayName) ($($delegatedMgmtGroup.Id))"
-            } catch {
-                Write-Verbose "$logPrefix Failed to look up delegated ManagementPlane-Admins group"
-                Write-Error $_
-            }
-        }
-        if (-not [string]::IsNullOrWhiteSpace($AdministratorGroupId)) {
-            Write-Verbose "$logPrefix Injecting delegated CatalogPlane-Members group (ID: $AdministratorGroupId)"
-            try {
-                $delegatedAdminGroup = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$AdministratorGroupId" -OutputType PSObject
-                $ServiceGroups += [PSCustomObject]@{
-                    Id          = $delegatedAdminGroup.Id
-                    DisplayName = "$GroupPrefix$GroupNamingDelimiter$ServiceName$($GroupNamingDelimiter)CatalogPlane$($GroupNamingDelimiter)Members"
-                    IsDelegated = $true
-                }
-                Write-Verbose "$logPrefix Delegated CatalogPlane-Members: $($delegatedAdminGroup.DisplayName) ($($delegatedAdminGroup.Id))"
-            } catch {
-                Write-Verbose "$logPrefix Failed to look up delegated CatalogPlane-Members group"
-                Write-Error $_
-            }
-        }
+        $ServiceGroups += $delegatedGroups
 
         $report.Groups = $ServiceGroups
         Write-Verbose "$logPrefix Service Groups IDs: $($report.Groups.Id|ConvertTo-Json -Compress)"
@@ -572,6 +537,17 @@ ManagementPlane,Admins,
         # Delegated groups are injected for downstream filter patterns but must not be added to
         # the catalog or assigned to access packages as resources.
         $ownedGroups = @($ServiceGroups | Where-Object { -not $_.IsDelegated })
+        $pimGroups = @($ownedGroups | Where-Object {
+                ($EnablePimForGroups -and ($_.DisplayName -like "*-ControlPlane-Admins" -or $_.DisplayName -like "*-ManagementPlane-Admins")) -or
+                ($EnableWorkloadPlanePimForGroups -and $_.DisplayName -like "*-WorkloadPlane-Admins")
+            })
+
+        # Before the catalog step, so the catalog offers the Eligible Member role of these groups
+        if ($pimGroups.Count -gt 0) {
+            Write-Verbose "$logPrefix Processing PIM for Groups policies"
+            $report.PimPolicies = New-EntraOpsServicePIMPolicy -ServiceGroups $pimGroups -ServiceName $ServiceName
+            Write-Verbose "$logPrefix Service PIM Policy IDs: $($report.PimPolicies.Id|ConvertTo-Json -Compress)"
+        }
 
         Write-Verbose "$logPrefix Processing Catalog"
         $ServiceEMCatalogOptions = @{
@@ -630,6 +606,7 @@ ManagementPlane,Admins,
                 ServiceName             = $ServiceName
                 GroupPrefix             = $GroupPrefix
                 GroupNamingDelimiter    = $GroupNamingDelimiter
+                EligibleMemberGroupIds  = @($pimGroups | ForEach-Object { $_.Id })
             }
             $ServiceEMAccessPackageAssignments = New-EntraOpsServiceEMAccessPackageResourceAssignment @ServiceEMAccessPackageResourceAssignmentOptions
             $report.AccessPackageAssignments = $ServiceEMAccessPackageAssignments
@@ -641,8 +618,6 @@ ManagementPlane,Admins,
                 ServicePackages  = $ServiceEMAccessPackages
                 ServiceGroups    = $ServiceGroups
                 ServiceName      = $ServiceName
-                ControlPlaneApproverGroupId    = $ControlPlaneApproverGroupId
-                ManagementPlaneApproverGroupId = $ManagementPlaneApproverGroupId
             }
             $ServiceEMAssignmentPolicies = New-EntraOpsServiceEMAssignmentPolicy @ServiceEMAssignmentPolicyOptions
             $report.AssignmentPolicies = $ServiceEMAssignmentPolicies
@@ -669,24 +644,13 @@ ManagementPlane,Admins,
             Write-Verbose "$logPrefix No access packages to configure — skipping resource assignment, policies, and member assignments"
         }
 
-        if (-not $NoPimForGroups) {
-            Write-Verbose "$logPrefix Processing PIM policies"
-            $ServicePIMPolicyOptions = @{
-                ServiceGroups = $ownedGroups
-                ServiceName   = $ServiceName
-            }
-            $ServicePIMPolicies = New-EntraOpsServicePIMPolicy @ServicePIMPolicyOptions
-            $report.PimPolicies = $ServicePIMPolicies
-            Write-Verbose "$logPrefix Service PIM Policy IDs: $($report.PimPolicies.Id|ConvertTo-Json -Compress)"
-
-            Write-Verbose "$logPrefix Processing PIM assignments"
+        if ($GroupOwnership -eq "Eligible") {
+            Write-Verbose "$logPrefix Processing PIM for Groups eligible owners"
             $ServicePIMAssignmentOptions = @{
-                ServiceGroups           = $ownedGroups
-                GroupPrefix             = $GroupPrefix
-                GroupNamingDelimiter    = $GroupNamingDelimiter
-                EnableOwnerAssignment = ($GroupOwnership -eq "Eligible")
+                ServiceGroups         = $ownedGroups
+                EnableOwnerAssignment = $true
             }
-            if ($GroupOwnership -eq "Eligible" -and $graphOwner -and $graphOwner.Id) {
+            if ($graphOwner -and $graphOwner.Id) {
                 $ServicePIMAssignmentOptions.WorkloadPlaneAdminPrincipalId = $graphOwner.Id
             }
             $report.PimForGroupsAssignments = New-EntraOpsServicePIMAssignment @ServicePIMAssignmentOptions
@@ -695,27 +659,12 @@ ManagementPlane,Admins,
 
         if (-not $SkipAzureResourceGroup) {
             Write-Verbose "$logPrefix Processing Azure Container"
-            # Admin groups of another scope (-DeploymentScope Both) get their Azure roles on this scope
-            $azureGroups = @($ServiceGroups)
-            foreach ($crossScope in @(
-                    @{ Plane = 'ControlPlane'; Id = $ControlPlaneApproverGroupId },
-                    @{ Plane = 'ManagementPlane'; Id = $ManagementPlaneApproverGroupId })) {
-                $hasPlaneGroup = $azureGroups | Where-Object { $_.DisplayName -like "*-$($crossScope.Plane)-Admins" -and $_.DisplayName -notlike "*-PIM-*" }
-                if ($crossScope.Id -and -not $hasPlaneGroup) {
-                    $azureGroups += [PSCustomObject]@{
-                        Id          = $crossScope.Id
-                        DisplayName = "$GroupPrefix$GroupNamingDelimiter$ServiceName$GroupNamingDelimiter$($crossScope.Plane)$($GroupNamingDelimiter)Admins"
-                        IsDelegated = $true
-                    }
-                }
-            }
             $ServiceAZContainerOptions = @{
                 ServiceName                = $ServiceName
-                ServiceGroups              = $azureGroups
+                ServiceGroups              = $ServiceGroups
                 AzureScope                 = $AzureScope
                 Location                   = $AzureRegion
                 SkipControlPlaneDelegation = ($SkipControlPlaneDelegation -and [string]::IsNullOrWhiteSpace($ControlPlaneDelegationGroupId))
-                pimForGroups               = ($EnablePIMStagingGroup -and -not $NoPimForGroups)
             }
             $previousAzContext = Get-AzContext
             try {
@@ -739,8 +688,7 @@ ManagementPlane,Admins,
             if (-not $controlPlaneGroup) {
                 Write-Warning "$logPrefix No per-service ControlPlane-Admins group in $ServiceName (delegated or not created); -ControlPlaneAdmins is ignored"
             } else {
-                # Permanent membership is protected by the PIM-eligible Azure roles; without them membership itself is just-in-time
-                $eligibleMembership = $SkipAzureResourceGroup -and -not $NoPimForGroups
+                $eligibleMembership = [bool]$EnablePimForGroups
                 $report.ControlPlaneAdminAssignments = @(foreach ($controlPlaneAdmin in $graphControlPlaneAdmins) {
                         try {
                             if ($eligibleMembership) {

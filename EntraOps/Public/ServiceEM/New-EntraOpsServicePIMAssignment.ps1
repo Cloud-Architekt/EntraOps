@@ -1,26 +1,21 @@
 <#
 .SYNOPSIS
-    Creates PIM for Groups eligible assignments for service admin groups.
+    Creates PIM for Groups eligible owner assignments for the WorkloadPlane groups.
 
 .DESCRIPTION
-    Creates PIM for Groups eligible assignments with no expiration:
-    - PIM staging groups (mailNickname PIM.<ServiceName>.<AccessLevel>.<Role>): the base group with the
-      same AccessLevel and Role (e.g. ManagementPlane-Admins) becomes eligible member.
-    - With -EnableOwnerAssignment: the workload plane admin becomes eligible owner of each WorkloadPlane group
-      (WorkloadPlane-Admins and WorkloadPlane-Users); never of ControlPlane/ManagementPlane or staging groups.
-
-    The Microsoft 365 group (<ServiceName> Members) never gets eligibilities; access to the admin and
-    user groups is granted through access packages.
+    With -EnableOwnerAssignment, the workload plane admin becomes eligible owner (no expiration) of each
+    WorkloadPlane group (WorkloadPlane-Admins and WorkloadPlane-Users); never of ControlPlane,
+    ManagementPlane, CatalogPlane or Microsoft 365 groups. Eligible memberships are granted through
+    the access packages.
 
     Idempotent: existing noExpiration eligible assignments are detected and
     skipped.
 
-    When no PIM staging group exists and -EnableOwnerAssignment isn't set, the function returns an
-    empty array without error.
+    Without -EnableOwnerAssignment the function returns an empty array without error.
 
 .PARAMETER ServiceGroups
     All service group objects (owned groups only — delegated groups must be
-    excluded). PIM staging groups are automatically matched to their base group.
+    excluded).
 
 .PARAMETER WorkloadPlaneAdminPrincipalId
     Object ID of the workload plane admin. Required when -EnableOwnerAssignment is set.
@@ -31,21 +26,15 @@
     When set, creates PIM for Groups eligible-owner assignments for the workload plane admin
     on each WorkloadPlane group. Disabled by default (-GroupOwnership Eligible).
 
-.PARAMETER GroupPrefix
-    Prefix used in group DisplayNames (e.g. "SG"). Must match the prefix
-    passed to New-EntraOpsServiceBootstrap. Defaults to "SG".
-
-.PARAMETER GroupNamingDelimiter
-    Delimiter between group name segments (e.g. "-"). Defaults to "-".
-
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
 
 .EXAMPLE
-    New-EntraOpsServicePIMAssignment -ServiceGroups $ownedGroups
+    New-EntraOpsServicePIMAssignment -ServiceGroups $ownedGroups -EnableOwnerAssignment `
+        -WorkloadPlaneAdminPrincipalId "00000000-0000-0000-0000-000000000001"
 
-    Makes SG-MyService-ManagementPlane-Admins eligible member of its PIM staging group
-    SG-PIM-MyService-ManagementPlane-Admins.
+    Makes the workload plane admin eligible owner of SG-MyService-WorkloadPlane-Admins and
+    SG-MyService-WorkloadPlane-Users.
 
 #>
 function New-EntraOpsServicePIMAssignment {
@@ -54,9 +43,6 @@ function New-EntraOpsServicePIMAssignment {
     param(
         [Parameter(Mandatory)]
         [psobject[]]$ServiceGroups,
-
-        [string]$GroupPrefix = "SG",
-        [string]$GroupNamingDelimiter = "-",
 
         [string]$WorkloadPlaneAdminPrincipalId = "",
 
@@ -67,32 +53,16 @@ function New-EntraOpsServicePIMAssignment {
 
     begin {
         $pimEligibilities = @()
-        $isStagingGroup = { param($group) $group.MailNickname -like "PIM.*" -or $group.DisplayName -like "*-PIM-*" }
-        $isOwnerTarget = { param($group) $EnableOwnerAssignment -and $group.DisplayName -like "*-WorkloadPlane-*" -and -not (& $isStagingGroup $group) }
+        $isOwnerTarget = { param($group) $EnableOwnerAssignment -and $group.DisplayName -like "*-WorkloadPlane-*" }
         $targetGroups = @($ServiceGroups | Where-Object {
-                $_.DisplayName -notlike "*Members*" -and $_.GroupTypes -notcontains "Unified" -and
-                ((& $isStagingGroup $_) -or (& $isOwnerTarget $_))
+                $_.GroupTypes -notcontains "Unified" -and (& $isOwnerTarget $_)
             })
-
-        $pimEligibilityParams = @{
-            accessId = "member"
-            principalId = ""
-            groupId = ""
-            action = "AdminAssign"
-            scheduleInfo = @{
-                startDateTime = (Get-Date).AddHours(-1).ToString("o")
-                expiration = @{
-                    type = "noExpiration"
-                }
-            }
-        }
     }
 
     process {
         Write-Verbose "$logPrefix Beginning PIM Assignment"
 
         foreach($group in $targetGroups){
-            $pimEligibilityParams.groupId = $group.Id
             Write-Verbose "$logPrefix Looking up eligibility for group ID: $($group.Id)"
 
             try {
@@ -103,34 +73,7 @@ function New-EntraOpsServicePIMAssignment {
                 continue
             }
 
-            if(& $isStagingGroup $group){
-                # mailNickname doesn't contain the GroupPrefix, so it also matches groups created with another prefix
-                $sourceGroup = if($group.MailNickname -like "PIM.*"){
-                    $ServiceGroups | Where-Object { $_.MailNickname -eq ($group.MailNickname -replace '^PIM\.', '') }
-                }
-                if(-not $sourceGroup){
-                    $pimGroupPrefixLen = "$GroupPrefix$($GroupNamingDelimiter)PIM$GroupNamingDelimiter".Length
-                    $sourceGroup = $ServiceGroups|Where-Object{$_.DisplayName -like "$GroupPrefix$GroupNamingDelimiter"+$group.DisplayName.Substring($pimGroupPrefixLen)}
-                }
-                $pimEligibilityParams.principalId = $sourceGroup.Id
-                $ne = $pimEligibilityParams.principalId+"_noExpiration"
-                # Scope check to current group only — accumulated $pimEligibilities spans all groups
-                $ee = $pimEligibilities | Where-Object { $_.groupId -eq $group.Id } | ForEach-Object { $_.principalId+"_"+$_.targetSchedule.scheduleInfo.expiration.type }
-                if([string]::IsNullOrWhiteSpace($pimEligibilityParams.principalId)){
-                    Write-Warning "$logPrefix No base group found for PIM staging group $($group.DisplayName), skipping eligible member assignment"
-                }elseif($ne -notin $ee){
-                    Write-Verbose "$logPrefix $($pimEligibilityParams|ConvertTo-Json -Compress)"
-                    try {
-                        Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($pimEligibilityParams | ConvertTo-Json -Depth 10) -OutputType PSObject | Out-Null
-                        $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
-                    } catch {
-                        Write-Warning "$logPrefix Failed to create PIM eligible assignment for group $($group.Id). Error: $_"
-                    }
-                }
-            }
-
-            # Eligible-owner assignment for the workload plane admin (opt-in only).
-            if((& $isOwnerTarget $group) -and -not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdminPrincipalId)){
+            if(-not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdminPrincipalId)){
                 $ownerParams = @{
                     accessId    = "owner"
                     principalId = $WorkloadPlaneAdminPrincipalId
@@ -158,7 +101,7 @@ function New-EntraOpsServicePIMAssignment {
 
     end {
         if ($targetGroups.Count -eq 0) {
-            Write-Verbose "$logPrefix No PIM staging group in this scope and -EnableOwnerAssignment not set, no PIM for Groups eligibilities to create"
+            Write-Verbose "$logPrefix -EnableOwnerAssignment not set, no PIM for Groups eligibilities to create"
             return [psobject[]]@()
         }
 

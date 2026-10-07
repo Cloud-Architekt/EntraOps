@@ -28,15 +28,6 @@
 .PARAMETER ServicePackages
     Access package objects returned by New-EntraOpsServiceEMAccessPackage.
 
-.PARAMETER ControlPlaneApproverGroupId
-    Object ID of the ControlPlane-Admins group of another scope (e.g. the Sub scope of a landing zone with
-    -Smb). Approves and reviews ManagementPlane-Admins when no ControlPlane-Admins group exists in this scope.
-
-.PARAMETER ManagementPlaneApproverGroupId
-    Object ID of the ManagementPlane-Admins group of another scope (e.g. the Sub scope of a landing zone with
-    -DeploymentScope Both). Approves and reviews WorkloadPlane-Admins when no
-    ManagementPlane-Admins group exists in this scope.
-
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
 
@@ -68,10 +59,6 @@ function New-EntraOpsServiceEMAssignmentPolicy {
         [Parameter(Mandatory)]
         [psobject[]]$ServicePackages,
 
-        [string]$ControlPlaneApproverGroupId = "",
-
-        [string]$ManagementPlaneApproverGroupId = "",
-
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
@@ -85,12 +72,9 @@ function New-EntraOpsServiceEMAssignmentPolicy {
             Write-Error $_
         }
         $catalogPlaneMembersGroupId = ($ServiceGroups|Where-Object{$_.DisplayName -like "*CatalogPlane-Members"}).Id
-        # PIM staging groups (SG-PIM-*) share the ManagementPlane-Admins suffix
-        $mgmtAdminsGroupId = ($ServiceGroups|Where-Object{$_.DisplayName -like "*ManagementPlane-Admins" -and $_.DisplayName -notlike "*-PIM-*"}).Id
-        # ManagementPlane-Admins may live in another scope (e.g. Sub scope of a PerService landing zone)
-        $mgmtApproverGroupId = if ($mgmtAdminsGroupId) { $mgmtAdminsGroupId } else { $ManagementPlaneApproverGroupId }
-        $controlPlaneAdminsGroupId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*ControlPlane-Admins" } | Select-Object -First 1).Id
-        $controlPlaneApproverId = if ($controlPlaneAdminsGroupId) { $controlPlaneAdminsGroupId } else { $ControlPlaneApproverGroupId }
+        # Delegated (tenant-wide or other landing zone) groups are injected by name into ServiceGroups
+        $mgmtApproverGroupId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*ManagementPlane-Admins" } | Select-Object -First 1).Id
+        $controlPlaneApproverId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*ControlPlane-Admins" } | Select-Object -First 1).Id
         $wlUsersApproverId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*WorkloadPlane-Admins" } | Select-Object -First 1).Id
         if (-not $wlUsersApproverId) { $wlUsersApproverId = $mgmtApproverGroupId }
 
@@ -144,23 +128,27 @@ function New-EntraOpsServiceEMAssignmentPolicy {
             throw "Invalid ServiceEM.AccessReviews.ReviewDuration '$reviewDuration' in EntraOpsConfig. Use a duration in days such as 'P25D'."
         }
         $guidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
-        $crossScopeGroupIds = @{ 'ControlPlane-Admins' = $controlPlaneApproverId; 'ManagementPlane-Admins' = $mgmtApproverGroupId }
+        $reviewerTiers = @('WorkloadPlane-Admins', 'ManagementPlane-Admins', 'ControlPlane-Admins')
         # Group reviewers are service group name suffixes (e.g. WorkloadPlane-Admins) or group object IDs
         $resolveReviewerGroups = {
             param([string]$PolicyKey, [string[]]$Values)
             foreach ($value in $Values) {
-                if ($value -match $guidPattern) { $groupId = $value }
-                else {
-                    $groupId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*$value" -and $_.DisplayName -notlike "*-PIM-*" } | Select-Object -First 1).Id
-                    if (-not $groupId) { $groupId = $crossScopeGroupIds[$value] }
-                    # ControlPlane-Admins -> ManagementPlane-Admins -> CatalogPlane-Members
-                    if (-not $groupId -and $value -eq 'ControlPlane-Admins') { $groupId = $mgmtApproverGroupId }
-                    if (-not $groupId) {
-                        Write-Verbose "$logPrefix Reviewer group '$value' of $PolicyKey not found, using CatalogPlane-Members"
-                        $groupId = $catalogPlaneMembersGroupId
-                    }
+                if ($value -match $guidPattern) {
+                    @{ "@odata.type" = "#microsoft.graph.groupMembers"; groupId = $value }
+                    continue
                 }
-                @{ "@odata.type" = "#microsoft.graph.groupMembers"; groupId = $groupId }
+                # A missing admin group falls back to the same or a higher tier only
+                $candidates = if ($value -in $reviewerTiers) { $reviewerTiers[$reviewerTiers.IndexOf($value)..($reviewerTiers.Count - 1)] } else { @($value) }
+                $groupId = $null
+                foreach ($candidate in $candidates) {
+                    $groupId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*$candidate" } | Select-Object -First 1).Id
+                    if ($groupId) { break }
+                }
+                if ($groupId) {
+                    @{ "@odata.type" = "#microsoft.graph.groupMembers"; groupId = $groupId }
+                } else {
+                    Write-Verbose "$logPrefix No reviewer group '$value' or a higher tier found for $PolicyKey"
+                }
             }
         }
         $reviewSettingsByPolicy = @{}
@@ -203,6 +191,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
             switch ($reviewerType) {
                 'Group' {
                     $reviewSettings.primaryReviewers = @(& $resolveReviewerGroups $reviewPolicyKey $reviewerGroups)
+                    if ($reviewSettings.primaryReviewers.Count -eq 0) { $reviewSettings = $null }
                 }
                 'SelfReview' {
                     $reviewSettings.isSelfReview = $true
@@ -234,7 +223,12 @@ function New-EntraOpsServiceEMAssignmentPolicy {
         }
         $setReviewSettings = {
             param([hashtable]$Params, [string]$PolicyKey)
-            if ($enableAccessReviews) { $Params.reviewSettings = $reviewSettingsByPolicy[$PolicyKey] }
+            if (-not $enableAccessReviews) { return }
+            if ($reviewSettingsByPolicy[$PolicyKey]) {
+                $Params.reviewSettings = $reviewSettingsByPolicy[$PolicyKey]
+            } else {
+                Write-Warning "$logPrefix '$($Params.displayName)' is created without access review: no reviewer group of the configured or a higher tier in this scope."
+            }
         }
         $wpUsersRequestorScope = [string](& $getPolicySetting 'WorkloadPlaneUsers' 'RequestorScope' 'AllMemberUsers')
         if ($wpUsersRequestorScope -notin @('AllMemberUsers', 'CatalogPlaneMembers')) {

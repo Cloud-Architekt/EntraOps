@@ -779,7 +779,7 @@
                 {
                     title: "Access reviews",
                     fields: [
-                        { key: "SemArEnableAccessReviews", label: "Enable access reviews", type: "checkbox", default: true, help: "Adds recurring access reviews to all assignment policies. Reviewers are configured per policy below (default WorkloadPlane-Admins for the WorkloadPlane-Users access package, ManagementPlane-Admins for all others, fallback CatalogPlane-Members); access is kept if a review isn't completed.", usedIn: "New-EntraOpsServiceEMAssignmentPolicy" },
+                        { key: "SemArEnableAccessReviews", label: "Enable access reviews", type: "checkbox", default: true, help: "Adds recurring access reviews to all assignment policies. Reviewers are configured per policy below (default WorkloadPlane-Admins for the WorkloadPlane-Users access package, ManagementPlane-Admins for all others; a missing group falls back to a higher tier only, never to CatalogPlane-Members); access is kept if a review isn't completed.", usedIn: "New-EntraOpsServiceEMAssignmentPolicy" },
                         { key: "SemArRecurrenceIntervalInMonths", label: "Recurrence interval (months)", type: "number", default: 3, min: 1, max: 12, help: "Months between two reviews, e.g. 3 = quarterly." },
                         { key: "SemArStartAfterDays", label: "First review after (days)", type: "number", default: 4, min: 0, help: "Days after the deployment when the first review starts." },
                         { key: "SemArReviewDuration", label: "Review duration", type: "text", default: "P25D", help: "ISO 8601 duration in days a review stays open, e.g. P25D. Keep it shorter than the recurrence interval." }

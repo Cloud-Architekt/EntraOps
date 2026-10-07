@@ -10,7 +10,7 @@
     2. Deletes all access packages in the catalog.
     3. Deletes the catalog itself.
     4. Deletes the Entra groups registered as catalog resources that were created by the landing zone
-       (mailNickname "<ServiceName>.*" or "PIM.<ServiceName>.*", ServiceName = catalog name without
+       (mailNickname "<ServiceName>.*", ServiceName = catalog name without
        "Catalog-"). Other catalog resources, e.g. shared groups added manually, are kept, as well as any
        group whose Object ID appears in ExcludeGroupIds.
     5. Only with -RemoveAzureResourceGroup: deletes the Azure resource group created
@@ -180,7 +180,7 @@ function Remove-EntraOpsServiceCatalog {
                     Write-Verbose "$logPrefix Group $($resource.DisplayName) [$($resource.OriginId)] not found, skipping"
                     continue
                 }
-                if ($group.MailNickname -notlike "$serviceName.*" -and $group.MailNickname -notlike "PIM.$serviceName.*") {
+                if ($group.MailNickname -notlike "$serviceName.*") {
                     Write-Warning "$logPrefix Keeping group $($resource.DisplayName) [$($resource.OriginId)]: it wasn't created by this landing zone (mailNickname '$($group.MailNickname)')"
                     continue
                 }

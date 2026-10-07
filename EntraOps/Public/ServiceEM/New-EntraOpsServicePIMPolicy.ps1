@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     Updates the Unified Role Management Policy for the member role of each
-    non-Members group in ServiceGroups. Policies enforce:
+    admin group (ControlPlane-Admins, ManagementPlane-Admins, WorkloadPlane-Admins) in
+    ServiceGroups. Other groups are ignored. Policies enforce:
 
     - Expiration_Admin_Eligibility: no expiration for eligible assignments.
     - Expiration_Admin_Assignment: 15-day maximum for active assignments
@@ -21,12 +22,11 @@
     Access level is determined from the group DisplayName (ControlPlane,
     ManagementPlane, or WorkloadPlane).
 
-    When all admin groups are delegated and no non-Members groups remain,
-    returns an empty array without error.
+    When ServiceGroups contains no admin group, returns an empty array without error.
 
 .PARAMETER ServiceGroups
-    All owned service group objects. Non-Members groups receive policy updates.
-    Pass only owned (non-delegated) groups.
+    Owned service group objects that should be managed by PIM for Groups. Only the admin groups
+    receive policy updates. Pass only owned (non-delegated) groups.
 
 .PARAMETER ServiceName
     Name of the service. Optional; not currently used in policy computation
@@ -39,7 +39,7 @@
     New-EntraOpsServicePIMPolicy -ServiceGroups $ownedGroups
 
     Applies PIM policy (MFA + Justification, 10h activation limit) to all
-    non-Members groups for the service.
+    admin groups for the service.
 
 .EXAMPLE
     New-EntraOpsServicePIMPolicy -ServiceGroups $ownedGroups -ServiceName "MyService"
@@ -60,6 +60,7 @@ function New-EntraOpsServicePIMPolicy {
     )
 
     begin {
+        $pimGroups = @($ServiceGroups | Where-Object { $_.DisplayName -match '(Control|Management|Workload)Plane-Admins$' -and $_.GroupTypes -notcontains 'Unified' })
         $groupPolicies = @()
         $groupPolicyAssignments = @()
         $policyUpdateFailures = [System.Collections.Generic.List[string]]::new()
@@ -91,7 +92,7 @@ function New-EntraOpsServicePIMPolicy {
     process {
         Write-Verbose "$logPrefix Beginning PIM Policy"
 
-        foreach ($group in $ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" }) {
+        foreach ($group in $pimGroups) {
             # Determine access level from group DisplayName
             $accessLevel = $null
             if ($group.DisplayName -match 'ControlPlane') {
@@ -190,8 +191,7 @@ function New-EntraOpsServicePIMPolicy {
             throw "$logPrefix Failed to update PIM policy for $($policyUpdateFailures.Count) group(s): $($policyUpdateFailures -join '; ')"
         }
 
-        # When no non-Members groups exist (e.g., all admin groups delegated), nothing to return.
-        if (($ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" } | Measure-Object).Count -eq 0) {
+        if ($pimGroups.Count -eq 0) {
             return [psobject[]]@()
         }
         # Update-MgPolicyRoleManagementPolicy updates policy rules synchronously — there is no
@@ -203,7 +203,7 @@ function New-EntraOpsServicePIMPolicy {
         if ($result.Count -eq 0) {
             Write-Verbose "$logPrefix groupPolicyAssignments empty — performing single recovery lookup"
             try {
-                foreach ($group in $ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" }) {
+                foreach ($group in $pimGroups) {
                     $recovery = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/policies/roleManagementPolicyAssignments?`$filter=scopeId eq '$($group.Id)' and scopeType eq 'Group'" -OutputType PSObject
                     $result += @($recovery | Where-Object { $_.id -like "*member" })
                 }

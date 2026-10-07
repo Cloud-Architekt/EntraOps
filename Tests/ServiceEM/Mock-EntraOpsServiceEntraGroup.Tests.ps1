@@ -163,7 +163,7 @@ Describe "New-EntraOpsServiceEntraGroup - Unit Tests" {
             $roles = @([pscustomobject]@{accessLevel = ""; name = "Members"; groupType = "Unified" })
             
             { New-EntraOpsServiceEntraGroup -ServiceName "Test Service!" -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/test" -ServiceRoles $roles -ErrorAction Stop } | 
-            Should -Throw -ExpectedMessage "*invalid characters*"
+                Should -Throw -ExpectedMessage "*ServiceName 'Test Service!' is invalid*"
         }
         
         It "Should accept valid MailNickname with dots and underscores" {
@@ -204,29 +204,10 @@ Describe "New-EntraOpsServiceEntraGroup - Unit Tests" {
             $result[1].SecurityEnabled | Should -Be $true
         }
         
-        It "Should create PIM staging group for ManagementPlane-Admins only with EnablePIMStagingGroup" {
-            $roles = @([pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = "" })
-            
-            $result = New-EntraOpsServiceEntraGroup -ServiceName "TestSvc" -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/test" -ServiceRoles $roles -EnablePIMStagingGroup
-            
-            $result | Should -HaveCount 2
-            $pimGroup = $result | Where-Object { $_.MailNickname -like "PIM.*" }
-            $pimGroup | Should -Not -BeNullOrEmpty
-        }
-
-        It "Should NOT create PIM staging group by default" {
+        It "Should NOT create a PIM staging group" {
             $roles = @([pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = "" })
             
             $result = New-EntraOpsServiceEntraGroup -ServiceName "TestSvc" -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/test" -ServiceRoles $roles
-            
-            $result | Should -HaveCount 1
-            $result[0].MailNickname | Should -Not -BeLike "PIM.*"
-        }
-        
-        It "Should NOT create PIM staging group when NoPimEscalation is set" {
-            $roles = @([pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = "" })
-            
-            $result = New-EntraOpsServiceEntraGroup -ServiceName "TestSvc" -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/test" -ServiceRoles $roles -EnablePIMStagingGroup -NoPimEscalation
             
             $result | Should -HaveCount 1
             $result[0].MailNickname | Should -Not -BeLike "PIM.*"
