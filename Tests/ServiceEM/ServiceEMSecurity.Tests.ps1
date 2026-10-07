@@ -109,21 +109,167 @@ Describe 'ServiceEM workload plane admin and group ownership' {
     }
 
     It 'assigns the workload plane admin to the admin access package without setting group owners' {
-        New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -WorkloadPlaneAdmin 'admin@contoso.com' -ServiceMembers @() -EnablePIMOwnerAssignment 6>$null | Out-Null
+        New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -WorkloadPlaneAdmin 'admin@contoso.com' -ServiceMembers @() 6>$null | Out-Null
 
         Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly -ParameterFilter { [string]::IsNullOrEmpty($WorkloadPlaneAdmin) }
         Should -Invoke New-EntraOpsServiceEMAssignment -Times 1 -Exactly -ParameterFilter { $WorkloadPlaneAdmin.Id -eq 'id:admin@contoso.com' }
-        Should -Invoke New-EntraOpsServicePIMAssignment -Times 1 -Exactly -ParameterFilter { [string]::IsNullOrEmpty($WorkloadPlaneAdminPrincipalId) }
+        Should -Invoke New-EntraOpsServicePIMAssignment -Times 0 -Exactly
     }
 
-    It 'sets the workload plane admin as group owner only with AssignOwner' {
-        New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -WorkloadPlaneAdmin 'admin@contoso.com' -ServiceMembers @() -AssignOwner -EnablePIMOwnerAssignment 6>$null | Out-Null
+    It 'sets the workload plane admin as permanent owner only with GroupOwnership Permanent and warns' {
+        New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -WorkloadPlaneAdmin 'admin@contoso.com' -ServiceMembers @() -GroupOwnership Permanent -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
 
         Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly -ParameterFilter { $WorkloadPlaneAdmin -eq 'https://graph.microsoft.com/v1.0/users/id:admin@contoso.com' }
-        Should -Invoke New-EntraOpsServicePIMAssignment -Times 1 -Exactly -ParameterFilter { $WorkloadPlaneAdminPrincipalId -eq 'id:admin@contoso.com' }
+        Should -Invoke New-EntraOpsServicePIMAssignment -Times 0 -Exactly
+        @($warnings | Where-Object { "$_" -like '*-GroupOwnership Permanent*bypassing access package approvals*' }).Count | Should -Be 1
     }
 
-    It 'resolves no workload plane admin without WorkloadPlaneAdmin and AssignOwner' {
+    It 'makes the workload plane admin an eligible owner with GroupOwnership Eligible' {
+        New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -WorkloadPlaneAdmin 'admin@contoso.com' -ServiceMembers @() -GroupOwnership Eligible -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly -ParameterFilter { [string]::IsNullOrEmpty($WorkloadPlaneAdmin) }
+        Should -Invoke New-EntraOpsServicePIMAssignment -Times 1 -Exactly -ParameterFilter { $WorkloadPlaneAdminPrincipalId -eq 'id:admin@contoso.com' -and $EnableOwnerAssignment }
+    }
+
+    It 'resolves the signed-in user as eligible owner with GroupOwnership Eligible only' {
+        New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -GroupOwnership Eligible -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        Should -Invoke New-EntraOpsServicePIMAssignment -Times 1 -Exactly -ParameterFilter { $WorkloadPlaneAdminPrincipalId -eq 'id:caller@contoso.com' }
+    }
+
+    It 'ignores ManagementPlane-Members in custom service roles with a warning' {
+        $roles = @(
+            [pscustomobject]@{ accessLevel = 'ManagementPlane'; name = 'Members'; groupType = '' },
+            [pscustomobject]@{ accessLevel = 'WorkloadPlane'; name = 'Admins'; groupType = '' }
+        )
+
+        New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -ServiceRoles $roles -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly -ParameterFilter { @($ServiceRoles | Where-Object { $_.accessLevel -eq 'ManagementPlane' }).Count -eq 0 }
+        @($warnings | Where-Object { "$_" -like '*ManagementPlane-Members isn''t supported*' }).Count | Should -Be 1
+    }
+
+    Context 'PIM for Groups' {
+        BeforeEach {
+            $script:BootstrapSteps = [System.Collections.Generic.List[string]]::new()
+            Mock New-EntraOpsServiceEntraGroup {
+                @('WorkloadPlane-Users', 'WorkloadPlane-Admins', 'ManagementPlane-Admins', 'ControlPlane-Admins', 'CatalogPlane-Members') |
+                ForEach-Object { [pscustomobject]@{ Id = $_; DisplayName = "SG-Rg-X-$_" } }
+            }
+            Mock New-EntraOpsServicePIMPolicy { $script:BootstrapSteps.Add('PIMPolicy'); @() }
+            Mock New-EntraOpsServiceEMCatalogResource { $script:BootstrapSteps.Add('CatalogResource'); @([pscustomobject]@{ Id = 'r1' }) }
+        }
+
+        It 'configures no PIM for Groups by default' {
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            Should -Invoke New-EntraOpsServicePIMPolicy -Times 0 -Exactly
+            Should -Invoke New-EntraOpsServicePIMAssignment -Times 0 -Exactly
+            Should -Invoke New-EntraOpsServiceEMAccessPackageResourceAssignment -Times 1 -Exactly -ParameterFilter { @($EligibleMemberGroupIds).Count -eq 0 }
+            @($warnings | Where-Object { "$_" -like '*Microsoft Entra ID Governance*' }).Count | Should -Be 0
+        }
+
+        It 'manages ControlPlane-Admins and ManagementPlane-Admins with EnablePimForGroups and warns about the license' {
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -EnablePimForGroups -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            Should -Invoke New-EntraOpsServicePIMPolicy -Times 1 -Exactly -ParameterFilter { (@($ServiceGroups.Id | Sort-Object) -join ',') -eq 'ControlPlane-Admins,ManagementPlane-Admins' }
+            Should -Invoke New-EntraOpsServiceEMAccessPackageResourceAssignment -Times 1 -Exactly -ParameterFilter { (@($EligibleMemberGroupIds | Sort-Object) -join ',') -eq 'ControlPlane-Admins,ManagementPlane-Admins' }
+            @($warnings | Where-Object { "$_" -like '*-EnablePimForGroups:*Microsoft Entra ID Governance*P2 alone*' }).Count | Should -Be 1
+            $script:BootstrapSteps[0] | Should -Be 'PIMPolicy' -Because 'the catalog only offers the Eligible Member role of groups managed by PIM'
+        }
+
+        It 'manages WorkloadPlane-Admins with EnableWorkloadPlanePimForGroups' {
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -EnableWorkloadPlanePimForGroups -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            Should -Invoke New-EntraOpsServicePIMPolicy -Times 1 -Exactly -ParameterFilter { (@($ServiceGroups.Id) -join ',') -eq 'WorkloadPlane-Admins' }
+            Should -Invoke New-EntraOpsServiceEMAccessPackageResourceAssignment -Times 1 -Exactly -ParameterFilter { (@($EligibleMemberGroupIds) -join ',') -eq 'WorkloadPlane-Admins' }
+            @($warnings | Where-Object { "$_" -like '*-EnableWorkloadPlanePimForGroups:*Microsoft Entra ID Governance*' }).Count | Should -Be 1
+        }
+    }
+
+    It 'forwards CatalogPlaneMembers' {
+        New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -CatalogPlaneMembers @('ops@contoso.com') 6>$null | Out-Null
+
+        Should -Invoke New-EntraOpsServiceEMAssignment -Times 1 -Exactly -ParameterFilter { @($CatalogPlaneMembers.Id) -join ',' -eq 'id:ops@contoso.com' }
+    }
+
+    Context 'initial ControlPlane-Admins members' {
+        BeforeEach {
+            $script:CpRequests = [System.Collections.Generic.List[object]]::new()
+            Mock New-EntraOpsServiceEntraGroup { @([pscustomobject]@{ Id = 'cp'; DisplayName = 'SG-Rg-X-ControlPlane-Admins' }) }
+            Mock Invoke-EntraOpsMsGraphQuery {
+                if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
+                if ($Method -eq 'POST') { $script:CpRequests.Add([pscustomobject]@{ Uri = $Uri; Body = ($Body | ConvertFrom-Json) }); return [pscustomobject]@{ Id = 'req' } }
+                if ($Uri -like '/v1.0/groups/cp/members*') { return @([pscustomobject]@{ Id = 'id:existing@contoso.com' }) }
+                return @()
+            }
+            Mock Get-AzContext { [pscustomobject]@{ Tenant = [pscustomobject]@{ Id = 't' }; Subscription = [pscustomobject]@{ Id = '11111111-1111-1111-1111-111111111111' } } }
+            Mock Get-AzSubscription { [pscustomobject]@{ Id = $SubscriptionId } }
+            Mock New-EntraOpsServiceAZContainer { [pscustomobject]@{ ResourceId = 'rg' } }
+        }
+
+        It 'adds permanent members when the Azure roles of ControlPlane-Admins are PIM-eligible' {
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -AzureRegion 'westeurope' -SubscriptionId '11111111-1111-1111-1111-111111111111' -ServiceMembers @() `
+                -ControlPlaneAdmins @('cp@contoso.com', 'existing@contoso.com') 6>$null | Out-Null
+
+            $script:CpRequests.Count | Should -Be 1
+            $script:CpRequests[0].Uri | Should -Be '/v1.0/groups/cp/members/$ref'
+            $script:CpRequests[0].Body.'@odata.id' | Should -Be 'https://graph.microsoft.com/v1.0/directoryObjects/id:cp@contoso.com'
+        }
+
+        It 'gives delegated admin groups of a governance landing zone their Azure roles on this scope' {
+            Mock New-EntraOpsServiceEntraGroup { @([pscustomobject]@{ Id = 'wa'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins' }) }
+            Mock Invoke-EntraOpsMsGraphQuery {
+                if ($Uri -like '/v1.0/groups/*') { return [pscustomobject]@{ Id = ($Uri -replace '^/v1.0/groups/'); DisplayName = 'governance group' } }
+                return @()
+            }
+            $mp = '22222222-2222-2222-2222-222222222222'; $cp = '33333333-3333-3333-3333-333333333333'
+
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -AzureRegion 'westeurope' -SubscriptionId '11111111-1111-1111-1111-111111111111' -ServiceMembers @() `
+                -ManagementPlaneDelegationGroupId $mp -ControlPlaneDelegationGroupId $cp 6>$null | Out-Null
+
+            Should -Invoke New-EntraOpsServiceAZContainer -Times 1 -Exactly -ParameterFilter {
+                ($ServiceGroups | Where-Object { $_.Id -eq $mp -and $_.DisplayName -eq 'SG-Rg-X-ManagementPlane-Admins' -and $_.IsDelegated }) -and
+                ($ServiceGroups | Where-Object { $_.Id -eq $cp -and $_.DisplayName -eq 'SG-Rg-X-ControlPlane-Admins' -and $_.IsDelegated }) -and
+                -not $SkipControlPlaneDelegation
+            }
+        }
+
+        It 'adds PIM for Groups eligible members with EnablePimForGroups' {
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -ControlPlaneAdmins @('cp@contoso.com') -EnablePimForGroups -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            $script:CpRequests.Count | Should -Be 1
+            $script:CpRequests[0].Uri | Should -Be '/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests'
+            $script:CpRequests[0].Body.accessId | Should -Be 'member'
+            $script:CpRequests[0].Body.groupId | Should -Be 'cp'
+            $script:CpRequests[0].Body.principalId | Should -Be 'id:cp@contoso.com'
+        }
+
+        It 'warns when no per-service ControlPlane-Admins group exists' {
+            Mock New-EntraOpsServiceEntraGroup { @([pscustomobject]@{ Id = 'g1'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins' }) }
+
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -ControlPlaneAdmins @('cp@contoso.com') -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            $script:CpRequests.Count | Should -Be 0
+            @($warnings | Where-Object { "$_" -like '*-ControlPlaneAdmins is ignored*' }).Count | Should -Be 1
+        }
+    }
+
+    It 'stops before creating objects when a delegated group lookup fails' {
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
+            if ($Uri -like '/v1.0/groups/*') { throw 'Request_ResourceNotFound' }
+        }
+
+        { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -ControlPlaneDelegationGroupId '11111111-1111-1111-1111-111111111111' 6>$null } |
+        Should -Throw '*Unable to resolve delegated ControlPlane-Admins group*Request_ResourceNotFound*'
+        { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -ManagementPlaneDelegationGroupId '../users' 6>$null } |
+        Should -Throw '*ManagementPlaneDelegationGroupId*'
+
+        Should -Invoke New-EntraOpsServiceEntraGroup -Times 0 -Exactly
+    }
+
+    It 'resolves no workload plane admin without WorkloadPlaneAdmin and GroupOwnership' {
         New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() 6>$null | Out-Null
 
         Should -Invoke New-EntraOpsServiceEMAssignment -Times 1 -Exactly -ParameterFilter { $null -eq $WorkloadPlaneAdmin }
@@ -200,7 +346,6 @@ Describe 'ServiceEM workload plane admin and group ownership' {
         Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly -ParameterFilter {
             @($ServiceRoles | Where-Object groupType -EQ 'Unified').Count -eq 0 -and @($ServiceRoles).Count -gt 0
         }
-        Should -Invoke New-EntraOpsServicePIMAssignment -Times 1 -Exactly -ParameterFilter { $ServiceGroups.Id -notcontains 'm365' }
         Should -Invoke New-EntraOpsServiceEMCatalogResource -Times 1 -Exactly -ParameterFilter { $ServiceGroups.Id -notcontains 'm365' }
     }
 
@@ -215,7 +360,7 @@ Describe 'ServiceEM workload plane admin and group ownership' {
         New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -CreateM365Group 6>$null | Out-Null
 
         Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly -ParameterFilter { @($ServiceRoles | Where-Object groupType -EQ 'Unified').Count -eq 1 }
-        Should -Invoke New-EntraOpsServicePIMAssignment -Times 1 -Exactly -ParameterFilter { $ServiceGroups.Id -contains 'm365' }
+        Should -Invoke New-EntraOpsServiceEMCatalogResource -Times 1 -Exactly -ParameterFilter { $ServiceGroups.Id -contains 'm365' }
     }
 
     It 'uses CreateM365Group from ServiceEM config unless the parameter is passed' {
@@ -253,6 +398,7 @@ Describe 'ServiceEM workload plane admin and group ownership' {
         BeforeEach {
             Mock Invoke-EntraOpsMsGraphQuery {
                 if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
+                if ($Uri -eq "/v1.0/groups/$script:AdminGroupId") { return [pscustomobject]@{ Id = $script:AdminGroupId; DisplayName = 'PRG-Admins' } }
                 if ($Uri -like '*/checkMemberGroups') { return $script:MemberOfResult }
             }
         }
@@ -321,6 +467,18 @@ Describe 'ServiceEM catalog owner assignment' {
 
         @($script:RoleBodies | Where-Object { $_.roleDefinitionId -eq $script:OwnerRoleId }).Count | Should -Be 0
         $script:RoleBodies.Count | Should -BeGreaterThan 0
+    }
+
+    It 'warns about same-tier escalation only for a per-service ManagementPlane-Admins group' {
+        $perService = @($script:CatalogGroups) + [pscustomobject]@{ Id = 'mp'; DisplayName = 'SG-Rg-X-ManagementPlane-Admins' }
+        $centralized = @($script:CatalogGroups) + [pscustomobject]@{ Id = 'mp-tenant'; DisplayName = 'SG-Rg-X-ManagementPlane-Admins'; IsDelegated = $true }
+
+        New-EntraOpsServiceEMCatalogResourceRole -ServiceGroups $perService -ServiceCatalogId 'cat' -WarningVariable perServiceWarnings -WarningAction SilentlyContinue 6>$null | Out-Null
+        New-EntraOpsServiceEMCatalogResourceRole -ServiceGroups $centralized -ServiceCatalogId 'cat' -WarningVariable centralizedWarnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        @($perServiceWarnings | Where-Object { "$_" -like '*add further ManagementPlane admins*-GovernanceModel Centralized*' }).Count | Should -Be 1
+        @($centralizedWarnings | Where-Object { "$_" -like '*Access package assignment manager*' }).Count | Should -Be 0
+        @($script:RoleBodies | Where-Object { $_.roleDefinitionId -eq 'e2182095-804a-4656-ae11-64734e9b7ae5' }).principalId | Should -Be @('mp', 'mp-tenant')
     }
 }
 
@@ -485,6 +643,29 @@ Describe 'ServiceEM access package assignment fulfillment' {
         Should -Invoke Start-Sleep -Times 15 -Exactly
         Should -Invoke Start-Sleep -ParameterFilter { $Seconds -gt 30 } -Times 0 -Exactly
     }
+
+    It 'assigns the workload plane admin and CatalogPlaneMembers to CatalogPlane-Members' {
+        $script:AssignmentBodies = [System.Collections.Generic.List[object]]::new()
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'POST') {
+                $body = $Body | ConvertFrom-Json
+                $script:AssignmentBodies.Add($body)
+                return [pscustomobject]@{ Id = "req-$($body.assignment.targetId)-$($body.assignment.accessPackageId)"; State = 'submitted' }
+            }
+            if ($Uri -match '/assignmentRequests/(req-.+)$') { return [pscustomobject]@{ Id = $Matches[1]; State = 'delivered' } }
+            return @()
+        }
+        $packages = @($script:Packages) + [pscustomobject]@{ Id = 'ap-catalog'; DisplayName = 'AP-Rg-X-CatalogPlane-Members' }
+        $policies = @($script:Policies) + [pscustomobject]@{ Id = 'pol-initial-catalog'; DisplayName = 'Initial Catalog Members Policy' }
+
+        New-EntraOpsServiceEMAssignment -ServiceCatalogId 'cat' -ServiceMembers @() -WorkloadPlaneAdmin ([pscustomobject]@{ Id = 'admin' }) `
+            -CatalogPlaneMembers @([pscustomobject]@{ Id = 'ops' }, [pscustomobject]@{ Id = 'admin' }) `
+            -ServiceAssignmentPolicies $policies -ServicePackages $packages 6>$null | Out-Null
+
+        $catalogBodies = @($script:AssignmentBodies | Where-Object { $_.assignment.accessPackageId -eq 'ap-catalog' })
+        @($catalogBodies | ForEach-Object { $_.assignment.targetId } | Sort-Object) | Should -Be @('admin', 'ops')
+        @($catalogBodies | ForEach-Object { $_.assignment.assignmentPolicyId } | Select-Object -Unique) | Should -Be @('pol-initial-catalog')
+    }
 }
 
 Describe 'ServiceEM Azure subscription targeting' {
@@ -568,16 +749,6 @@ Describe 'ServiceEM Azure subscription targeting' {
 
         $script:CurrentSub | Should -Be $script:PreviousSub
     }
-
-    It 'forwards SubscriptionId only to the Rg scope of the landing zone' {
-        Mock New-EntraOpsServiceBootstrap { [pscustomobject]@{ ServiceName = $ServiceName } }
-        Mock Resolve-EntraOpsServiceEMDelegationGroup { '33333333-3333-3333-3333-333333333333' }
-
-        New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'X' -DeploymentScope Both -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel PerService 6>$null | Out-Null
-
-        Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-X' -and $SubscriptionId -eq $script:TargetSub -and -not $SkipAzureResourceGroup }
-        Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Sub-X' -and [string]::IsNullOrEmpty($SubscriptionId) -and $SkipAzureResourceGroup }
-    }
 }
 
 Describe 'ServiceEM landing zone deployment scope' {
@@ -660,17 +831,47 @@ Describe 'ServiceEM landing zone deployment scope' {
         Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-C' -and $GroupPrefix -eq 'SEC' }
     }
 
-    It 'forwards CreateM365Group to every scope and creates no Microsoft 365 group by default' {
-        New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'X' -DeploymentScope Both -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel PerService -CreateM365Group 6>$null | Out-Null
+    It 'forwards CreateM365Group and creates no Microsoft 365 group by default' {
+        New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'X' -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel PerService -CreateM365Group 6>$null | Out-Null
         New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'Y' -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel PerService 6>$null | Out-Null
 
-        Should -Invoke New-EntraOpsServiceBootstrap -Times 2 -Exactly -ParameterFilter { $CreateM365Group }
+        Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-X' -and $CreateM365Group }
         Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-Y' -and -not $CreateM365Group }
     }
 
-    It 'rejects custom landing zone components for a single scope' {
-        { New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'X' -DeploymentScope ResourceGroup -SkipAzureResourceGroup -LandingZoneComponents @([pscustomobject]@{ Role = 'Rg'; ServiceRole = @() }) } |
-        Should -Throw '*only be used with -DeploymentScope Both*'
+    It 'only supports single-scope deployments' {
+        { New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'X' -DeploymentScope Both -SkipAzureResourceGroup } | Should -Throw '*does not belong to the set*'
+    }
+
+    It 'uses the governance groups of another landing zone as delegated groups' {
+        $ids = @{ ControlPlane = '11111111-aaaa-aaaa-aaaa-111111111111'; ManagementPlane = '22222222-aaaa-aaaa-aaaa-222222222222'; Administrator = '33333333-aaaa-aaaa-aaaa-333333333333' }
+        Mock Resolve-EntraOpsServiceEMDelegationGroup { $GroupId }
+
+        New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'X' -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel PerService `
+            -ControlPlaneDelegationGroupId $ids.ControlPlane -ManagementPlaneDelegationGroupId $ids.ManagementPlane -AdministratorGroupId $ids.Administrator `
+            -ControlPlaneAdmins @('cp@contoso.com') -CatalogPlaneMembers @('ops@contoso.com') -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter {
+            $ServiceName -eq 'Rg-X' -and $SkipControlPlaneDelegation -and $SkipManagementPlaneDelegation -and
+            $ControlPlaneDelegationGroupId -eq $ids.ControlPlane -and $ManagementPlaneDelegationGroupId -eq $ids.ManagementPlane -and $AdministratorGroupId -eq $ids.Administrator -and
+            -not (& $script:HasRole $ServiceRoles 'ControlPlane' 'Admins') -and -not (& $script:HasRole $ServiceRoles 'ManagementPlane' 'Admins') -and
+            -not $ControlPlaneAdmins -and @($CatalogPlaneMembers) -join ',' -eq 'ops@contoso.com'
+        }
+        @($warnings | Where-Object { "$_" -like '*-ControlPlaneAdmins is ignored*' }).Count | Should -Be 1
+    }
+
+    It 'forwards GroupOwnership and the PIM for Groups switches to every scope' {
+        New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'X' -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel PerService -GroupOwnership Eligible -EnablePimForGroups -EnableWorkloadPlanePimForGroups 6>$null | Out-Null
+
+        Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $GroupOwnership -eq 'Eligible' -and $EnablePimForGroups -and $EnableWorkloadPlanePimForGroups }
+    }
+
+    It 'ignores ControlPlaneAdmins in the Centralized model with a warning' {
+        New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'X' -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel Centralized `
+            -AdministratorGroupId '44444444-4444-4444-4444-444444444444' -ControlPlaneAdmins @('cp@contoso.com') -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { -not $ControlPlaneAdmins }
+        @($warnings | Where-Object { "$_" -like '*-ControlPlaneAdmins is ignored*' }).Count | Should -Be 1
     }
 }
 
@@ -694,20 +895,9 @@ Describe 'ServiceEM PIM for Groups eligible assignments' {
         }
     }
 
-    It 'makes only ManagementPlane-Admins eligible for its staging group and never the Microsoft 365 group' {
-        $groups = @('Sub-X Members', 'SG-Sub-X-ManagementPlane-Admins', 'SG-PIM-Sub-X-ManagementPlane-Admins', 'SG-Sub-X-WorkloadPlane-Users') | ForEach-Object { [pscustomobject]@{ Id = "id:$_"; DisplayName = $_ } }
+    It 'creates eligible owner assignments only on the WorkloadPlane groups with EnableOwnerAssignment' {
+        $groups = @('Rg-X Members', 'SG-Rg-X-WorkloadPlane-Users', 'SG-Rg-X-WorkloadPlane-Admins', 'SG-Rg-X-ControlPlane-Admins', 'SG-Rg-X-ManagementPlane-Admins') | ForEach-Object { [pscustomobject]@{ Id = "id:$_"; DisplayName = $_ } }
         $groups[0] | Add-Member -NotePropertyName GroupTypes -NotePropertyValue @('Unified')
-
-        New-EntraOpsServicePIMAssignment -ServiceGroups $groups 6>$null | Out-Null
-
-        $script:EligibilityBodies.Count | Should -Be 1
-        $script:EligibilityBodies[0].groupId | Should -Be 'id:SG-PIM-Sub-X-ManagementPlane-Admins'
-        $script:EligibilityBodies[0].principalId | Should -Be 'id:SG-Sub-X-ManagementPlane-Admins'
-        @($script:EligibilityBodies | Where-Object principalId -EQ 'id:Sub-X Members').Count | Should -Be 0
-    }
-
-    It 'creates eligible owner assignments on the admin and user groups only with EnableOwnerAssignment' {
-        $groups = @('Rg-X Members', 'SG-Rg-X-WorkloadPlane-Users', 'SG-Rg-X-WorkloadPlane-Admins') | ForEach-Object { [pscustomobject]@{ Id = "id:$_"; DisplayName = $_ } }
 
         New-EntraOpsServicePIMAssignment -ServiceGroups $groups -WorkloadPlaneAdminPrincipalId 'admin-id' 6>$null | Out-Null
         $script:EligibilityBodies.Count | Should -Be 0
@@ -715,27 +905,7 @@ Describe 'ServiceEM PIM for Groups eligible assignments' {
         New-EntraOpsServicePIMAssignment -ServiceGroups $groups -WorkloadPlaneAdminPrincipalId 'admin-id' -EnableOwnerAssignment 6>$null | Out-Null
         $script:EligibilityBodies.Count | Should -Be 2
         @($script:EligibilityBodies | Where-Object { $_.accessId -eq 'owner' -and $_.principalId -eq 'admin-id' }).Count | Should -Be 2
-    }
-
-    It 'matches the PIM staging group by mailNickname when the groups use another prefix' {
-        $groups = @(
-            [pscustomobject]@{ Id = 'old-admins'; DisplayName = 'SG-Sub-X-ManagementPlane-Admins'; MailNickname = 'Sub-X.ManagementPlane.Admins' }
-            [pscustomobject]@{ Id = 'old-pim'; DisplayName = 'SG-PIM-Sub-X-ManagementPlane-Admins'; MailNickname = 'PIM.Sub-X.ManagementPlane.Admins' }
-        )
-
-        New-EntraOpsServicePIMAssignment -ServiceGroups $groups -GroupPrefix 'GRP' 6>$null | Out-Null
-
-        ($script:EligibilityBodies | Where-Object groupId -EQ 'old-pim').principalId | Should -Be 'old-admins'
-    }
-
-    It 'creates no eligible member assignment without a Members group' {
-        $groups = @('SG-Sub-X-ManagementPlane-Admins', 'SG-PIM-Sub-X-ManagementPlane-Admins', 'SG-Sub-X-WorkloadPlane-Admins') | ForEach-Object { [pscustomobject]@{ Id = "id:$_"; DisplayName = $_ } }
-
-        New-EntraOpsServicePIMAssignment -ServiceGroups $groups 6>$null | Out-Null
-
-        $script:EligibilityBodies.Count | Should -Be 1
-        $script:EligibilityBodies[0].groupId | Should -Be 'id:SG-PIM-Sub-X-ManagementPlane-Admins'
-        $script:EligibilityBodies[0].principalId | Should -Be 'id:SG-Sub-X-ManagementPlane-Admins'
+        @($script:EligibilityBodies | Where-Object { $_.accessId -eq 'member' }).Count | Should -Be 0
     }
 
     It 'returns without warning when there is nothing to assign' {
@@ -789,7 +959,9 @@ Describe 'ServiceEM Azure container scope' {
         Should -Invoke Get-AzResourceGroup -Times 0 -Exactly
         Should -Invoke New-AzResourceGroup -Times 0 -Exactly
         Should -Invoke New-AzRoleAssignment -Times 1 -Exactly -ParameterFilter { $Scope -eq '/subscriptions/sub1' -and $ObjectId -eq 'id:SG-Sub-X-WorkloadPlane-Admins' }
-        Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 5 -Exactly -ParameterFilter { $Scope -eq '/subscriptions/sub1' }
+        Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 4 -Exactly -ParameterFilter { $Scope -eq '/subscriptions/sub1' }
+        Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly -ParameterFilter { $PrincipalId -eq 'id:SG-Sub-X-WorkloadPlane-Admins' -and $RoleDefinitionId -like '*rd-Contributor' }
+        Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter { $PrincipalId -eq 'id:SG-Sub-X-WorkloadPlane-Admins' -and $RoleDefinitionId -like '*rd-Role Based Access Control Administrator' }
     }
 
     It 'tags a new resource group with the service name' {
@@ -820,6 +992,129 @@ Describe 'ServiceEM Azure container scope' {
         New-EntraOpsServiceAZContainer -ServiceName 'Rg-X' -ServiceGroups $script:Groups -Location 'westeurope' -WarningAction SilentlyContinue 6>$null | Out-Null
 
         Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter { $PrincipalId -eq 'id:SG-Sub-X-ManagementPlane-Admins' -and $RoleDefinitionId -like '*rd-Contributor' -and $Scope -eq '/subscriptions/sub1/resourceGroups/RG-X' }
+    }
+
+    It 'assigns no Owner role' {
+        New-EntraOpsServiceAZContainer -ServiceName 'Sub-X' -ServiceGroups $script:Groups -AzureScope Subscription -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        Should -Invoke New-AzRoleAssignment -Times 0 -Exactly -ParameterFilter { $RoleDefinitionName -eq 'Owner' }
+    }
+}
+
+Describe 'ServiceEM access package resource roles' {
+    BeforeAll {
+        . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/New-EntraOpsServiceEMAccessPackageResourceAssignment.ps1"
+    }
+
+    It 'adds the Microsoft 365 group to every access package of the scope' {
+        $script:RoleScopeBodies = [System.Collections.Generic.List[object]]::new()
+        Mock Start-Sleep {}
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'POST') {
+                $script:RoleScopeBodies.Add([pscustomobject]@{ Uri = $Uri; Body = ($Body | ConvertFrom-Json -Depth 10) })
+                return [pscustomobject]@{ Id = [guid]::NewGuid().Guid }
+            }
+            if ($Uri -like '*/resourceRoles?*') {
+                $resourceId = [regex]::Match($Uri, "resource/id eq '([^']+)'").Groups[1].Value
+                return @([pscustomobject]@{ Id = "role-$resourceId"; DisplayName = 'Member'; OriginId = "Member_$resourceId" })
+            }
+            if ($Uri -like '*/accessPackages?*') {
+                $scopes = @($script:RoleScopeBodies | ForEach-Object { [pscustomobject]@{ Role = [pscustomobject]@{ OriginId = $_.Body.role.originId }; Scope = [pscustomobject]@{ OriginId = $_.Body.scope.originId } } })
+                return @([pscustomobject]@{ ResourceRoleScopes = $scopes })
+            }
+            return @()
+        }
+        $groups = @(
+            [pscustomobject]@{ Id = 'm365'; DisplayName = 'Rg-X Members'; GroupTypes = @('Unified') }
+            [pscustomobject]@{ Id = 'wu'; DisplayName = 'SG-Rg-X-WorkloadPlane-Users'; GroupTypes = @() }
+            [pscustomobject]@{ Id = 'wa'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins'; GroupTypes = @() }
+        )
+        $resources = @($groups | ForEach-Object { [pscustomobject]@{ Id = "res-$($_.Id)"; DisplayName = $_.DisplayName; OriginSystem = 'AadGroup'; OriginId = $_.Id } })
+        $packages = @('AP-Rg-X-WorkloadPlane-Users', 'AP-Rg-X-WorkloadPlane-Admins') | ForEach-Object { [pscustomobject]@{ Id = "ap:$_"; DisplayName = $_; ResourceRoleScopes = @() } }
+
+        New-EntraOpsServiceEMAccessPackageResourceAssignment -ServiceCatalogId 'cat' -ServiceName 'Rg-X' -ServiceGroups $groups -ServicePackages $packages -ServiceCatalogResources $resources 6>$null | Out-Null
+
+        $script:RoleScopeBodies.Count | Should -Be 4
+        foreach ($package in $packages) {
+            @($script:RoleScopeBodies | Where-Object { $_.Uri -like "*/accessPackages/$($package.Id)/*" -and $_.Body.scope.originId -eq 'm365' }).Count | Should -Be 1
+        }
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 3 -Exactly -ParameterFilter { $Method -eq 'GET' -and $Uri -like '*/resourceRoles`?*' }
+    }
+
+    Context 'eligible membership' {
+        BeforeEach {
+            $script:RoleScopeBodies = [System.Collections.Generic.List[object]]::new()
+            $script:DeletedUris = [System.Collections.Generic.List[string]]::new()
+            $script:OfferEligibleRole = $true
+            Mock Start-Sleep {}
+            Mock Invoke-EntraOpsMsGraphQuery {
+                if ($Method -eq 'POST') {
+                    $script:RoleScopeBodies.Add([pscustomobject]@{ Uri = $Uri; Body = ($Body | ConvertFrom-Json -Depth 10) })
+                    return [pscustomobject]@{ Id = [guid]::NewGuid().Guid }
+                }
+                if ($Method -eq 'DELETE') { $script:DeletedUris.Add($Uri); return }
+                if ($Uri -like '*/resourceRoles?*') {
+                    $resourceId = [regex]::Match($Uri, "resource/id eq '([^']+)'").Groups[1].Value
+                    $groupId = $resourceId -replace '^res-'
+                    $roles = @([pscustomobject]@{ Id = "role-$resourceId"; DisplayName = 'Member'; OriginId = "Member_$groupId" })
+                    if ($script:OfferEligibleRole) { $roles += [pscustomobject]@{ Id = "erole-$resourceId"; DisplayName = 'Eligible Member'; OriginId = "EligibleMember_$groupId" } }
+                    return $roles
+                }
+                if ($Uri -like '*/accessPackages?*') {
+                    $scopes = @($script:RoleScopeBodies | ForEach-Object { [pscustomobject]@{ Role = [pscustomobject]@{ OriginId = $_.Body.role.originId }; Scope = [pscustomobject]@{ OriginId = $_.Body.scope.originId } } })
+                    return @([pscustomobject]@{ ResourceRoleScopes = $scopes })
+                }
+                return @()
+            }
+            $script:EligibleGroups = @(
+                [pscustomobject]@{ Id = 'wa'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins'; GroupTypes = @() }
+                [pscustomobject]@{ Id = 'ma'; DisplayName = 'SG-Rg-X-ManagementPlane-Admins'; GroupTypes = @() }
+            )
+            $script:EligibleResources = @($script:EligibleGroups | ForEach-Object { [pscustomobject]@{ Id = "res-$($_.Id)"; DisplayName = $_.DisplayName; OriginSystem = 'AadGroup'; OriginId = $_.Id } })
+        }
+
+        It 'delivers the Eligible Member role only for the groups managed by PIM for Groups' {
+            $packages = @('AP-Rg-X-WorkloadPlane-Admins', 'AP-Rg-X-ManagementPlane-Admins') | ForEach-Object { [pscustomobject]@{ Id = "ap:$_"; DisplayName = $_; ResourceRoleScopes = @() } }
+
+            New-EntraOpsServiceEMAccessPackageResourceAssignment -ServiceCatalogId 'cat' -ServiceName 'Rg-X' -ServiceGroups $script:EligibleGroups -ServicePackages $packages -ServiceCatalogResources $script:EligibleResources -EligibleMemberGroupIds @('ma') 6>$null | Out-Null
+
+            ($script:RoleScopeBodies | Where-Object { $_.Body.scope.originId -eq 'ma' }).Body.role.originId | Should -Be 'EligibleMember_ma'
+            ($script:RoleScopeBodies | Where-Object { $_.Body.scope.originId -eq 'wa' }).Body.role.originId | Should -Be 'Member_wa'
+        }
+
+        It 'replaces an active Member role from an earlier deployment with Eligible Member' {
+            $existing = [pscustomobject]@{ Id = 'rrs-active'; Role = [pscustomobject]@{ OriginId = 'Member_ma' }; Scope = [pscustomobject]@{ OriginId = 'ma' } }
+            $packages = @([pscustomobject]@{ Id = 'ap:mp'; DisplayName = 'AP-Rg-X-ManagementPlane-Admins'; ResourceRoleScopes = @($existing) })
+
+            New-EntraOpsServiceEMAccessPackageResourceAssignment -ServiceCatalogId 'cat' -ServiceName 'Rg-X' -ServiceGroups @($script:EligibleGroups[1]) -ServicePackages $packages -ServiceCatalogResources $script:EligibleResources -EligibleMemberGroupIds @('ma') -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            $script:DeletedUris | Should -Be @('/v1.0/identityGovernance/entitlementManagement/accessPackages/ap:mp/resourceRoleScopes/rrs-active')
+            $script:RoleScopeBodies.Body.role.originId | Should -Be 'EligibleMember_ma'
+            @($warnings | Where-Object { "$_" -like '*Replacing the active Member role*' }).Count | Should -Be 1
+        }
+
+        It 'does not add Eligible Member when the active Member role cannot be removed' {
+            Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'DELETE' } -MockWith { throw 'Graph 500' }
+            $existing = [pscustomobject]@{ Id = 'rrs-active'; Role = [pscustomobject]@{ OriginId = 'Member_ma' }; Scope = [pscustomobject]@{ OriginId = 'ma' } }
+            $script:ExistingScope = $existing
+            Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'GET' -and $Uri -like '*/accessPackages`?*' } -MockWith { @([pscustomobject]@{ ResourceRoleScopes = @($script:ExistingScope) }) }
+            $packages = @([pscustomobject]@{ Id = 'ap:mp'; DisplayName = 'AP-Rg-X-ManagementPlane-Admins'; ResourceRoleScopes = @($existing) })
+
+            New-EntraOpsServiceEMAccessPackageResourceAssignment -ServiceCatalogId 'cat' -ServiceName 'Rg-X' -ServiceGroups @($script:EligibleGroups[1]) -ServicePackages $packages -ServiceCatalogResources $script:EligibleResources -EligibleMemberGroupIds @('ma') -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            $script:RoleScopeBodies.Count | Should -Be 0
+            @($warnings | Where-Object { "$_" -like '*Eligible Member is not added*' }).Count | Should -Be 1
+        }
+
+        It 'never falls back to the active Member role when Eligible Member is not offered' {
+            $script:OfferEligibleRole = $false
+            $packages = @([pscustomobject]@{ Id = 'ap:mp'; DisplayName = 'AP-Rg-X-ManagementPlane-Admins'; ResourceRoleScopes = @() })
+
+            New-EntraOpsServiceEMAccessPackageResourceAssignment -ServiceCatalogId 'cat' -ServiceName 'Rg-X' -ServiceGroups @($script:EligibleGroups[1]) -ServicePackages $packages -ServiceCatalogResources $script:EligibleResources -EligibleMemberGroupIds @('ma') -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            $script:RoleScopeBodies.Count | Should -Be 0
+            @($warnings | Where-Object { "$_" -like '*Eligible Member role not found*' }).Count | Should -Be 1
+        }
     }
 }
 
@@ -883,7 +1178,7 @@ Describe 'ServiceEM Graph lookup safety' {
         @($script:GroupLookupUris | Where-Object { $_ -like '*../users*' }) | Should -BeNullOrEmpty
     }
 
-    It 'creates delegation groups without owner unless AssignOwner is set' {
+    It 'creates delegation groups without owner' {
         $script:CreatedGroupBodies = [System.Collections.Generic.List[object]]::new()
         Mock Get-MgContext { [pscustomobject]@{ Scopes = @('RoleManagement.ReadWrite.Directory'); Account = 'admin@contoso.com' } }
         Mock Invoke-EntraOpsMsGraphQuery {
@@ -891,16 +1186,13 @@ Describe 'ServiceEM Graph lookup safety' {
                 $script:CreatedGroupBodies.Add(($Body | ConvertFrom-Json -Depth 5))
                 return [pscustomobject]@{ Id = 'new-group-id' }
             }
-            if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = 'owner-id' } }
             return @()
         }
         Mock Save-EntraOpsServiceEMConfigKey {}
 
         Resolve-EntraOpsServiceEMDelegationGroup -Plane ControlPlane -DefaultGroupName 'PRG-Test' -ConfigKey ControlPlaneDelegationGroupId | Should -Be 'new-group-id'
-        Resolve-EntraOpsServiceEMDelegationGroup -Plane ControlPlane -DefaultGroupName 'PRG-Test' -ConfigKey ControlPlaneDelegationGroupId -AssignOwner | Should -Be 'new-group-id'
 
         $script:CreatedGroupBodies[0].PSObject.Properties.Name | Should -Not -Contain 'owners@odata.bind'
-        $script:CreatedGroupBodies[1].'owners@odata.bind' | Should -Be 'https://graph.microsoft.com/v1.0/users/owner-id'
     }
 }
 
@@ -918,7 +1210,7 @@ Describe 'ServiceEM assignment policy group references' {
             if ($Method -eq 'POST') {
                 $policy = $Body | ConvertFrom-Json -Depth 20
                 $script:PolicyBodies.Add($policy)
-                $created = [pscustomobject]@{ id = [guid]::NewGuid().Guid; accessPackage = $policy.accessPackage }
+                $created = [pscustomobject]@{ id = [guid]::NewGuid().Guid; displayName = $policy.displayName; accessPackage = $policy.accessPackage }
                 $script:CreatedPolicies.Add($created)
                 return $created
             }
@@ -927,19 +1219,18 @@ Describe 'ServiceEM assignment policy group references' {
         }
     }
 
-    It 'does not reference the PIM staging group as ManagementPlane-Admins' {
-        $groups = @('Sub-X Members', 'SG-Sub-X-CatalogPlane-Members', 'SG-Sub-X-ManagementPlane-Members', 'SG-Sub-X-ControlPlane-Admins', 'SG-Sub-X-ManagementPlane-Admins', 'SG-PIM-Sub-X-ManagementPlane-Admins') |
+    It 'uses the admin groups of the scope as reviewers' {
+        $groups = @('Sub-X Members', 'SG-Sub-X-CatalogPlane-Members', 'SG-Sub-X-ControlPlane-Admins', 'SG-Sub-X-ManagementPlane-Admins') |
         ForEach-Object { New-TestGroup $_ }
-        $packages = @('AP-Sub-X-CatalogPlane-Members', 'AP-Sub-X-ManagementPlane-Members', 'AP-Sub-X-ManagementPlane-Admins') | ForEach-Object { New-TestPackage $_ }
+        $packages = @('AP-Sub-X-CatalogPlane-Members', 'AP-Sub-X-ManagementPlane-Admins') | ForEach-Object { New-TestPackage $_ }
 
         New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Sub-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages $packages | Out-Null
 
         $script:PolicyBodies.Count | Should -Be 4
         foreach ($policy in $script:PolicyBodies) {
-            $policy.reviewSettings.primaryReviewers.groupId | Should -Be 'id:SG-Sub-X-ManagementPlane-Admins'
+            $expectedReviewer = if ($policy.displayName -in 'Management Plane Policy', 'Initial Management Admin Policy') { 'id:SG-Sub-X-ControlPlane-Admins' } else { 'id:SG-Sub-X-ManagementPlane-Admins' }
+            $policy.reviewSettings.primaryReviewers.groupId | Should -Be $expectedReviewer -Because "'$($policy.displayName)' is reviewed by the same or a higher tier"
         }
-        ($script:PolicyBodies | Where-Object displayName -EQ 'Initial Management Membership Policy').requestApprovalSettings.stages.primaryApprovers.groupId |
-        Should -Be 'id:SG-Sub-X-ManagementPlane-Admins'
         $adminPolicy = $script:PolicyBodies | Where-Object displayName -EQ 'Initial Management Admin Policy'
         $adminPolicy.allowedTargetScope | Should -Be 'allMemberUsers'
         $adminPolicy.requestApprovalSettings.isApprovalRequiredForAdd | Should -BeFalse
@@ -947,19 +1238,88 @@ Describe 'ServiceEM assignment policy group references' {
         $adminPolicy.requestorSettings.enableOnBehalfRequestorsToAddAccess | Should -BeFalse
     }
 
-    It 'falls back to CatalogPlane-Members when ManagementPlane-Admins is not in the scope' {
-        $groups = @('Rg-X Members', 'SG-Rg-X-CatalogPlane-Members', 'SG-Rg-X-ManagementPlane-Members', 'SG-Rg-X-WorkloadPlane-Users', 'SG-Rg-X-WorkloadPlane-Admins') |
+    Context 'Management Plane Policy' {
+        BeforeAll {
+            $script:MpPackages = @('AP-Sub-X-CatalogPlane-Members', 'AP-Sub-X-ManagementPlane-Admins') | ForEach-Object { New-TestPackage $_ }
+        }
+
+        It 'lets the administrator group request ManagementPlane-Admins with approval by ControlPlane-Admins' {
+            $groups = @('SG-Sub-X-CatalogPlane-Members', 'SG-Sub-X-ControlPlane-Admins', 'SG-Sub-X-ManagementPlane-Admins') | ForEach-Object { New-TestGroup $_ }
+
+            New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Sub-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages $script:MpPackages | Out-Null
+
+            $mpPolicy = $script:PolicyBodies | Where-Object displayName -EQ 'Management Plane Policy'
+            $mpPolicy.accessPackage.id | Should -Be 'ap:AP-Sub-X-ManagementPlane-Admins'
+            $mpPolicy.allowedTargetScope | Should -Be 'specificDirectoryUsers'
+            $mpPolicy.specificAllowedTargets.groupId | Should -Be 'id:SG-Sub-X-CatalogPlane-Members'
+            $mpPolicy.requestorSettings.enableTargetsToSelfAddAccess | Should -BeTrue
+            $stage = $mpPolicy.requestApprovalSettings.stages[0]
+            $stage.primaryApprovers.groupId | Should -Be 'id:SG-Sub-X-ControlPlane-Admins'
+            $stage.isEscalationEnabled | Should -BeFalse
+            $stage.PSObject.Properties.Name | Should -Not -Contain 'fallbackPrimaryApprovers'
+        }
+
+        It 'uses a delegated ControlPlane-Admins group as approver' {
+            $groups = @('SG-Rg-X-CatalogPlane-Members', 'SG-Rg-X-ManagementPlane-Admins') | ForEach-Object { New-TestGroup $_ }
+            $packages = @('AP-Rg-X-ManagementPlane-Admins') | ForEach-Object { New-TestPackage $_ }
+
+            New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages $packages -WarningAction SilentlyContinue | Out-Null
+            @($script:PolicyBodies | Where-Object displayName -EQ 'Management Plane Policy').Count | Should -Be 0
+
+            $delegated = [pscustomobject]@{ Id = 'gov-cp'; DisplayName = 'SG-Rg-X-ControlPlane-Admins'; IsDelegated = $true }
+            New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups (@($groups) + $delegated) -ServicePackages $packages | Out-Null
+            ($script:PolicyBodies | Where-Object displayName -EQ 'Management Plane Policy').requestApprovalSettings.stages[0].primaryApprovers.groupId | Should -Be 'gov-cp'
+        }
+
+        It 'adds a missing Management Plane Policy to an existing landing zone' {
+            $groups = @('SG-Sub-X-CatalogPlane-Members', 'SG-Sub-X-ControlPlane-Admins', 'SG-Sub-X-ManagementPlane-Admins') | ForEach-Object { New-TestGroup $_ }
+            $script:CreatedPolicies.Add([pscustomobject]@{ id = 'existing'; displayName = 'Initial Management Admin Policy'; accessPackage = [pscustomobject]@{ id = 'ap:AP-Sub-X-ManagementPlane-Admins' } })
+
+            New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Sub-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages @($script:MpPackages[1]) | Out-Null
+
+            @($script:PolicyBodies).displayName | Should -Be @('Management Plane Policy')
+        }
+
+        It 'creates an admin-only Initial Catalog Members Policy' {
+            $groups = @('SG-Sub-X-CatalogPlane-Members') | ForEach-Object { New-TestGroup $_ }
+
+            New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Sub-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages @($script:MpPackages[0]) | Out-Null
+
+            $policy = $script:PolicyBodies | Where-Object displayName -EQ 'Initial Catalog Members Policy'
+            $policy.accessPackage.id | Should -Be 'ap:AP-Sub-X-CatalogPlane-Members'
+            $policy.requestorSettings.enableTargetsToSelfAddAccess | Should -BeFalse
+            $policy.requestApprovalSettings.isApprovalRequiredForAdd | Should -BeFalse
+        }
+    }
+
+    It 'never lets CatalogPlane-Members approve privileged packages when ManagementPlane-Admins is not in the scope' {
+        $groups = @('Rg-X Members', 'SG-Rg-X-CatalogPlane-Members', 'SG-Rg-X-WorkloadPlane-Users', 'SG-Rg-X-WorkloadPlane-Admins') |
         ForEach-Object { New-TestGroup $_ }
-        $packages = @('AP-Rg-X-CatalogPlane-Members', 'AP-Rg-X-ManagementPlane-Members', 'AP-Rg-X-WorkloadPlane-Users', 'AP-Rg-X-WorkloadPlane-Admins') | ForEach-Object { New-TestPackage $_ }
+        $packages = @('AP-Rg-X-CatalogPlane-Members', 'AP-Rg-X-WorkloadPlane-Users', 'AP-Rg-X-WorkloadPlane-Admins') | ForEach-Object { New-TestPackage $_ }
 
         New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages $packages | Out-Null
 
-        foreach ($name in 'Initial Management Membership Policy', 'Workload Plane Policy') {
-            ($script:PolicyBodies | Where-Object displayName -EQ $name).requestApprovalSettings.stages.primaryApprovers.groupId |
-            Should -Be 'id:SG-Rg-X-CatalogPlane-Members'
+        foreach ($name in 'Workload Plane Policy') {
+            @($script:PolicyBodies | Where-Object displayName -EQ $name).Count | Should -Be 0 -Because "'$name' has no ManagementPlane-Admins approver"
         }
+        @($script:PolicyBodies | Where-Object displayName -EQ 'Initial Workload Admin Policy').Count | Should -Be 1
         ($script:PolicyBodies | Where-Object displayName -EQ 'Workload Plane Users Policy').requestApprovalSettings.stages.primaryApprovers.groupId |
         Should -Be 'id:SG-Rg-X-WorkloadPlane-Admins'
+    }
+
+    It 'uses a delegated ManagementPlane-Admins group as approver and reviewer' {
+        $groups = @('SG-Rg-X-CatalogPlane-Members', 'SG-Rg-X-WorkloadPlane-Users', 'SG-Rg-X-WorkloadPlane-Admins') |
+        ForEach-Object { New-TestGroup $_ }
+        $groups += [pscustomobject]@{ Id = 'gov-mp'; DisplayName = 'SG-Rg-X-ManagementPlane-Admins'; IsDelegated = $true }
+        $packages = @('AP-Rg-X-WorkloadPlane-Admins') | ForEach-Object { New-TestPackage $_ }
+
+        New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages $packages | Out-Null
+
+        foreach ($name in 'Workload Plane Policy') {
+            $policy = $script:PolicyBodies | Where-Object displayName -EQ $name
+            $policy.requestApprovalSettings.stages.primaryApprovers.groupId | Should -Be 'gov-mp'
+            $policy.reviewSettings.primaryReviewers.groupId | Should -Be 'gov-mp'
+        }
     }
 
     Context 'access review reviewers' {
@@ -984,6 +1344,28 @@ Describe 'ServiceEM assignment policy group references' {
             foreach ($name in 'Workload Plane Policy', 'Initial Workload Admin Policy') {
                 ($script:PolicyBodies | Where-Object displayName -EQ $name).reviewSettings.primaryReviewers.groupId | Should -Be 'id:SG-Rg-X-ManagementPlane-Admins'
             }
+        }
+
+        It 'falls back to a higher tier reviewer only, never to CatalogPlane-Members' {
+            $groups = @('SG-Rg-X-CatalogPlane-Members', 'SG-Rg-X-WorkloadPlane-Users', 'SG-Rg-X-ControlPlane-Admins') | ForEach-Object { New-TestGroup $_ }
+            $packages = @('AP-Rg-X-WorkloadPlane-Users', 'AP-Rg-X-CatalogPlane-Members') | ForEach-Object { New-TestPackage $_ }
+
+            New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages $packages -WarningAction SilentlyContinue | Out-Null
+
+            ($script:PolicyBodies | Where-Object displayName -EQ 'Initial Workload Users Policy').reviewSettings.primaryReviewers.groupId |
+            Should -Be 'id:SG-Rg-X-ControlPlane-Admins' -Because 'WorkloadPlane-Admins and ManagementPlane-Admins are missing'
+            @($script:PolicyBodies.reviewSettings.primaryReviewers.groupId) | Should -Not -Contain 'id:SG-Rg-X-CatalogPlane-Members'
+        }
+
+        It 'creates the policy without access review when no reviewer of the same or a higher tier exists' {
+            $groups = @('SG-Rg-X-CatalogPlane-Members', 'SG-Rg-X-WorkloadPlane-Users') | ForEach-Object { New-TestGroup $_ }
+            $packages = @('AP-Rg-X-CatalogPlane-Members') | ForEach-Object { New-TestPackage $_ }
+
+            New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages $packages -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+
+            $policy = $script:PolicyBodies | Where-Object displayName -EQ 'Initial Catalog Members Policy'
+            $policy.PSObject.Properties.Name | Should -Not -Contain 'reviewSettings'
+            @($warnings | Where-Object { "$_" -like "*'Initial Catalog Members Policy' is created without access review*" }).Count | Should -Be 1
         }
 
         It 'applies group, self-review, specific reviewers and manager from ServiceEM.AccessReviews.Policies' {
@@ -1038,7 +1420,7 @@ Describe 'ServiceEM assignment policy group references' {
 
     Context 'initial direct assignment policies' {
         BeforeAll {
-            $script:WpGroups = @('Rg-X Members', 'SG-Rg-X-WorkloadPlane-Users', 'SG-Rg-X-WorkloadPlane-Admins') | ForEach-Object { New-TestGroup $_ }
+            $script:WpGroups = @('Rg-X Members', 'SG-Rg-X-WorkloadPlane-Users', 'SG-Rg-X-WorkloadPlane-Admins', 'SG-Rg-X-ManagementPlane-Admins') | ForEach-Object { New-TestGroup $_ }
             $script:WpPackages = @('AP-Rg-X-WorkloadPlane-Users', 'AP-Rg-X-WorkloadPlane-Admins') | ForEach-Object { New-TestPackage $_ }
         }
 
@@ -1230,7 +1612,7 @@ Describe 'ServiceEM catalog removal resource group' {
         Remove-EntraOpsServiceCatalog -ServiceCatalogName 'Catalog-Rg-MyApp' -Force -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
 
         $script:DeletedUris | Should -Contain '/v1.0/groups/own'
-        $script:DeletedUris | Should -Contain '/v1.0/groups/pim'
+        $script:DeletedUris | Should -Not -Contain '/v1.0/groups/pim'
         $script:DeletedUris | Should -Not -Contain '/v1.0/groups/foreign'
         @($warnings | Where-Object { "$_" -like "*Keeping group foreign*" }).Count | Should -Be 1
     }
@@ -1327,5 +1709,19 @@ Describe 'ServiceEM PIM policy safety' {
 
         { New-EntraOpsServicePIMPolicy -ServiceGroups @([pscustomobject]@{ Id = 'failed-group'; DisplayName = 'SG-Test-ControlPlane-Admins' }) } |
         Should -Throw '*Failed to update PIM policy for 1 group(s)*failed-group*'
+    }
+
+    It 'updates only the policies of the admin groups' {
+        $script:PolicyLookupUris = [System.Collections.Generic.List[string]]::new()
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'GET') { $script:PolicyLookupUris.Add($Uri); return [pscustomobject]@{ Id = 'assignment-member'; PolicyId = 'policy-id' } }
+        }
+        $groups = @('Test Members', 'SG-Test-CatalogPlane-Members', 'SG-Test-WorkloadPlane-Users', 'SG-Test-WorkloadPlane-Admins', 'SG-Members-ManagementPlane-Admins') |
+        ForEach-Object { [pscustomobject]@{ Id = $_; DisplayName = $_ } }
+
+        New-EntraOpsServicePIMPolicy -ServiceGroups $groups 6>$null | Out-Null
+
+        $script:PolicyLookupUris.Count | Should -Be 2
+        @($script:PolicyLookupUris | Where-Object { $_ -like "*'SG-Test-WorkloadPlane-Admins'*" -or $_ -like "*'SG-Members-ManagementPlane-Admins'*" }).Count | Should -Be 2
     }
 }

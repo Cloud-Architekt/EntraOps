@@ -3,11 +3,13 @@
     Assigns Entra security groups as resources inside their matching access packages.
 
 .DESCRIPTION
-    For each owned (non-delegated, non-PIM) security group, looks up the
+    For each owned (non-delegated) security group, looks up the
     corresponding access package by name and registers the group's Member
-    catalog resource role into that package. Package names are matched
+    catalog resource role into that package (Eligible Member for the groups in
+    -EligibleMemberGroupIds). Package names are matched
     using the pattern AP-<ServiceName>-<AccessLevel>-<RoleName>, derived
-    from the group's DisplayName.
+    from the group's DisplayName. The Microsoft 365 group (if created) is added
+    to every access package, so all assigned users become members of it.
 
     Idempotent: existing resource role scope assignments are detected and
     skipped to avoid duplicates.
@@ -20,14 +22,19 @@
     group display names.
 
 .PARAMETER ServiceGroups
-    Entra group objects to register. Delegated groups (IsDelegated=true) and
-    PIM staging groups (*-PIM-*) are automatically skipped.
+    Entra group objects to register. Delegated groups (IsDelegated=true) are
+    automatically skipped.
 
 .PARAMETER ServicePackages
     Access package objects returned by New-EntraOpsServiceEMAccessPackage.
 
 .PARAMETER ServiceCatalogResources
     Catalog resource objects returned by New-EntraOpsServiceEMCatalogResource.
+
+.PARAMETER EligibleMemberGroupIds
+    Object IDs of groups managed by PIM for Groups. Their access package delivers the Eligible Member
+    role (PIM for Groups eligible membership) instead of the active Member role. Requires Microsoft
+    Entra ID Governance or Microsoft Entra Suite licenses.
 
 .PARAMETER GroupPrefix
     Prefix used in group DisplayNames (e.g. "SG"). Defaults to "SG".
@@ -70,6 +77,8 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
         [Parameter(Mandatory)]
         [psobject[]]$ServiceCatalogResources,
 
+        [string[]]$EligibleMemberGroupIds = @(),
+
         [string]$GroupPrefix = "SG",
 
         [string]$GroupNamingDelimiter = "-",
@@ -87,20 +96,14 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
         Write-Verbose "$logPrefix Beginning EM Access Package Resource Assignment"
 
         Write-Verbose "$logPrefix Processing Access Package Assignments for $(($ServiceGroups|Measure-Object).Count) Groups"
-        foreach($group in $ServiceGroups){
-            # Skip PIM groups and delegated groups — delegated groups are not catalog resources
-            if($group.DisplayName -like "*-PIM-*"){ continue }
+        $groupPackagePairs = foreach($group in $ServiceGroups){
+            # Delegated groups are not catalog resources
             if($group.IsDelegated -eq $true){ continue }
 
-            $resource = $ServiceCatalogResources|Where-Object{`
-                $_.DisplayName -eq $group.DisplayName -and `
-                $_.OriginSystem -eq "AadGroup"
-            }
-            if(-not $resource){
-                Write-Verbose "$logPrefix No catalog resource found for group '$($group.DisplayName)' — skipping"
+            if($group.PSObject.Properties.Name -contains 'GroupTypes' -and $group.GroupTypes -contains "Unified"){
+                foreach($unifiedPackage in $ServicePackages){ [pscustomobject]@{ Group = $group; Package = $unifiedPackage } }
                 continue
             }
-            Write-Verbose "$logPrefix Processing Access Package Resource ID: $($resource.Id)"
 
             # Derive the expected access package name from the group display name.
             # Groups are named: {Prefix}{Delim}{ServiceName}{Delim}{Plane}{Delim}{Role}
@@ -120,27 +123,54 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                 Write-Verbose "$logPrefix No matching Access Package found for group '$($group.DisplayName)', skipping"
                 continue
             }
+            [pscustomobject]@{ Group = $group; Package = $package }
+        }
+
+        $resourceRolesByResource = @{}
+        foreach($pair in @($groupPackagePairs)){
+            $group = $pair.Group
+            $package = $pair.Package
+
+            $resource = $ServiceCatalogResources|Where-Object{`
+                $_.DisplayName -eq $group.DisplayName -and `
+                $_.OriginSystem -eq "AadGroup"
+            }
+            if(-not $resource){
+                Write-Verbose "$logPrefix No catalog resource found for group '$($group.DisplayName)' — skipping"
+                continue
+            }
+            Write-Verbose "$logPrefix Processing Access Package Resource ID: $($resource.Id)"
             Write-Verbose "$logPrefix Processing Access Package ID: $($package.Id)"
 
             #Get available roles for resource in Catalog
             #Used to validate if Access Package exists for resource role
-            try{
-                Write-Verbose "$logPrefix Getting Catalog Resource Roles for Resource ID: $($resource.id)"
-                $resourceRoles = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$ServiceCatalogId/resourceRoles?`$filter=originSystem eq 'AadGroup' and resource/id eq '$($resource.id)'&`$expand=resource" -OutputType PSObject
-            }catch{
-                Write-Verbose "$logPrefix Failed to get Catalog Resource Roles — skipping group '$($group.DisplayName)'"
-                Write-Error $_
-                continue
+            if(-not $resourceRolesByResource.ContainsKey($resource.Id)){
+                try{
+                    Write-Verbose "$logPrefix Getting Catalog Resource Roles for Resource ID: $($resource.id)"
+                    $resourceRolesByResource[$resource.Id] = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$ServiceCatalogId/resourceRoles?`$filter=originSystem eq 'AadGroup' and resource/id eq '$($resource.id)'&`$expand=resource" -OutputType PSObject
+                }catch{
+                    Write-Verbose "$logPrefix Failed to get Catalog Resource Roles — skipping group '$($group.DisplayName)'"
+                    Write-Error $_
+                    continue
+                }
             }
+            $resourceRoles = $resourceRolesByResource[$resource.Id]
             if(-not $resourceRoles){
                 Write-Verbose "$logPrefix No catalog resource roles returned for '$($group.DisplayName)' (transient?) — skipping"
                 continue
             }
             Write-Verbose "$logPrefix Found Catalog Resource Roles: $($resourceRoles.OriginId|ConvertTo-Json -Compress)"
 
-            $memberRole = $resourceRoles|Where-Object{$_.DisplayName -eq "Member"}
+            $eligible = $group.Id -in $EligibleMemberGroupIds
+            # Group roles: Member_<groupId>; EligibleMember_<groupId> only when the group is managed by PIM for Groups
+            $findRole = { param($prefix, $name) $resourceRoles | Where-Object { $_.OriginId -eq "$($prefix)_$($resource.OriginId)" -or $_.DisplayName -eq $name } | Select-Object -First 1 }
+            $memberRole = if($eligible){ & $findRole 'EligibleMember' 'Eligible Member' } else { & $findRole 'Member' 'Member' }
             if(-not $memberRole){
-                Write-Verbose "$logPrefix Member role not found for '$($group.DisplayName)' (resource not fully indexed?) — skipping"
+                if($eligible){
+                    Write-Warning "$logPrefix Eligible Member role not found for '$($group.DisplayName)' in the catalog (group not yet managed by PIM for Groups, or no Microsoft Entra ID Governance license). No resource role is added to the access package, run the deployment again later."
+                } else {
+                    Write-Verbose "$logPrefix Member role not found for '$($group.DisplayName)' (resource not fully indexed?) — skipping"
+                }
                 continue
             }
             $resourceParams = @{
@@ -161,6 +191,23 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
             }
             $ex = $package.ResourceRoleScopes|ForEach-Object{"$($_.Role.OriginId)_$($_.Scope.OriginId)"}
             $packageRoles += $ex
+            $activeRemovalFailed = $false
+            if($eligible){
+                # An active Member role (e.g. deployed without PIM for Groups) would bypass the PIM activation
+                $activeRole = & $findRole 'Member' 'Member'
+                foreach($activeScope in @($package.ResourceRoleScopes | Where-Object { $activeRole -and $_.Role.OriginId -eq $activeRole.OriginId -and $_.Scope.OriginId -eq $resource.OriginId })){
+                    Write-Warning "$logPrefix Replacing the active Member role of '$($group.DisplayName)' in '$($package.DisplayName)' with Eligible Member; assigned users lose their active membership and must activate it with PIM for Groups."
+                    try{
+                        Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($package.Id)/resourceRoleScopes/$($activeScope.Id)" -OutputType PSObject -ThrowOnFailure | Out-Null
+                        $removed = "$($activeScope.Role.OriginId)_$($activeScope.Scope.OriginId)"
+                        $packageRoles = @($packageRoles | Where-Object { $_ -ne $removed })
+                    }catch{
+                        $activeRemovalFailed = $true
+                        Write-Warning "$logPrefix Failed to remove the active Member role of '$($group.DisplayName)' from '$($package.DisplayName)', Eligible Member is not added; run the deployment again. Error: $($_.Exception.Message)"
+                    }
+                }
+            }
+            if($activeRemovalFailed){ continue }
             $tb = "$($resourceParams.role.originId)_$($resourceParams.scope.originId)"
             if($tb -notin $ex){
                 try{
@@ -197,7 +244,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                 Write-Verbose "$logPrefix Consistency check lookup failed (transient?) — retrying: $($_.Exception.Message)"
                 return $false
             }
-            $checkAssignments = @($check.Packages.ResourceRoleScopes | ForEach-Object {"$($_.Role.OriginId)_$($_.Scope.OriginId)"})
+            $checkAssignments = @($check.Packages.ResourceRoleScopes | ForEach-Object {"$($_.Role.OriginId)_$($_.Scope.OriginId)"} | Sort-Object -Unique)
             (Compare-Object $expectedAssignments $checkAssignments | Measure-Object).Count -eq 0
         }
         if(-not $confirmed){

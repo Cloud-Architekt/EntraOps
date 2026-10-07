@@ -6,8 +6,10 @@
     Creates one assignment policy per access package in the catalog. Policies
     define requestor settings (self-add/remove enabled), reviewer settings
     (quarterly reviews, WorkloadPlane-Admins as reviewer of the WorkloadPlane-Users
-    policies, ManagementPlane-Admins as reviewer of all other policies, CatalogPlane-Members
-    as fallback reviewer), and expiration settings. Reviewers are configurable per policy in
+    policies, ControlPlane-Admins as reviewer of the ManagementPlane-Admins policies, ManagementPlane-Admins
+    as reviewer of all other policies, CatalogPlane-Members as last fallback reviewer), and expiration settings.
+    Requests for privileged access packages are only approved by the same or a higher tier; CatalogPlane-Members
+    only approve their own access package. Reviewers are configurable per policy in
     ServiceEM.AccessReviews.Policies.<Policy> (Group, SelfReview, SpecificReviewers or Manager). Assignments of all policies expire after 365 days
     by default, configurable per policy in ServiceEM.AssignmentPolicies.<Policy>.Expiration.
 
@@ -70,10 +72,11 @@ function New-EntraOpsServiceEMAssignmentPolicy {
             Write-Error $_
         }
         $catalogPlaneMembersGroupId = ($ServiceGroups|Where-Object{$_.DisplayName -like "*CatalogPlane-Members"}).Id
-        # PIM staging groups (SG-PIM-*) share the ManagementPlane-Admins suffix
-        $mgmtAdminsGroupId = ($ServiceGroups|Where-Object{$_.DisplayName -like "*ManagementPlane-Admins" -and $_.DisplayName -notlike "*-PIM-*"}).Id
-        # ManagementPlane-Admins may live in another scope (e.g. Sub scope of a PerService landing zone)
-        $mgmtApproverGroupId = if($mgmtAdminsGroupId){ $mgmtAdminsGroupId } else { $catalogPlaneMembersGroupId }
+        # Delegated (tenant-wide or other landing zone) groups are injected by name into ServiceGroups
+        $mgmtApproverGroupId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*ManagementPlane-Admins" } | Select-Object -First 1).Id
+        $controlPlaneApproverId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*ControlPlane-Admins" } | Select-Object -First 1).Id
+        $wlUsersApproverId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*WorkloadPlane-Admins" } | Select-Object -First 1).Id
+        if (-not $wlUsersApproverId) { $wlUsersApproverId = $mgmtApproverGroupId }
 
         # Defaults can be overridden in ServiceEM.AssignmentPolicies and ServiceEM.AccessReviews of EntraOpsConfig
         $serviceEMConfig = if ($null -ne $Global:EntraOpsConfig) { $Global:EntraOpsConfig.ServiceEM }
@@ -125,28 +128,40 @@ function New-EntraOpsServiceEMAssignmentPolicy {
             throw "Invalid ServiceEM.AccessReviews.ReviewDuration '$reviewDuration' in EntraOpsConfig. Use a duration in days such as 'P25D'."
         }
         $guidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
+        $reviewerTiers = @('WorkloadPlane-Admins', 'ManagementPlane-Admins', 'ControlPlane-Admins')
         # Group reviewers are service group name suffixes (e.g. WorkloadPlane-Admins) or group object IDs
         $resolveReviewerGroups = {
             param([string]$PolicyKey, [string[]]$Values)
             foreach ($value in $Values) {
-                if ($value -match $guidPattern) { $groupId = $value }
-                else {
-                    $groupId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*$value" -and $_.DisplayName -notlike "*-PIM-*" } | Select-Object -First 1).Id
-                    if (-not $groupId) {
-                        Write-Verbose "$logPrefix Reviewer group '$value' of $PolicyKey not found in this scope, using CatalogPlane-Members"
-                        $groupId = $catalogPlaneMembersGroupId
-                    }
+                if ($value -match $guidPattern) {
+                    @{ "@odata.type" = "#microsoft.graph.groupMembers"; groupId = $value }
+                    continue
                 }
-                @{ "@odata.type" = "#microsoft.graph.groupMembers"; groupId = $groupId }
+                # A missing admin group falls back to the same or a higher tier only
+                $candidates = if ($value -in $reviewerTiers) { $reviewerTiers[$reviewerTiers.IndexOf($value)..($reviewerTiers.Count - 1)] } else { @($value) }
+                $groupId = $null
+                foreach ($candidate in $candidates) {
+                    $groupId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*$candidate" } | Select-Object -First 1).Id
+                    if ($groupId) { break }
+                }
+                if ($groupId) {
+                    @{ "@odata.type" = "#microsoft.graph.groupMembers"; groupId = $groupId }
+                } else {
+                    Write-Verbose "$logPrefix No reviewer group '$value' or a higher tier found for $PolicyKey"
+                }
             }
         }
         $reviewSettingsByPolicy = @{}
-        foreach ($reviewPolicyKey in 'BaselinePolicy', 'WorkloadPlaneUsers', 'WorkloadPlaneAdmins', 'ManagementPlaneAdmins', 'InitialWorkloadMembership', 'InitialManagementMembership', 'InitialManagementAdmins', 'InitialWorkloadUsers', 'InitialWorkloadAdmins') {
+        foreach ($reviewPolicyKey in 'BaselinePolicy', 'WorkloadPlaneUsers', 'WorkloadPlaneAdmins', 'ManagementPlaneAdmins', 'InitialWorkloadMembership', 'InitialManagementAdmins', 'InitialWorkloadUsers', 'InitialWorkloadAdmins', 'InitialCatalogMembers') {
             if (-not $enableAccessReviews) { break }
             $reviewerConfig = $accessReviewConfig.Policies.$reviewPolicyKey
             $reviewerType = if (-not [string]::IsNullOrWhiteSpace([string]$reviewerConfig.ReviewerType)) { [string]$reviewerConfig.ReviewerType } else { 'Group' }
             $reviewers = @($reviewerConfig.Reviewers | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { ([string]$_).Trim() })
-            $defaultReviewerGroup = if ($reviewPolicyKey -in 'WorkloadPlaneUsers', 'InitialWorkloadUsers') { 'WorkloadPlane-Admins' } else { 'ManagementPlane-Admins' }
+            $defaultReviewerGroup = switch ($reviewPolicyKey) {
+                { $_ -in 'WorkloadPlaneUsers', 'InitialWorkloadUsers' } { 'WorkloadPlane-Admins'; break }
+                { $_ -in 'ManagementPlaneAdmins', 'InitialManagementAdmins' } { 'ControlPlane-Admins'; break }
+                default { 'ManagementPlane-Admins' }
+            }
             $reviewerGroups = if ($reviewers.Count -gt 0) { $reviewers } else { @($defaultReviewerGroup) }
             $reviewSettings = @{
                 isEnabled = $true
@@ -176,6 +191,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
             switch ($reviewerType) {
                 'Group' {
                     $reviewSettings.primaryReviewers = @(& $resolveReviewerGroups $reviewPolicyKey $reviewerGroups)
+                    if ($reviewSettings.primaryReviewers.Count -eq 0) { $reviewSettings = $null }
                 }
                 'SelfReview' {
                     $reviewSettings.isSelfReview = $true
@@ -207,7 +223,12 @@ function New-EntraOpsServiceEMAssignmentPolicy {
         }
         $setReviewSettings = {
             param([hashtable]$Params, [string]$PolicyKey)
-            if ($enableAccessReviews) { $Params.reviewSettings = $reviewSettingsByPolicy[$PolicyKey] }
+            if (-not $enableAccessReviews) { return }
+            if ($reviewSettingsByPolicy[$PolicyKey]) {
+                $Params.reviewSettings = $reviewSettingsByPolicy[$PolicyKey]
+            } else {
+                Write-Warning "$logPrefix '$($Params.displayName)' is created without access review: no reviewer group of the configured or a higher tier in this scope."
+            }
         }
         $wpUsersRequestorScope = [string](& $getPolicySetting 'WorkloadPlaneUsers' 'RequestorScope' 'AllMemberUsers')
         if ($wpUsersRequestorScope -notin @('AllMemberUsers', 'CatalogPlaneMembers')) {
@@ -352,6 +373,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
         $initialDirectPolicies = @(
             [pscustomobject]@{ PackageFilter = "*WorkloadPlane-Users";  DisplayName = "Initial Workload Users Policy"; ConfigKey = "InitialWorkloadUsers" }
             [pscustomobject]@{ PackageFilter = "*WorkloadPlane-Admins"; DisplayName = "Initial Workload Admin Policy"; ConfigKey = "InitialWorkloadAdmins" }
+            [pscustomobject]@{ PackageFilter = "*CatalogPlane-Members"; DisplayName = "Initial Catalog Members Policy"; ConfigKey = "InitialCatalogMembers" }
         )
         foreach ($initialDirectPolicy in $initialDirectPolicies) {
             $initialDirectPolicy | Add-Member -NotePropertyName Expiration -NotePropertyValue (& $getExpiration $initialDirectPolicy.ConfigKey $defaultExpiration)
@@ -374,59 +396,10 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         $params.displayName = "Initial Workload Membership Policy"
                         & $setReviewSettings $params 'InitialWorkloadMembership'
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
-                    }elseif($package.displayName -like "*ManagementPlane-Members"){
-                        # Clone to avoid mutating the shared $initialPolicyParams reference.
-                        # The nested requestApprovalSettings is replaced entirely (not mutated) to
-                        # avoid modifying the inner object via the shallow clone.
-                        $params = $initialPolicyParams.Clone()
-                        $params.displayName = "Initial Management Membership Policy"
-                        $params.expiration = & $getExpiration 'InitialManagementMembership' $defaultExpiration
-                        $params.allowedTargetScope = "specificDirectoryUsers"
-                        # WorkloadPlane-Members may not exist in Sub-only landing zones; fall back to
-                        # CatalogPlane-Members as the requestor scope in that case.
-                        $wlMembersGroupId = ($ServiceGroups|Where-Object{$_.DisplayName -like "*WorkloadPlane-Members"}).Id
-                        $mgmtMemberRequestorId = if($wlMembersGroupId){ $wlMembersGroupId } else { ($ServiceGroups|Where-Object{$_.DisplayName -like "*CatalogPlane-Members"}).Id }
-                        $params.specificAllowedTargets = @(
-                            @{
-                                "@odata.type" = "#microsoft.graph.groupMembers"
-                                groupId = $mgmtMemberRequestorId
-                            }
-                        )
-                        $params.requestApprovalSettings = @{
-                            isApprovalRequiredForAdd = $true
-                            isApprovalRequiredForUpdate = $false
-                            stages = @(
-                                @{
-                                    durationBeforeAutomaticDenial = & $getApprovalTimeout 'InitialManagementMembership' 'P2D'
-                                    isApproverJustificationRequired = $true
-                                    isEscalationEnabled = $false
-                                    durationBeforeEscalation = "PT0S"
-                                    primaryApprovers = @(
-                                        @{
-                                            "@odata.type" = "#microsoft.graph.groupMembers"
-                                            groupId = $mgmtApproverGroupId
-                                        }
-                                    )
-                                    <# Not supported when heirarchical manager is not the primary approver
-                                    fallbackPrimaryApprovers = @(
-                                        @{
-                                            "@odata.type" = "#microsoft.graph.groupMembers"
-                                            groupId = $(($ServiceGroups|Where-Object{$_.DisplayName -like "*ControlPlane-Admins"}).Id)
-                                        }
-                                    )
-                                    #>
-                                }
-                            )
-                        }
-                        $params = $policyParams + $params
-                        & $setReviewSettings $params 'InitialManagementMembership'
-                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
                     }elseif($package.displayName -like "*ManagementPlane-Admins"){
-                        # Create Initial Management Admin Policy for admin-driven service owner assignment
+                        # Admin-only policy for the initial assignment of the workload plane admin; requests are disabled
                         $params = $initialPolicyParams.Clone()
                         $params.displayName = "Initial Management Admin Policy"
-                        # Keep adminAdd target scope restricted to specificDirectoryUsers from initialPolicyParams
-                        # (request-based adds remain disabled via requestorSettings)
                         $params.requestApprovalSettings = @{
                             isApprovalRequiredForAdd = $false  # No approval needed for adminAdd
                             isApprovalRequiredForUpdate = $false
@@ -436,62 +409,16 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         $params.requestorSettings = $adminOnlyRequestorSettings
                         & $setReviewSettings $params 'InitialManagementAdmins'
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
-
-                        # Create Management Plane Policy for self-service elevation with strong controls
-                        $controlPlaneAdminsId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*ControlPlane-Admins" }).Id
-                        $catalogPlaneMembersId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*CatalogPlane-Members" }).Id
-                        $mgmtPlanePolicyParams = @{
-                            displayName = "Management Plane Policy"
-                            description = "The Management Plane Policy for $ServiceName ManagementPlane-Admins access package."
-                            allowedTargetScope = "specificDirectoryUsers"
-                            specificAllowedTargets = @(
-                                @{
-                                    "@odata.type" = "#microsoft.graph.groupMembers"
-                                    groupId = $(($ServiceGroups | Where-Object { $_.DisplayName -like "*ManagementPlane-Members" }).Id)
-                                }
-                            )
-                            expiration = & $getExpiration 'ManagementPlaneAdmins' $defaultExpiration
-                            requestApprovalSettings = @{
-                                isApprovalRequiredForAdd = $true
-                                isApprovalRequiredForUpdate = $false
-                                stages = @(
-                                    @{
-                                        durationBeforeAutomaticDenial = & $getApprovalTimeout 'ManagementPlaneAdmins' 'P1D'
-                                        isApproverJustificationRequired = $true
-                                        isEscalationEnabled = $true
-                                        durationBeforeEscalation = "PT12H"
-                                        primaryApprovers = @(
-                                            @{
-                                                "@odata.type" = "#microsoft.graph.groupMembers"
-                                                groupId = $controlPlaneAdminsId
-                                            }
-                                        )
-                                        fallbackPrimaryApprovers = @(
-                                            @{
-                                                "@odata.type" = "#microsoft.graph.groupMembers"
-                                                groupId = $catalogPlaneMembersId
-                                            }
-                                        )
-                                    }
-                                )
-                            }
-                        }
-                        # Guard: skip self-service policy if ControlPlane-Admins does not exist in this scope
-                        if ($controlPlaneAdminsId) {
-                            $params = $policyParams + $mgmtPlanePolicyParams
-                            & $setExtension $params 'ManagementPlaneAdmins'
-                            & $setReviewSettings $params 'ManagementPlaneAdmins'
-                            $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
-                        } else {
-                            Write-Verbose "$logPrefix Skipping Management Plane Policy — ControlPlane-Admins not found in this scope (delegated or not created)"
-                        }
+                    } elseif ($package.displayName -like "*WorkloadPlane-Admins" -and -not $mgmtApproverGroupId) {
+                        Write-Verbose "$logPrefix Skipping Workload Plane Policy — no ManagementPlane-Admins approver for this scope"
                     }elseif($package.displayName -like "*WorkloadPlane-Admins"){
                         $params = $policyParams + $workloadPlanePolicyParams
                         & $setExtension $params 'WorkloadPlaneAdmins'
                         & $setReviewSettings $params 'WorkloadPlaneAdmins'
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                    } elseif ($package.displayName -like "*WorkloadPlane-Users" -and -not $wlUsersApproverId) {
+                        Write-Verbose "$logPrefix Skipping Workload Plane Users Policy — no WorkloadPlane-Admins or ManagementPlane-Admins approver for this scope"
                     }elseif($package.displayName -like "*WorkloadPlane-Users"){
-                        # WorkloadPlane-Users: Approver is WorkloadPlane-Admins (or fallback to CatalogPlane-Members)
                         $params = $baselinePolicyParams.Clone()
                         $params.displayName = "Workload Plane Users Policy"
                         $params.expiration = & $getExpiration 'WorkloadPlaneUsers' $defaultExpiration
@@ -499,7 +426,6 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                             $params.allowedTargetScope = "allMemberUsers"
                             $params.Remove('specificAllowedTargets')
                         }
-                        $catalogMembersId = ($ServiceGroups|Where-Object{$_.DisplayName -like "*CatalogPlane-Members"}).Id
                         $params.requestApprovalSettings = @{
                             isApprovalRequiredForAdd = $true
                             isApprovalRequiredForUpdate = $false
@@ -512,10 +438,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                                     primaryApprovers = @(
                                         @{
                                             "@odata.type" = "#microsoft.graph.groupMembers"
-                                            groupId = $(
-                                                $wlAdminsId = ($ServiceGroups|Where-Object{$_.DisplayName -like "*WorkloadPlane-Admins"}).Id
-                                                if($wlAdminsId){ $wlAdminsId } else { $catalogMembersId }
-                                            )
+                                            groupId       = $wlUsersApproverId
                                         }
                                     )
                                 }
@@ -533,6 +456,53 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                     }
                 } catch {
                     Write-Warning "$logPrefix Failed to create assignment policy for package '$($package.DisplayName)' (ID: $($package.Id)). Error: $_"
+                }
+            }
+
+            # Self-service request of ManagementPlane-Admins by the administrator group, approved by ControlPlane-Admins.
+            # Checked per policy name so existing landing zones get the policy on re-run.
+            if ($package.DisplayName -like "*ManagementPlane-Admins" -and -not ($policies | Where-Object { $_.AccessPackage.Id -eq $package.Id -and $_.DisplayName -eq "Management Plane Policy" })) {
+                if (-not $controlPlaneApproverId -or -not $catalogPlaneMembersGroupId) {
+                    Write-Verbose "$logPrefix Skipping Management Plane Policy — no ControlPlane-Admins approver or CatalogPlane-Members requestor group for this scope"
+                } else {
+                    $params = $policyParams + @{
+                        displayName             = "Management Plane Policy"
+                        description             = "The Management Plane Policy for $ServiceName ManagementPlane-Admins access package."
+                        allowedTargetScope      = "specificDirectoryUsers"
+                        specificAllowedTargets  = @(
+                            @{
+                                "@odata.type" = "#microsoft.graph.groupMembers"
+                                groupId       = $catalogPlaneMembersGroupId
+                            }
+                        )
+                        expiration              = & $getExpiration 'ManagementPlaneAdmins' $defaultExpiration
+                        requestApprovalSettings = @{
+                            isApprovalRequiredForAdd    = $true
+                            isApprovalRequiredForUpdate = $false
+                            stages                      = @(
+                                @{
+                                    durationBeforeAutomaticDenial   = & $getApprovalTimeout 'ManagementPlaneAdmins' 'P1D'
+                                    isApproverJustificationRequired = $true
+                                    isEscalationEnabled             = $false
+                                    durationBeforeEscalation        = "PT0S"
+                                    primaryApprovers                = @(
+                                        @{
+                                            "@odata.type" = "#microsoft.graph.groupMembers"
+                                            groupId       = $controlPlaneApproverId
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    }
+                    & $setExtension $params 'ManagementPlaneAdmins'
+                    & $setReviewSettings $params 'ManagementPlaneAdmins'
+                    try {
+                        Write-Verbose "$logPrefix Creating Management Plane Policy for Access Package ID: $($package.Id)"
+                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject -ThrowOnFailure
+                    } catch {
+                        Write-Warning "$logPrefix Failed to create Management Plane Policy for package '$($package.DisplayName)'. ManagementPlane-Admins can't be requested until it exists; re-run the deployment. Error: $_"
+                    }
                 }
             }
 

@@ -186,7 +186,7 @@ Describe "New-EntraOpsServiceEntraGroup" {
                     -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                     -ServiceRoles $roles `
                     -ErrorAction Stop
-            } | Should -Throw -ExpectedMessage "*invalid characters*"
+            } | Should -Throw -ExpectedMessage "*ServiceName 'Test Service!' is invalid*"
         }
         
         It "Should accept valid MailNickname with dots and underscores" {
@@ -235,32 +235,21 @@ Describe "New-EntraOpsServiceEntraGroup" {
             $result.MailNickname | Should -Contain "TestService.ControlPlane.Admins"
         }
         
-        It "Should create PIM staging group when NoPimEscalation is not set" {
+        It "Should ignore legacy PIM staging groups returned by the group search" {
             $roles = @(
                 [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = "" }
             )
+            $legacy = [pscustomobject]@{ Id = 'legacy-pim'; DisplayName = 'SG-PIM-TestService-ManagementPlane-Admins'; MailNickname = 'PIM.TestService.ManagementPlane.Admins' }
+            $script:MockGroups[$legacy.Id] = $legacy
+            # $search matches tokens inside the mailNickname, not only its prefix
+            Mock Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -ParameterFilter { $Method -eq 'GET' } -MockWith { @($script:MockGroups.Values) }
             
             $result = New-EntraOpsServiceEntraGroup `
                 -ServiceName "TestService" `
                 -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
                 -ServiceRoles $roles
             
-            $result | Should -Not -BeNullOrEmpty
-            $result.MailNickname | Should -Contain "PIM.TestService.ManagementPlane.Admins"
-        }
-        
-        It "Should NOT create PIM staging group when NoPimEscalation is set" {
-            $roles = @(
-                [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = "" }
-            )
-            
-            $result = New-EntraOpsServiceEntraGroup `
-                -ServiceName "TestService" `
-                -WorkloadPlaneAdmin "https://graph.microsoft.com/v1.0/users/12345678-1234-1234-1234-123456789012" `
-                -ServiceRoles $roles `
-                -NoPimEscalation
-            
-            $result | Should -Not -BeNullOrEmpty
+            $result.MailNickname | Should -Contain "TestService.ManagementPlane.Admins"
             $result.MailNickname | Should -Not -Contain "PIM.TestService.ManagementPlane.Admins"
         }
     }

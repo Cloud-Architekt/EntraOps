@@ -22,7 +22,11 @@
 
 .PARAMETER WorkloadPlaneAdmin
     Graph User object for the workload plane admin. Added to WorkloadPlane-Members
-    unless already present via ServiceMembers.
+    unless already present via ServiceMembers. Also added to CatalogPlane-Members.
+
+.PARAMETER CatalogPlaneMembers
+    Graph User objects added to the CatalogPlane-Members access package through the
+    admin-only "Initial Catalog Members Policy" (PerService model only).
 
 .PARAMETER ServiceAssignmentPolicies
     Assignment policy objects returned by New-EntraOpsServiceEMAssignmentPolicy.
@@ -57,6 +61,9 @@ function New-EntraOpsServiceEMAssignment {
         [psobject[]]$ServiceMembers,
 
         [psobject]$WorkloadPlaneAdmin,
+
+        [AllowEmptyCollection()]
+        [psobject[]]$CatalogPlaneMembers = @(),
 
         [Parameter(Mandatory)]
         [psobject[]]$ServiceAssignmentPolicies,
@@ -128,7 +135,7 @@ function New-EntraOpsServiceEMAssignment {
         $submittedRequests = [System.Collections.Generic.List[psobject]]::new()
 
         $assignmentRequestUri = "/v1.0/identityGovernance/entitlementManagement/assignmentRequests"
-        $adminOnlyPolicyNames = @('Initial Workload Users Policy', 'Initial Workload Admin Policy', 'Initial Management Admin Policy')
+        $adminOnlyPolicyNames = @('Initial Workload Users Policy', 'Initial Workload Admin Policy', 'Initial Management Admin Policy', 'Initial Catalog Members Policy')
         $addTargetToPolicy = {
             param($Policy, [string]$TargetId)
             $policyUri = "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies/$($Policy.Id)"
@@ -251,6 +258,38 @@ function New-EntraOpsServiceEMAssignment {
             }
         } else {
             Write-Verbose "$logPrefix No suitable workload plane admin assignment conditions met, skipping workload plane admin assignment"
+        }
+
+        # CatalogPlane-Members is the requestor group of the catalog and can't be requested by non-members
+        $catalogMembersPackage = $ServicePackages | Where-Object { $_.DisplayName -like "*CatalogPlane-Members" } | Select-Object -First 1
+        $catalogMembersPolicy  = $ServiceAssignmentPolicies | Where-Object { $_.DisplayName -eq "Initial Catalog Members Policy" } | Select-Object -First 1
+        $catalogTargets = @(@($CatalogPlaneMembers) + @($WorkloadPlaneAdmin) | Where-Object { $_ -and $_.Id } | Sort-Object -Property Id -Unique)
+        if ($catalogTargets.Count -gt 0 -and (-not $catalogMembersPackage -or -not $catalogMembersPolicy)) {
+            Write-Verbose "$logPrefix CatalogPlane-Members access package or Initial Catalog Members Policy not found (delegated administrator group?), skipping CatalogPlane-Members assignments"
+        } elseif ($catalogTargets.Count -gt 0) {
+            foreach ($catalogTarget in $catalogTargets) {
+                if (& $getExistingAccess $catalogTarget.Id $catalogMembersPackage.Id) {
+                    Write-Verbose "$logPrefix $($catalogTarget.Id) already has access package $($catalogMembersPackage.DisplayName), skipping"
+                    continue
+                }
+                $assignmentParams.assignment.targetId = $catalogTarget.Id
+                $assignmentParams.assignment.assignmentPolicyId = $catalogMembersPolicy.Id
+                $assignmentParams.assignment.accessPackageId = $catalogMembersPackage.Id
+                try {
+                    Write-Verbose "$logPrefix Creating CatalogPlane-Members Assignment Request for $($catalogTarget.Id)"
+                    $postResult = & $submitAssignment $catalogMembersPolicy $catalogTarget.Id
+                    if ($null -ne $postResult) {
+                        $assignmentRequests += $postResult
+                        $existingAccess["$($catalogTarget.Id)|$($catalogMembersPackage.Id)"] = "request $($postResult.State)"
+                        $submittedRequests.Add([pscustomobject]@{ Id = $postResult.Id; State = $postResult.State; TargetId = $catalogTarget.Id; AccessPackageId = $catalogMembersPackage.Id })
+                    } else {
+                        Write-Warning "$logPrefix Assignment request of CatalogPlane-Members for $($catalogTarget.Id) was rejected. Check that the user is in the allowed target scope of policy '$($catalogMembersPolicy.DisplayName)'."
+                    }
+                } catch {
+                    Write-Verbose "$logPrefix Failed to create CatalogPlane-Members Assignment Request"
+                    Write-Error $_
+                }
+            }
         }
     }
 

@@ -9,7 +9,7 @@ ServiceEM is a submodule of EntraOps that automates the provisioning and managem
 ServiceEM creates and manages:
 - **Azure Resource Groups** with tier-specific RBAC assignments
 - **Entra ID Security Groups** (role-assignable) for each service and tier
-- **PIM for Groups** policies with configurable authentication contexts
+- **PIM for Groups** (opt-in) for the admin groups with configurable authentication contexts
 - **Entra ID Governance Access Packages** for self-service membership
 - **Constrained Delegation** using Azure ABAC conditions to limit role assignment capabilities
 
@@ -60,23 +60,25 @@ New-EntraOpsSubscriptionLandingZone `
 ```
 
 > **Note:** `-WorkloadPlaneAdmin` assigns the admin to the admin access package: ManagementPlane-Admins in the default PerService
-> single scope, WorkloadPlane-Admins (which approves WorkloadPlane-Users requests) in the Centralized model or the Rg scope of
-> `Both`. The admin isn't added to WorkloadPlane-Users unless `-AddWorkloadPlaneAdminToUsers` is set. It doesn't make the admin a
-> group owner: owners are only set with the opt-in
-> switch `-AssignOwner`, because owners of role-assignable groups can manage their membership. See [Group owners](#group-owners)
-> for the Microsoft 365 group exception.
+> single scope, WorkloadPlane-Admins (which approves WorkloadPlane-Users requests) in the Centralized model or when
+> ManagementPlane-Admins is delegated. In the PerService model the admin is also assigned to the CatalogPlane-Members access package (Initial Catalog Members
+> Policy), so they can request the other access packages. The admin isn't added to WorkloadPlane-Users unless
+> `-AddWorkloadPlaneAdminToUsers` is set. It doesn't make the admin a
+> group owner: ownership of the WorkloadPlane groups is opt-in with `-GroupOwnership Eligible` or `Permanent`, because owners
+> can add members directly, bypassing access package approvals and access reviews. See [Group owners](#group-owners)
+> for details and the Microsoft 365 group exception.
 
 **That's it!** This creates one resource group scope `Rg-MyFirstApp` (default `-DeploymentScope ResourceGroup`, see [Deployment Scopes](#deployment-scopes)):
 - ✅ Role-assignable Entra ID security groups per tier (plus the optional Microsoft 365 group `Rg-MyFirstApp Members` for team collaboration with [`-CreateM365Group`](#createm365group-parameter))
 - ✅ One Entitlement Management catalog `Catalog-Rg-MyFirstApp` with access packages and assignment policies
-- ✅ PIM for Groups policies and eligible assignments for just-in-time elevation
+- ✅ Opt-in PIM for Groups with eligible membership through access packages (Microsoft Entra ID Governance license): ControlPlane-/ManagementPlane-Admins with `-EnablePimForGroups` (recommended) and WorkloadPlane-Admins with `-EnableWorkloadPlanePimForGroups` (see [EnablePimForGroups and EnableWorkloadPlanePimForGroups Parameters](#enablepimforgroups-and-enableworkloadplanepimforgroups-parameters))
 - ✅ Azure Resource Group `RG-MyFirstApp` with PIM-eligible RBAC assignments
 
 #### Step 3: Verify Deployment
 
 ```powershell
-# Created groups (including the PIM staging group)
-Invoke-EntraOpsMsGraphQuery -Uri "/v1.0/groups?`$filter=startswith(mailNickname,'Rg-MyFirstApp.') or startswith(mailNickname,'PIM.Rg-MyFirstApp.')" -OutputType PSObject |
+# Created groups
+Invoke-EntraOpsMsGraphQuery -Uri "/v1.0/groups?`$filter=startswith(mailNickname,'Rg-MyFirstApp.')" -OutputType PSObject |
     Select-Object displayName, id
 
 # Catalog, access packages, assignment policies and delivered assignments of this landing zone
@@ -100,7 +102,7 @@ ServiceEM automates the creation of **tiered, service-scoped landing zones** fol
 
 #### Key Concepts
 - **Three Tiers**: ControlPlane (highest privilege), ManagementPlane (resource management), WorkloadPlane (application access), plus CatalogPlane groups for catalog governance
-- **Scopes**: `New-EntraOpsSubscriptionLandingZone` runs `New-EntraOpsServiceBootstrap` once for a single scope - `Rg-<DeploymentPrefix>` with the Azure resource group `RG-<DeploymentPrefix>` (default `-DeploymentScope ResourceGroup`) or `Sub-<DeploymentPrefix>` with role assignments on the subscription (`Subscription`) - or twice with `-DeploymentScope Both` (`Sub-` governance groups without Azure resources, `Rg-` workload groups and resource group)
+- **Scopes**: `New-EntraOpsSubscriptionLandingZone` runs `New-EntraOpsServiceBootstrap` once for a single scope - `Rg-<DeploymentPrefix>` with the Azure resource group `RG-<DeploymentPrefix>` (default `-DeploymentScope ResourceGroup`) or `Sub-<DeploymentPrefix>` with role assignments on the subscription (`Subscription`). To separate governance from workload groups, create the governance groups once and pass them as delegation groups (see [Separating governance and workload groups](#separating-governance-and-workload-groups))
 - **Two Governance Models**:
   - **PerService** (runtime default): Creates dedicated admin groups per service - use for dev/test or isolated services
   - **Centralized** (default in configuration files generated by `New-EntraOpsConfigFile`): Uses shared tenant-wide admin groups - use for production with dedicated ops teams
@@ -115,25 +117,26 @@ ServiceEM automates the creation of **tiered, service-scoped landing zones** fol
 #### Key Parameters for AI
 `New-EntraOpsSubscriptionLandingZone` parameters:
 
-| Parameter                                                             | Description                                                                                                          |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `-DeploymentPrefix <string>`                                          | Service name prefix (default: `"Default"`); the scope is named `Rg-<Prefix>` or `Sub-<Prefix>`                       |
-| `-DeploymentScope <string>`                                           | `"ResourceGroup"` (default), `"Subscription"` or `"Both"` (two scopes and catalogs), see [Deployment Scopes](#deployment-scopes) |
-| `-AzureRegion <string>`                                               | Azure region of the resource group (e.g. `"westeurope"`); required unless `-SkipAzureResourceGroup` is set or `-DeploymentScope` is `Subscription` |
-| `-SubscriptionId <string>`                                            | Subscription (GUID) of the resource group; required unless `-SkipAzureResourceGroup` is set. Validated before any object is created; the Azure context is switched for the RBAC step and restored afterwards |
-| `-ServiceMembers <string[]>`                                          | UPNs/object IDs assigned to the WorkloadPlane-Users access package; defaults to the signed-in user (empty for app-only). The deployment stops before any object is created if a member or the admin can't be resolved |
-| `-AssignOwner`                                                        | Opt-in: sets the admin as owner of created groups                                                                    |
-| `-WorkloadPlaneAdmin <string>`                                        | UPN, object ID or Graph URL of the admin, assigned to the admin access package (defaults to the signed-in user only with `-AssignOwner`) |
-| `-AddWorkloadPlaneAdminToUsers`                                       | Also assign the admin to the WorkloadPlane-Users access package (default: admin access package only; `ServiceEM.AddWorkloadPlaneAdminToUsers`) |
-| `-GovernanceModel <string>`                                           | `"PerService"` or `"Centralized"`; parameter > `ServiceEM.GovernanceModel` in config > `"PerService"`               |
-| `-ControlPlaneDelegationGroupId`, `-ManagementPlaneDelegationGroupId`, `-AdministratorGroupId` | Existing groups to use instead of per-service groups; fall back to the `ServiceEM` config values |
-| `-SkipAzureResourceGroup`                                             | Entra-only: no Azure resource group and no Azure RBAC                                                                |
-| `-SkipCatalogOwnerAssignment`                                         | No permanent Catalog Owner assignment for ControlPlane-Admins in the catalog(s) (recommended, see [Catalog Owner assignment](#catalog-owner-assignment-for-controlplane-admins)) |
-| `-NoPimEscalation`                                                    | No PIM staging group, no PIM for Groups policies and no PIM for Groups eligibilities                                 |
-| `-CreateM365Group`                                                    | Also creates the Microsoft 365 group `<Scope>-<Prefix> Members` for team collaboration; it gets no PIM for Groups eligibilities or other access (see [CreateM365Group Parameter](#createm365group-parameter)) |
-| `-GroupPrefix <string>`                                               | Prefix of the security group display names (default `SG`; `ServiceEM.GroupPrefix`), see [Naming Conventions](#naming-conventions) |
-| `-EnablePIMOwnerAssignment`                                           | Additionally makes the admin an eligible owner of the admin groups (requires `-AssignOwner`)                         |
-| `-Smb`                                                                | Only with `-DeploymentScope Both`: creates ManagementPlane-Admins in the Rg scope instead of the Sub scope           |
+| Parameter                                                                                      | Description                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-DeploymentPrefix <string>`                                                                   | Service name prefix (default: `"Default"`); the scope is named `Rg-<Prefix>` or `Sub-<Prefix>`                                                                                                                                                                                                                                                                      |
+| `-DeploymentScope <string>`                                                                    | `"ResourceGroup"` (default) or `"Subscription"`, see [Deployment Scopes](#deployment-scopes)                                                                                                                                                                                                                                                                        |
+| `-AzureRegion <string>`                                                                        | Azure region of the resource group (e.g. `"westeurope"`); required unless `-SkipAzureResourceGroup` is set or `-DeploymentScope` is `Subscription`                                                                                                                                                                                                                  |
+| `-SubscriptionId <string>`                                                                     | Subscription (GUID) of the resource group; required unless `-SkipAzureResourceGroup` is set. Validated before any object is created; the Azure context is switched for the RBAC step and restored afterwards                                                                                                                                                        |
+| `-ServiceMembers <string[]>`                                                                   | UPNs/object IDs assigned to the WorkloadPlane-Users access package; defaults to the signed-in user (empty for app-only). The deployment stops before any object is created if a member or the admin can't be resolved                                                                                                                                               |
+| `-GroupOwnership <string>`                                                                     | `None` (default), `Eligible` or `Permanent`: opt-in (PIM for Groups eligible or permanent) ownership of the WorkloadPlane groups (WorkloadPlane-Admins, WorkloadPlane-Users) for the admin; shows a warning, because owners can add members directly, bypassing access package approvals and access reviews (see [Group owners](#group-owners))                     |
+| `-WorkloadPlaneAdmin <string>`                                                                 | UPN, object ID or Graph URL of the admin, assigned to the admin access package and, in the PerService model, to CatalogPlane-Members (defaults to the signed-in user only with `-GroupOwnership Eligible` or `Permanent`)                                                                                                                                           |
+| `-CatalogPlaneMembers <string[]>`                                                              | UPNs assigned to the CatalogPlane-Members access package (Initial Catalog Members Policy), in addition to the admin; ignored with `AdministratorGroupId` / Centralized                                                                                                                                                                                              |
+| `-ControlPlaneAdmins <string[]>`                                                               | UPNs added as initial members of the per-service ControlPlane-Admins group (PerService only, ignored with a warning in the Centralized model or with `-ControlPlaneDelegationGroupId`): PIM for Groups eligible members with `-EnablePimForGroups`, otherwise permanent members                                                                                     |
+| `-AddWorkloadPlaneAdminToUsers`                                                                | Also assign the admin to the WorkloadPlane-Users access package (default: admin access package only; `ServiceEM.AddWorkloadPlaneAdminToUsers`)                                                                                                                                                                                                                      |
+| `-GovernanceModel <string>`                                                                    | `"PerService"` or `"Centralized"`; parameter > `ServiceEM.GovernanceModel` in config > `"PerService"`                                                                                                                                                                                                                                                               |
+| `-ControlPlaneDelegationGroupId`, `-ManagementPlaneDelegationGroupId`, `-AdministratorGroupId` | Existing groups to use instead of per-service groups; fall back to the `ServiceEM` config values                                                                                                                                                                                                                                                                    |
+| `-SkipAzureResourceGroup`                                                                      | Entra-only: no Azure resource group and no Azure RBAC                                                                                                                                                                                                                                                                                                               |
+| `-SkipCatalogOwnerAssignment`                                                                  | No permanent Catalog Owner assignment for ControlPlane-Admins in the catalog (recommended, see [Catalog Owner assignment](#catalog-owner-assignment-for-controlplane-admins))                                                                                                                                                                                       |
+| `-EnablePimForGroups`                                                                          | Opt-in (recommended): PIM for Groups policy for the owned ControlPlane-Admins and ManagementPlane-Admins groups; their access packages grant **eligible** membership. Requires Microsoft Entra ID Governance licenses (see [EnablePimForGroups and EnableWorkloadPlanePimForGroups Parameters](#enablepimforgroups-and-enableworkloadplanepimforgroups-parameters)) |
+| `-EnableWorkloadPlanePimForGroups`                                                             | Opt-in: the same for WorkloadPlane-Admins, e.g. for multi-activation scenarios (group membership, then the PIM-eligible Azure roles)                                                                                                                                                                                                                                |
+| `-CreateM365Group`                                                                             | Also creates the Microsoft 365 group `<Scope>-<Prefix> Members` for team collaboration; it is added to every access package of its scope (members via any access package), but gets no PIM for Groups eligibilities or other access (see [CreateM365Group Parameter](#createm365group-parameter))                                                                   |
+| `-GroupPrefix <string>`                                                                        | Prefix of the security group display names (default `SG`; `ServiceEM.GroupPrefix`), see [Naming Conventions](#naming-conventions)                                                                                                                                                                                                                                   |
 
 #### AI Context Checklist
 Before suggesting ServiceEM commands, verify:
@@ -155,7 +158,7 @@ New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "IdentityOnly" -WorkloadPl
 ```
 
 #### Troubleshooting for AI
-- **Missing groups**: Centralized removes per-service ControlPlane-/ManagementPlane-Admins, ManagementPlane-Members and CatalogPlane-Members groups; `-NoPimEscalation` removes the PIM staging group; the Microsoft 365 group is only created with `-CreateM365Group`
+- **Missing groups**: Centralized removes per-service ControlPlane-/ManagementPlane-Admins and CatalogPlane-Members groups; the Microsoft 365 group is only created with `-CreateM365Group`
 - **Centralized silently became PerService**: A delegation group could not be resolved or created - check the `CENTRALIZED GOVERNANCE MODEL FAILED` warnings
 - **Assignment policy errors**: Usually a referenced approver or requestor group does not exist in the same scope (see [Assignment Policies](#assignment-policies)) or the users are invalid
 - **Azure RBAC failures**: Caller lacks Azure subscription permissions or the Azure context points to another subscription
@@ -207,12 +210,12 @@ Invoke-EntraOpsReportingGeneration -ConfigFilePath ./EntraOpsConfig.json `
 
 Open `Reports/index.html` and use these apps to inspect the landing zone resources:
 
-| Reporting App | What to Review |
-|---------------|----------------|
-| **EAM Dashboard** | Newly created groups, their classified tier levels, and role assignments. Filter by RBAC system (`IdentityGovernance`) or principal type (`group`) to isolate ServiceEM objects. |
-| **Access Package Flow** | Access packages, assignment policies, requestor scopes, and approver chains created by ServiceEM. Validates that the approval workflow matches the intended governance model. |
+| Reporting App              | What to Review                                                                                                                                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **EAM Dashboard**          | Newly created groups, their classified tier levels, and role assignments. Filter by RBAC system (`IdentityGovernance`) or principal type (`group`) to isolate ServiceEM objects.                         |
+| **Access Package Flow**    | Access packages, assignment policies, requestor scopes, and approver chains created by ServiceEM. Validates that the approval workflow matches the intended governance model.                            |
 | **Configuration Analyzer** | If Tenant Governance snapshots are enabled, compare snapshots before and after the deployment to see exactly which resources were added (Change Timeline) and review their property-level configuration. |
-| **Tier Breach Analyzer** | Verify that the new landing zone does not introduce tier boundary violations (e.g., a WorkloadPlane identity with a path to ControlPlane privileges). |
+| **Tier Breach Analyzer**   | Verify that the new landing zone does not introduce tier boundary violations (e.g., a WorkloadPlane identity with a path to ControlPlane privileges).                                                    |
 
 > **Tip:** Use the cross-tool **Review list** to bookmark findings across apps. Export filtered results as CSV or JSON for triage and remediation tracking. See the [Reportings documentation](../reportings/index.html) for detailed guidance on each app.
 
@@ -246,12 +249,13 @@ Open `Reports/index.html` and use these apps to inspect the landing zone resourc
 
 #### Required permissions
 
-| Identity type                        | Microsoft Graph                                                                                                                                                                                                                                                  | Entra ID directory roles                                                                                                         |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| User (delegated, `-Scope ServiceEM`) | Requested automatically: `Directory.AccessAsUser.All`, `EntitlementManagement.ReadWrite.All`, `RoleManagement.ReadWrite.Directory`, `RoleManagementPolicy.ReadWrite.Directory`, `RoleManagementPolicy.ReadWrite.AzureADGroup`, `PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup`, `PrivilegedAccess.ReadWrite.AzureADGroup` (plus the EntraOps read scopes) | Privileged Role Administrator (role-assignable groups, PIM for Groups) and Identity Governance Administrator (catalogs, access packages), or Global Administrator |
-| Workload identity (application)      | `Group.ReadWrite.All`, `User.Read.All`, `EntitlementManagement.ReadWrite.All`, `RoleManagement.ReadWrite.Directory`, `RoleManagementPolicy.ReadWrite.Directory`, `RoleManagementPolicy.ReadWrite.AzureADGroup`, `PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup`, `PrivilegedAccess.ReadWrite.AzureADGroup` - grant manually with admin consent (not assigned by `New-EntraOpsWorkloadIdentity`) | -                                                                                                                                |
+| Identity type                        | Microsoft Graph                                                                                                                                                                                                                                                                                                                                                                                        | Entra ID directory roles                                                                                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User (delegated, `-Scope ServiceEM`) | Requested automatically: `Directory.AccessAsUser.All`, `EntitlementManagement.ReadWrite.All`, `RoleManagement.ReadWrite.Directory`, `RoleManagementPolicy.ReadWrite.Directory`, `RoleManagementPolicy.ReadWrite.AzureADGroup`, `PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup`, `PrivilegedAccess.ReadWrite.AzureADGroup` (plus the EntraOps read scopes)                                       | Privileged Role Administrator (role-assignable groups, PIM for Groups) and Identity Governance Administrator (catalogs, access packages), or Global Administrator |
+| Workload identity (application)      | `Group.ReadWrite.All`, `User.Read.All`, `EntitlementManagement.ReadWrite.All`, `RoleManagement.ReadWrite.Directory`, `RoleManagementPolicy.ReadWrite.Directory`, `RoleManagementPolicy.ReadWrite.AzureADGroup`, `PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup`, `PrivilegedAccess.ReadWrite.AzureADGroup` - grant manually with admin consent (not assigned by `New-EntraOpsWorkloadIdentity`) | -                                                                                                                                                                 |
 
-All created security groups are **role-assignable** (required for PIM for Groups), therefore `RoleManagement.ReadWrite.Directory`
+All created security groups are **role-assignable** (only Privileged Role Administrators and Global Administrators can manage
+their members and owners, which protects them against less privileged administrators), therefore `RoleManagement.ReadWrite.Directory`
 is required in both governance models.
 
 #### Required for PerService Model (Default)
@@ -298,7 +302,7 @@ and an existing group for CatalogPlane (`AdministratorGroupId`):
    }
    ```
    `AdministratorGroupId` is required: in the Centralized model no per-service CatalogPlane-Members group is created,
-   and this group is the requestor scope, approver and reviewer fallback of the assignment policies. Without it,
+   and this group is the requestor scope of the assignment policies. Without it,
    `New-EntraOpsSubscriptionLandingZone` stops before creating any object. The `-WorkloadPlaneAdmin` must be a
    member of it; ServiceEM checks this before creating any object and stops otherwise.
 
@@ -306,35 +310,33 @@ and an existing group for CatalogPlane (`AdministratorGroupId`):
    - If no ID is configured, ServiceEM searches for a group with the display name `ControlPlaneGroupName` /
      `ManagementPlaneGroupName` (defaults `PRG-Tenant-ControlPlane-IdentityOps` / `PRG-Tenant-ManagementPlane-PlatformOps`)
    - If none exists and the session token contains `RoleManagement.ReadWrite.Directory` (included in `-Scope "ServiceEM"`),
-     a role-assignable group is created (owned by the signed-in user only with `-AssignOwner`, otherwise without owner)
+     a role-assignable group is created (always without owner, see [Group owners](#group-owners))
    - Found or created group IDs are persisted to `EntraOpsConfig.json` in the current directory
    - If resolution fails, ServiceEM warns and **falls back to the PerService model**
 
 #### Governance Model Comparison
 
-| Feature                 | PerService (Default)      | Centralized                                                         |
-| ----------------------- | ------------------------- | ------------------------------------------------------------------- |
-| **Pre-existing groups** | ❌ Not required            | ✅ Required or auto-created (role-assignable), plus `AdministratorGroupId` |
-| **Permissions needed**  | See [Required permissions](#required-permissions) | Same                                                                |
-| **Group count**         | More (per service)        | Fewer (shared)                                                      |
-| **Use case**            | 5-10 services, dev/test   | 50+ services, production                                            |
-| **Isolation**           | Higher (dedicated admins) | Lower (shared admins)                                               |
+| Feature                 | PerService (Default)                              | Centralized                                                               |
+| ----------------------- | ------------------------------------------------- | ------------------------------------------------------------------------- |
+| **Pre-existing groups** | ❌ Not required                                    | ✅ Required or auto-created (role-assignable), plus `AdministratorGroupId` |
+| **Permissions needed**  | See [Required permissions](#required-permissions) | Same                                                                      |
+| **Group count**         | More (per service)                                | Fewer (shared)                                                            |
+| **Use case**            | 5-10 services, dev/test                           | 50+ services, production                                                  |
+| **Isolation**           | Higher (dedicated admins)                         | Lower (shared admins)                                                     |
 
 ### Deployment Scopes
 
-`-DeploymentScope` of `New-EntraOpsSubscriptionLandingZone` defines where the Azure permissions are assigned and how many
-catalogs are created:
+`-DeploymentScope` of `New-EntraOpsSubscriptionLandingZone` defines where the Azure permissions are assigned. Every
+landing zone deploys exactly one scope and one catalog:
 
-| `-DeploymentScope`        | Scope / catalog                            | Microsoft 365 group (only with `-CreateM365Group`) | Azure                                                                 |
-| ------------------------- | ------------------------------------------ | ------------------------ | --------------------------------------------------------------------- |
-| `ResourceGroup` (default) | `Rg-<Prefix>` / `Catalog-Rg-<Prefix>`      | `Rg-<Prefix> Members`    | Resource group `RG-<Prefix>`; all role assignments on the resource group |
-| `Subscription`            | `Sub-<Prefix>` / `Catalog-Sub-<Prefix>`    | `Sub-<Prefix> Members`   | No resource group; the same role assignments on the subscription (`-SubscriptionId`) |
-| `Both`                    | `Sub-<Prefix>` and `Rg-<Prefix>`, two catalogs | One per scope        | Resource group only; the Sub scope has governance groups but no Azure permissions |
+| `-DeploymentScope`        | Scope / catalog                         | Microsoft 365 group (only with `-CreateM365Group`) | Azure                                                                                |
+| ------------------------- | --------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `ResourceGroup` (default) | `Rg-<Prefix>` / `Catalog-Rg-<Prefix>`   | `Rg-<Prefix> Members`                              | Resource group `RG-<Prefix>`; all role assignments on the resource group             |
+| `Subscription`            | `Sub-<Prefix>` / `Catalog-Sub-<Prefix>` | `Sub-<Prefix> Members`                             | No resource group; the same role assignments on the subscription (`-SubscriptionId`) |
 
-With `ResourceGroup` and `Subscription`, all groups of the service live in **one scope and one catalog**. In the PerService
-model this includes ControlPlane-Admins and ManagementPlane-Admins, so they receive their PIM eligible Azure roles on the
-resource group or subscription (in `Both`, they sit in the Sub scope without Azure permissions unless `-Smb` is used).
-`-Smb` and `-LandingZoneComponents` only apply to `Both`.
+All groups of the service (own or delegated) live in **one scope and one catalog**. In the PerService model this includes
+ControlPlane-Admins and ManagementPlane-Admins, so they receive their PIM eligible Azure roles on the resource group or
+subscription.
 
 ```powershell
 # Subscription deployment: no resource group, role assignments on the subscription
@@ -350,9 +352,52 @@ New-EntraOpsSubscriptionLandingZone `
 > Based Access Control Administrator **on the subscription** so that eligible assignments don't have to expire. This affects all
 > eligible assignments of these roles on the subscription, not only the ones of the landing zone.
 
-> **Existing two-scope deployments:** landing zones deployed before `-DeploymentScope` existed (now `Both`) keep their `Sub-`
-> objects when redeployed with a single scope. Remove them manually, e.g.
-> `Remove-EntraOpsServiceCatalog -ServiceCatalogName "Catalog-Sub-<Prefix>" -Force` (see [Cmdlet Inventory](#cmdlet-inventory)).
+#### Separating governance and workload groups
+
+To keep the governance groups (ControlPlane-Admins, ManagementPlane-Admins, CatalogPlane-Members) apart from the workload
+groups, create the governance groups once and pass them as delegation groups to the workload landing zone:
+
+```powershell
+# 1. Governance scope without Azure resources
+$governance = New-EntraOpsServiceBootstrap -ServiceName "Sub-MyApp" -SkipAzureResourceGroup `
+    -EnablePimForGroups -ServiceRoles (@"
+accessLevel,name,groupType
+CatalogPlane,Members,
+ControlPlane,Admins,
+ManagementPlane,Admins,
+"@ | ConvertFrom-Csv)
+$groupId = { param($name) ($governance.Groups | Where-Object DisplayName -like "*-$name").Id }
+
+# 2. One workload landing zone per workload, using the governance groups as delegated groups
+New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "MyApp" `
+    -AzureRegion "westeurope" -SubscriptionId "<subscription-id>" `
+    -ControlPlaneDelegationGroupId (& $groupId 'ControlPlane-Admins') `
+    -ManagementPlaneDelegationGroupId (& $groupId 'ManagementPlane-Admins') `
+    -AdministratorGroupId (& $groupId 'CatalogPlane-Members')
+```
+
+The workload scope creates only WorkloadPlane-Users and WorkloadPlane-Admins (plus the optional Microsoft 365 group). The
+delegated groups are injected into it and get:
+
+| Delegated group        | Catalog role                                       | Workload policies                                                   | PIM eligible Azure roles on `RG-<Prefix>`                         |
+| ---------------------- | -------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| ControlPlane-Admins    | Catalog Owner                                      | Approver/reviewer where ControlPlane-Admins is the default          | User Access Administrator                                         |
+| ManagementPlane-Admins | Catalog Reader + Access package assignment manager | Approves the Workload Plane Policy (WorkloadPlane-Admins); reviewer | Contributor + constrained Role Based Access Control Administrator |
+| CatalogPlane-Members   | Catalog Reader                                     | Requestor scope of the Workload Plane Policy                        | -                                                                 |
+
+Delegated groups never get owners or PIM for Groups policies from the workload landing zone; PIM for Groups for them comes
+from the governance call (`-EnablePimForGroups` there). `-ControlPlaneAdmins` is ignored with a warning in the workload call
+(no per-service ControlPlane-Admins); pass the initial members to the governance call instead.
+
+For many workloads that share tenant-wide governance groups, the **Centralized** model (`-GovernanceModel Centralized`, see
+[Governance Models](#governance-models-and-persona-based-groups)) remains the recommended option; the two calls above are the
+per-application (PerService) variant.
+
+| Variant                             | How                                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------------- |
+| ManagementPlane-Admins per workload | Delegate only ControlPlane-Admins (omit `-ManagementPlaneDelegationGroupId`) |
+| CatalogPlane-Members per workload   | Omit `-AdministratorGroupId` in the workload call                            |
+| Custom group sets                   | `New-EntraOpsServiceBootstrap -ServiceRoles`                                 |
 
 ### Basic Landing Zone Deployment
 
@@ -368,7 +413,7 @@ New-EntraOpsSubscriptionLandingZone `
 ```
 
 **What gets created:**
-- **Rg scope** (`Rg-MyFirstApp`): all groups of the service, catalog `Catalog-Rg-MyFirstApp`, access packages, PIM for Groups policies and resource group `RG-MyFirstApp` with Azure RBAC
+- **Scope** (`Rg-MyFirstApp`): all groups of the service, catalog `Catalog-Rg-MyFirstApp`, access packages and resource group `RG-MyFirstApp` with Azure RBAC (PIM for Groups only with `-EnablePimForGroups` / `-EnableWorkloadPlanePimForGroups`)
 - **Governance**: PerService model (creates per-service admin groups automatically)
 
 **Explicit Centralized deployment (requires delegation groups, see above):**
@@ -424,9 +469,9 @@ VERBOSE: [New-EntraOpsServiceEMAccessPackage] Creating Access Package
 VERBOSE: [New-EntraOpsServiceEMAccessPackage] Processing 0 Access Package Roles
 VERBOSE: [New-EntraOpsServiceBootstrap] No access packages to configure — skipping resource assignment, policies, and member assignments
 ```
-✅ **Meaning**: Sub scope of `-DeploymentScope Both` in the Centralized model with `-CreateM365Group` has no WorkloadPlane groups → zero access packages created (expected). Without `-CreateM365Group` the scope has no groups at all and is skipped:
+✅ **Meaning**: The scope has no groups that need an access package (e.g. a governance scope with custom `-ServiceRoles` that only contains a Microsoft 365 group) → zero access packages created (expected). A scope without any own group is skipped:
 ```
-VERBOSE: [New-EntraOpsServiceBootstrap] No groups left to create for Sub-MyApp (all roles delegated or skipped), skipping this scope
+VERBOSE: [New-EntraOpsServiceBootstrap] No groups left to create for Rg-MyApp (all roles delegated or skipped), skipping this scope
 ```
 
 **Inherited Permission Detection:**
@@ -434,19 +479,17 @@ VERBOSE: [New-EntraOpsServiceBootstrap] No groups left to create for Sub-MyApp (
 VERBOSE: [New-EntraOpsServiceAZContainer] ManagementPlane-Admins already has Contributor eligible at a higher scope — skipping assignment
 VERBOSE: [New-EntraOpsServiceAZContainer] ControlPlane-Admins already has User Access Administrator eligible at a higher scope — skipping assignment
 ```
-✅ **Meaning**: ServiceEM detected PIM eligible assignments at a parent scope (subscription, management group or root) and skipped redundant assignments (these messages only appear for ManagementPlane-Admins and ControlPlane-Admins groups that exist in the scope with Azure permissions, i.e. per-service groups of a single-scope deployment, delegated groups, or ManagementPlane-Admins with `-Smb`)
+✅ **Meaning**: ServiceEM detected PIM eligible assignments at a parent scope (subscription, management group or root) and skipped redundant assignments (these messages only appear for ManagementPlane-Admins and ControlPlane-Admins groups that receive Azure roles, i.e. per-service groups and delegated groups)
 
 ### Complete Centralized Deployment Example with Annotated Output
 
-Here's a complete example showing how persona-based groups (IdentityOps, PlatformOps) flow through a Centralized governance deployment.
-It uses `-DeploymentScope Both` and `-CreateM365Group`; with the default `ResourceGroup` scope, steps 6 to 10 (Sub scope) don't exist,
-and without `-CreateM365Group` the Sub scope has no group of its own and is skipped.
+Here's a complete example showing how persona-based groups (IdentityOps, PlatformOps) flow through a Centralized governance deployment
+with the default `ResourceGroup` scope and `-CreateM365Group`.
 
 **Command:**
 ```powershell
 New-EntraOpsSubscriptionLandingZone `
     -DeploymentPrefix "MyEntraOpsApp" `
-    -DeploymentScope Both `
     -CreateM365Group `
     -AzureRegion "westeurope" `
     -SubscriptionId "<subscription-id>" `
@@ -484,93 +527,75 @@ VERBOSE: [New-EntraOpsSubscriptionLandingZone] Validated ControlPlane group: prg
 
 # 4. ManagementPlane group (PlatformOps) validated
 VERBOSE: [New-EntraOpsSubscriptionLandingZone] ManagementPlane delegation group ID supplied: 0463b6cf-de08-46c9-9fc1-48615ef75099 — validating
-VERBOSE: [New-EntraOpsSubscriptionLandingZone] Validated ManagementPlane group: prg_Lab-Tier1.Azure.1.PlatformOps (0463b6cf-de08-46c9-9fc1-48615ef75099)
+VERBOSE: [New-EntraOpsSubscriptionLandingZone] Validated ManagementPlane group: prg - Contoso - PlatformOps (0463b6cf-de08-46c9-9fc1-48615ef75099)
 
 # 5. Per-service ControlPlane/ManagementPlane groups removed from ServiceRoles
 VERBOSE: [New-EntraOpsSubscriptionLandingZone] Removing ControlPlane/ManagementPlane/CatalogPlane from per-service groups
 VERBOSE: [New-EntraOpsSubscriptionLandingZone] Removing ControlPlane components from ServiceRoles
 
-# 6. Processing Sub scope (subscription-level)
-VERBOSE: [New-EntraOpsSubscriptionLandingZone] Processing LZ Role: Sub
+# 6. Processing the single scope (default -DeploymentScope ResourceGroup: Rg-MyEntraOpsApp)
+VERBOSE: [New-EntraOpsSubscriptionLandingZone] Deployment scope: ResourceGroup
+VERBOSE: [New-EntraOpsSubscriptionLandingZone] Processing LZ
+
+# 7. WorkloadPlaneAdmin and ServiceMembers forwarded from parent cmdlet
 VERBOSE: [New-EntraOpsServiceBootstrap] WorkloadPlaneAdmin set, looking up admin@contoso.com
 
-# 7. ControlPlane/ManagementPlane creation skipped (centralized model)
+# 8. ControlPlane/ManagementPlane creation skipped (centralized model)
 VERBOSE: [New-EntraOpsServiceBootstrap] ControlPlaneDelegationGroupId provided — enforcing SkipControlPlaneDelegation
 VERBOSE: [New-EntraOpsServiceBootstrap] ManagementPlaneDelegationGroupId provided — enforcing SkipManagementPlaneDelegation
 
-# 8. Only Members group created for Sub scope (no WorkloadPlane at subscription level)
-VERBOSE: [New-EntraOpsServiceEntraGroup] Processing 1 Groups
-VERBOSE: [New-EntraOpsServiceEntraGroup] {"DisplayName":"Sub-MyEntraOpsApp Members",...}
-
-# 9. Tenant-wide delegation groups injected into service catalog
-VERBOSE: [New-EntraOpsServiceBootstrap] Injecting delegated ControlPlane-Admins group (ID: a6b79e96-8a71-4b22-8946-1bbde6bbe8bd)
-VERBOSE: [New-EntraOpsServiceBootstrap] Delegated ControlPlane-Admins: prg - Contoso - IdentityOps
-
-VERBOSE: [New-EntraOpsServiceBootstrap] Injecting delegated ManagementPlane-Admins group (ID: 0463b6cf-de08-46c9-9fc1-48615ef75099)
-VERBOSE: [New-EntraOpsServiceBootstrap] Delegated ManagementPlane-Admins: prg_Lab-Tier1.Azure.1.PlatformOps
-
-VERBOSE: [New-EntraOpsServiceBootstrap] Injecting delegated CatalogPlane-Members group (ID: 7c6eb065-92e0-4c22-9908-7506d022e05b)
-VERBOSE: [New-EntraOpsServiceBootstrap] Delegated CatalogPlane-Members: dug_AAD.PrivilegedAccounts
-
-# 10. Catalog and resources created, but no access packages (Sub scope is Unified-only)
-VERBOSE: [New-EntraOpsServiceBootstrap] Service Catalog ID: 812367e5-2e4a-49c8-87a8-ffdaefa823d1
-VERBOSE: [New-EntraOpsServiceBootstrap] Service Catalog Resource IDs: "793dc62a-a5fc-4d7f-9182-bd46a6b1e3bc"
-VERBOSE: [New-EntraOpsServiceEMAccessPackage] Processing 0 Access Package Roles
-VERBOSE: [New-EntraOpsServiceBootstrap] No access packages to configure — skipping resource assignment, policies, and member assignments
-
-# 11. Processing Rg scope (resource group level)
-VERBOSE: [New-EntraOpsSubscriptionLandingZone] Processing LZ Role: Rg
-
-# 12. WorkloadPlaneAdmin and ServiceMembers forwarded from parent cmdlet
-VERBOSE: [New-EntraOpsServiceBootstrap] WorkloadPlaneAdmin set, looking up admin@contoso.com
-
-# 13. WorkloadPlane groups created for Rg scope
+# 9. WorkloadPlane groups and Microsoft 365 group created
 VERBOSE: [New-EntraOpsServiceEntraGroup] Processing 3 Groups
 VERBOSE: [New-EntraOpsServiceEntraGroup] {"DisplayName":"Rg-MyEntraOpsApp Members",...}
 VERBOSE: [New-EntraOpsServiceEntraGroup] {"DisplayName":"SG-Rg-MyEntraOpsApp-WorkloadPlane-Users",...}
 VERBOSE: [New-EntraOpsServiceEntraGroup] {"DisplayName":"SG-Rg-MyEntraOpsApp-WorkloadPlane-Admins",...}
 
-# 14. Tenant-wide delegation groups injected again for Rg catalog
+# 10. Tenant-wide delegation groups injected into the service catalog
 VERBOSE: [New-EntraOpsServiceBootstrap] Injecting delegated ControlPlane-Admins group (ID: a6b79e96-8a71-4b22-8946-1bbde6bbe8bd)
-VERBOSE: [New-EntraOpsServiceBootstrap] Delegated ManagementPlane-Admins: prg_Lab-Tier1.Azure.1.PlatformOps
+VERBOSE: [New-EntraOpsServiceBootstrap] Delegated ControlPlane-Admins: prg - Contoso - IdentityOps
 
-# 15. Access packages created for WorkloadPlane-Users and WorkloadPlane-Admins
+VERBOSE: [New-EntraOpsServiceBootstrap] Injecting delegated ManagementPlane-Admins group (ID: 0463b6cf-de08-46c9-9fc1-48615ef75099)
+VERBOSE: [New-EntraOpsServiceBootstrap] Delegated ManagementPlane-Admins: prg - Contoso - PlatformOps
+
+VERBOSE: [New-EntraOpsServiceBootstrap] Injecting delegated CatalogPlane-Members group (ID: 7c6eb065-92e0-4c22-9908-7506d022e05b)
+VERBOSE: [New-EntraOpsServiceBootstrap] Delegated CatalogPlane-Members: dug - Contoso - PrivilegedAccounts
+
+# 11. Access packages created for WorkloadPlane-Users and WorkloadPlane-Admins
 VERBOSE: [New-EntraOpsServiceEMAccessPackage] Processing 2 Access Package Roles
 VERBOSE: [New-EntraOpsServiceEMAccessPackage] Creating Access Package
 VERBOSE: [New-EntraOpsServiceBootstrap] Service Access Package IDs: ["b564d5cf-2d4a-4b82-ba76-2e663687ec8d","691e8983-7ef3-47a2-ab9b-3901978dafd6"]
 
-# 16. Assignment policies created, including the admin-only initial policies
+# 12. Assignment policies created, including the admin-only initial policies
 VERBOSE: [New-EntraOpsServiceEMAssignmentPolicy] Assigning Policy for Access Package ID: b564d5cf-2d4a-4b82-ba76-2e663687ec8d
 VERBOSE: [New-EntraOpsServiceEMAssignmentPolicy] Creating Initial Workload Admin Policy for Access Package ID: b564d5cf-2d4a-4b82-ba76-2e663687ec8d
 VERBOSE: [New-EntraOpsServiceEMAssignmentPolicy] Assigning Policy for Access Package ID: 691e8983-7ef3-47a2-ab9b-3901978dafd6
 VERBOSE: [New-EntraOpsServiceEMAssignmentPolicy] Creating Initial Workload Users Policy for Access Package ID: 691e8983-7ef3-47a2-ab9b-3901978dafd6
 
-# 17. Service members assigned to WorkloadPlane-Users (Initial Workload Users Policy), owner to WorkloadPlane-Admins (Initial Workload Admin Policy)
+# 13. Service members assigned to WorkloadPlane-Users (Initial Workload Users Policy), owner to WorkloadPlane-Admins (Initial Workload Admin Policy)
 VERBOSE: [New-EntraOpsServiceEMAssignment] Processing Service Member ID: alice-object-id
 VERBOSE: [New-EntraOpsServiceEMAssignment] Processing Service Member ID: bob-object-id
 VERBOSE: [New-EntraOpsServiceEMAssignment] Creating Assignment Request for Workload Plane Admin - {...}
 
-# 18. PIM policies updated for WorkloadPlane groups
-VERBOSE: [New-EntraOpsServicePIMPolicy] Updating PIM Policy ID: Group_baa5996e-1aee-4422-9473-1900fda1f679_707a26f7-...
+# 14. No PIM for Groups policy in this example (WorkloadPlane-Admins only with -EnableWorkloadPlanePimForGroups)
 
-# 19. Azure Resource Group created with RBAC assignments
+# 15. Azure Resource Group created with RBAC assignments
 VERBOSE: [New-EntraOpsServiceAZContainer] Azure Resource Group not found, creating
 VERBOSE: Created resource group 'RG-MyEntraOpsApp' in location 'westeurope'
 
-# 20. Inherited subscription-level eligibilities of the delegated groups detected, RG assignments skipped
+# 16. Inherited subscription-level eligibilities of the delegated groups detected, RG assignments skipped
 VERBOSE: [New-EntraOpsServiceAZContainer] ManagementPlane-Admins already has Contributor eligible at a higher scope — skipping assignment
 VERBOSE: [New-EntraOpsServiceAZContainer] ControlPlane-Admins already has User Access Administrator eligible at a higher scope — skipping assignment
 
-# 21. RG-scoped PIM eligible assignments (e.g. Contributor and constrained RBAC Administrator for WorkloadPlane-Admins)
+# 17. RG-scoped PIM eligible assignments (e.g. constrained RBAC Administrator for WorkloadPlane-Admins)
 VERBOSE: [New-EntraOpsServiceAZContainer] Creating PIM Eligible Assignment for PrincipalId: d0daf544-dc42-4a9c-83b9-27e2d3f6c436
 VERBOSE: [New-EntraOpsServiceAZContainer] Creating PIM Eligible Assignment for PrincipalId: baa5996e-1aee-4422-9473-1900fda1f679
 ```
 
 **Key Takeaways:**
-1. **IdentityOps group** (ControlPlane) was read from config, validated, and injected into both Sub and Rg catalogs
-2. **PlatformOps group** (ManagementPlane) was read from config, validated, and injected into both catalogs
+1. **IdentityOps group** (ControlPlane) was read from config, validated, and injected into the catalog `Catalog-Rg-MyEntraOpsApp`
+2. **PlatformOps group** (ManagementPlane) was read from config, validated, and injected into the same catalog
 3. **No per-service ControlPlane/ManagementPlane groups** were created (Centralized model)
-4. **WorkloadPlane groups** created only at Rg scope (Sub has only Unified Members group)
+4. **WorkloadPlane groups** and the Microsoft 365 group `Rg-MyEntraOpsApp Members` created in the single scope
 5. **Service members** (alice, bob) assigned to WorkloadPlane-Users access package (the admin as well with `-AddWorkloadPlaneAdminToUsers`)
 6. **Service owner** (admin, because of `-WorkloadPlaneAdmin`) assigned to WorkloadPlane-Admins access package (no ManagementPlane-Admins access package exists in the Centralized model)
 7. **Inherited permissions** detected at RG level, preventing redundant RBAC assignments
@@ -635,8 +660,9 @@ New-EntraOpsServiceBootstrap `
 ```
 
 This creates the resource group `RG-MyMicroservice` (the `Sub-`/`Rg-` prefix is stripped). CatalogPlane-Members is needed as
-requestor scope; the delegated ManagementPlane-Admins group approves the WorkloadPlane-Admins access package (without it,
-CatalogPlane-Members is used as approver). Unlike the landing zone cmdlet, `New-EntraOpsServiceBootstrap` does not read delegation group
+requestor scope; the delegated ManagementPlane-Admins group approves the WorkloadPlane-Admins access package (without a
+ManagementPlane-Admins approver, the Workload Plane Policy isn't created and only the admin-assigned Initial Workload Admin
+Policy exists). Unlike the landing zone cmdlet, `New-EntraOpsServiceBootstrap` does not read delegation group
 IDs or the governance model from `EntraOpsConfig.json`; constrained delegation and PIM authentication context settings are taken
 from the configuration loaded via `Connect-EntraOps -ConfigFilePath`.
 
@@ -691,18 +717,18 @@ The **`ServiceEM`** section of `EntraOpsConfig.json` contains the following basi
 }
 ```
 
-| Setting                            | Description                                                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `GovernanceModel`                  | `Centralized` or `PerService`; used when `-GovernanceModel` is not passed                                    |
-| `ControlPlaneDelegationGroupId`    | Existing group used as ControlPlane-Admins (instead of a per-service group)                                  |
-| `ControlPlaneGroupName`            | Display name used to look up or create the ControlPlane delegation group (Centralized, no ID configured)    |
-| `ManagementPlaneDelegationGroupId` | Existing group used as ManagementPlane-Admins                                                                |
-| `ManagementPlaneGroupName`         | Display name used to look up or create the ManagementPlane delegation group (Centralized, no ID configured) |
-| `AdministratorGroupId`             | Existing group used as CatalogPlane-Members (catalog reader, requestor scope and approver/reviewer fallback) |
-| `DefaultAzureRegion`               | Azure region used when `-AzureRegion` is not passed (e.g. `westeurope`); empty means the parameter is required |
-| `SkipCatalogOwnerAssignment`       | Default of `-SkipCatalogOwnerAssignment` (see [Catalog Owner assignment](#catalog-owner-assignment-for-controlplane-admins)); an explicitly passed parameter wins |
-| `CreateM365Group`                  | Default of `-CreateM365Group`: `true` also creates the Microsoft 365 group `<Scope>-<Prefix> Members` for team collaboration (see [CreateM365Group Parameter](#createm365group-parameter)); an explicitly passed parameter wins |
-| `AddWorkloadPlaneAdminToUsers`     | Default of `-AddWorkloadPlaneAdminToUsers`: `true` also assigns the `-WorkloadPlaneAdmin` to the WorkloadPlane-Users access package; an explicitly passed parameter wins |
+| Setting                            | Description                                                                                                                                                                                                                             |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GovernanceModel`                  | `Centralized` or `PerService`; used when `-GovernanceModel` is not passed                                                                                                                                                               |
+| `ControlPlaneDelegationGroupId`    | Existing group used as ControlPlane-Admins (instead of a per-service group)                                                                                                                                                             |
+| `ControlPlaneGroupName`            | Display name used to look up or create the ControlPlane delegation group (Centralized, no ID configured)                                                                                                                                |
+| `ManagementPlaneDelegationGroupId` | Existing group used as ManagementPlane-Admins                                                                                                                                                                                           |
+| `ManagementPlaneGroupName`         | Display name used to look up or create the ManagementPlane delegation group (Centralized, no ID configured)                                                                                                                             |
+| `AdministratorGroupId`             | Existing group used as CatalogPlane-Members (catalog reader, requestor scope)                                                                                                                                                           |
+| `DefaultAzureRegion`               | Azure region used when `-AzureRegion` is not passed (e.g. `westeurope`); empty means the parameter is required                                                                                                                          |
+| `SkipCatalogOwnerAssignment`       | Default of `-SkipCatalogOwnerAssignment` (see [Catalog Owner assignment](#catalog-owner-assignment-for-controlplane-admins)); an explicitly passed parameter wins                                                                       |
+| `CreateM365Group`                  | Default of `-CreateM365Group`: `true` also creates the Microsoft 365 group `<Scope>-<Prefix> Members` for team collaboration (see [CreateM365Group Parameter](#createm365group-parameter)); an explicitly passed parameter wins         |
+| `AddWorkloadPlaneAdminToUsers`     | Default of `-AddWorkloadPlaneAdminToUsers`: `true` also assigns the `-WorkloadPlaneAdmin` to the WorkloadPlane-Users access package; an explicitly passed parameter wins                                                                |
 | `GroupPrefix`                      | Default of `-GroupPrefix`: prefix of the security group display names (`SG` = `SG-Rg-MyApp-WorkloadPlane-Users`); letters, digits, `_`, `.` or `-`; an explicitly passed parameter wins (see [Naming Conventions](#naming-conventions)) |
 
 > **Note:** The `ControlPlaneDelegationGroupId` and `ManagementPlaneDelegationGroupId` values must be **Security Groups** (role-assignable). They are also honored in the PerService model (see [How ServiceEM Reads EntraOpsConfig.json](#how-serviceem-reads-entraopsconfigjson)).
@@ -726,10 +752,10 @@ review cadence. The defaults written by `New-EntraOpsConfigFile` (and used when 
       "WorkloadPlaneAdmins":         { "Expiration": "P365D", "ApprovalTimeout": "P2D", "AllowExtension": true },
       "ManagementPlaneAdmins":       { "Expiration": "P365D", "ApprovalTimeout": "P1D", "AllowExtension": true },
       "InitialWorkloadMembership":   { "Expiration": "P365D" },
-      "InitialManagementMembership": { "Expiration": "P365D", "ApprovalTimeout": "P2D" },
       "InitialManagementAdmins":     { "Expiration": "P365D" },
       "InitialWorkloadUsers":        { "Expiration": "P365D" },
-      "InitialWorkloadAdmins":       { "Expiration": "P365D" }
+      "InitialWorkloadAdmins":       { "Expiration": "P365D" },
+      "InitialCatalogMembers":       { "Expiration": "P365D" }
     },
     "AccessReviews": {
       "EnableAccessReviews": true,
@@ -740,46 +766,46 @@ review cadence. The defaults written by `New-EntraOpsConfigFile` (and used when 
         "BaselinePolicy":              { "ReviewerType": "Group", "Reviewers": ["ManagementPlane-Admins"] },
         "WorkloadPlaneUsers":          { "ReviewerType": "Group", "Reviewers": ["WorkloadPlane-Admins"] },
         "WorkloadPlaneAdmins":         { "ReviewerType": "Group", "Reviewers": ["ManagementPlane-Admins"] },
-        "ManagementPlaneAdmins":       { "ReviewerType": "Group", "Reviewers": ["ManagementPlane-Admins"] },
+        "ManagementPlaneAdmins":       { "ReviewerType": "Group", "Reviewers": ["ControlPlane-Admins"] },
         "InitialWorkloadMembership":   { "ReviewerType": "Group", "Reviewers": ["ManagementPlane-Admins"] },
-        "InitialManagementMembership": { "ReviewerType": "Group", "Reviewers": ["ManagementPlane-Admins"] },
-        "InitialManagementAdmins":     { "ReviewerType": "Group", "Reviewers": ["ManagementPlane-Admins"] },
+        "InitialManagementAdmins":     { "ReviewerType": "Group", "Reviewers": ["ControlPlane-Admins"] },
         "InitialWorkloadUsers":        { "ReviewerType": "Group", "Reviewers": ["WorkloadPlane-Admins"] },
-        "InitialWorkloadAdmins":       { "ReviewerType": "Group", "Reviewers": ["ManagementPlane-Admins"] }
+        "InitialWorkloadAdmins":       { "ReviewerType": "Group", "Reviewers": ["ManagementPlane-Admins"] },
+        "InitialCatalogMembers":       { "ReviewerType": "Group", "Reviewers": ["ManagementPlane-Admins"] }
       }
     }
   }
 }
 ```
 
-| Setting                                                   | Description                                                                                                                  |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `PIMForGroups.MaximumActivationDuration`                  | Maximum duration of a PIM for Groups activation (ISO 8601, e.g. `PT8H`)                                                      |
-| `PIMForGroups.MaximumActiveAssignmentDuration`            | Maximum duration of an active (non-eligible) PIM for Groups assignment (e.g. `P15D`); eligible assignments don't expire      |
-| `AssignmentPolicies.<Policy>.Expiration`                  | "Assignments expire after": default `P365D` (365 days) for every policy; `noExpiration` or another ISO 8601 duration such as `P30D`, `P6M` or `PT12H` |
-| `AssignmentPolicies.<Policy>.ApprovalTimeout`             | Time until a pending request is automatically denied, in whole days, e.g. `P2D` (Entra ID allows up to 14 days)            |
-| `AssignmentPolicies.WorkloadPlaneUsers.RequestorScope`    | `AllMemberUsers` (every member user, no guests) or `CatalogPlaneMembers` (members of CatalogPlane-Members only)              |
-| `AssignmentPolicies.<Policy>.AllowExtension`              | Standard request policies only (`BaselinePolicy`, `WorkloadPlaneUsers`, `WorkloadPlaneAdmins`, `ManagementPlaneAdmins`): `true` (default) lets users extend an expiring assignment ("Allow users to extend access"), always with approval by the policy's approvers; ignored with `noExpiration` |
-| `AccessReviews.EnableAccessReviews`                       | `false` creates the assignment policies without recurring access reviews                                                      |
-| `AccessReviews.RecurrenceIntervalInMonths`                | Months between two reviews (1 to 12, default 3 = quarterly)                                                                  |
-| `AccessReviews.StartAfterDays`                            | Days between the deployment and the start of the first review                                                                |
-| `AccessReviews.ReviewDuration`                            | Length of each review period in whole days (e.g. `P25D`)                                                                     |
-| `AccessReviews.Policies.<Policy>.ReviewerType`            | Who reviews the assignments of the policy: `Group` (default, members of the `Reviewers` groups), `SelfReview` (users review their own access), `SpecificReviewers` (the users in `Reviewers`) or `Manager` (the user's manager, the `Reviewers` groups as fallback reviewers) |
-| `AccessReviews.Policies.<Policy>.Reviewers`               | `Group` and `Manager`: service group name suffixes (e.g. `WorkloadPlane-Admins`) or group object IDs; `SpecificReviewers`: user object IDs or UPNs (required); ignored for `SelfReview`. Default `WorkloadPlane-Admins` for `WorkloadPlaneUsers` and `InitialWorkloadUsers` (the WorkloadPlane-Users access package), `ManagementPlane-Admins` for all other policies. A group suffix that doesn't exist in the scope falls back to CatalogPlane-Members |
+| Setting                                                | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PIMForGroups.MaximumActivationDuration`               | Maximum duration of a PIM for Groups activation (ISO 8601, e.g. `PT8H`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `PIMForGroups.MaximumActiveAssignmentDuration`         | Maximum duration of an active (non-eligible) PIM for Groups assignment (e.g. `P15D`); eligible assignments don't expire                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `AssignmentPolicies.<Policy>.Expiration`               | "Assignments expire after": default `P365D` (365 days) for every policy; `noExpiration` or another ISO 8601 duration such as `P30D`, `P6M` or `PT12H`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `AssignmentPolicies.<Policy>.ApprovalTimeout`          | Time until a pending request is automatically denied, in whole days, e.g. `P2D` (Entra ID allows up to 14 days)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `AssignmentPolicies.WorkloadPlaneUsers.RequestorScope` | `AllMemberUsers` (every member user, no guests) or `CatalogPlaneMembers` (members of CatalogPlane-Members only)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `AssignmentPolicies.<Policy>.AllowExtension`           | Standard request policies only (`BaselinePolicy`, `WorkloadPlaneUsers`, `WorkloadPlaneAdmins`, `ManagementPlaneAdmins`): `true` (default) lets users extend an expiring assignment ("Allow users to extend access"), always with approval by the policy's approvers; ignored with `noExpiration`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `AccessReviews.EnableAccessReviews`                    | `false` creates the assignment policies without recurring access reviews                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `AccessReviews.RecurrenceIntervalInMonths`             | Months between two reviews (1 to 12, default 3 = quarterly)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `AccessReviews.StartAfterDays`                         | Days between the deployment and the start of the first review                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `AccessReviews.ReviewDuration`                         | Length of each review period in whole days (e.g. `P25D`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `AccessReviews.Policies.<Policy>.ReviewerType`         | Who reviews the assignments of the policy: `Group` (default, members of the `Reviewers` groups), `SelfReview` (users review their own access), `SpecificReviewers` (the users in `Reviewers`) or `Manager` (the user's manager, the `Reviewers` groups as fallback reviewers)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `AccessReviews.Policies.<Policy>.Reviewers`            | `Group` and `Manager`: service group name suffixes (e.g. `WorkloadPlane-Admins`) or group object IDs; `SpecificReviewers`: user object IDs or UPNs (required); ignored for `SelfReview`. Default `WorkloadPlane-Admins` for `WorkloadPlaneUsers` and `InitialWorkloadUsers` (the WorkloadPlane-Users access package), `ControlPlane-Admins` for `ManagementPlaneAdmins` and `InitialManagementAdmins` (the ManagementPlane-Admins access package), `ManagementPlane-Admins` for all other policies. Group names resolve only to the groups of the scope (own or delegated). A missing admin group falls back to a higher tier only (WorkloadPlane-Admins → ManagementPlane-Admins → ControlPlane-Admins), never to CatalogPlane-Members; without a reviewer of the same or a higher tier, the policy is created without access review and a warning |
 
 The policy keys map to the assignment policies as follows:
 
-| Key                           | Assignment policy                                                                   |
-| ----------------------------- | ----------------------------------------------------------------------------------- |
-| `BaselinePolicy`              | Baseline Policy (CatalogPlane-Members access package and the policy template)       |
-| `WorkloadPlaneUsers`          | Workload Plane Users Policy (requests for WorkloadPlane-Users)                      |
-| `WorkloadPlaneAdmins`         | Workload Plane Policy (requests for WorkloadPlane-Admins)                           |
-| `ManagementPlaneAdmins`       | Management Plane Policy (requests for ManagementPlane-Admins)                       |
-| `InitialWorkloadMembership`   | Initial Workload Membership Policy (WorkloadPlane-Members)                          |
-| `InitialManagementMembership` | Initial Management Membership Policy (ManagementPlane-Members)                      |
-| `InitialManagementAdmins`     | Initial Management Admin Policy (admin-assigned only)                               |
-| `InitialWorkloadUsers`        | Initial Workload Users Policy (admin-assigned initial `-ServiceMembers` assignment) |
-| `InitialWorkloadAdmins`       | Initial Workload Admin Policy (admin-assigned initial `-WorkloadPlaneAdmin` assignment) |
+| Key                         | Assignment policy                                                                                                                         |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `BaselinePolicy`            | Baseline Policy (CatalogPlane-Members access package and the policy template)                                                             |
+| `WorkloadPlaneUsers`        | Workload Plane Users Policy (requests for WorkloadPlane-Users)                                                                            |
+| `WorkloadPlaneAdmins`       | Workload Plane Policy (requests for WorkloadPlane-Admins)                                                                                 |
+| `ManagementPlaneAdmins`     | Management Plane Policy (requests for ManagementPlane-Admins)                                                                             |
+| `InitialWorkloadMembership` | Initial Workload Membership Policy (WorkloadPlane-Members)                                                                                |
+| `InitialManagementAdmins`   | Initial Management Admin Policy (admin-assigned only)                                                                                     |
+| `InitialWorkloadUsers`      | Initial Workload Users Policy (admin-assigned initial `-ServiceMembers` assignment)                                                       |
+| `InitialWorkloadAdmins`     | Initial Workload Admin Policy (admin-assigned initial `-WorkloadPlaneAdmin` assignment)                                                   |
+| `InitialCatalogMembers`     | Initial Catalog Members Policy (admin-assigned initial `-WorkloadPlaneAdmin` / `-CatalogPlaneMembers` assignment to CatalogPlane-Members) |
 
 Invalid values stop the deployment with an error that names the setting, e.g.
 `Invalid ServiceEM.AssignmentPolicies.InitialWorkloadUsers.Expiration '90 days'`.
@@ -802,7 +828,7 @@ by `New-EntraOpsConfigFile`); the runtime default without configuration is PerSe
 - **Shared delegation groups**: ControlPlane-Admins and ManagementPlane-Admins are tenant-wide groups configured once in `EntraOpsConfig.json`
 - **Consistent permissions**: Same administrators have access across all landing zones
 - **Reduced complexity**: Fewer groups to manage across multiple services
-- **Skipped per-service groups**: ServiceEM removes the per-service ControlPlane-Admins, ManagementPlane-Admins, ManagementPlane-Members and CatalogPlane-Members groups from all scopes
+- **Skipped per-service groups**: ServiceEM removes the per-service ControlPlane-Admins, ManagementPlane-Admins and CatalogPlane-Members groups from all scopes
 - **Fallback**: If a delegation group can neither be found nor created, ServiceEM warns and falls back to the PerService model
 
 **Configuration in EntraOpsConfig.json (under the `ServiceEM` section):**
@@ -839,10 +865,10 @@ Consider an organization with two dedicated operations teams:
    - Manages: Platform infrastructure, networking, monitoring
 
 3. **Administrator Group (CatalogPlane)**
-   - Group: `dug_AAD.PrivilegedAccounts`
+   - Group: `dug - Contoso - PrivilegedAccounts`
    - Object ID: `7c6eb065-92e0-4c22-9908-7506d022e05b`
    - Responsible for: Entitlement Management catalog governance
-   - Manages: Requests for the WorkloadPlane access packages, fallback approver/reviewer
+   - Manages: Requests for the WorkloadPlane access packages (requestor scope); approves only its own package
 
 When you run `New-EntraOpsSubscriptionLandingZone` with Centralized governance:
 
@@ -859,16 +885,16 @@ New-EntraOpsSubscriptionLandingZone `
 **What happens:**
 1. ServiceEM reads `ControlPlaneDelegationGroupId`, `ManagementPlaneDelegationGroupId`, and `AdministratorGroupId` from `EntraOpsConfig.json` (unless passed as parameters)
 2. Validates that the ControlPlane and ManagementPlane groups exist (falls back to name-based lookup/creation, see [Required for Centralized Model](#required-for-centralized-model-optional))
-3. **Skips creating** per-service ControlPlane-Admins, ManagementPlane-Admins, ManagementPlane-Members and CatalogPlane-Members groups
+3. **Skips creating** per-service ControlPlane-Admins, ManagementPlane-Admins and CatalogPlane-Members groups
 4. **References** the tenant-wide groups in the catalog (catalog roles, policy approvers/requestors); they are not added as catalog resources and are never modified
-5. Creates only the following groups for the service (default `-DeploymentScope ResourceGroup`; `Both` with `-CreateM365Group` additionally creates `Sub-MyApp Members` and its own catalog):
+5. Creates only the following groups for the service (default `-DeploymentScope ResourceGroup`; `Subscription` uses the `Sub-MyApp` prefix):
    - `Rg-MyApp Members` (Microsoft 365 group, only with `-CreateM365Group`)
    - `SG-Rg-MyApp-WorkloadPlane-Users` (Security group)
    - `SG-Rg-MyApp-WorkloadPlane-Admins` (Security group, PIM eligible)
 6. Assigns the tenant-wide groups:
    - IdentityOps → Catalog Owner; PIM eligible User Access Administrator on `RG-MyApp` (skipped if already eligible at subscription level)
    - PlatformOps → Catalog Reader + AP Assignment Manager; approver of the WorkloadPlane-Admins access package; PIM eligible Contributor and constrained Role Based Access Control Administrator on `RG-MyApp` (Contributor skipped if already eligible at subscription level)
-   - dug_AAD.PrivilegedAccounts → Catalog Reader; requestor scope of the WorkloadPlane-Admins access package (the `-WorkloadPlaneAdmin` must be a member)
+   - dug - Contoso - PrivilegedAccounts → Catalog Reader; requestor scope of the WorkloadPlane-Admins access package (the `-WorkloadPlaneAdmin` must be a member)
 
 **Benefits in Practice:**
 - **Consistency**: The same IdentityOps team manages UAA across all 50 subscriptions in your tenant
@@ -895,38 +921,24 @@ New-EntraOpsSubscriptionLandingZone `
 ```
 
 **What gets created (per service, default `-DeploymentScope ResourceGroup`):**
-- `SG-Rg-MyApp-ControlPlane-Admins` (Catalog Owner, approver of the ManagementPlane-Admins access package, PIM eligible User Access Administrator on `RG-MyApp`)
+- `SG-Rg-MyApp-ControlPlane-Admins` (Catalog Owner, approver and access reviewer of the ManagementPlane-Admins access package, PIM eligible User Access Administrator on `RG-MyApp`)
 - `SG-Rg-MyApp-ManagementPlane-Admins` (Catalog Reader + AP Assignment Manager, approver; PIM eligible Contributor and constrained Role Based Access Control Administrator on `RG-MyApp`)
-- `SG-PIM-Rg-MyApp-ManagementPlane-Admins` (PIM staging group, not created with `-NoPimEscalation`)
-- `SG-Rg-MyApp-ManagementPlane-Members` (requestor scope of the ManagementPlane-Admins access package)
-- `SG-Rg-MyApp-CatalogPlane-Members` (catalog readers, requestor scope and fallback approver)
+- `SG-Rg-MyApp-CatalogPlane-Members` (catalog readers, requestor scope of the other access packages; approve only their own access package)
 - `SG-Rg-MyApp-WorkloadPlane-Users`
-- `SG-Rg-MyApp-WorkloadPlane-Admins`
+- `SG-Rg-MyApp-WorkloadPlane-Admins` (permanent Reader, PIM eligible constrained Role Based Access Control Administrator on `RG-MyApp`)
 - `Rg-MyApp Members` (Microsoft 365 group for team collaboration, only with `-CreateM365Group`)
 
 With `-DeploymentScope Subscription` the same groups are created with the `Sub-MyApp` prefix and the Azure roles are assigned
 on the subscription.
 
-**With `-DeploymentScope Both`:**
+**With governance groups separated from the workload** (see [Separating governance and workload groups](#separating-governance-and-workload-groups)):
 
-**Sub scope:**
-- `SG-Sub-MyApp-ControlPlane-Admins` (Catalog Owner, approver of the ManagementPlane-Admins access package)
-- `SG-Sub-MyApp-ManagementPlane-Admins` (Catalog Reader + AP Assignment Manager, approver)
-- `SG-PIM-Sub-MyApp-ManagementPlane-Admins` (PIM staging group, not created with `-NoPimEscalation`)
-- `SG-Sub-MyApp-ManagementPlane-Members` (requestor scope of the ManagementPlane-Admins access package)
-- `SG-Sub-MyApp-CatalogPlane-Members` (catalog readers, requestor scope and fallback approver)
-- `Sub-MyApp Members` (Microsoft 365 group for team collaboration, only with `-CreateM365Group`)
-
-**Rg scope:**
-- `SG-Rg-MyApp-CatalogPlane-Members`
-- `SG-Rg-MyApp-ManagementPlane-Members`
-- `SG-Rg-MyApp-WorkloadPlane-Users`
-- `SG-Rg-MyApp-WorkloadPlane-Admins`
-- `Rg-MyApp Members` (only with `-CreateM365Group`)
-
-> **Note (`Both`):** The Sub scope never creates Azure resources, so the per-service ControlPlane-Admins and ManagementPlane-Admins groups
-> receive **no Azure RBAC** from ServiceEM. Assign subscription-level roles to them yourself, use `-Smb` to create
-> ManagementPlane-Admins in the Rg scope, or use a single-scope deployment.
+- Governance call (`New-EntraOpsServiceBootstrap -ServiceName "Sub-MyApp" -SkipAzureResourceGroup`): `SG-Sub-MyApp-ControlPlane-Admins`,
+  `SG-Sub-MyApp-ManagementPlane-Admins`, `SG-Sub-MyApp-CatalogPlane-Members` in `Catalog-Sub-MyApp` (access packages for
+  ManagementPlane-Admins and CatalogPlane-Members); no Azure resources
+- Workload call (delegation IDs of these groups): `SG-Rg-MyApp-WorkloadPlane-Users`, `SG-Rg-MyApp-WorkloadPlane-Admins`
+  (and `Rg-MyApp Members` with `-CreateM365Group`) in `Catalog-Rg-MyApp`; the delegated groups get their catalog roles, approve
+  and review the workload policies and receive their PIM eligible Azure roles on `RG-MyApp`
 
 ### How ServiceEM Reads EntraOpsConfig.json
 
@@ -940,7 +952,7 @@ ServiceEM integrates deeply with the `EntraOpsConfig.json` configuration file. H
 
 4. **Delegation Group Resolution** (`Resolve-EntraOpsServiceEMDelegationGroup`):
    - Centralized: always resolves both groups - by configured ID, then by `ControlPlaneGroupName` / `ManagementPlaneGroupName`, then by creating a role-assignable group; found/created IDs are written back to `./EntraOpsConfig.json`
-   - PerService: configured delegation IDs are still honored, the corresponding per-service ControlPlane-/ManagementPlane-Admins groups are then not created (ManagementPlane-Members and CatalogPlane-Members still are, unless `AdministratorGroupId` is set)
+   - PerService: configured delegation IDs are still honored, the corresponding per-service ControlPlane-/ManagementPlane-Admins groups are then not created (CatalogPlane-Members still is, unless `AdministratorGroupId` is set)
    - A configured ID that cannot be found triggers a warning and the name-based lookup; if Centralized resolution fails completely, the deployment continues with PerService
 
 **Complete EntraOpsConfig.json Example for Centralized Governance:**
@@ -982,16 +994,63 @@ The following example shows the full `ServiceEM` section inside `EntraOpsConfig.
 }
 ```
 
+### Choosing an Operating Model
+
+Choose the governance model by the teams that operate the planes, using the existing parameters:
+
+| Team type                                                                  | Scenario                    | ControlPlane | ManagementPlane                  | WorkloadPlane | How to deploy                                                                                                                                                                               |
+| -------------------------------------------------------------------------- | --------------------------- | ------------ | -------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Generalists (small team operates everything)                               | PerService                  | Per service  | Per service                      | Per service   | `-GovernanceModel PerService` (runtime default without config file), single scope; seed people with `-ControlPlaneAdmins`, `-WorkloadPlaneAdmin`, `-CatalogPlaneMembers`, `-ServiceMembers` |
+| Mixed (central identity team, service teams operate their Azure resources) | Hybrid                      | Centralized  | Per service                      | Per service   | `-GovernanceModel PerService -ControlPlaneDelegationGroupId <tenant-wide group>`                                                                                                            |
+| Specialists (dedicated identity and platform teams)                        | Centralized                 | Centralized  | Centralized                      | Per service   | `-GovernanceModel Centralized` + `AdministratorGroupId` (default of a config file from `New-EntraOpsConfigFile`)                                                                            |
+| Platform team for subscriptions                                            | Centralized on subscription | Centralized  | Centralized (subscription scope) | Per service   | `-GovernanceModel Centralized -DeploymentScope Subscription`                                                                                                                                |
+
+> **Default:** without a configuration file the runtime default is **PerService**; a configuration file generated by
+> `New-EntraOpsConfigFile` sets `GovernanceModel` to `"Centralized"`. An explicitly passed `-GovernanceModel` wins.
+
+To keep per-application governance groups (ControlPlane-Admins, ManagementPlane-Admins, CatalogPlane-Members) apart from the
+workload groups, create them once and pass them as delegation groups to the workload landing zones (see
+[Separating governance and workload groups](#separating-governance-and-workload-groups)); for many
+workloads sharing tenant-wide governance groups, use the Centralized model.
+
+**Self-service paths in the PerService model:**
+- **ControlPlane-Admins**: no access package; initial members via `-ControlPlaneAdmins`, otherwise an Entra administrator
+  (Privileged Role Administrator, the group is role-assignable) adds them in the portal
+- **CatalogPlane-Members**: initial members via `-WorkloadPlaneAdmin` and `-CatalogPlaneMembers` (Initial Catalog Members
+  Policy). The Baseline Policy only lets existing CatalogPlane-Members request (and extend) it, approved by CatalogPlane-Members;
+  new members are assigned by catalog owners or access package assignment managers, or via the parameters
+- **ManagementPlane-Admins**: requested by CatalogPlane-Members (Management Plane Policy), approved by ControlPlane-Admins; the
+  initial `-WorkloadPlaneAdmin` is assigned directly
+- **WorkloadPlane-Admins**: requested by CatalogPlane-Members, approved by ManagementPlane-Admins
+- **WorkloadPlane-Users**: requested by all member users (default), approved by WorkloadPlane-Admins
+
+These paths only apply to the PerService model. In the Centralized model, ControlPlane-/ManagementPlane-Admins and
+CatalogPlane-Members are tenant-wide groups managed outside ServiceEM.
+
+Requests are only approved by the same or a higher tier; CatalogPlane-Members never approve privileged access packages.
+
+**Security considerations:**
+- **Group ownership** is opt-in (`-GroupOwnership Eligible` or `Permanent`) and limited to the WorkloadPlane groups: owners can
+  add members directly, bypassing access package approvals and access reviews (see [Group owners](#group-owners))
+- **Access package assignment manager**: ManagementPlane-Admins hold this catalog role permanently and can directly assign every
+  access package of the catalog without approval, including ManagementPlane-Admins itself (see
+  [Access package assignment manager](#access-package-assignment-manager-for-managementplane-admins))
+- **PIM for Groups** (`-EnablePimForGroups`, recommended): makes the membership of ControlPlane-Admins and ManagementPlane-Admins
+  eligible, so their permanent catalog roles only apply after a just-in-time activation (see
+  [EnablePimForGroups and EnableWorkloadPlanePimForGroups Parameters](#enablepimforgroups-and-enableworkloadplanepimforgroups-parameters))
+- **Catalog Owner**: permanent catalog role of ControlPlane-Admins unless `-SkipCatalogOwnerAssignment` is set (see
+  [Catalog Owner assignment](#catalog-owner-assignment-for-controlplane-admins))
+
 ### Governance Model Comparison
 
-| Aspect                     | Centralized                                  | PerService                            |
-| -------------------------- | -------------------------------------------- | ------------------------------------- |
-| **ControlPlane-Admins**    | Single tenant-wide group (e.g., IdentityOps) | Dedicated group per service           |
-| **ManagementPlane-Admins** | Single tenant-wide group (e.g., PlatformOps) | Dedicated group per service           |
-| **Use Case**               | 50+ services, dedicated operations teams     | 5-10 services, service-specific teams |
-| **PIM Scope**              | One activation across all services           | Separate activation per service       |
-| **Complexity**             | Low (fewer groups)                           | High (groups scale with services)     |
-| **Isolation**              | Lower (shared administrators)                | Higher (dedicated administrators)     |
+| Aspect                     | Centralized                                                           | PerService                                          |
+| -------------------------- | --------------------------------------------------------------------- | --------------------------------------------------- |
+| **ControlPlane-Admins**    | Single tenant-wide group (e.g., IdentityOps)                          | Dedicated group per service                         |
+| **ManagementPlane-Admins** | Single tenant-wide group (e.g., PlatformOps)                          | Dedicated group per service                         |
+| **Use Case**               | 50+ services, dedicated operations teams                              | 5-10 services, service-specific teams               |
+| **PIM Scope**              | One activation across all services                                    | Separate activation per service                     |
+| **Complexity**             | Low (fewer groups)                                                    | High (groups scale with services)                   |
+| **Isolation**              | Lower (shared administrators)                                         | Higher (dedicated administrators)                   |
 | **Configuration**          | `GovernanceModel: "Centralized"` + group IDs in `EntraOpsConfig.json` | `-GovernanceModel "PerService"` or no configuration |
 
 ### Migration Between Models
@@ -1049,7 +1108,7 @@ Constrained delegations are applied as [Azure ABAC conditions](https://learn.mic
 
 ### ManagementPlane Constrained Delegation
 
-**Scope:** ManagementPlane-Admins group (PIM eligible Role Based Access Control Administrator on the resource group). Only assigned when ManagementPlane-Admins and WorkloadPlane-Admins exist in the same scope, i.e. in a single-scope PerService deployment, with a delegated ManagementPlane group (Centralized model or `ManagementPlaneDelegationGroupId`) or with `-Smb`
+**Scope:** ManagementPlane-Admins group (PIM eligible Role Based Access Control Administrator on the resource group). Assigned when a ManagementPlane-Admins group and WorkloadPlane-Admins exist for the Azure scope, i.e. in a single-scope PerService deployment or with a delegated ManagementPlane group (Centralized model or `ManagementPlaneDelegationGroupId`)
 
 **Permissions:** Can assign **any** Azure role **EXCEPT** the high-privileged roles listed in `ExcludedRoleDefinitionIds`
 
@@ -1060,7 +1119,7 @@ Constrained delegations are applied as [Azure ABAC conditions](https://learn.mic
 - `18d7d88d-d35e-4fb5-a5c3-7773c20a72d9` - User Access Administrator
 - `f58310d9-a9f6-439a-9e8d-f62e7b41a168` - Role Based Access Control Administrator
 
-**Use Case:** Management-tier administrators can delegate operational roles (Contributor, specific service roles) to workload teams without granting control-plane access.
+**Use Case:** Management-tier administrators assign resource-level or limited roles (e.g. Website Contributor) to the WorkloadPlane-Admins group without granting control-plane access. WorkloadPlane-Admins get no Contributor on the resource group from ServiceEM (see [Azure RBAC Implementation](#azure-rbac-implementation-resource-group-or-subscription-scope)).
 
 ### WorkloadPlane Constrained Delegation
 
@@ -1129,10 +1188,11 @@ Authentication context enforcement requires users to meet additional Conditional
 
 > **Implementation note:** New-EntraOpsServicePIMPolicy adds the authentication context step-up only when EnableAuthenticationContext is `true` and an AuthenticationContextClassReferenceId is configured for the relevant tier. Otherwise it enforces MFA + Business Justification only.
 
-**Scope of the policy:** The settings apply to the **PIM for Groups** member policy of every non-Members group created by the
-landing zone (ControlPlane-Admins, ManagementPlane-Admins, the PIM staging group, WorkloadPlane-Users and WorkloadPlane-Admins).
-The tier is derived from the group display name. Delegated groups are never modified, PIM for Azure resources (the eligible roles
-on the resource group) is not affected, and nothing is configured with `-NoPimEscalation`. Changes take effect when the landing
+**Scope of the policy:** The settings apply to the **PIM for Groups** member policy of ControlPlane-Admins and ManagementPlane-Admins
+with `-EnablePimForGroups` and of WorkloadPlane-Admins with `-EnableWorkloadPlanePimForGroups` (see
+[EnablePimForGroups and EnableWorkloadPlanePimForGroups Parameters](#enablepimforgroups-and-enableworkloadplanepimforgroups-parameters));
+without these switches nothing is configured. The tier is derived from the group display name. Delegated groups are never
+modified and PIM for Azure resources (the eligible roles on the resource group) is not affected. Changes take effect when the landing
 zone is deployed again.
 
 **Default Enforcement (when authentication context is disabled):**
@@ -1283,7 +1343,7 @@ When disabled, PIM policies will still require MFA and Justification (as defined
 2. Authentication context ID doesn't exist in Entra ID
 3. No Conditional Access policy targets the authentication context
 4. User's session already satisfies the authentication context requirements
-5. The activated role is an Azure resource role (PIM for Azure resources) or the landing zone was deployed with `-NoPimEscalation` - authentication context is only configured for PIM for Groups
+5. The activated role is an Azure resource role (PIM for Azure resources), or the landing zone was deployed without `-EnablePimForGroups` / `-EnableWorkloadPlanePimForGroups` - authentication context is only configured for PIM for Groups
 
 **Resolution:**
 1. Verify configuration in `EntraOpsConfig.json` and re-run the landing zone deployment
@@ -1307,71 +1367,107 @@ When disabled, PIM policies will still require MFA and Justification (as defined
 
 ## Security Considerations
 
-### NoPimEscalation Parameter
+### EnablePimForGroups and EnableWorkloadPlanePimForGroups Parameters
 
-By default, ServiceEM configures **PIM for Groups** for all non-Members groups of a landing zone scope:
-- A **PIM staging group** `SG-PIM-<ServiceName>-ManagementPlane-Admins` is created next to ManagementPlane-Admins (the scope of a single-scope deployment; with `Both` the Sub scope, or the Rg scope with `-Smb`)
-- PIM for Groups policies (MFA + justification, 10 hours by default, no approval) are applied to ControlPlane-Admins, ManagementPlane-Admins, the staging group, WorkloadPlane-Users and WorkloadPlane-Admins
-- ManagementPlane-Admins becomes an eligible member of its staging group; membership of all other groups is granted through
-  access packages (the Microsoft 365 group of [`-CreateM365Group`](#createm365group-parameter) gets no eligibilities)
+PIM for Groups is **opt-in**. Without these switches, ServiceEM configures **no PIM for Groups policy** for any group and the
+access packages grant active (regular) group membership. The Azure roles of the admin groups are PIM-eligible in any case
+(PIM for Azure resources, not affected by these switches).
 
-Use `-NoPimEscalation` when group membership should only be granted through access packages, or when PIM for Groups is managed separately:
+| Switch                              | Groups                                                                           | Default |
+| ----------------------------------- | -------------------------------------------------------------------------------- | ------- |
+| `-EnablePimForGroups` (recommended) | Owned (non-delegated) per-service ControlPlane-Admins and ManagementPlane-Admins | Off     |
+| `-EnableWorkloadPlanePimForGroups`  | WorkloadPlane-Admins                                                             | Off     |
+
+The two switches are available on `New-EntraOpsSubscriptionLandingZone` (forwarded to the scope) and `New-EntraOpsServiceBootstrap`.
+
+**Why ControlPlane-Admins and ManagementPlane-Admins:** both groups hold **permanent catalog roles** in Entitlement Management that
+can't be PIM-protected: ControlPlane-Admins is Catalog Owner, ManagementPlane-Admins is Access package assignment manager and can
+directly assign every access package of the catalog without approval. Their Azure roles are already PIM-eligible, so PIM for
+Groups protects the identity governance delegation: the catalog roles only apply after the group membership is activated.
+
+**What ServiceEM configures for a selected group:**
+- **PIM for Groups member policy:** MFA and justification, no approval, maximum activation
+  `ServiceEM.PIMForGroups.MaximumActivationDuration` (default `PT10H`), active assignments at most
+  `ServiceEM.PIMForGroups.MaximumActiveAssignmentDuration` (default `P15D`), eligible assignments don't expire, optional
+  authentication context (see [PIM Authentication Context Configuration](#pim-authentication-context-configuration)). The policy is applied **before** the
+  group is added to the catalog, so the catalog offers the **Eligible Member** role.
+- **Eligible membership through the access package:** the access package of the group delivers the **Eligible Member** resource
+  role (PIM for Groups eligible membership) instead of the active **Member** role. Assigned users become eligible members and
+  activate the membership in PIM. If the access package still has the active Member role of the group (e.g. a landing zone
+  first deployed without the switch), it is **removed and replaced** by Eligible Member (warning; assigned users lose their active membership). If the catalog doesn't
+  offer Eligible Member (group not yet managed by PIM, or missing license), ServiceEM warns and adds **no** resource role - it never
+  falls back to active Member; re-run the deployment later.
+- **`-ControlPlaneAdmins`** become PIM for Groups eligible members of ControlPlane-Admins (without the switch: permanent members).
+
+**WorkloadPlane-Admins:** `-EnableWorkloadPlanePimForGroups` applies the same handling (policy, Eligible Member in its access
+package, license warning), e.g. for **multi-activation** scenarios: activate the group membership, then the PIM-eligible Azure
+roles of the group. It isn't needed by default, because the Azure roles of WorkloadPlane-Admins (constrained Role Based Access
+Control Administrator) are already PIM-eligible.
+
+**Never PIM for Groups:** WorkloadPlane-Users, CatalogPlane-Members, the Microsoft 365 group of
+[`-CreateM365Group`](#createm365group-parameter) and delegated or tenant-wide groups (Centralized model,
+`-ControlPlaneDelegationGroupId`, `-ManagementPlaneDelegationGroupId`, `-AdministratorGroupId`).
+
+> **License warning:** Eligible group memberships through access packages are a **Microsoft Entra ID Governance** feature: they
+> require Microsoft Entra ID Governance or Microsoft Entra Suite licenses. **Microsoft Entra ID P2 alone is not sufficient**
+> (PIM for Groups by itself requires P2). ServiceEM shows a warning when one of the switches is used. See
+> [Assign eligible group membership and ownership in access packages](https://learn.microsoft.com/en-us/entra/id-governance/entitlement-management-access-package-eligible)
+> and [Microsoft Entra ID Governance licensing fundamentals](https://learn.microsoft.com/en-us/entra/id-governance/licensing-fundamentals).
+
+> **Important:** A group that is managed by PIM for Groups can't be taken out of PIM management again
+> ([Enable management of group with PIM](https://learn.microsoft.com/en-us/entra/id-governance/entitlement-management-access-package-eligible#enable-management-of-group-with-pim)).
+> The access package expiration (default 365 days) and the PIM eligibility (no expiration) are independent: the eligibility ends
+> when the access package assignment ends
+> ([PIM and access package reference](https://learn.microsoft.com/en-us/entra/id-governance/entitlement-management-access-package-pim-reference)).
 
 ```powershell
-# -NoPimEscalation: no PIM staging group, no PIM for Groups policies/eligibilities
-New-EntraOpsSubscriptionLandingZone `
-    -DeploymentPrefix "ProdCritical" `
-    -AzureRegion "westeurope" `
-    -SubscriptionId "<subscription-id>" `
-    -WorkloadPlaneAdmin "owner@contoso.com" `
-    -NoPimEscalation `
-    -Verbose
+# Recommended: ControlPlane-Admins and ManagementPlane-Admins with PIM for Groups
+New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "MyApp" `
+    -AzureRegion "westeurope" -SubscriptionId "<subscription-id>" `
+    -EnablePimForGroups
+
+# Additionally WorkloadPlane-Admins (multi-activation)
+New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "MyApp" `
+    -AzureRegion "westeurope" -SubscriptionId "<subscription-id>" `
+    -EnablePimForGroups -EnableWorkloadPlanePimForGroups
 ```
 
-**What changes:**
-- **Without** `-NoPimEscalation`:
-  - Creates the staging group, e.g. `SG-PIM-Sub-MyApp-ManagementPlane-Admins`, with ManagementPlane-Admins as eligible member
-  - PIM policies enforce MFA + Justification (and optionally authentication context) for activations
-
-- **With** `-NoPimEscalation`:
-  - No PIM staging group is created
-  - No PIM for Groups policies and no PIM for Groups eligible assignments are configured
-  - Group membership is only granted via the (time-bound, approval-based) access packages
-  - Azure RBAC on the resource group is still assigned as PIM eligible (PIM for Azure resources is not affected)
-
-> **Note:** In the default PIM-only Azure RBAC model the staging group does not receive any Azure role. It is only assigned
-> permanent Owner when `New-EntraOpsServiceAZContainer` is called directly with `-rbacModel Azure|Both -pimForGroups`.
+**Escalation path:** ServiceEM assigns no Owner role. Unrestricted Azure access (role assignments including Owner) remains only
+with ControlPlane-Admins via the PIM-eligible User Access Administrator; ManagementPlane-Admins keep the eligible Contributor and
+the constrained Role Based Access Control Administrator.
 
 **When to use:**
-- ✅ Access-package-only elevation with approvals and expiration
-- ✅ PIM for Groups is managed by a separate process or tooling
-- ❌ Just-in-time activation of group membership via PIM for Groups is required
+- ✅ `-EnablePimForGroups`: production landing zones with Microsoft Entra ID Governance licenses (no standing catalog roles)
+- ✅ `-EnableWorkloadPlanePimForGroups`: WorkloadPlane-Admins should activate the group membership before their Azure roles
+- ❌ Only Microsoft Entra ID P2 licenses: keep the defaults (active membership through access packages)
 
 ### CreateM365Group Parameter
 
 By default, a landing zone only contains security groups. With `-CreateM365Group` (or `ServiceEM.CreateM365Group` set to
 `true` in `EntraOpsConfig.json`, also available in the Configuration Wizard), ServiceEM additionally creates the Microsoft 365
-group `<Scope>-<Prefix> Members` in each scope. An explicitly passed `-CreateM365Group:$false` wins over the setting.
+group `<Scope>-<Prefix> Members`. An explicitly passed `-CreateM365Group:$false` wins over the setting.
 
 **Purpose:** the group is the collaboration space of the service team:
 - **Email and ChatOps:** a group mailbox and calendar, e.g. as recipient for alerts, deployment and incident notifications
 - **Knowledge:** when SharePoint Online or Microsoft Teams is used, the group's SharePoint site (documents, runbooks, wiki) or a
   Microsoft Teams team created for the group (channels for operations and ChatOps bots)
 
-**Intended members** are the people behind the personas of the service (ServiceEM doesn't add any members):
+**Members:** the group is added as a resource (Member role) to **every access package of its scope**. Every user assigned to any
+access package of the scope automatically becomes a member and loses the membership when the assignment ends:
 
-| Persona | Privileged group of the persona | Included in the Microsoft 365 group |
-| ------- | ------------------------------- | ----------------------------------- |
-| Workload users (developers, data-plane operators) | `SG-<Scope>-<Prefix>-WorkloadPlane-Users` | ✅ |
-| Workload admins (service owners, workload operators) | `SG-<Scope>-<Prefix>-WorkloadPlane-Admins` | ✅ |
-| Management members and admins (platform operators of the service, PerService model) | `SG-<Scope>-<Prefix>-ManagementPlane-Members` / `-Admins` | ✅ (optional) |
-| Control plane admins (identity and access administrators, PerService model) | `SG-<Scope>-<Prefix>-ControlPlane-Admins` | Optional; usually not part of the service team |
-| Catalog readers / administrators (`CatalogPlane-Members`) | `SG-<Scope>-<Prefix>-CatalogPlane-Members` or `AdministratorGroupId` | Not required |
-| Tenant-wide delegation groups (Centralized model: IdentityOps, PlatformOps) | Delegated groups | ❌ (managed outside the landing zone) |
+| Persona                                                                                                | Privileged group of the persona              | Member of the Microsoft 365 group                      |
+| ------------------------------------------------------------------------------------------------------ | -------------------------------------------- | ------------------------------------------------------ |
+| Workload users (developers, data-plane operators)                                                      | `SG-<Scope>-<Prefix>-WorkloadPlane-Users`    | ✅ via the WorkloadPlane-Users access package           |
+| Workload admins (service owners, workload operators)                                                   | `SG-<Scope>-<Prefix>-WorkloadPlane-Admins`   | ✅ via the WorkloadPlane-Admins access package          |
+| Management admins (platform operators of the service, PerService model)                                | `SG-<Scope>-<Prefix>-ManagementPlane-Admins` | ✅ via the ManagementPlane-Admins access package        |
+| Catalog members (`CatalogPlane-Members`, PerService model)                                             | `SG-<Scope>-<Prefix>-CatalogPlane-Members`   | ✅ via the CatalogPlane-Members access package          |
+| Control plane admins (identity and access administrators, PerService model)                            | `SG-<Scope>-<Prefix>-ControlPlane-Admins`    | ❌ not automatically (no access package)                |
+| `AdministratorGroupId` and tenant-wide delegation groups (Centralized model: IdentityOps, PlatformOps) | Delegated groups                             | ❌ not automatically (managed outside the landing zone) |
 
-> **Note:** the Microsoft 365 group gets no PIM for Groups eligibilities, no access package and no Azure or catalog role:
-> membership only grants access to the group's collaboration resources (mailbox, calendar, SharePoint site or team). Access to
-> the admin and user groups is always granted through the access packages.
+> **Note:** the Microsoft 365 group gets no PIM for Groups eligibilities, no access package of its own and no Azure or catalog
+> role: membership only grants access to the group's collaboration resources (mailbox, calendar, SharePoint site or team). Access
+> to the admin and user groups is always granted through the access packages. A scope without access packages (e.g. custom
+> `-ServiceRoles` with only delegated groups) gets no automatic members.
 
 ```powershell
 New-EntraOpsSubscriptionLandingZone `
@@ -1383,11 +1479,11 @@ New-EntraOpsSubscriptionLandingZone `
 ```
 
 **Without `-CreateM365Group` (default):**
-- No Microsoft 365 group in any scope; a scope without other groups (e.g. the Sub scope of `-DeploymentScope Both` in the
-  Centralized model) is skipped completely, without catalog
-- A Microsoft 365 group created by an earlier run is left untouched but no longer used: it isn't added to the catalog
+- No Microsoft 365 group; a scope without other own groups (e.g. custom `-ServiceRoles` with only delegated groups) is skipped
+  completely, without catalog
+- A Microsoft 365 group created by a run with `-CreateM365Group` is left untouched but no longer used: it isn't added to the catalog
 - Unchanged: access packages, assignment policies and the initial assignments of `-ServiceMembers` and `-WorkloadPlaneAdmin`,
-  PIM for Groups policies, the PIM staging group and its eligibility for ManagementPlane-Admins, and Azure RBAC
+  PIM for Groups settings of `-EnablePimForGroups` / `-EnableWorkloadPlanePimForGroups`, and Azure RBAC
 
 `New-EntraOpsServiceBootstrap` uses the same switch: `Unified` entries of `-ServiceRoles` are only created with `-CreateM365Group`.
 
@@ -1399,6 +1495,8 @@ ControlPlane-Admins group (per-service group or the `ControlPlaneDelegationGroup
 > **Warning:** Entitlement Management catalog roles can't be managed by PIM. This assignment is **permanent** (standing access):
 > every active member of ControlPlane-Admins can modify the catalog at any time, e.g. add resources, change access packages and
 > assignment policies (requestors, approvers, expiration) or assign access directly, without a separate activation of the role.
+> With [`-EnablePimForGroups`](#enablepimforgroups-and-enableworkloadplanepimforgroups-parameters) the membership of
+> ControlPlane-Admins is eligible, so the role only applies after a just-in-time activation of the membership.
 
 Use `-SkipCatalogOwnerAssignment` to skip this assignment (`New-EntraOpsSubscriptionLandingZone` and
 `New-EntraOpsServiceBootstrap`), or set `ServiceEM.SkipCatalogOwnerAssignment` to `true` to make it the default. The other catalog roles and the PIM eligible Azure User Access Administrator assignment on the
@@ -1417,25 +1515,71 @@ New-EntraOpsSubscriptionLandingZone `
 Entra ID role **Identity Governance Administrator** via PIM (the group must be role-assignable, or assign the role to its
 members). Catalog changes then require a just-in-time activation with the controls of the PIM role settings (MFA or
 authentication context, justification, approval). Note that this role is tenant-wide and covers all catalogs, not only the
-service catalog. Existing Catalog Owner assignments from earlier runs are not removed.
+service catalog.
+
+### Access package assignment manager for ManagementPlane-Admins
+
+`New-EntraOpsServiceEMCatalogResourceRole` assigns the catalog role **Access package assignment manager** (AP Assignment Manager)
+of every service catalog to ManagementPlane-Admins (per-service group or the `ManagementPlaneDelegationGroupId`).
+
+> **Warning:** This assignment is **permanent**. In the PerService model the catalog also contains the ManagementPlane-Admins
+> access package, and every deployment shows a warning: members of ManagementPlane-Admins can directly assign every access
+> package of the catalog without approval (administrator direct assignments bypass the approval of the assignment policies),
+> including the ManagementPlane-Admins access package itself. They can add further ManagementPlane admins without the approval of
+> ControlPlane-Admins. The escalation stays within the ManagementPlane tier: ControlPlane-Admins has no access package, and an
+> assignment manager can't change policies, resources or catalog roles.
+>
+> **Recommendation:** Use the **Centralized** governance model (`-GovernanceModel Centralized`) for production. ManagementPlane-Admins
+> is then a tenant-wide group (`ManagementPlaneDelegationGroupId`) that is governed outside the service catalogs, so the service
+> catalogs contain no ManagementPlane-Admins access package and no warning is shown. The tenant-wide group still holds the
+> assignment manager role on every service catalog, i.e. it can directly assign the lower-tier packages of all services; protect
+> its membership centrally (e.g. PIM for Groups, own catalog with ControlPlane approval). In the PerService model, make the
+> membership of ManagementPlane-Admins eligible with [`-EnablePimForGroups`](#enablepimforgroups-and-enableworkloadplanepimforgroups-parameters)
+> so the permission is just-in-time.
 
 ### Service Owner and Member Assignment
 
 **Owner vs. Members** (initial `adminAdd` assignments by `New-EntraOpsServiceEMAssignment`):
-- **WorkloadPlaneAdmin**: Assigned to the ManagementPlane-Admins access package ("Initial Management Admin Policy") where it exists (PerService single scope, or the Sub scope of `Both`); otherwise to the WorkloadPlane-Admins access package ("Initial Workload Admin Policy"), e.g. in the Centralized model or the Rg scope of `Both`. Both policies are admin-assigned only, without approval, and expire after 365 days by default (`ServiceEM.AssignmentPolicies`). Landing zones created before the initial policies existed fall back to the "Workload Plane Policy" (with approval). Only with `-AddWorkloadPlaneAdminToUsers` the admin is also added to the service members
-- **ServiceMembers**: Assigned to the WorkloadPlane-Members access package ("Initial Workload Membership Policy", requires approval by the requestor's manager and CatalogPlane-Members, so the request waits for approval) where it exists (custom `ServiceRoles` / Bootstrap defaults); otherwise to the WorkloadPlane-Users access package ("Initial Workload Users Policy", admin-assigned only, no approval, expires after 365 days by default; fallback "Workload Plane Users Policy"). In the default landing zone this is the Rg scope WorkloadPlane-Users package
+- **WorkloadPlaneAdmin**: Assigned to the ManagementPlane-Admins access package ("Initial Management Admin Policy") where it exists (PerService model with an own ManagementPlane-Admins group); otherwise to the WorkloadPlane-Admins access package ("Initial Workload Admin Policy"), e.g. in the Centralized model or with a delegated ManagementPlane-Admins group. The two policies are admin-assigned only, without approval, and expire after 365 days by default (`ServiceEM.AssignmentPolicies`). Landing zones created before the initial policies existed fall back to the "Workload Plane Policy" (with approval). Only with `-AddWorkloadPlaneAdminToUsers` the admin is also added to the service members
+- **WorkloadPlaneAdmin and CatalogPlaneMembers**: In a scope with a per-service CatalogPlane-Members group (PerService model), the admin and the users of `-CatalogPlaneMembers` are assigned to the CatalogPlane-Members access package ("Initial Catalog Members Policy", admin-assigned only, no approval, expires after 365 days by default). CatalogPlane-Members is the requestor scope of its own Baseline Policy, so new users can't request it; without these parameters an Entra or Identity Governance administrator (or a catalog owner / access package assignment manager) assigns the first members. Ignored with `AdministratorGroupId` and in the Centralized model
+- **ServiceMembers**: Assigned to the WorkloadPlane-Members access package ("Initial Workload Membership Policy", requires approval by the requestor's manager and CatalogPlane-Members, so the request waits for approval) where it exists (only with custom `-ServiceRoles`); otherwise to the WorkloadPlane-Users access package ("Initial Workload Users Policy", admin-assigned only, no approval, expires after 365 days by default; fallback "Workload Plane Users Policy"). In the default landing zone this is the WorkloadPlane-Users package of the scope
 
 The cmdlet waits up to 5 minutes (at most 30 seconds between checks) until the submitted requests are delivered. Requests that
 wait for approval or failed are reported with a warning and not awaited; requests that are still in progress after 5 minutes are
 listed with their last state and completed in the background.
 
-WorkloadPlaneAdmin is resolved when `-WorkloadPlaneAdmin` is passed (or, with `-AssignOwner` only, defaults to the signed-in
-user). It is set as owner of all groups **created** in that run only with `-AssignOwner` (existing groups are not updated).
+**ControlPlaneAdmins** (`-ControlPlaneAdmins`, PerService only): ControlPlane-Admins has no access package. The users are added
+directly to the per-service ControlPlane-Admins group: as **PIM for Groups eligible members** with
+[`-EnablePimForGroups`](#enablepimforgroups-and-enableworkloadplanepimforgroups-parameters), otherwise as **permanent (active)
+members**. `New-EntraOpsSubscriptionLandingZone` only forwards them to the scope that contains
+ControlPlane-Admins. In the Centralized model or with `-ControlPlaneDelegationGroupId` the parameter is ignored with a warning;
+the tenant-wide group is managed outside ServiceEM. Without the parameter, an Entra administrator (Privileged Role
+Administrator, because the group is role-assignable) adds the members in the portal.
+
+WorkloadPlaneAdmin is resolved when `-WorkloadPlaneAdmin` is passed (or, with `-GroupOwnership Eligible` or `Permanent`,
+defaults to the signed-in user). Whether it owns the WorkloadPlane groups is controlled by `-GroupOwnership` (see [Group owners](#group-owners)).
 
 #### Group owners
 
-Without `-AssignOwner`, ServiceEM doesn't send any owner when creating groups (including auto-created delegation groups) and
-creates no PIM for Groups eligible owner assignments. Microsoft Entra ID still applies its own defaults when groups are created
+`-GroupOwnership` (`New-EntraOpsSubscriptionLandingZone` and `New-EntraOpsServiceBootstrap`) controls the ownership of the
+**WorkloadPlane groups** (WorkloadPlane-Admins, WorkloadPlane-Users) for the WorkloadPlaneAdmin:
+
+| Value            | Behavior                                                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------------------- |
+| `None` (default) | No owner and no PIM for Groups eligible owner assignment                                                       |
+| `Permanent`      | WorkloadPlaneAdmin is set as owner when the WorkloadPlane groups are created (existing groups are not updated) |
+| `Eligible`       | WorkloadPlaneAdmin becomes a PIM for Groups eligible owner of the WorkloadPlane groups                         |
+
+> **Warning:** Ownership is opt-in and shown as a warning at deployment: owners can add members directly, bypassing access
+> package approvals and access reviews.
+
+ControlPlane-Admins, ManagementPlane-Admins, CatalogPlane-Members, the Microsoft
+365 group and the tenant-wide delegation groups (Centralized model, auto-created by `Resolve-EntraOpsServiceEMDelegationGroup`)
+never get an owner from ServiceEM. Following the tier model, owning a higher-tier group (e.g. the role-assignable
+ControlPlane-Admins) would let the owner add themselves and escalate (tier breach). Ownership is therefore limited to the
+WorkloadPlane, which the WorkloadPlaneAdmin (ManagementPlane-Admins in the PerService model) already governs.
+
+Microsoft Entra ID still applies its own defaults when groups are created
 without owners in a **delegated** (user) sign-in:
 
 - **Microsoft 365 groups** (`{ServiceName} Members`, with `-CreateM365Group`): the signed-in user is automatically added as owner, and the last owner
@@ -1444,8 +1588,6 @@ without owners in a **delegated** (user) sign-in:
   role-assignable groups).
 
 With a workload identity (app-only sign-in), all groups are created without owners.
-
-Assignments created by earlier runs with `-AssignOwner` are not removed.
 
 By default, the admin only gets the admin access package. Use `-AddWorkloadPlaneAdminToUsers` (or set
 `ServiceEM.AddWorkloadPlaneAdminToUsers` to `true`) to assign the admin to the WorkloadPlane-Users access package as well, e.g.
@@ -1477,35 +1619,35 @@ New-EntraOpsSubscriptionLandingZone `
 
 ServiceEM exports 16 cmdlets for automated landing zone provisioning and management:
 
-| #   | Cmdlet                                                 | Purpose                                                                                                                                                                                             |
-| --- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | `New-EntraOpsServiceBootstrap`                         | **Orchestrator** — calls all other cmdlets in correct sequence for complete service provisioning of one scope                                                                                       |
-| 2   | `New-EntraOpsServiceEntraGroup`                        | Creates role-assignable security groups, unified (M365) groups and the PIM staging group with correct naming                                                                                        |
-| 3   | `New-EntraOpsServiceEMCatalog`                         | Creates Entitlement Management catalog (e.g., `Catalog-Sub-MyApp`) with idempotent lookup                                                                                                           |
-| 4   | `New-EntraOpsServiceEMCatalogResource`                 | Registers the owned (non-delegated) service groups as catalog resources (required before creating access packages)                                                                                  |
-| 5   | `New-EntraOpsServiceEMCatalogResourceRole`             | Assigns catalog roles: Owner (ControlPlane-Admins, skipped with `-SkipCatalogOwnerAssignment`), Reader (CatalogPlane-Members, WorkloadPlane-Admins, ManagementPlane-Admins), AP Assignment Manager (ManagementPlane-Admins)                     |
-| 6   | `New-EntraOpsServiceEMAccessPackage`                   | Creates one access package per non-Unified role except ControlPlane-Admins                                                                                                                          |
-| 7   | `New-EntraOpsServiceEMAccessPackageResourceAssignment` | Maps group Member roles into access packages as resource role scopes                                                                                                                                |
-| 8   | `New-EntraOpsServiceEMAssignmentPolicy`                | Creates assignment policies: requestor scopes, approvers, expiration, quarterly access reviews                                                                                                      |
-| 9   | `New-EntraOpsServiceEMAssignment`                      | Initial `adminAdd` assignments: service members → WorkloadPlane-Members (fallback WorkloadPlane-Users); admin → ManagementPlane-Admins (fallback WorkloadPlane-Admins)                             |
-| 10  | `New-EntraOpsServicePIMPolicy`                         | Configures PIM for Groups activation policies: MFA, justification, optional authentication context, max duration (10 hours), no approval                                                           |
-| 11  | `New-EntraOpsServicePIMAssignment`                     | Creates PIM for Groups eligible assignments: ManagementPlane-Admins → eligible member of its PIM staging group; optional eligible owner (`-EnablePIMOwnerAssignment`). Returned as `PimForGroupsAssignments` in the bootstrap report |
-| 12  | `New-EntraOpsServiceAZContainer`                       | Creates the Azure Resource Group `RG-<Prefix>` (or, with `-AzureScope Subscription`, uses the subscription) with PIM-eligible RBAC (Contributor, UAA, constrained RBAC Administrator) and permanent Reader for WorkloadPlane-Admins                             |
-| 13  | `New-EntraOpsSubscriptionLandingZone`                  | **Landing Zone** — single resource group or subscription scope (default), or the Sub + Rg split (`-DeploymentScope Both`); resolves governance model and delegation groups                                                                  |
-| 14  | `Get-EntraOpsServiceEMReport`                          | Read-only report of **all** Entitlement Management catalogs in the tenant (roles, resources, access packages, policies, delivered assignments)                                                      |
-| 15  | `Remove-EntraOpsServiceCatalog`                        | Cleanup cmdlet — removes assignments, access packages, the catalog and the groups of the landing zone registered as catalog resources; deletes the Azure RG only with `-RemoveAzureResourceGroup -SubscriptionId` (see note below)                              |
-| 16  | `Resolve-EntraOpsServiceEMDelegationGroup`             | Resolves (by ID or display name) or creates a role-assignable ControlPlane/ManagementPlane delegation group and persists its ID to `EntraOpsConfig.json`                                           |
+| #   | Cmdlet                                                 | Purpose                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `New-EntraOpsServiceBootstrap`                         | **Orchestrator** — calls all other cmdlets in correct sequence for complete service provisioning of one scope                                                                                                                                                                                                                                                                                            |
+| 2   | `New-EntraOpsServiceEntraGroup`                        | Creates role-assignable security groups and unified (M365) groups with correct naming                                                                                                                                                                                                                                                                                                                    |
+| 3   | `New-EntraOpsServiceEMCatalog`                         | Creates Entitlement Management catalog (e.g., `Catalog-Sub-MyApp`) with idempotent lookup                                                                                                                                                                                                                                                                                                                |
+| 4   | `New-EntraOpsServiceEMCatalogResource`                 | Registers the owned (non-delegated) service groups as catalog resources (required before creating access packages)                                                                                                                                                                                                                                                                                       |
+| 5   | `New-EntraOpsServiceEMCatalogResourceRole`             | Assigns catalog roles: Owner (ControlPlane-Admins, skipped with `-SkipCatalogOwnerAssignment`), Reader (CatalogPlane-Members, WorkloadPlane-Admins, ManagementPlane-Admins), AP Assignment Manager (ManagementPlane-Admins)                                                                                                                                                                              |
+| 6   | `New-EntraOpsServiceEMAccessPackage`                   | Creates one access package per non-Unified role except ControlPlane-Admins                                                                                                                                                                                                                                                                                                                               |
+| 7   | `New-EntraOpsServiceEMAccessPackageResourceAssignment` | Maps group roles into access packages as resource role scopes: Member, or Eligible Member for PIM-managed groups (`-EligibleMemberGroupIds`, set by the bootstrap with `-EnablePimForGroups` / `-EnableWorkloadPlanePimForGroups`)                                                                                                                                                                       |
+| 8   | `New-EntraOpsServiceEMAssignmentPolicy`                | Creates assignment policies: requestor scopes, approvers, expiration, quarterly access reviews                                                                                                                                                                                                                                                                                                           |
+| 9   | `New-EntraOpsServiceEMAssignment`                      | Initial `adminAdd` assignments: service members → WorkloadPlane-Members (fallback WorkloadPlane-Users); admin → ManagementPlane-Admins (fallback WorkloadPlane-Admins); admin and `-CatalogPlaneMembers` → CatalogPlane-Members                                                                                                                                                                          |
+| 10  | `New-EntraOpsServicePIMPolicy`                         | Configures PIM for Groups activation policies (MFA, justification, optional authentication context, max duration (10 hours), no approval) for ControlPlane-/ManagementPlane-Admins with `-EnablePimForGroups` and WorkloadPlane-Admins with `-EnableWorkloadPlanePimForGroups`, before the groups are added to the catalog; only called when a group is selected (`PimPolicies` in the bootstrap report) |
+| 11  | `New-EntraOpsServicePIMAssignment`                     | Creates the PIM for Groups eligible owner assignments of the WorkloadPlane groups; only called with `-GroupOwnership Eligible`. Returned as `PimForGroupsAssignments` in the bootstrap report                                                                                                                                                                                                            |
+| 12  | `New-EntraOpsServiceAZContainer`                       | Creates the Azure Resource Group `RG-<Prefix>` (or, with `-AzureScope Subscription`, uses the subscription) with PIM-eligible RBAC (Contributor, UAA, constrained RBAC Administrator) and permanent Reader for WorkloadPlane-Admins; assigns no Owner role                                                                                                                                               |
+| 13  | `New-EntraOpsSubscriptionLandingZone`                  | **Landing Zone** — exactly one scope: resource group (default) or subscription (`-DeploymentScope`); resolves governance model and delegation groups                                                                                                                                                                                                                                                     |
+| 14  | `Get-EntraOpsServiceEMReport`                          | Read-only report of **all** Entitlement Management catalogs in the tenant (roles, resources, access packages, policies, delivered assignments)                                                                                                                                                                                                                                                           |
+| 15  | `Remove-EntraOpsServiceCatalog`                        | Cleanup cmdlet — removes assignments, access packages, the catalog and the groups of the landing zone registered as catalog resources; deletes the Azure RG only with `-RemoveAzureResourceGroup -SubscriptionId` (see note below)                                                                                                                                                                       |
+| 16  | `Resolve-EntraOpsServiceEMDelegationGroup`             | Resolves (by ID or display name) or creates a role-assignable ControlPlane/ManagementPlane delegation group and persists its ID to `EntraOpsConfig.json`                                                                                                                                                                                                                                                 |
 
 > **`Remove-EntraOpsServiceCatalog` and the resource group:** the resource group is **kept by default**; role assignments of the
 > deleted groups remain on it as orphaned assignments. Add the opt-in switch `-RemoveAzureResourceGroup` together with
 > `-SubscriptionId` to delete `RG-MyApp` (including all its resources) in that subscription when removing `Catalog-Rg-MyApp`;
 > without `-SubscriptionId` the cmdlet stops before deleting anything, so a resource group with the same name in the subscription
 > of the current Azure context can't be deleted by mistake. Only a resource group with the tag `EntraOpsServiceEM = {ServiceName}`
-> (set when the landing zone creates it) is deleted; an existing resource group that the landing zone reused, or one created by
-> an earlier version without the tag, is kept with a warning. Removing `Catalog-Sub-MyApp` never deletes a resource group
+> (set when the landing zone creates it) is deleted; an existing resource group that the landing zone reused is kept with a
+> warning. Removing `Catalog-Sub-MyApp` never deletes a resource group
 > and warns that Azure role assignments on the subscription (`-DeploymentScope Subscription`) must be removed manually.
-> Only groups created by the landing zone are deleted: catalog resources whose mailNickname starts with `{ServiceName}.` or
-> `PIM.{ServiceName}.`. Other groups in the catalog (e.g. shared groups added manually) are kept with a warning, delegated groups
+> Only groups created by the landing zone are deleted: catalog resources whose mailNickname starts with `{ServiceName}.`.
+> Other groups in the catalog (e.g. shared groups added manually) are kept with a warning, delegated groups
 > are never registered as catalog resources, and `-ExcludeGroupIds` protects additional groups.
 > The cmdlet asks for confirmation before deleting anything; `-Force` (or `-Confirm:$false`) skips the prompt for automation,
 > and `-WhatIf` shows the catalog, number of access packages and group resources without changing anything.
@@ -1520,20 +1662,19 @@ ServiceEM exports 16 cmdlets for automated landing zone provisioning and managem
 ServiceEM follows consistent naming patterns for all created resources. `{ServiceName}` is `{Scope}-{DeploymentPrefix}` for landing
 zones (e.g. `Sub-MyApp`, `Rg-MyApp`) or the `-ServiceName` of `New-EntraOpsServiceBootstrap`.
 
-| Resource Type                          | Pattern                                             | Example                                   |
-| -------------------------------------- | --------------------------------------------------- | ----------------------------------------- |
-| **Unified Group**                      | `{ServiceName} Members` (mailNickname `{ServiceName}.Members`), only with `-CreateM365Group` | `Rg-MyApp Members`                        |
-| **Security Group**                     | `{GroupPrefix}-{ServiceName}-{AccessLevel}-{Name}` (mailNickname `{ServiceName}.{AccessLevel}.{Name}`) | `SG-Rg-MyApp-WorkloadPlane-Admins`        |
-| **PIM Staging Group**                  | `{GroupPrefix}-PIM-{ServiceName}-ManagementPlane-Admins` (mailNickname `PIM.{ServiceName}.ManagementPlane.Admins`) | `SG-PIM-Sub-MyApp-ManagementPlane-Admins` |
-| **Delegation Group (ControlPlane)**    | `ControlPlaneGroupName` (default)                   | `PRG-Tenant-ControlPlane-IdentityOps`     |
-| **Delegation Group (ManagementPlane)** | `ManagementPlaneGroupName` (default)                | `PRG-Tenant-ManagementPlane-PlatformOps`  |
-| **EM Catalog**                         | `Catalog-{ServiceName}`                             | `Catalog-Rg-MyApp`                        |
-| **Access Package**                     | `AP-{ServiceName}-{AccessLevel}-{Name}`             | `AP-Rg-MyApp-WorkloadPlane-Users`         |
-| **Assignment Policy**                  | Fixed names per access package: `Baseline Policy`, `Workload Plane Users Policy`, `Workload Plane Policy`, `Management Plane Policy`, `Initial Workload Membership Policy`, `Initial Management Membership Policy`, `Initial Management Admin Policy`, `Initial Workload Users Policy`, `Initial Workload Admin Policy` | `Initial Workload Admin Policy` |
-| **Resource Group**                     | `RG-{ServiceName}` without `Sub-`/`Rg-` prefix      | `RG-MyApp`                                |
+| Resource Type                          | Pattern                                                                                                                                                                                                                                                                                                           | Example                                  |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| **Unified Group**                      | `{ServiceName} Members` (mailNickname `{ServiceName}.Members`), only with `-CreateM365Group`                                                                                                                                                                                                                      | `Rg-MyApp Members`                       |
+| **Security Group**                     | `{GroupPrefix}-{ServiceName}-{AccessLevel}-{Name}` (mailNickname `{ServiceName}.{AccessLevel}.{Name}`)                                                                                                                                                                                                            | `SG-Rg-MyApp-WorkloadPlane-Admins`       |
+| **Delegation Group (ControlPlane)**    | `ControlPlaneGroupName` (default)                                                                                                                                                                                                                                                                                 | `PRG-Tenant-ControlPlane-IdentityOps`    |
+| **Delegation Group (ManagementPlane)** | `ManagementPlaneGroupName` (default)                                                                                                                                                                                                                                                                              | `PRG-Tenant-ManagementPlane-PlatformOps` |
+| **EM Catalog**                         | `Catalog-{ServiceName}`                                                                                                                                                                                                                                                                                           | `Catalog-Rg-MyApp`                       |
+| **Access Package**                     | `AP-{ServiceName}-{AccessLevel}-{Name}`                                                                                                                                                                                                                                                                           | `AP-Rg-MyApp-WorkloadPlane-Users`        |
+| **Assignment Policy**                  | Fixed names per access package: `Baseline Policy`, `Workload Plane Users Policy`, `Workload Plane Policy`, `Management Plane Policy`, `Initial Workload Membership Policy`, `Initial Management Admin Policy`, `Initial Workload Users Policy`, `Initial Workload Admin Policy`, `Initial Catalog Members Policy` | `Initial Workload Admin Policy`          |
+| **Resource Group**                     | `RG-{ServiceName}` without `Sub-`/`Rg-` prefix                                                                                                                                                                                                                                                                    | `RG-MyApp`                               |
 
 **Scope Prefixes:**
-- `Sub-{DeploymentPrefix}` — Subscription scope (`-DeploymentScope Subscription`: role assignments on the subscription; `Both`: governance scope without Azure resources)
+- `Sub-{DeploymentPrefix}` — Subscription scope (`-DeploymentScope Subscription`: role assignments on the subscription)
 - `Rg-{DeploymentPrefix}` — Resource group scope (default)
 
 **Customizable names:** `{GroupPrefix}` (default `SG`, `-GroupPrefix` or `ServiceEM.GroupPrefix`), the delegation group names
@@ -1550,85 +1691,51 @@ Groups created depend on the **governance model** and the **deployment scope**.
 
 One scope `{Scope}-{Prefix}` (`Rg-` or `Sub-`) with one catalog:
 
-| Group                                          | Centralized | PerService | Purpose |
-| ---------------------------------------------- | ----------- | ---------- | ------- |
-| `{Scope}-{Prefix} Members`                     | ✅ with `-CreateM365Group` | ✅ with `-CreateM365Group` | Microsoft 365 group for team collaboration (no access to the other groups) |
-| `SG-{Scope}-{Prefix}-WorkloadPlane-Users`      | ✅          | ✅         | End-user data-plane access; target group of the WorkloadPlane constrained delegation |
-| `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`     | ✅          | ✅         | Permanent Reader, PIM eligible Contributor + constrained RBAC Administrator |
-| `SG-{Scope}-{Prefix}-CatalogPlane-Members`     | ❌ (`AdministratorGroupId`) | ✅ | Catalog Reader; requestor scope and fallback approver/reviewer |
-| `SG-{Scope}-{Prefix}-ManagementPlane-Members`  | ❌          | ✅         | Requestor scope of the ManagementPlane-Admins access package |
-| `SG-{Scope}-{Prefix}-ManagementPlane-Admins`   | ❌ (delegated) | ✅      | Catalog Reader + AP Assignment Manager; PIM eligible Contributor + constrained RBAC Administrator |
-| `SG-PIM-{Scope}-{Prefix}-ManagementPlane-Admins` | ❌        | ✅ (not with `-NoPimEscalation`) | PIM staging group |
-| `SG-{Scope}-{Prefix}-ControlPlane-Admins`      | ❌ (delegated) | ✅      | Catalog Owner (unless `-SkipCatalogOwnerAssignment`); PIM eligible User Access Administrator |
-
-The tables below show the two scopes of `-DeploymentScope Both`.
-
-#### Centralized Governance Model
-
-**Sub Scope:**
-| Group                  | Type           | Purpose                                             |
-| ---------------------- | -------------- | --------------------------------------------------- |
-| `Sub-{Prefix} Members` | Unified (M365) | Team collaboration group; only with `-CreateM365Group`, otherwise the Sub scope isn't deployed |
-
-**Rg Scope:**
-| Group                                 | Type           | Purpose                                                                                 |
-| ------------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
-| `Rg-{Prefix} Members`                 | Unified (M365) | Team collaboration group (only with `-CreateM365Group`) |
-| `SG-Rg-{Prefix}-WorkloadPlane-Users`  | Security       | End-user data-plane access; target group of the WorkloadPlane constrained delegation    |
-| `SG-Rg-{Prefix}-WorkloadPlane-Admins` | Security       | Workload admin elevation; permanent Reader, PIM eligible Contributor + constrained RBAC Administrator on the RG |
+| Group                                        | Centralized                | PerService                | Purpose                                                                                           |
+| -------------------------------------------- | -------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------- |
+| `{Scope}-{Prefix} Members`                   | ✅ with `-CreateM365Group`  | ✅ with `-CreateM365Group` | Microsoft 365 group for team collaboration (no access to the other groups)                        |
+| `SG-{Scope}-{Prefix}-WorkloadPlane-Users`    | ✅                          | ✅                         | End-user data-plane access; target group of the WorkloadPlane constrained delegation              |
+| `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`   | ✅                          | ✅                         | Permanent Reader, PIM eligible constrained RBAC Administrator                                     |
+| `SG-{Scope}-{Prefix}-CatalogPlane-Members`   | ❌ (`AdministratorGroupId`) | ✅                         | Catalog Reader; requestor scope, approver of its own package                                      |
+| `SG-{Scope}-{Prefix}-ManagementPlane-Admins` | ❌ (delegated)              | ✅                         | Catalog Reader + AP Assignment Manager; PIM eligible Contributor + constrained RBAC Administrator |
+| `SG-{Scope}-{Prefix}-ControlPlane-Admins`    | ❌ (delegated)              | ✅                         | Catalog Owner (unless `-SkipCatalogOwnerAssignment`); PIM eligible User Access Administrator      |
 
 **NOT Created (Centralized):**
 - ❌ ControlPlane-Admins (delegated from `ServiceEM.ControlPlaneDelegationGroupId`)
 - ❌ ManagementPlane-Admins (delegated from `ServiceEM.ManagementPlaneDelegationGroupId`)
-- ❌ ManagementPlane-Members (removed in the Centralized model)
 - ❌ CatalogPlane-Members (delegated from `ServiceEM.AdministratorGroupId`)
 - ❌ WorkloadPlane-Members (not part of the landing zone roles in either model)
-- ❌ PIM staging groups (only created next to an owned ManagementPlane-Admins group)
 
-#### PerService Governance Model
-
-**Sub Scope:**
-| Group                                        | Type                | Purpose                                                                                  |
-| -------------------------------------------- | ------------------- | ---------------------------------------------------------------------------------------- |
-| `Sub-{Prefix} Members`                       | Unified (M365)      | Team collaboration group (only with `-CreateM365Group`) |
-| `SG-Sub-{Prefix}-CatalogPlane-Members`       | Security            | Catalog Reader; requestor scope, approver and fallback approver/reviewer                 |
-| `SG-Sub-{Prefix}-ManagementPlane-Members`    | Security            | Management tier membership; requestor scope of the ManagementPlane-Admins access package |
-| `SG-Sub-{Prefix}-ManagementPlane-Admins`     | Security            | Management tier elevation; Catalog Reader + AP Assignment Manager; approver and reviewer (no Azure RBAC in this scope) |
-| `SG-Sub-{Prefix}-ControlPlane-Admins`        | Security            | Catalog Owner; approver of the ManagementPlane-Admins access package (no Azure RBAC in this scope) |
-| `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` | Security (optional) | PIM staging group; ManagementPlane-Admins is its eligible member (not created with `-NoPimEscalation`) |
-
-**Rg Scope:**
-| Group                                    | Type           | Purpose                    |
-| ---------------------------------------- | -------------- | -------------------------- |
-| `Rg-{Prefix} Members`                    | Unified (M365) | Team collaboration group (only with `-CreateM365Group`) |
-| `SG-Rg-{Prefix}-CatalogPlane-Members`    | Security       | Catalog Reader; requestor scope and fallback approver/reviewer |
-| `SG-Rg-{Prefix}-ManagementPlane-Members` | Security       | Management tier membership (no Azure RBAC) |
-| `SG-Rg-{Prefix}-WorkloadPlane-Users`     | Security       | End-user data-plane access; target group of the WorkloadPlane constrained delegation |
-| `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | Security       | Workload admin elevation; permanent Reader, PIM eligible Contributor + constrained RBAC Administrator on the RG |
-
-With `-Smb`, `SG-Rg-{Prefix}-ManagementPlane-Admins` and `SG-PIM-Rg-{Prefix}-ManagementPlane-Admins` are created in the Rg
-scope instead of the Sub scope.
+The same applies to the PerService model for every group passed as delegation group (`-ControlPlaneDelegationGroupId`,
+`-ManagementPlaneDelegationGroupId`, `-AdministratorGroupId`), see
+[Separating governance and workload groups](#separating-governance-and-workload-groups).
 
 ### Azure RBAC Implementation (Resource Group or Subscription Scope)
 
-All assignments target the resource group `RG-{Prefix}` (`-DeploymentScope ResourceGroup` or the Rg scope of `Both`) or, with
-`-DeploymentScope Subscription`, the subscription `-SubscriptionId` (no resource group is created). In `Both`, the Sub scope
-always runs with `-SkipAzureResourceGroup`. The table shows the resource group case; the subscription case uses the same roles.
+All assignments target the resource group `RG-{Prefix}` (`-DeploymentScope ResourceGroup`) or, with
+`-DeploymentScope Subscription`, the subscription `-SubscriptionId` (no resource group is created). Delegated groups receive
+their roles on the same resource group or subscription. The table shows the resource group case; the subscription case uses the same roles.
 
 #### Assignments on `RG-{Prefix}` (or the subscription)
 
-| Group (if present in the scope)                                     | Azure RBAC Role                                  | Type                         | Notes                                                                    |
-| ------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------ |
-| `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`                          | Reader                                           | Permanent (active)           | Always assigned                                                          |
-| `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`                          | Contributor                                      | PIM eligible, no expiration  |                                                                          |
-| `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`                          | Role Based Access Control Administrator          | PIM eligible, no expiration  | ABAC: only `WorkloadPlane.AllowedRoleDefinitionIds` → WorkloadPlane-Users |
-| ManagementPlane-Admins (per-service in a single scope, delegated, or with `-Smb`) | Contributor                        | PIM eligible, no expiration  | Skipped if already eligible at a parent scope                            |
-| ManagementPlane-Admins (per-service in a single scope, delegated, or with `-Smb`) | Role Based Access Control Administrator | PIM eligible, no expiration | ABAC: all roles except `ManagementPlane.ExcludedRoleDefinitionIds` → WorkloadPlane-Admins |
-| ControlPlane-Admins (per-service in a single scope, or delegated)   | User Access Administrator                        | PIM eligible, no expiration  | Skipped if already eligible at a parent scope                            |
+| Group (if present in the scope)                   | Azure RBAC Role                         | Type                        | Notes                                                                                     |
+| ------------------------------------------------- | --------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------- |
+| `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`        | Reader                                  | Permanent (active)          | Always assigned                                                                           |
+| `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`        | Role Based Access Control Administrator | PIM eligible, no expiration | ABAC: only `WorkloadPlane.AllowedRoleDefinitionIds` → WorkloadPlane-Users                 |
+| ManagementPlane-Admins (per-service or delegated) | Contributor                             | PIM eligible, no expiration | Skipped if already eligible at a parent scope                                             |
+| ManagementPlane-Admins (per-service or delegated) | Role Based Access Control Administrator | PIM eligible, no expiration | ABAC: all roles except `ManagementPlane.ExcludedRoleDefinitionIds` → WorkloadPlane-Admins |
+| ControlPlane-Admins (per-service or delegated)    | User Access Administrator               | PIM eligible, no expiration | Skipped if already eligible at a parent scope                                             |
 
 ServiceEM also updates the PIM for Azure resources policy of these roles on the resource group (or subscription) so that
-eligible assignments are not required to expire. ManagementPlane-Members and the PIM staging group do not receive Azure roles
-in the default (PIM) RBAC model.
+eligible assignments are not required to expire. ServiceEM assigns no Owner role: unrestricted access (role assignments
+including Owner) remains only with ControlPlane-Admins via the PIM-eligible User Access Administrator.
+
+> **No Contributor for WorkloadPlane-Admins:** Contributor on the resource group (or subscription) equals ManagementPlane control
+> (e.g. managed identities, Key Vault access policies, run command on virtual machines) and would be a tier breach for the
+> WorkloadPlane. WorkloadPlane-Admins therefore only get Reader and the constrained Role Based Access Control Administrator;
+> resource-level or other roles (e.g. Website Contributor) are assigned to them by ManagementPlane-Admins through their constrained
+> Role Based Access Control Administrator. Without any ManagementPlane-Admins for the scope (e.g.
+> custom `-ServiceRoles`), a warning states that nobody gets Contributor from ServiceEM.
 
 #### Prerequisites for Azure RBAC
 
@@ -1640,8 +1747,7 @@ No additional Microsoft Graph permission is needed for the Azure part.
 #### When Azure RBAC is NOT Created
 
 Azure RBAC assignments are **skipped** when:
-- `-SkipAzureResourceGroup` parameter is used
-- The scope is the Sub scope of `New-EntraOpsSubscriptionLandingZone` (always)
+- `-SkipAzureResourceGroup` parameter is used (e.g. a governance scope created with `New-EntraOpsServiceBootstrap`; its groups get their roles as delegated groups of the workload landing zones)
 - The caller lacks Azure subscription permissions (errors are written, the deployment continues)
 - No Azure context/subscription is selected
 
@@ -1649,22 +1755,26 @@ Azure RBAC assignments are **skipped** when:
 
 #### PIM for Groups Integration
 
-ServiceEM creates PIM eligible assignments that enable just-in-time elevation (unless `-NoPimEscalation` is used):
+ServiceEM configures PIM for Groups only with the opt-in switches (see
+[EnablePimForGroups and EnableWorkloadPlanePimForGroups Parameters](#enablepimforgroups-and-enableworkloadplanepimforgroups-parameters)):
 
-1. **PIM staging group** (eligible **member**, no expiration):
-   - `SG-Sub-{Prefix}-ManagementPlane-Admins` → `SG-PIM-Sub-{Prefix}-ManagementPlane-Admins` (PerService; single scope: `{Scope}-{Prefix}`)
-   - With `-AssignOwner -EnablePIMOwnerAssignment`: the admin additionally becomes eligible **owner** of the admin and user groups
-   - Membership of the admin and user groups themselves is granted through the access packages; the Microsoft 365 group of
-     [`-CreateM365Group`](#createm365group-parameter) gets no eligibilities
-
-2. **PIM Policies:**
+1. **PIM Policies** (ControlPlane-/ManagementPlane-Admins with `-EnablePimForGroups`, WorkloadPlane-Admins with
+   `-EnableWorkloadPlanePimForGroups`; none without these switches):
    - MFA and justification required, no approval
    - Authentication context can be enforced (if configured in EntraOpsConfig.json)
    - Maximum activation duration of 10 hours (default, `ServiceEM.PIMForGroups.MaximumActivationDuration`)
 
-The report of `New-EntraOpsServiceBootstrap` (one per scope of `New-EntraOpsSubscriptionLandingZone`) lists these eligibilities
-in `PimForGroupsAssignments`; it is empty when the scope has no PIM staging group (e.g. Centralized model, `-NoPimEscalation`)
-and `-EnablePIMOwnerAssignment` isn't used.
+2. **Eligible assignments** (no expiration):
+   - Access packages of the selected groups grant **eligible membership** (Eligible Member resource role); the eligibility ends
+     with the access package assignment
+   - With `-EnablePimForGroups` and `-ControlPlaneAdmins`: the users become eligible **members** of ControlPlane-Admins
+   - With `-GroupOwnership Eligible`: the admin becomes eligible **owner** of the WorkloadPlane groups (WorkloadPlane-Admins, WorkloadPlane-Users)
+   - WorkloadPlane-Users, CatalogPlane-Members, the Microsoft 365 group of [`-CreateM365Group`](#createm365group-parameter) and
+     delegated groups never get PIM for Groups
+
+The report of `New-EntraOpsServiceBootstrap` (returned by `New-EntraOpsSubscriptionLandingZone` for its scope) lists the configured policies
+in `PimPolicies` and the eligible owner assignments of `-GroupOwnership Eligible` in `PimForGroupsAssignments` (absent or empty
+otherwise).
 
 #### Verification Commands
 
@@ -1682,66 +1792,58 @@ Get-AzRoleAssignment -Scope $rgId
 
 Access packages are created for every owned, non-Unified group except ControlPlane-Admins - never for delegated groups. The number and type depend on governance model and scope:
 
-#### Centralized Governance — Rg Scope Only
+#### Centralized Governance
 
-Same access packages for `-DeploymentScope ResourceGroup` and the Rg scope of `Both` (with `-DeploymentScope Subscription` the
-names start with `AP-Sub-`).
+Same access packages for every landing zone with delegated ControlPlane-/ManagementPlane-Admins and `AdministratorGroupId`
+(with `-DeploymentScope Subscription` the names start with `AP-Sub-`).
 
-| Access Package                        | Grants Membership To                  | Policy                      | Requestors                                  | Approver                                        | Expiration |
-| ------------------------------------- | ------------------------------------- | --------------------------- | ------------------------------------------- | ----------------------------------------------- | ---------- |
-| `AP-Rg-{Prefix}-WorkloadPlane-Users`  | `SG-Rg-{Prefix}-WorkloadPlane-Users`  | Workload Plane Users Policy | All member users³                           | WorkloadPlane-Admins                            | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Users`  | `SG-Rg-{Prefix}-WorkloadPlane-Users`  | Initial Workload Users Policy | Admin-assigned only (initial `-ServiceMembers`) | No approval                             | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Admins` | `SG-Rg-{Prefix}-WorkloadPlane-Admins` | Workload Plane Policy       | CatalogPlane-Members (`AdministratorGroupId`) | ManagementPlane-Admins (delegated group)        | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Admins` | `SG-Rg-{Prefix}-WorkloadPlane-Admins` | Initial Workload Admin Policy | Admin-assigned only (initial `-WorkloadPlaneAdmin`) | No approval                         | 365 days   |
+| Access Package                        | Grants Membership To                  | Policy                        | Requestors                                          | Approver                                  | Expiration |
+| ------------------------------------- | ------------------------------------- | ----------------------------- | --------------------------------------------------- | ----------------------------------------- | ---------- |
+| `AP-Rg-{Prefix}-WorkloadPlane-Users`  | `SG-Rg-{Prefix}-WorkloadPlane-Users`  | Workload Plane Users Policy   | All member users³                                   | WorkloadPlane-Admins                      | 365 days   |
+| `AP-Rg-{Prefix}-WorkloadPlane-Users`  | `SG-Rg-{Prefix}-WorkloadPlane-Users`  | Initial Workload Users Policy | Admin-assigned only (initial `-ServiceMembers`)     | No approval                               | 365 days   |
+| `AP-Rg-{Prefix}-WorkloadPlane-Admins` | `SG-Rg-{Prefix}-WorkloadPlane-Admins` | Workload Plane Policy         | CatalogPlane-Members (`AdministratorGroupId`)       | ManagementPlane-Admins (delegated group)² | 365 days   |
+| `AP-Rg-{Prefix}-WorkloadPlane-Admins` | `SG-Rg-{Prefix}-WorkloadPlane-Admins` | Initial Workload Admin Policy | Admin-assigned only (initial `-WorkloadPlaneAdmin`) | No approval                               | 365 days   |
 
-**Sub Scope**: No access packages created. The Sub scope only exists with `-CreateM365Group` (its only owned group is the Microsoft 365 group).
+The same applies to the workload landing zone of
+[Separating governance and workload groups](#separating-governance-and-workload-groups); the
+governance scope gets the CatalogPlane-Members and ManagementPlane-Admins access packages of the PerService table below.
 
 #### PerService Governance
 
-**Single scope (default `-DeploymentScope ResourceGroup`, 5 access packages; `Subscription` uses `AP-Sub-`):**
-| Access Package                            | Grants Membership To                      | Policy                               | Requestors              | Approver                                                              | Expiration |
-| ----------------------------------------- | ----------------------------------------- | ------------------------------------ | ----------------------- | --------------------------------------------------------------------- | ---------- |
-| `AP-Rg-{Prefix}-CatalogPlane-Members`     | `SG-Rg-{Prefix}-CatalogPlane-Members`     | Baseline Policy                      | CatalogPlane-Members    | CatalogPlane-Members                                                  | 365 days   |
-| `AP-Rg-{Prefix}-ManagementPlane-Members`  | `SG-Rg-{Prefix}-ManagementPlane-Members`  | Initial Management Membership Policy | CatalogPlane-Members¹   | ManagementPlane-Admins                                                | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Users`      | `SG-Rg-{Prefix}-WorkloadPlane-Users`      | Workload Plane Users Policy          | All member users³       | WorkloadPlane-Admins                                                  | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Users`      | `SG-Rg-{Prefix}-WorkloadPlane-Users`      | Initial Workload Users Policy        | Admin-assigned only (initial `-ServiceMembers`) | No approval                                   | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Admins`     | `SG-Rg-{Prefix}-WorkloadPlane-Admins`     | Workload Plane Policy                | CatalogPlane-Members¹   | ManagementPlane-Admins                                                | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Admins`     | `SG-Rg-{Prefix}-WorkloadPlane-Admins`     | Initial Workload Admin Policy        | Admin-assigned only     | No approval                                                           | 365 days   |
-| `AP-Rg-{Prefix}-ManagementPlane-Admins`   | `SG-Rg-{Prefix}-ManagementPlane-Admins`   | Management Plane Policy              | ManagementPlane-Members | ControlPlane-Admins (escalation after 12 h, fallback CatalogPlane-Members) | 365 days   |
-| `AP-Rg-{Prefix}-ManagementPlane-Admins`   | `SG-Rg-{Prefix}-ManagementPlane-Admins`   | Initial Management Admin Policy      | Admin-assigned only (initial `-WorkloadPlaneAdmin`) | No approval                               | 365 days   |
+**Single scope (default `-DeploymentScope ResourceGroup`, 4 access packages; `Subscription` uses `AP-Sub-`):**
+| Access Package                          | Grants Membership To                    | Policy                          | Requestors                                                                  | Approver                | Expiration |
+| --------------------------------------- | --------------------------------------- | ------------------------------- | --------------------------------------------------------------------------- | ----------------------- | ---------- |
+| `AP-Rg-{Prefix}-CatalogPlane-Members`   | `SG-Rg-{Prefix}-CatalogPlane-Members`   | Baseline Policy                 | CatalogPlane-Members                                                        | CatalogPlane-Members    | 365 days   |
+| `AP-Rg-{Prefix}-CatalogPlane-Members`   | `SG-Rg-{Prefix}-CatalogPlane-Members`   | Initial Catalog Members Policy  | Admin-assigned only (initial `-WorkloadPlaneAdmin`, `-CatalogPlaneMembers`) | No approval             | 365 days   |
+| `AP-Rg-{Prefix}-WorkloadPlane-Users`    | `SG-Rg-{Prefix}-WorkloadPlane-Users`    | Workload Plane Users Policy     | All member users³                                                           | WorkloadPlane-Admins    | 365 days   |
+| `AP-Rg-{Prefix}-WorkloadPlane-Users`    | `SG-Rg-{Prefix}-WorkloadPlane-Users`    | Initial Workload Users Policy   | Admin-assigned only (initial `-ServiceMembers`)                             | No approval             | 365 days   |
+| `AP-Rg-{Prefix}-WorkloadPlane-Admins`   | `SG-Rg-{Prefix}-WorkloadPlane-Admins`   | Workload Plane Policy           | CatalogPlane-Members¹                                                       | ManagementPlane-Admins² | 365 days   |
+| `AP-Rg-{Prefix}-WorkloadPlane-Admins`   | `SG-Rg-{Prefix}-WorkloadPlane-Admins`   | Initial Workload Admin Policy   | Admin-assigned only                                                         | No approval             | 365 days   |
+| `AP-Rg-{Prefix}-ManagementPlane-Admins` | `SG-Rg-{Prefix}-ManagementPlane-Admins` | Management Plane Policy         | CatalogPlane-Members                                                        | ControlPlane-Admins⁴    | 365 days   |
+| `AP-Rg-{Prefix}-ManagementPlane-Admins` | `SG-Rg-{Prefix}-ManagementPlane-Admins` | Initial Management Admin Policy | Admin-assigned only (initial `-WorkloadPlaneAdmin`)                         | No approval             | 365 days   |
 
 In the single scope the `-WorkloadPlaneAdmin` is initially assigned to ManagementPlane-Admins (not WorkloadPlane-Admins),
-because the ManagementPlane-Admins access package exists in the scope.
+because the ManagementPlane-Admins access package exists in the scope, and to CatalogPlane-Members.
 
-**`-DeploymentScope Both` — Sub Scope (3 access packages):**
-| Access Package                            | Grants Membership To                      | Policy                               | Requestors              | Approver                                                              | Expiration |
-| ----------------------------------------- | ----------------------------------------- | ------------------------------------ | ----------------------- | --------------------------------------------------------------------- | ---------- |
-| `AP-Sub-{Prefix}-CatalogPlane-Members`    | `SG-Sub-{Prefix}-CatalogPlane-Members`    | Baseline Policy                      | CatalogPlane-Members    | CatalogPlane-Members                                                  | 365 days   |
-| `AP-Sub-{Prefix}-ManagementPlane-Members` | `SG-Sub-{Prefix}-ManagementPlane-Members` | Initial Management Membership Policy | CatalogPlane-Members¹   | ManagementPlane-Admins                                                | 365 days   |
-| `AP-Sub-{Prefix}-ManagementPlane-Admins`  | `SG-Sub-{Prefix}-ManagementPlane-Admins`  | Management Plane Policy              | ManagementPlane-Members | ControlPlane-Admins (escalation after 12 h, fallback CatalogPlane-Members) | 365 days   |
-| `AP-Sub-{Prefix}-ManagementPlane-Admins`  | `SG-Sub-{Prefix}-ManagementPlane-Admins`  | Initial Management Admin Policy      | Admin-assigned only     | No approval                                                           | 365 days   |
+¹ WorkloadPlane-Members if such a group exists in the scope (only with custom `-ServiceRoles`); neither the landing zone roles nor the `New-EntraOpsServiceBootstrap` default roles include it.
 
-**`-DeploymentScope Both` — Rg Scope (4 access packages):**
-| Access Package                           | Grants Membership To                     | Policy                               | Requestors            | Approver                  | Expiration |
-| ---------------------------------------- | ---------------------------------------- | ------------------------------------ | --------------------- | ------------------------- | ---------- |
-| `AP-Rg-{Prefix}-CatalogPlane-Members`    | `SG-Rg-{Prefix}-CatalogPlane-Members`    | Baseline Policy                      | CatalogPlane-Members  | CatalogPlane-Members      | 365 days   |
-| `AP-Rg-{Prefix}-ManagementPlane-Members` | `SG-Rg-{Prefix}-ManagementPlane-Members` | Initial Management Membership Policy | CatalogPlane-Members¹ | ManagementPlane-Admins²   | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Users`     | `SG-Rg-{Prefix}-WorkloadPlane-Users`     | Workload Plane Users Policy          | All member users      | WorkloadPlane-Admins      | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Users`     | `SG-Rg-{Prefix}-WorkloadPlane-Users`     | Initial Workload Users Policy        | Admin-assigned only   | No approval               | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Admins`    | `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | Workload Plane Policy                | CatalogPlane-Members¹ | ManagementPlane-Admins²   | 365 days   |
-| `AP-Rg-{Prefix}-WorkloadPlane-Admins`    | `SG-Rg-{Prefix}-WorkloadPlane-Admins`    | Initial Workload Admin Policy        | Admin-assigned only   | No approval               | 365 days   |
-
-¹ WorkloadPlane-Members if such a group exists in the scope (e.g. Bootstrap default roles); the landing zone roles don't include it.
-
-² Approvers are resolved within the same scope. With `-DeploymentScope Both` (PerService), ManagementPlane-Admins exists only in the Sub scope, so CatalogPlane-Members is used as approver (and access reviewer) in the Rg scope instead. Use `-Smb`, a single scope or a `ManagementPlaneDelegationGroupId` to have ManagementPlane-Admins approve.
+² ManagementPlane-Admins of the scope: the per-service group or the delegated group (`-ManagementPlaneDelegationGroupId`, Centralized model). If no ManagementPlane-Admins approver exists at all (e.g. custom `-ServiceRoles` or `-SkipManagementPlaneDelegation` without a delegation group), the Workload Plane Policy isn't created; the admin-assigned Initial Workload Admin Policy still is. The Workload Plane Users Policy is approved by WorkloadPlane-Admins, otherwise by the ManagementPlane-Admins approver, otherwise it isn't created. CatalogPlane-Members only approve their own access package (Baseline Policy).
 
 ³ Default `ServiceEM.AssignmentPolicies.WorkloadPlaneUsers.RequestorScope` = `AllMemberUsers`; `CatalogPlaneMembers` restricts requests to CatalogPlane-Members.
+
+⁴ No escalation and no fallback approver. The Management Plane Policy is only created when an approver exists: ControlPlane-Admins of the same scope (own or delegated). Missing Management Plane Policies are checked by policy name and added to existing landing zones on a re-run; earlier versions could fail to create it, so ManagementPlane-Admins could only be assigned by administrators.
+
+The Initial Catalog Members Policy is only created for a per-service CatalogPlane-Members group (PerService model), not when `AdministratorGroupId` replaces it.
 
 The expiration ("Assignments expire after") of each policy, and therefore of each access package, is configured separately in
 `ServiceEM.AssignmentPolicies.<Policy>.Expiration` or in the Configuration Wizard (default 365 days for all policies, see
 [Assignment Policy, Access Review and PIM for Groups Settings](#assignment-policy-access-review-and-pim-for-groups-settings)).
 
-> **Note**: No access packages are created for ControlPlane-Admins — membership is managed directly (or via PIM for Groups).
+> **Note**: No access packages are created for ControlPlane-Admins — initial members are added with `-ControlPlaneAdmins` (see [Service Owner and Member Assignment](#service-owner-and-member-assignment)), otherwise by an Entra administrator in the portal.
+
+> **Note**: With `-EnablePimForGroups` the ManagementPlane-Admins access package (and with `-EnableWorkloadPlanePimForGroups` the
+> WorkloadPlane-Admins access package) grants **eligible** membership instead of active membership (see
+> [EnablePimForGroups and EnableWorkloadPlanePimForGroups Parameters](#enablepimforgroups-and-enableworkloadplanepimforgroups-parameters)).
 
 ### Assignment Policies
 
@@ -1749,16 +1851,16 @@ Each access package has an **assignment policy** that controls who can request a
 
 #### Default Assignment Policy Configuration
 
-| Setting                                       | Default Value                          | Description                                                                                                                  |
-| --------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| **Allowed Requestors** (`allowedTargetScope`) | `specificDirectoryUsers`               | Members of the requestor group listed above; `allMemberUsers` for WorkloadPlane-Members and WorkloadPlane-Users; `allMemberUsers` with all requests disabled (admin-assigned only) for the Initial Management Admin, Initial Workload Users and Initial Workload Admin policies, because administrator direct assignments are also limited to the target scope |
-| **Requestor Settings**                        | Self-add, self-remove and extension    | No custom schedule, no on-behalf requests; extension ("Allow users to extend access", with approval) only for the Baseline, Workload Plane (Users) and Management Plane policies (`AllowExtension`); no requests and no extension for the admin-assigned initial policies |
-| **Approval Required**                         | Yes                                    | Single stage with approver justification (two stages - requestor's manager, then CatalogPlane-Members - for WorkloadPlane-Members); not required for the admin-assigned initial policies |
-| **Approvers**                                 | Tier-specific groups                   | See tables above                                                                                                              |
-| **Access Duration** (`expiration`)            | 365 days                               | Assignments of all policies expire after 365 days; configurable per policy in `ServiceEM.AssignmentPolicies` (see [Assignment Policy, Access Review and PIM for Groups Settings](#assignment-policy-access-review-and-pim-for-groups-settings)). Users get reminders 14 days and 1 day before expiry and can request an extension through the standard policies; an initial assignment can't be extended, the user requests the access package again through the standard policy of the package |
-| **Approval Timeout**                          | 2 days / 1 day                         | Pending requests are denied after 2 days (1 day for the Management Plane Policy); configurable in `ServiceEM.AssignmentPolicies` |
-| **Access Reviews**                            | Quarterly                              | Every 3 months starting 4 days after deployment, 25-day review period; reviewers ManagementPlane-Admins (WorkloadPlane-Admins for the WorkloadPlane-Users access package, fallback CatalogPlane-Members); access is kept if not reviewed; configurable in `ServiceEM.AccessReviews`, including self-review, specific reviewers or the user's manager per policy |
-| **Questions**                                 | None                                   | No custom questions configured by default                                                                                    |
+| Setting                                       | Default Value                       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Allowed Requestors** (`allowedTargetScope`) | `specificDirectoryUsers`            | Members of the requestor group listed above; `allMemberUsers` for WorkloadPlane-Members and WorkloadPlane-Users; `allMemberUsers` with all requests disabled (admin-assigned only) for the Initial Management Admin, Initial Workload Users, Initial Workload Admin and Initial Catalog Members policies, because administrator direct assignments are also limited to the target scope                                                                                                                                                                 |
+| **Requestor Settings**                        | Self-add, self-remove and extension | No custom schedule, no on-behalf requests; extension ("Allow users to extend access", with approval) only for the Baseline, Workload Plane (Users) and Management Plane policies (`AllowExtension`); no requests and no extension for the admin-assigned initial policies                                                                                                                                                                                                                                                                               |
+| **Approval Required**                         | Yes                                 | Single stage with approver justification (two stages - requestor's manager, then CatalogPlane-Members - for WorkloadPlane-Members); not required for the admin-assigned initial policies                                                                                                                                                                                                                                                                                                                                                                |
+| **Approvers**                                 | Tier-specific groups                | See tables above; only the same or a higher tier approves, a policy without such an approver isn't created (see footnote ² above). CatalogPlane-Members only approve their own access package (Baseline Policy)                                                                                                                                                                                                                                                                                                                                         |
+| **Access Duration** (`expiration`)            | 365 days                            | Assignments of all policies expire after 365 days; configurable per policy in `ServiceEM.AssignmentPolicies` (see [Assignment Policy, Access Review and PIM for Groups Settings](#assignment-policy-access-review-and-pim-for-groups-settings)). Users get reminders 14 days and 1 day before expiry and can request an extension through the standard policies; an initial assignment can't be extended, the user requests the access package again through the standard policy of the package                                                         |
+| **Approval Timeout**                          | 2 days / 1 day                      | Pending requests are denied after 2 days (1 day for the Management Plane Policy); configurable in `ServiceEM.AssignmentPolicies`                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **Access Reviews**                            | Quarterly                           | Every 3 months starting 4 days after deployment, 25-day review period; reviewers ManagementPlane-Admins (WorkloadPlane-Admins for the WorkloadPlane-Users access package, ControlPlane-Admins for the ManagementPlane-Admins access package; only groups of the scope (own or delegated) are used; a missing group falls back to a higher tier only, otherwise the policy gets no access review); access is kept if not reviewed; configurable in `ServiceEM.AccessReviews`, including self-review, specific reviewers or the user's manager per policy |
+| **Questions**                                 | None                                | No custom questions configured by default                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 > **Policy precedence:** Entra ID applies a policy for specific users and groups before an "all members" policy of the same access
 > package and ignores the latter for users in its scope ([Multiple policies](https://learn.microsoft.com/entra/id-governance/entitlement-management-troubleshoot#multiple-policies)).
@@ -1867,10 +1969,10 @@ Error: Response status code does not indicate success: BadRequest
 ServiceEM uses the same module dependencies as the rest of EntraOps. No separate `Install-Module` is needed:
 `Connect-EntraOps` (or `Install-EntraOpsAllRequiredModules`) installs missing modules automatically.
 
-| Module                             | Purpose                                                                                                                                  |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Az.Accounts**                    | Azure sign-in and context (`Get-AzContext`, `Get-AzAccessToken`)                                                                         |
-| **Az.Resources**                   | Resource group, Azure RBAC and PIM for Azure resources operations                                                                       |
+| Module                             | Purpose                                                                                                                                                                                  |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Az.Accounts**                    | Azure sign-in and context (`Get-AzContext`, `Get-AzAccessToken`)                                                                                                                         |
+| **Az.Resources**                   | Resource group, Azure RBAC and PIM for Azure resources operations                                                                                                                        |
 | **Microsoft.Graph.Authentication** | Graph sign-in and `Get-MgContext` (default user/member lookup, delegation group auto-creation); not needed with `UseInvokeRestMethodOnly` and service principal/managed identity sign-in |
 
 All Microsoft Graph calls of the ServiceEM cmdlets (groups, users, Entitlement Management, PIM for Groups) go through
@@ -1884,17 +1986,17 @@ for the requested delegated scopes and the application permissions of workload i
 
 When a delegation Group ID is provided (via `EntraOpsConfig.json` or parameter), the following behavior applies:
 
-| Behavior                        | ControlPlane            | ManagementPlane                                    | CatalogPlane            |
-| ------------------------------- | ----------------------- | -------------------------------------------------- | ----------------------- |
-| **Group created**               | No                      | No                                                 | No                      |
-| **Synthetic entry injected**    | Yes (with DisplayName)  | Yes (with DisplayName)                             | Yes (with DisplayName)  |
-| **Registered as catalog resource** | No                   | No                                                 | No                      |
-| **Catalog role assigned**       | Yes (Owner)             | Yes (Reader, AP Assignment Manager)                | Yes (Reader)            |
-| **Referenced in AP policies**   | Approver of the ManagementPlane-Admins AP (only if ManagementPlane is not delegated) | Approver and access reviewer          | Requestor scope, approver and fallback approver/reviewer |
-| **Azure RBAC assigned (RG)**    | Yes (UAA, PIM-eligible) | Yes (Contributor and constrained RBAC Administrator, PIM-eligible) | —         |
-| **PIM policy applied to group** | No (managed externally) | No (managed externally)                            | No (managed externally) |
-| **PIM eligibility created**     | No (managed externally) | No (managed externally)                            | No (managed externally) |
-| **Access package created**      | No                      | No                                                 | No                      |
+| Behavior                           | ControlPlane                                                                         | ManagementPlane                                                    | CatalogPlane            |
+| ---------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------ | ----------------------- |
+| **Group created**                  | No                                                                                   | No                                                                 | No                      |
+| **Synthetic entry injected**       | Yes (with DisplayName)                                                               | Yes (with DisplayName)                                             | Yes (with DisplayName)  |
+| **Registered as catalog resource** | No                                                                                   | No                                                                 | No                      |
+| **Catalog role assigned**          | Yes (Owner)                                                                          | Yes (Reader, AP Assignment Manager)                                | Yes (Reader)            |
+| **Referenced in AP policies**      | Approver/reviewer of ManagementPlane-Admins AP (if ManagementPlane is not delegated) | Approver and access reviewer                                       | Requestor scope         |
+| **Azure RBAC assigned (RG)**       | Yes (UAA, PIM-eligible)                                                              | Yes (Contributor and constrained RBAC Administrator, PIM-eligible) | —                       |
+| **PIM policy applied to group**    | No (managed externally)                                                              | No (managed externally)                                            | No (managed externally) |
+| **PIM eligibility created**        | No (managed externally)                                                              | No (managed externally)                                            | No (managed externally) |
+| **Access package created**         | No                                                                                   | No                                                                 | No                      |
 
 The delegated groups are **read-only** from ServiceEM's perspective — they receive role assignments and policy references but are never modified (no PIM policies, no eligibility assignments) and are not deleted by `Remove-EntraOpsServiceCatalog`.
 
@@ -1904,20 +2006,23 @@ This matrix shows how each parameter affects the objects created during deployme
 
 #### New-EntraOpsSubscriptionLandingZone Parameters
 
-| Parameter                      | Groups                      | Catalogs | Azure Resources     | Access Packages   | PIM for Groups         |
-| ------------------------------ | --------------------------- | -------- | ------------------- | ----------------- | ---------------------- |
-| **None (defaults: ResourceGroup, PerService)** | ✅ 7 created (incl. PIM staging group) | 1 | ✅ RG + RBAC | ✅ 5 created | ✅ Policies + staging group eligibility |
-| `-DeploymentScope Subscription` | ✅ 7 created               | 1        | ⚠️ No RG; RBAC on the subscription | ✅ 5 created | ✅ Configured |
-| `-DeploymentScope Both`        | ✅ 9 created (5 Sub, 4 Rg) | 2        | ✅ RG + RBAC (Rg scope groups only) | ✅ 7 created (3 Sub, 4 Rg) | ✅ Configured |
-| `-SkipAzureResourceGroup`      | ✅ 7 created                 | 1        | ❌ Skipped           | ✅ 5 created       | ✅ Configured           |
-| `-NoPimEscalation`             | ⚠️ 6 created (no PIM staging group) | 1 | ✅ RG + RBAC  | ✅ 5 created       | ❌ Skipped              |
-| `-CreateM365Group`             | ✅ +1 per scope (Microsoft 365 group) | 1 | ✅ RG + RBAC | ✅ 5 created       | ✅ Configured (no eligibilities for the Microsoft 365 group) |
-| `-GovernanceModel Centralized` | ⚠️ 2 created                 | 1        | ✅ RG + RBAC (incl. delegated groups) | ⚠️ 2 created | ✅ Policies on WorkloadPlane groups only |
-| `-Smb` (only with `Both`)      | ⚠️ 9 created (3 Sub, 6 Rg incl. ManagementPlane-Admins + PIM staging group) | 2 | ✅ RG + RBAC (incl. ManagementPlane-Admins) | ✅ 7 created (2 Sub, 5 Rg) | ✅ Configured |
-| `-WorkloadPlaneAdmin`          | —                           | —        | N/A                 | Admin assigned (adminAdd) | N/A              |
-| `-SkipCatalogOwnerAssignment`  | —                           | —        | N/A                 | No Catalog Owner for ControlPlane-Admins | N/A |
-| `-AssignOwner`                 | Owner of created groups     | —        | N/A                 | —                 | Optional eligible owner (`-EnablePIMOwnerAssignment`) |
-| `-ServiceMembers`              | —                           | —        | N/A                 | Members assigned to the WorkloadPlane-Users AP (adminAdd) | N/A |
+| Parameter                                                                                                                             | Groups                                                  | Catalogs | Azure Resources                      | Access Packages                                                     | PIM for Groups                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | -------- | ------------------------------------ | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **None (defaults: ResourceGroup, PerService)**                                                                                        | ✅ 5 created                                             | 1        | ✅ RG + RBAC                          | ✅ 4 created                                                         | ❌ None (opt-in)                                                                                      |
+| `-DeploymentScope Subscription`                                                                                                       | ✅ 5 created                                             | 1        | ⚠️ No RG; RBAC on the subscription    | ✅ 4 created                                                         | ❌ None (opt-in)                                                                                      |
+| `-SkipAzureResourceGroup`                                                                                                             | ✅ 5 created                                             | 1        | ❌ Skipped                            | ✅ 4 created                                                         | ❌ None (opt-in)                                                                                      |
+| `-EnablePimForGroups`                                                                                                                 | ✅ 5 created                                             | 1        | ✅ RG + RBAC                          | ✅ 4 created                                                         | ✅ Policies for ControlPlane-/ManagementPlane-Admins; their access packages grant eligible membership |
+| `-EnableWorkloadPlanePimForGroups`                                                                                                    | ✅ 5 created                                             | 1        | ✅ RG + RBAC                          | ✅ 4 created                                                         | ✅ Policy for WorkloadPlane-Admins; its access package grants eligible membership                     |
+| `-CreateM365Group`                                                                                                                    | ✅ +1 (Microsoft 365 group)                              | 1        | ✅ RG + RBAC                          | ✅ 4 created (each also grants Microsoft 365 group membership)       | ❌ None (never for the Microsoft 365 group)                                                           |
+| `-GovernanceModel Centralized`                                                                                                        | ⚠️ 2 created                                             | 1        | ✅ RG + RBAC (incl. delegated groups) | ⚠️ 2 created                                                         | ❌ None (WorkloadPlane-Admins only with `-EnableWorkloadPlanePimForGroups`)                           |
+| Delegation IDs of a governance scope (`-ControlPlaneDelegationGroupId`, `-ManagementPlaneDelegationGroupId`, `-AdministratorGroupId`) | ⚠️ 2 created (WorkloadPlane-Users, WorkloadPlane-Admins) | 1        | ✅ RG + RBAC (incl. delegated groups) | ⚠️ 2 created                                                         | ❌ None (delegated groups get PIM for Groups from the governance call)                                |
+| `-WorkloadPlaneAdmin`                                                                                                                 | —                                                       | —        | N/A                                  | Admin assigned (adminAdd) to the admin and CatalogPlane-Members APs | N/A                                                                                                  |
+| `-CatalogPlaneMembers`                                                                                                                | —                                                       | —        | N/A                                  | Users assigned to the CatalogPlane-Members AP (adminAdd)            | N/A                                                                                                  |
+| `-ControlPlaneAdmins`                                                                                                                 | Members of ControlPlane-Admins (PerService)             | —        | N/A                                  | —                                                                   | Eligible members with `-EnablePimForGroups`, otherwise permanent members                             |
+| `-SkipCatalogOwnerAssignment`                                                                                                         | —                                                       | —        | N/A                                  | No Catalog Owner for ControlPlane-Admins                            | N/A                                                                                                  |
+| `-GroupOwnership Permanent`                                                                                                           | Admin is owner of created WorkloadPlane groups          | —        | N/A                                  | —                                                                   | N/A                                                                                                  |
+| `-GroupOwnership Eligible`                                                                                                            | —                                                       | —        | N/A                                  | —                                                                   | Admin is eligible owner of the WorkloadPlane groups                                                  |
+| `-ServiceMembers`                                                                                                                     | —                                                       | —        | N/A                                  | Members assigned to the WorkloadPlane-Users AP (adminAdd)           | N/A                                                                                                  |
 
 **Legend:**
 - ✅ Created/Configured as expected
@@ -1931,10 +2036,10 @@ This matrix shows how each parameter affects the objects created during deployme
 When this parameter is used:
 
 **Created:**
-- All groups of the scope(s)
-- The catalog (two with `-DeploymentScope Both`)
+- All groups of the scope
+- The catalog
 - All access packages, assignment policies and initial assignments
-- PIM for Groups policies and assignments
+- PIM for Groups policies and eligible assignments (only with `-EnablePimForGroups`, `-EnableWorkloadPlanePimForGroups` or `-GroupOwnership Eligible`)
 
 **Skipped:**
 - Azure Resource Group creation
@@ -1952,38 +2057,35 @@ When using Centralized governance:
 - Rg-{Prefix} Members (Unified, only with `-CreateM365Group`)
 - 2 access packages
 
-With `-DeploymentScope Both` and `-CreateM365Group`, `Sub-{Prefix} Members` and a second catalog without access packages are
-created additionally; without `-CreateM365Group` the Sub scope has no group of its own and is skipped.
-
 **Delegated (Not Created):**
 - ControlPlane-Admins (uses tenant-wide delegation group)
 - ManagementPlane-Admins (uses tenant-wide delegation group)
 - CatalogPlane-Members (uses administrator group)
-- ManagementPlane-Members (not used)
 
 **Prerequisites:**
 - ControlPlaneDelegationGroupId in EntraOpsConfig.json (or resolvable/creatable via `ControlPlaneGroupName`)
 - ManagementPlaneDelegationGroupId in EntraOpsConfig.json (or resolvable/creatable via `ManagementPlaneGroupName`)
 - AdministratorGroupId in EntraOpsConfig.json
 
-**`-NoPimEscalation`**
+**`-EnablePimForGroups` and `-EnableWorkloadPlanePimForGroups`**
 
-When this parameter is used:
+When these parameters are used:
 
 **Impact:**
-- PIM staging groups (SG-PIM-*) are NOT created
-- No PIM for Groups policies and no PIM for Groups eligible assignments (incl. `-EnablePIMOwnerAssignment`)
-- Group membership is only granted through access packages
-- Azure RBAC on the resource group remains PIM eligible
+- PIM for Groups policy for ControlPlane-Admins and ManagementPlane-Admins (`-EnablePimForGroups`) and WorkloadPlane-Admins (`-EnableWorkloadPlanePimForGroups`), applied before the groups are added to the catalog
+- Their access packages grant eligible membership (Eligible Member) instead of active membership; an existing active Member role is replaced (warning)
+- `-ControlPlaneAdmins` are added as eligible members (`-EnablePimForGroups`)
+- License warning: requires Microsoft Entra ID Governance or Microsoft Entra Suite licenses (Microsoft Entra ID P2 alone is not sufficient)
+- Azure RBAC on the resource group remains PIM eligible (unchanged)
 
-**Use Case:** Access-package-only elevation or PIM for Groups managed outside of ServiceEM
+**Use Case:** No standing catalog roles for ControlPlane-/ManagementPlane-Admins (recommended); multi-activation for WorkloadPlane-Admins
 
 **`-WorkloadPlaneAdmin` and `-ServiceMembers`**
 
 **WorkloadPlaneAdmin:**
-- Set as owner of all groups created in this run, only with `-AssignOwner`
-- Assigned (adminAdd) to the ManagementPlane-Admins access package, or to WorkloadPlane-Admins where no ManagementPlane-Admins package exists
-- Accepts a UPN, object ID or a Graph OData URL (`https://graph.microsoft.com/v1.0/users/<id>` or `.../servicePrincipals/<id>`); defaults to the signed-in user only with `-AssignOwner` (required for app-only sign-in in that case)
+- Owner of the WorkloadPlane groups only with `-GroupOwnership Permanent` (groups created in this run) or `Eligible` (PIM for Groups eligible owner); never owner of other groups
+- Assigned (adminAdd) to the ManagementPlane-Admins access package, or to WorkloadPlane-Admins where no ManagementPlane-Admins package exists, and to the CatalogPlane-Members access package (PerService, Initial Catalog Members Policy)
+- Accepts a UPN, object ID or a Graph OData URL (`https://graph.microsoft.com/v1.0/users/<id>` or `.../servicePrincipals/<id>`); defaults to the signed-in user only with `-GroupOwnership Eligible` or `Permanent` (required for app-only sign-in in that case)
 - Added to the service members (WorkloadPlane-Users access package) only with `-AddWorkloadPlaneAdminToUsers`
 
 **ServiceMembers:**
@@ -2006,7 +2108,7 @@ Error: Response status code does not indicate success: BadRequest
 ```
 
 **Causes:**
-1. **Missing requestor/approver group in the scope** - e.g. no `AdministratorGroupId` in the Centralized model (CatalogPlane-Members is the requestor scope and approver fallback)
+1. **Missing requestor/approver group in the scope** - e.g. no `AdministratorGroupId` in the Centralized model (CatalogPlane-Members is the requestor scope)
 2. **Graph replication delay** - Groups created but not yet available to Entitlement Management
 3. **Invalid WorkloadPlaneAdmin or ServiceMembers** - User not found in directory (affects the initial assignments)
 
@@ -2110,7 +2212,7 @@ No Azure RBAC role assignments created after deployment
 
 **Causes:**
 1. Using `-SkipAzureResourceGroup`
-2. Looking at the wrong scope - ServiceEM only assigns roles on `RG-<DeploymentPrefix>` (never on the subscription) and only for groups of the Rg scope
+2. Looking at the wrong scope - ServiceEM only assigns roles on `RG-<DeploymentPrefix>` (on the subscription only with `-DeploymentScope Subscription`), for the groups of the scope including delegated groups
 3. Caller lacks Azure permissions on the subscription passed with `-SubscriptionId`
 4. Assignment skipped because the group is already eligible for Contributor/UAA at subscription level (see verbose output)
 
@@ -2152,7 +2254,7 @@ No Azure RBAC role assignments created after deployment
 Groups don't have PIM policies configured; 403 Forbidden on `roleManagementPolicyAssignments` or `eligibilityScheduleRequests`
 
 **Cause:**
-Deployment used `-NoPimEscalation`, the group is delegated (never modified by ServiceEM), or the caller lacks the required Microsoft Graph permissions or directory roles.
+Deployment without `-EnablePimForGroups` / `-EnableWorkloadPlanePimForGroups` (PIM for Groups is opt-in), the group is never PIM-managed (WorkloadPlane-Users, CatalogPlane-Members, Microsoft 365 group), the group is delegated (never modified by ServiceEM), or the caller lacks the required Microsoft Graph permissions or directory roles.
 
 **Resolution:**
 1. Check the PIM for Groups policy assignments of the group:
@@ -2175,12 +2277,13 @@ After deployment, verify the following:
 
 #### Entra ID Objects
 - [ ] All expected groups created (check count, see [Parameter Impact Matrix](#parameter-impact-matrix))
-- [ ] Groups have the expected owners (only with `-AssignOwner`)
+- [ ] WorkloadPlane groups have the expected owners (only with `-GroupOwnership`); no other group has an owner set by ServiceEM
 - [ ] Catalogs created
 - [ ] Access packages created
 - [ ] Assignment policies configured (or manually created if failed)
-- [ ] PIM for Groups policies applied to the non-Members groups (unless `-NoPimEscalation`)
-- [ ] PIM for Groups eligibility assignments created (unless `-NoPimEscalation`)
+- [ ] PIM for Groups policies applied to ControlPlane-/ManagementPlane-Admins (only with `-EnablePimForGroups`) and WorkloadPlane-Admins (only with `-EnableWorkloadPlanePimForGroups`)
+- [ ] Access packages of these groups contain the Eligible Member role (no warning about a missing Eligible Member role)
+- [ ] PIM for Groups eligible owner assignments created (only with `-GroupOwnership Eligible`)
 
 #### Azure Resources (if not using -SkipAzureResourceGroup)
 - [ ] Resource group `RG-<DeploymentPrefix>` created
