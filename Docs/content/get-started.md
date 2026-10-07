@@ -65,7 +65,7 @@ Update the module with `Update-PSResource EntraOps`. If you installed it with `I
 
 The module package contains no classification templates, samples or reporting apps.
 `Initialize-EntraOpsWorkspace` downloads them (`Classification`, `Samples` and `Reports` from the
-`main` branch) into the working folder. Pass `-Ref` with the release tag or commit that matches your
+`main` branch) into the working folder. Pass `-Ref` (or `-Branch`) with another branch, or with the release tag or commit that matches your
 module version, and use `-Force` after a module update to refresh them. It never writes into the
 module folder and never replaces `Classification/Global.json`, tenant classification folders or
 generated report data. `Update-EntraOps` only updates repository clones.

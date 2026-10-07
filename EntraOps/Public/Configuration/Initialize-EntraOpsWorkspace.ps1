@@ -28,8 +28,8 @@
     private 'EntraOps-Insiders' repository, which requires -PersonalAccessToken or ENTRAOPS_PAT.
 
 .PARAMETER Ref
-    Branch, release tag or full commit SHA to download. Defaults to 'main'. Use the ref that matches
-    the installed module version.
+    Branch, release tag or full commit SHA to download (alias: -Branch). Defaults to 'main'. Use the
+    ref that matches the installed module version.
 
 .PARAMETER PersonalAccessToken
     GitHub token for the private 'EntraOps-Insiders' repository. Defaults to ENTRAOPS_PAT.
@@ -47,6 +47,11 @@
     $env:ENTRAOPS_ROOT = 'D:\EntraOps'; Import-Module EntraOps -Force; Initialize-EntraOpsWorkspace -Ref 'v1.2.0'
 
     Uses D:\EntraOps as working folder and installs the content of release v1.2.0.
+
+.EXAMPLE
+    Initialize-EntraOpsWorkspace -Branch 'dev' -Force
+
+    Installs the content of the 'dev' branch and replaces existing files (except the protected files).
 #>
 
 function Initialize-EntraOpsWorkspace {
@@ -64,6 +69,7 @@ function Initialize-EntraOpsWorkspace {
         [System.String]$Repository = 'EntraOps',
 
         [Parameter(Mandatory = $false)]
+        [Alias('Branch')]
         [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$')]
         [System.String]$Ref = 'main',
 
