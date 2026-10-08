@@ -118,7 +118,11 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      # Fail fast when the runner's apt mirror hangs instead of consuming the whole job timeout.
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 8
+        run: |
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99entraops-timeouts > /dev/null
+          npx playwright install --with-deps chromium
       - name: Run documentation and report browser tests
         run: npm run test:browser
