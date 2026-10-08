@@ -523,12 +523,13 @@ the progress display, for example in non-interactive automation.
             [Parameter(Mandatory)][string]$ReportRoot
         )
 
-        # $PSScriptRoot is EntraOps/Public/Reportings, three levels below the repository root.
-        $RepositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))
-        $ReportTemplateRoot = Join-Path $RepositoryRoot 'Reports'
-        $ModuleManifest = Join-Path $RepositoryRoot 'EntraOps/EntraOps.psd1'
+        # $PSScriptRoot is <module>/Public/Reportings in both repository clones and module-only installs.
+        $ModuleRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+        $WorkingFolder = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
+        $ReportTemplateRoot = Join-Path $WorkingFolder 'Reports'
+        $ModuleManifest = Join-Path $ModuleRoot 'EntraOps.psd1'
         if (-not (Test-Path -LiteralPath $ReportTemplateRoot -PathType Container)) {
-            throw "EntraOps report templates were not found: $ReportTemplateRoot"
+            throw "EntraOps report templates were not found: $ReportTemplateRoot. Run Initialize-EntraOpsWorkspace -Content Reports to install them."
         }
         if (-not (Test-Path -LiteralPath $ModuleManifest -PathType Leaf)) {
             throw "EntraOps module manifest was not found: $ModuleManifest"

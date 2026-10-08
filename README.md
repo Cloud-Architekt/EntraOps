@@ -139,11 +139,23 @@ A complete list of all existing PowerShell query templates is available as YAML 
 
 ### Import module and sign-in options
 
-Import PowerShell module (by default, required modules will be installed automatically)
+Import PowerShell module (by default, required modules will be installed automatically).
+
+From a clone of this repository (includes classification templates, samples and reporting apps; updated with `Update-EntraOps`):
 
 ```powershell
 Import-Module ./EntraOps
 ```
+
+From the PowerShell Gallery (updated with `Update-PSResource EntraOps`, or `Update-Module EntraOps` if installed with `Install-Module`). `Initialize-EntraOpsWorkspace` downloads the classification templates, samples and reporting apps into the EntraOps working folder (`ENTRAOPS_ROOT`, the current folder with `EntraOpsConfig.json`, or `<home>/EntraOps`); run it again with `-Force` after a module update:
+
+```powershell
+Install-PSResource EntraOps -Scope CurrentUser
+Import-Module EntraOps
+Initialize-EntraOpsWorkspace
+```
+
+See [Install EntraOps](Docs/get-started/index.html#install-entraops) for a comparison of both options.
   
 User Interactive with consented Microsoft Graph PowerShell
 

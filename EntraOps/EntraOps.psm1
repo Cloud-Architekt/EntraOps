@@ -83,6 +83,8 @@ if (-not (Test-Path -LiteralPath $__EntraOpsSession.PersistentCachePath)) {
     }
 }
 
-# Global variable
-$EntraOpsBasefolder = (Get-Item -Path $PSScriptRoot).Parent.FullName
+# Global variable: the working folder for configuration, classification, exports and reports.
+$EntraOpsBaseFolderResolution = Resolve-EntraOpsBaseFolder -ModuleRoot $PSScriptRoot
+$EntraOpsBasefolder = $EntraOpsBaseFolderResolution.Path
+Write-Verbose "EntraOps working folder ($($EntraOpsBaseFolderResolution.Source)): $EntraOpsBasefolder"
 New-Variable -Name EntraOpsBaseFolder -Value $EntraOpsBasefolder -Scope Global -Force

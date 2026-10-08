@@ -8,9 +8,14 @@ ingestion, automated protection, and full rollout.
 > [!TIP]
 > **Quick start:** sign in interactively and try EntraOps right now - no configuration file needed:
 > ```powershell
+> # Repository clone
 > Import-Module ./EntraOps
+> # or PowerShell Gallery (downloads classification templates, samples and reporting apps once)
+> Install-PSResource EntraOps; Import-Module EntraOps; Initialize-EntraOpsWorkspace
+>
 > Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
-> Invoke-EntraOpsPrivilegedEAM
+> Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles
+> New-EntraOpsReportingData
 > ```
 > See [1. Try it with zero configuration](#try-it-with-zero-configuration) below for details, or keep reading for prerequisites and the full adoption roadmap.
 
@@ -20,6 +25,80 @@ ingestion, automated protection, and full rollout.
 - A Microsoft Entra ID tenant where you have (temporarily) **Global Administrator** and **User Access Administrator** permissions to register the application used by EntraOps and grant it the required Microsoft Graph and Azure RBAC permissions.
 - Optional: a GitHub account/organization if you want to run EntraOps as a scheduled, automated pipeline instead of (or in addition to) interactive/local execution.
 - Optional: a Log Analytics workspace or Microsoft Sentinel workspace if you want to ingest classification data into custom tables or WatchLists (see [Reportings &rarr; Microsoft Sentinel integration](../reportings/index.html#microsoft-sentinel-integration)).
+
+## Install EntraOps {#install-entraops}
+
+You can use EntraOps from a clone of the repository or install the module from the PowerShell
+Gallery. Both provide the same cmdlets; they differ in where EntraOps keeps its files and how it is
+updated.
+
+|                                            | Clone the repository                                                       | PowerShell Gallery                                                                   |
+| ------------------------------------------ | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Best for                                   | Automation with GitHub Actions or Azure DevOps, version-controlled exports | Interactive use and local scripts                                                    |
+| Import                                     | `Import-Module ./EntraOps`                                                 | `Import-Module EntraOps`                                                             |
+| Working folder                             | Repository root                                                            | `ENTRAOPS_ROOT`, the current folder with `EntraOpsConfig.json`, or `<home>/EntraOps` |
+| Classification templates, samples, reports | Included                                                                   | Downloaded with `Initialize-EntraOpsWorkspace`                                       |
+| Update                                     | `Update-EntraOps` or the Update-EntraOps workflow                          | `Update-PSResource EntraOps`, then `Initialize-EntraOpsWorkspace -Force`             |
+| Privilege History, Configuration Analyzer  | Supported (git history of the repository)                                  | Only in a working folder with git history                                            |
+
+Required modules (Az.Accounts, Az.Resources and Microsoft.Graph.Authentication) are installed
+automatically when you connect with `Connect-EntraOps`.
+
+### Option A: Clone the repository {#install-from-repository}
+
+```powershell
+git clone https://github.com/Cloud-Architekt/EntraOps.git
+cd EntraOps
+Import-Module ./EntraOps
+```
+
+The repository contains the module, classification templates, samples and reporting apps. For a
+scheduled, automated setup, create your own repository from the template instead - see
+[3. Customize and automate collection with GitHub](#deploy-with-github) or
+[Automate with Azure DevOps](#deploy-with-azure-devops).
+
+### Option B: Install from the PowerShell Gallery {#install-from-powershell-gallery}
+
+```powershell
+Install-PSResource EntraOps -Scope CurrentUser
+Import-Module EntraOps
+Initialize-EntraOpsWorkspace
+```
+
+Update the module with `Update-PSResource EntraOps`. If you installed it with `Install-Module`, use
+`Update-Module EntraOps` instead.
+
+The module package contains no classification templates, samples or reporting apps.
+`Initialize-EntraOpsWorkspace` downloads them (`Classification`, `Samples` and `Reports` from the
+`main` branch) into the working folder. Pass `-Ref` (or `-Branch`) with another branch, or with the release tag or commit that matches your
+module version, and use `-Force` after a module update to refresh them. It never writes into the
+module folder and never replaces `Classification/Global.json`, tenant classification folders or
+generated report data. `Update-EntraOps` only updates repository clones.
+
+> [!IMPORTANT]
+> Run `Initialize-EntraOpsWorkspace` before `New-EntraOpsReportingData`: without the `Reports`
+> folder, report generation stops with an error. `Invoke-EntraOpsPrivilegedEAM` works without it,
+> because it downloads the classification templates it needs for the run.
+
+### Working folder {#working-folder}
+
+EntraOps reads and writes its configuration, classification files, exports and reports in a working
+folder (`$EntraOpsBaseFolder`), which is resolved when the module is imported:
+
+1. The folder in the environment variable `ENTRAOPS_ROOT`, if it is set.
+2. The repository clone that contains the module - a GitHub or Azure DevOps pipeline checkout or a
+   local clone.
+3. The current folder, if it contains `EntraOpsConfig.json`.
+4. `<home>/EntraOps`.
+
+Run `Import-Module EntraOps -Verbose` to see which folder is used. To keep several tenants apart
+with a Gallery installation, use one folder per tenant and run EntraOps from it, or set
+`ENTRAOPS_ROOT` before importing the module.
+
+`Initialize-EntraOpsWorkspace -Path <folder>` installs the content into another folder and uses it
+as working folder for the current PowerShell session. For new sessions, set `ENTRAOPS_ROOT` to that
+folder before importing the module. Use `-KeepWorkingFolder` to only prepare the folder, e.g. for
+another tenant.
 
 ## Adoption roadmap: from a single cmdlet to full tiering {#adoption-roadmap}
 
@@ -66,7 +145,9 @@ systems and settings you want to automate.
 ## 1. Try it with zero configuration {#try-it-with-zero-configuration}
 
 You can run a full Privileged EAM classification without creating an `EntraOpsConfig.json` file or a
-`Classification` folder first. EntraOps signs in to Azure and Microsoft Graph interactively, so the
+`Classification` folder first. With a PowerShell Gallery installation, run
+[`Initialize-EntraOpsWorkspace`](#install-from-powershell-gallery) once if you want to generate the
+reporting apps from the export afterwards. EntraOps signs in to Azure and Microsoft Graph interactively, so the
 Microsoft Graph sign-in can request the delegated permissions required for collection:
 
 > [!NOTE]
@@ -92,6 +173,8 @@ JSON output remains (except for any pre-existing `Classification_RoleActionOverw
 preserved). Use `-RbacSystems` to limit the scope, or `-PrivilegedObjectClassificationSource` to
 change how Control Plane scope is determined - see
 [Privileged EAM &rarr; Automatic Control Plane scope updates](../privileged-eam/index.html#automatic-updated-control-plane-scope).
+Use `-KeepClassificationFiles` to keep the classification files, e.g. to review them in the
+Classification Explorer.
 
 > [!TIP]
 > This is the fastest way to try EntraOps or produce a one-off export. Continue with [2. Verify output with reports and workbooks](#phase-2-verify-output) before you keep using it, or jump straight to [3. Customize and automate collection with GitHub](#deploy-with-github) for a repeatable, automated setup.
@@ -107,6 +190,8 @@ Classification Explorer and EAM Dashboard are built entirely from it, no Log Ana
 Azure subscription required:
 
 ```powershell
+Initialize-EntraOpsWorkspace -Ref '<release tag of your module version>' # module-only installations
+Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles
 New-EntraOpsReportingData
 ```
 
@@ -120,10 +205,13 @@ Analytics/Sentinel - see [4. Ingest to Sentinel](#phase-4-ingest-to-sentinel) be
 
 ## Import module and sign-in options
 
-Import the PowerShell module (by default, required modules are installed automatically):
+Import the PowerShell module as described in [Install EntraOps](#install-entraops) - from a
+repository clone or the PowerShell Gallery (by default, required modules are installed
+automatically):
 
 ```powershell
-Import-Module ./EntraOps
+Import-Module ./EntraOps   # repository clone
+Import-Module EntraOps     # PowerShell Gallery
 ```
 
 ### User Interactive with consented Microsoft Graph PowerShell

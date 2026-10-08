@@ -19,7 +19,8 @@
     Classification_RoleActionOverwrites.json and Classification_RoleDefinitionOverwrites.json
     in the tenant-specific Classification folder: these are tenant customization files that
     can be authored/maintained outside of this cmdlet (e.g. via the ClassificationExplorer
-    "Customize Overwrites" view, or manually) and are always preserved if present.
+    "Customize Overwrites" view, or manually) and are always preserved if present. Use
+    -KeepClassificationFiles to keep all classification files for the reporting apps.
 
 .PARAMETER RbacSystems
     RBAC systems to classify. Defaults to Azure, EntraID, IdentityGovernance,
@@ -39,9 +40,18 @@
     Destination folder for PrivilegedEAM JSON output. Defaults to
     <EntraOpsBaseFolder>/PrivilegedEAM/.
 
+.PARAMETER KeepClassificationFiles
+    Keep the downloaded classification templates and the generated tenant-specific classification
+    files instead of removing them after the run, e.g. so New-EntraOpsReportingData can show the
+    classification that was used for the export in the Classification Explorer.
+
 .EXAMPLE
     Run EntraOps with all defaults from an already-authenticated session.
     Invoke-EntraOpsPrivilegedEAM
+
+.EXAMPLE
+    Run EntraOps and generate the reporting apps from the export and its classification files.
+    Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles; New-EntraOpsReportingData
 
 .EXAMPLE
     Run for EntraID and Azure only, sourcing Control Plane objects from Azure Resource Graph.
@@ -69,6 +79,9 @@ function Invoke-EntraOpsPrivilegedEAM {
         ,
         [Parameter(Mandatory = $false)]
         [System.String]$ExportFolder
+        ,
+        [Parameter(Mandatory = $false)]
+        [switch]$KeepClassificationFiles
     )
 
     $ErrorActionPreference = "Stop"
@@ -202,15 +215,15 @@ function Invoke-EntraOpsPrivilegedEAM {
 
         # Build a minimal default EntraOpsConfig in memory (no config file required)
         $DefaultEntraOpsConfig = @{
-            TenantId        = $TenantId
-            TenantName      = $TenantName
-            RbacSystems     = $RbacSystems
-            AzureRbacClassification       = @{
+            TenantId                         = $TenantId
+            TenantName                       = $TenantName
+            RbacSystems                      = $RbacSystems
+            AzureRbacClassification          = @{
                 ClassifyConstrainedDelegationAlwaysAsControlPlane = $false
                 UnresolvedRoleDefinitionFallbackTier              = "Unclassified"
                 DeletedPrincipalAssignmentHandling                = "Filter"
             }
-            AutomatedClassificationUpdate = @{
+            AutomatedClassificationUpdate    = @{
                 Classifications = @(
                     "AadResources", "AadResources.Param", "ApiPermissions",
                     "Azure", "Azure.Param",
@@ -228,7 +241,7 @@ function Invoke-EntraOpsPrivilegedEAM {
                 AzureHighPrivilegedScopes            = @("/", "/providers/microsoft.management/managementgroups/$TenantId")
                 ExposureCriticalityLevel             = "<1"
             }
-            CustomSecurityAttributes = @{
+            CustomSecurityAttributes         = @{
                 PrivilegedUserAttribute             = "privilegedUser"
                 PrivilegedUserPawAttribute          = "associatedSecureAdminWorkstation"
                 PrivilegedServicePrincipalAttribute = "privilegedWorkloadIdentity"
@@ -238,9 +251,9 @@ function Invoke-EntraOpsPrivilegedEAM {
         New-Variable -Name EntraOpsConfig -Value $DefaultEntraOpsConfig -Scope Global -Force
 
         # Construct canonical paths used throughout this run
-        $ClassificationRoot      = Join-Path $EntraOpsBaseFolder "Classification"
+        $ClassificationRoot = Join-Path $EntraOpsBaseFolder "Classification"
         $ClassificationTemplates = Join-Path $ClassificationRoot "Templates"
-        $ClassificationTenant    = Join-Path $ClassificationRoot $TenantName
+        $ClassificationTenant = Join-Path $ClassificationRoot $TenantName
 
         # Ensure required directories exist; track newly created ones for cleanup
         New-EntraOpsDirectory -Path $ClassificationRoot      -Track $CreatedPaths
@@ -270,18 +283,18 @@ function Invoke-EntraOpsPrivilegedEAM {
         Update-EntraOpsClassificationFiles `
             -FolderClassification $ClassificationTemplates `
             -Classifications @(
-                "AadResources", "AadResources.Param", "ApiPermissions",
-                "Azure", "Azure.Param",
-                "Defender",
-                "DeviceManagement", "DeviceManagement.Param",
-                "IdentityGovernance"
-            )
+            "AadResources", "AadResources.Param", "ApiPermissions",
+            "Azure", "Azure.Param",
+            "Defender",
+            "DeviceManagement", "DeviceManagement.Param",
+            "IdentityGovernance"
+        )
 
         # Record only the templates that did not exist before this run, so teardown removes exactly those.
         if (Test-Path -LiteralPath $ClassificationTemplates -ErrorAction SilentlyContinue) {
             Get-ChildItem -LiteralPath $ClassificationTemplates -Filter "Classification_*.json" -ErrorAction SilentlyContinue |
-                Where-Object { $PreExistingTemplates -notcontains $_.Name } |
-                ForEach-Object { $DownloadedTemplates.Add($_.Name) | Out-Null }
+            Where-Object { $PreExistingTemplates -notcontains $_.Name } |
+            ForEach-Object { $DownloadedTemplates.Add($_.Name) | Out-Null }
         }
 
         Write-Host "       Status : Classification templates updated." -ForegroundColor Green
@@ -294,9 +307,9 @@ function Invoke-EntraOpsPrivilegedEAM {
 
         # Limit classification parameter scope to systems that are actually being collected
         $EffectiveClassificationScope = $ClassificationParameterScope | Where-Object {
-            ($_ -eq "EntraID"          -and $RbacSystems -contains "EntraID") -or
+            ($_ -eq "EntraID" -and $RbacSystems -contains "EntraID") -or
             ($_ -eq "DeviceManagement" -and $RbacSystems -contains "DeviceManagement") -or
-            ($_ -eq "Azure"            -and $RbacSystems -contains "Azure")
+            ($_ -eq "Azure" -and $RbacSystems -contains "Azure")
         }
 
         if ($EffectiveClassificationScope.Count -eq 0) {
@@ -355,8 +368,7 @@ function Invoke-EntraOpsPrivilegedEAM {
 
         Start-Sleep -Milliseconds 400
         Write-Progress -Activity $Activity -Completed
-    }
-    catch {
+    } catch {
         Write-Progress -Activity $Activity -Completed
         Write-Host ""
         Write-Host "  [ERROR] Invoke-EntraOpsPrivilegedEAM failed at:" -ForegroundColor Red
@@ -364,11 +376,14 @@ function Invoke-EntraOpsPrivilegedEAM {
         Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
         Write-Host ""
         throw
-    }
-    finally {
+    } finally {
         # ── Always: remove classification artefacts and disconnect ────────────────
         # Null-guards protect against early failures before path variables were set.
         Write-Host "  [Teardown] Removing classification artefacts and disconnecting..." -ForegroundColor Cyan
+
+        if ($KeepClassificationFiles) {
+            Write-Host "       Kept    : classification files in $ClassificationRoot (-KeepClassificationFiles)" -ForegroundColor DarkGray
+        }
 
         # Remove the generated tenant-specific classification folder, but preserve
         # Classification_RoleActionOverwrites.json and Classification_RoleDefinitionOverwrites.json:
@@ -379,11 +394,11 @@ function Invoke-EntraOpsPrivilegedEAM {
         # Templates and Classification root below) a zero-config run against an existing configured repo
         # permanently deleted the user's generated Classification_Azure.json / ScopeReasoning_*.json - on the
         # success path as well as on failure.
-        if (-not [string]::IsNullOrEmpty($ClassificationTenant) -and ($CreatedPaths -contains $ClassificationTenant) -and (Test-Path -LiteralPath $ClassificationTenant -ErrorAction SilentlyContinue)) {
+        if (-not $KeepClassificationFiles -and -not [string]::IsNullOrEmpty($ClassificationTenant) -and ($CreatedPaths -contains $ClassificationTenant) -and (Test-Path -LiteralPath $ClassificationTenant -ErrorAction SilentlyContinue)) {
             $PreservedTenantFiles = @('Classification_RoleActionOverwrites.json', 'Classification_RoleDefinitionOverwrites.json')
             Get-ChildItem -LiteralPath $ClassificationTenant -Force -ErrorAction SilentlyContinue |
-                Where-Object { $PreservedTenantFiles -notcontains $_.Name } |
-                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            Where-Object { $PreservedTenantFiles -notcontains $_.Name } |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
             Write-Host "       Cleaned : $ClassificationTenant (preserved $($PreservedTenantFiles -join ', '))" -ForegroundColor DarkGray
 
             # Remove the tenant folder itself only if it ends up empty (i.e. no preserved overwrite files remain).
@@ -394,7 +409,7 @@ function Invoke-EntraOpsPrivilegedEAM {
         }
 
         # Templates folder: remove whole folder if we created it, otherwise only downloaded files
-        if (-not [string]::IsNullOrEmpty($ClassificationTemplates)) {
+        if (-not $KeepClassificationFiles -and -not [string]::IsNullOrEmpty($ClassificationTemplates)) {
             if (($CreatedPaths -contains $ClassificationTemplates) -and (Test-Path -LiteralPath $ClassificationTemplates -ErrorAction SilentlyContinue)) {
                 Remove-Item -LiteralPath $ClassificationTemplates -Recurse -Force -ErrorAction SilentlyContinue
                 Write-Host "       Removed : $ClassificationTemplates" -ForegroundColor DarkGray
@@ -415,7 +430,7 @@ function Invoke-EntraOpsPrivilegedEAM {
         }
 
         # Remove Classification root if we created it and it is now empty
-        if (-not [string]::IsNullOrEmpty($ClassificationRoot) -and ($CreatedPaths -contains $ClassificationRoot) -and (Test-Path -LiteralPath $ClassificationRoot -ErrorAction SilentlyContinue)) {
+        if (-not $KeepClassificationFiles -and -not [string]::IsNullOrEmpty($ClassificationRoot) -and ($CreatedPaths -contains $ClassificationRoot) -and (Test-Path -LiteralPath $ClassificationRoot -ErrorAction SilentlyContinue)) {
             $Remaining = Get-ChildItem -LiteralPath $ClassificationRoot -Recurse -ErrorAction SilentlyContinue
             if (-not $Remaining) {
                 Remove-Item -LiteralPath $ClassificationRoot -Recurse -Force -ErrorAction SilentlyContinue

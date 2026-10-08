@@ -195,3 +195,4 @@ keeps duplicate copies of the JSON.
 Plain HTML, CSS and JavaScript — **no build step, no dependencies**. Just static
 files. The classification data is the single source of truth and is never modified by
 the app.
+

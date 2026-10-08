@@ -18,6 +18,13 @@ test("builds a zero-configuration express quickstart", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "How do you want to use EntraOps?" })).toBeVisible();
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.locator("#setupWizard")).toBeFocused();
+    await expect(page.getByRole("heading", { name: "How do you get EntraOps?" })).toBeVisible();
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("alert")).toHaveText("Choose whether you use the GitHub template or the PowerShell Gallery.");
+    await page.locator('label.setup-choice:has(input[value="gallery"])').click();
+    await expect(page.locator(".setup-command").filter({ hasText: "Install-PSResource -Name EntraOps" })).toHaveCount(1);
+    await expect(page.locator(".setup-command").filter({ hasText: "Initialize-EntraOpsWorkspace" })).toHaveCount(1);
+    await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByRole("heading", { name: "Sign in interactively" })).toBeVisible();
     const readAccessNote = page.locator(".setup-note").filter({ hasText: "Required read access" });
     const graphConsentNote = page.locator(".setup-note").filter({ hasText: "Microsoft Graph consent" });
@@ -43,8 +50,11 @@ test("builds a zero-configuration express quickstart", async ({ page }) => {
 
     await expect(page.getByRole("heading", { name: "Your EntraOps setup" })).toBeVisible();
     const commands = page.locator(".setup-command");
+    await expect(commands.filter({ hasText: "Install-PSResource -Name EntraOps" })).toHaveCount(1);
+    await expect(commands.filter({ hasText: "Initialize-EntraOpsWorkspace" })).toHaveCount(1);
+    await expect(commands.filter({ hasText: "Import-Module EntraOps" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "Connect-EntraOps -AuthenticationType 'UserInteractive' -TenantName 'contoso.onmicrosoft.com'" })).toHaveCount(1);
-    await expect(commands.filter({ hasText: "Invoke-EntraOpsPrivilegedEAM" })).toHaveCount(1);
+    await expect(commands.filter({ hasText: "Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "New-EntraOpsReportingData" })).toHaveCount(1);
 });
 
