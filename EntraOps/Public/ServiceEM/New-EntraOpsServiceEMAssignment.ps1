@@ -78,12 +78,13 @@ function New-EntraOpsServiceEMAssignment {
         $assignmentRequests = @()
         $assignments = @()
 
-        # Open request states; the $filter only supports one state per query
-        foreach ($openState in @('submitted', 'pendingApproval', 'delivering', 'scheduled')) {
-            $assignmentRequestsUri = "/v1.0/identityGovernance/entitlementManagement/assignmentRequests?`$filter=state eq '$openState'&`$expand=assignment(`$expand=target),accessPackage"
+        # Open requests of the catalog's access packages; filtering by package avoids reading all requests of the tenant
+        $openStates = @('submitted', 'pendingApproval', 'delivering', 'scheduled')
+        foreach ($package in @($ServicePackages | Where-Object { $_.Id })) {
+            $assignmentRequestsUri = "/v1.0/identityGovernance/entitlementManagement/assignmentRequests?`$expand=assignment(`$expand=target),accessPackage&`$filter=accessPackage/id eq '$($package.Id)'"
             try{
-                Write-Verbose "$logPrefix Looking up assignment requests in state '$openState'"
-                $assignmentRequests += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentRequestsUri -OutputType PSObject -DisableCache
+                Write-Verbose "$logPrefix Looking up open assignment requests of $($package.DisplayName)"
+                $assignmentRequests += @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentRequestsUri -OutputType PSObject -DisableCache) | Where-Object { $_ -and "$($_.State)" -in $openStates }
             }catch{
                 Write-Verbose "$logPrefix Failed to find Assignment Requests"
                 Write-Error $_
@@ -175,8 +176,9 @@ function New-EntraOpsServiceEMAssignment {
                 return Invoke-EntraOpsMsGraphQuery -Method POST -Uri $assignmentRequestUri -Body $requestBody -OutputType PSObject -ThrowOnFailure -SuppressBadRequestWarning
             } catch {
                 if ($_.Exception.Data['StatusCode'] -ne 400) { return $null }
+                $rejectionCode = $_.Exception.Data['ErrorCode']
             }
-            Write-Verbose "$logPrefix $TargetId isn't accepted by policy '$($Policy.DisplayName)', adding the user to its scope"
+            Write-Verbose "$logPrefix $TargetId isn't accepted by policy '$($Policy.DisplayName)' ($rejectionCode), adding the user to its scope"
             if (-not (& $addTargetToPolicy $Policy $TargetId)) {
                 return Invoke-EntraOpsMsGraphQuery -Method POST -Uri $assignmentRequestUri -Body $requestBody -OutputType PSObject
             }

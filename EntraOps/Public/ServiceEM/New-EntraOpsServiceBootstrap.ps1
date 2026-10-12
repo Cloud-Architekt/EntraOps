@@ -630,6 +630,10 @@ ManagementPlane,Admins,
                 ServiceGroups    = $ServiceGroups
                 ServiceName      = $ServiceName
             }
+            # specificDirectoryUsers targets only support users, not service principals
+            if ($graphOwner -and $graphOwner.Id -and $owner -like 'https://graph.microsoft.com/v1.0/users/*') {
+                $ServiceEMAssignmentPolicyOptions.WorkloadPlaneAdminId = $graphOwner.Id
+            }
             $ServiceEMAssignmentPolicies = New-EntraOpsServiceEMAssignmentPolicy @ServiceEMAssignmentPolicyOptions
             $report.AssignmentPolicies = $ServiceEMAssignmentPolicies
             

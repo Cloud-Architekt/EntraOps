@@ -1955,9 +1955,10 @@ Each access package has an **assignment policy** that controls who can request a
 > **Policy precedence:** Entra ID applies a policy for specific users and groups before an "all members" policy of the same access
 > package and ignores the latter for users in its scope ([Multiple policies](https://learn.microsoft.com/entra/id-governance/entitlement-management-troubleshoot#multiple-policies)).
 > A workload plane admin who is a member of the requestor group of the Workload Plane Policy (e.g. `AdministratorGroupId`) is
-> therefore rejected by the Initial Workload Admin Policy (`You don't meet policy requirements`). `New-EntraOpsServiceEMAssignment`
-> then adds the rejected user as a specific user to the admin-assigned initial policy (it becomes `specificDirectoryUsers`) and
-> retries for up to 60 seconds. Later initial assignments through this policy add their users the same way.
+> therefore rejected by an "all members" initial admin policy (`You don't meet policy requirements`). To avoid this, a new
+> initial admin policy (Initial Management Admin Policy, otherwise Initial Workload Admin Policy) is created as
+> `specificDirectoryUsers` with the workload plane admin as the only target if the admin is a user. For existing policies and later initial assignments, `New-EntraOpsServiceEMAssignment` adds the rejected user as a specific
+> user to the admin-assigned initial policy (it becomes `specificDirectoryUsers`) and retries for up to 60 seconds.
 
 #### Assignment Policy Creation Behavior
 

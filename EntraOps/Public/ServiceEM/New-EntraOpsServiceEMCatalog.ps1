@@ -51,12 +51,12 @@ function New-EntraOpsServiceEMCatalog {
         try {
             if (-not $catalog) {
                 Write-Verbose "$logPrefix Creating Catalog"
-                $catalog = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs" -Body (@{displayName = $catalogDisplayName } | ConvertTo-Json) -OutputType PSObject
+                $catalog = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs" -Body (@{displayName = $catalogDisplayName } | ConvertTo-Json) -OutputType PSObject -ThrowOnFailure -SuppressBadRequestWarning
             }
         } catch {
             # DuplicateCatalog (400) means the catalog exists but the initial lookup failed
             # (e.g. due to a transient GatewayTimeout). Retry the lookup before giving up.
-            if ($_.FullyQualifiedErrorId -like "DuplicateCatalog*" -or $_.Exception.Message -like "*DuplicateCatalog*") {
+            if ($_.Exception.Data['ErrorCode'] -eq 'DuplicateCatalog') {
                 Write-Verbose "$logPrefix DuplicateCatalog — retrying lookup"
                 try {
                     $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=accessPackages,resources" -OutputType PSObject -DisableCache

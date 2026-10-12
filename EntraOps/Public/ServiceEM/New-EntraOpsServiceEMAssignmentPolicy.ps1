@@ -28,6 +28,12 @@
 .PARAMETER ServicePackages
     Access package objects returned by New-EntraOpsServiceEMAccessPackage.
 
+.PARAMETER WorkloadPlaneAdminId
+    Optional object ID of the workload plane admin (user). If set, the initial admin policy used for the
+    admin's assignment (Initial Management Admin Policy, or Initial Workload Admin Policy if the service has no
+    ManagementPlane-Admins package) only allows this user as target instead of all member users. Entra ID ignores
+    "all member users" policies for users in scope of another policy with specific targets of the same package.
+
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
 
@@ -59,6 +65,8 @@ function New-EntraOpsServiceEMAssignmentPolicy {
         [Parameter(Mandatory)]
         [psobject[]]$ServicePackages,
 
+        [string]$WorkloadPlaneAdminId,
+
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
@@ -77,6 +85,21 @@ function New-EntraOpsServiceEMAssignmentPolicy {
         $controlPlaneApproverId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*ControlPlane-Admins" } | Select-Object -First 1).Id
         $wlUsersApproverId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*WorkloadPlane-Admins" } | Select-Object -First 1).Id
         if (-not $wlUsersApproverId) { $wlUsersApproverId = $mgmtApproverGroupId }
+        # Same package choice as New-EntraOpsServiceEMAssignment for the admin's initial assignment
+        $initialAdminPolicyName = if ($ServicePackages | Where-Object { $_.DisplayName -like "*ManagementPlane-Admins" }) { 'Initial Management Admin Policy' } else { 'Initial Workload Admin Policy' }
+        $setInitialAdminTarget = {
+            param($params)
+            if (-not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdminId) -and $params.displayName -eq $initialAdminPolicyName) {
+                Write-Verbose "$logPrefix Restricting $($params.displayName) to workload plane admin $WorkloadPlaneAdminId"
+                $params.allowedTargetScope = 'specificDirectoryUsers'
+                $params.specificAllowedTargets = @(
+                    @{
+                        '@odata.type' = '#microsoft.graph.singleUser'
+                        userId        = $WorkloadPlaneAdminId
+                    }
+                )
+            }
+        }
 
         # Defaults can be overridden in ServiceEM.AssignmentPolicies and ServiceEM.AccessReviews of EntraOpsConfig
         $serviceEMConfig = if ($null -ne $Global:EntraOpsConfig) { $Global:EntraOpsConfig.ServiceEM }
@@ -407,6 +430,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         $params.expiration = & $getExpiration 'InitialManagementAdmins' $defaultExpiration
                         $params = $policyParams + $params
                         $params.requestorSettings = $adminOnlyRequestorSettings
+                        & $setInitialAdminTarget $params
                         & $setReviewSettings $params 'InitialManagementAdmins'
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
                     } elseif ($package.displayName -like "*WorkloadPlane-Admins" -and -not $mgmtApproverGroupId) {
@@ -520,6 +544,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                     }
                 }
                 $params.requestorSettings = $adminOnlyRequestorSettings
+                & $setInitialAdminTarget $params
                 & $setReviewSettings $params $initialDirectPolicy.ConfigKey
                 try {
                     Write-Verbose "$logPrefix Creating $($initialDirectPolicy.DisplayName) for Access Package ID: $($package.Id)"

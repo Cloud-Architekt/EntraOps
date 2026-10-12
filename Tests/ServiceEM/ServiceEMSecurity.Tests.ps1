@@ -650,8 +650,11 @@ Describe 'ServiceEM access package assignment fulfillment' {
         $script:AssignmentBodies = [System.Collections.Generic.List[object]]::new()
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') { $script:AssignmentBodies.Add(($Body | ConvertFrom-Json)); return [pscustomobject]@{ Id = 'req-x'; State = 'submitted' } }
-            if ($Uri -like "*assignmentRequests?*state eq 'pendingApproval'*") {
-                return @([pscustomobject]@{ Id = 'r1'; State = 'pendingApproval'; Assignment = [pscustomobject]@{ Target = [pscustomobject]@{ ObjectId = 'admin' } }; AccessPackage = [pscustomobject]@{ Id = 'ap-admins' } })
+            if ($Uri -like "*assignmentRequests?*accessPackage/id eq 'ap-admins'*") {
+                return @(
+                    [pscustomobject]@{ Id = 'r1'; State = 'pendingApproval'; Assignment = [pscustomobject]@{ Target = [pscustomobject]@{ ObjectId = 'admin' } }; AccessPackage = [pscustomobject]@{ Id = 'ap-admins' } }
+                    [pscustomobject]@{ Id = 'r0'; State = 'delivered'; Assignment = [pscustomobject]@{ Target = [pscustomobject]@{ ObjectId = 'other' } }; AccessPackage = [pscustomobject]@{ Id = 'ap-admins' } }
+                )
             }
             return @()
         }
@@ -1161,6 +1164,58 @@ Describe 'ServiceEM access package resource roles' {
     }
 }
 
+Describe 'ServiceEM catalog resource onboarding' {
+    BeforeAll {
+        . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/New-EntraOpsServiceEMCatalogResource.ps1"
+        $script:NewGraphError = {
+            param($StatusCode, $ErrorCode)
+            $ex = [System.InvalidOperationException]::new("Graph $StatusCode")
+            $ex.Data['StatusCode'] = $StatusCode
+            $ex.Data['ErrorCode'] = $ErrorCode
+            $ex
+        }
+        $script:ResourceGroups = @([pscustomobject]@{ Id = 'g1'; DisplayName = 'SG-Rg-X-WorkloadPlane-Users' })
+    }
+
+    BeforeEach {
+        Mock Start-Sleep {}
+        $script:PostCalls = 0
+        $script:PostErrors = @()
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'POST') {
+                $script:PostCalls++
+                if ($script:PostCalls -le $script:PostErrors.Count) { throw $script:PostErrors[$script:PostCalls - 1] }
+                return [pscustomobject]@{ id = 'request' }
+            }
+            if ($script:PostCalls -gt 0) { return [pscustomobject]@{ Id = 'r1'; DisplayName = 'SG-Rg-X-WorkloadPlane-Users' } }
+            return @()
+        }
+    }
+
+    It 'retries while the group is not indexed yet' {
+        $script:PostErrors = @((& $script:NewGraphError 400 'ResourceNotFoundInOriginSystem'), (& $script:NewGraphError 400 'ResourceNotFoundInOriginSystem'))
+
+        New-EntraOpsServiceEMCatalogResource -ServiceGroups $script:ResourceGroups -ServiceCatalogId 'cat' 6>$null | Out-Null
+
+        $script:PostCalls | Should -Be 3
+    }
+
+    It 'treats an already onboarded group as success' {
+        $script:PostErrors = @((& $script:NewGraphError 400 'ResourceAlreadyOnboarded'))
+
+        New-EntraOpsServiceEMCatalogResource -ServiceGroups $script:ResourceGroups -ServiceCatalogId 'cat' 6>$null | Out-Null
+
+        $script:PostCalls | Should -Be 1
+    }
+
+    It 'fails immediately on other errors' {
+        $script:PostErrors = @((& $script:NewGraphError 403 'Authorization_RequestDenied'))
+
+        { New-EntraOpsServiceEMCatalogResource -ServiceGroups $script:ResourceGroups -ServiceCatalogId 'cat' 6>$null } | Should -Throw '*Graph 403*'
+        $script:PostCalls | Should -Be 1
+    }
+}
+
 Describe 'ServiceEM Graph lookup safety' {
     It 'encodes an apostrophe in the destructive catalog lookup' {
         $script:CatalogLookupUri = $null
@@ -1599,6 +1654,28 @@ Describe 'ServiceEM assignment policy group references' {
             New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $script:WpGroups -ServicePackages @($script:WpPackages[0]) | Out-Null
 
             $script:PolicyBodies.Count | Should -Be 0
+        }
+
+        It 'restricts the Initial Workload Admin Policy to the workload plane admin when no ManagementPlane-Admins package exists' {
+            New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $script:WpGroups -ServicePackages $script:WpPackages -WorkloadPlaneAdminId 'admin-id' | Out-Null
+
+            $adminPolicy = $script:PolicyBodies | Where-Object displayName -EQ 'Initial Workload Admin Policy'
+            $adminPolicy.allowedTargetScope | Should -Be 'specificDirectoryUsers'
+            $adminPolicy.specificAllowedTargets.'@odata.type' | Should -Be '#microsoft.graph.singleUser'
+            $adminPolicy.specificAllowedTargets.userId | Should -Be 'admin-id'
+            ($script:PolicyBodies | Where-Object displayName -EQ 'Initial Workload Users Policy').allowedTargetScope | Should -Be 'allMemberUsers'
+        }
+
+        It 'restricts only the Initial Management Admin Policy when a ManagementPlane-Admins package exists' {
+            $groups = @($script:WpGroups) + (New-TestGroup 'SG-Rg-X-ControlPlane-Admins') + (New-TestGroup 'SG-Rg-X-CatalogPlane-Members')
+            $packages = @($script:WpPackages) + (New-TestPackage 'AP-Rg-X-ManagementPlane-Admins')
+
+            New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages $packages -WorkloadPlaneAdminId 'admin-id' | Out-Null
+
+            $mgmtPolicy = $script:PolicyBodies | Where-Object displayName -EQ 'Initial Management Admin Policy'
+            $mgmtPolicy.allowedTargetScope | Should -Be 'specificDirectoryUsers'
+            $mgmtPolicy.specificAllowedTargets.userId | Should -Be 'admin-id'
+            ($script:PolicyBodies | Where-Object displayName -EQ 'Initial Workload Admin Policy').allowedTargetScope | Should -Be 'allMemberUsers'
         }
     }
 }

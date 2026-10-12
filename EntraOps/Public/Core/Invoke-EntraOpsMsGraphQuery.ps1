@@ -135,15 +135,20 @@ function Invoke-EntraOpsMsGraphQuery {
     }
 
     #region Helper - Graph error code/message from the response body (the raw body also contains all response headers)
-    function Get-EntraOpsMsGraphErrorSummary {
+    function Get-EntraOpsMsGraphError {
         param($ErrorRecord)
         $Body = [string]$ErrorRecord.ErrorDetails.Message
         if ($Body -match '(?s)(\{\s*"error".*\})\s*$') {
             try {
-                $GraphError = ($Matches[1] | ConvertFrom-Json -ErrorAction Stop).error
-                if ($GraphError.code) { return " ($($GraphError.code): $($GraphError.message))" }
+                return ($Matches[1] | ConvertFrom-Json -ErrorAction Stop).error
             } catch { }
         }
+        return $null
+    }
+    function Get-EntraOpsMsGraphErrorSummary {
+        param($ErrorRecord)
+        $GraphError = Get-EntraOpsMsGraphError -ErrorRecord $ErrorRecord
+        if ($GraphError.code) { return " ($($GraphError.code): $($GraphError.message))" }
         return ''
     }
     #endregion
@@ -484,7 +489,7 @@ function Invoke-EntraOpsMsGraphQuery {
                             Add-EntraOpsRetryStatistic -Name NonRetryableRequests
                             $__EntraOpsSession.RetryStatistics.NonRetryableRequestDetails.Add([pscustomobject]@{ Timestamp = (Get-Date); Uri = $Uri; StatusCode = $StatusCode; ErrorMessage = $_.Exception.Message })
                             if (($SuppressNotFoundWarning -and $StatusCode -eq 404) -or ($SuppressBadRequestWarning -and $StatusCode -eq 400) -or ($SuppressForbiddenWarning -and $StatusCode -eq 403)) {
-                                Write-Verbose "Failed to execute $Uri (expected $StatusCode, warning suppressed). Error: $($_.Exception.Message)"
+                                Write-Verbose "Failed to execute $Uri (expected $StatusCode, warning suppressed). Error: $($_.Exception.Message)$(Get-EntraOpsMsGraphErrorSummary -ErrorRecord $_)"
                             } else {
                                 Write-Warning "Failed to execute $Uri (non-retryable error). Error: $($_.Exception.Message)$(Get-EntraOpsMsGraphErrorSummary -ErrorRecord $_)"
                             }
@@ -492,6 +497,7 @@ function Invoke-EntraOpsMsGraphQuery {
                         if ($ThrowOnFailure) {
                             $GraphException = [System.InvalidOperationException]::new("Microsoft Graph query '$Uri' failed: $($_.Exception.Message)", $_.Exception)
                             $GraphException.Data['StatusCode'] = $StatusCode
+                            $GraphException.Data['ErrorCode'] = (Get-EntraOpsMsGraphError -ErrorRecord $_).code
                             $GraphException.Data['Uri'] = $Uri
                             throw $GraphException
                         }
@@ -669,7 +675,7 @@ function Invoke-EntraOpsMsGraphQuery {
                             Add-EntraOpsRetryStatistic -Name NonRetryableRequests
                             $__EntraOpsSession.RetryStatistics.NonRetryableRequestDetails.Add([pscustomobject]@{ Timestamp = (Get-Date); Uri = $Uri; StatusCode = $StatusCode; ErrorMessage = $_.Exception.Message })
                             if (($SuppressNotFoundWarning -and $StatusCode -eq 404) -or ($SuppressBadRequestWarning -and $StatusCode -eq 400) -or ($SuppressForbiddenWarning -and $StatusCode -eq 403)) {
-                                Write-Verbose "Failed to execute $Uri (expected $StatusCode, warning suppressed). Error: $($_.Exception.Message)"
+                                Write-Verbose "Failed to execute $Uri (expected $StatusCode, warning suppressed). Error: $($_.Exception.Message)$(Get-EntraOpsMsGraphErrorSummary -ErrorRecord $_)"
                             } else {
                                 Write-Warning "Failed to execute $Uri (non-retryable error). Error: $($_.Exception.Message)$(Get-EntraOpsMsGraphErrorSummary -ErrorRecord $_)"
                             }
@@ -677,6 +683,7 @@ function Invoke-EntraOpsMsGraphQuery {
                         if ($ThrowOnFailure) {
                             $GraphException = [System.InvalidOperationException]::new("Microsoft Graph query '$Uri' failed: $($_.Exception.Message)", $_.Exception)
                             $GraphException.Data['StatusCode'] = $StatusCode
+                            $GraphException.Data['ErrorCode'] = (Get-EntraOpsMsGraphError -ErrorRecord $_).code
                             $GraphException.Data['Uri'] = $Uri
                             throw $GraphException
                         }
@@ -697,8 +704,13 @@ function Invoke-EntraOpsMsGraphQuery {
                 return $null
             }
         }
+        # A fresh -DisableCache result supersedes an older cache entry of the same request
+        if ($DisableCache -and $isInCache) {
+            $__EntraOpsSession.GraphCache.Remove($cacheKey)
+            $__EntraOpsSession.CacheMetadata.Remove($cacheKey)
+        }
         # Updating cache with TTL metadata
-        if ($QueryResult -and !$isBatch -and ($isMethodGet -or $isCacheablePost)) {
+        if ($QueryResult -and !$DisableCache -and !$isBatch -and ($isMethodGet -or $isCacheablePost)) {
             $CurrentTime = [DateTime]::UtcNow
             $ExpiryTime = $CurrentTime.AddSeconds($CacheTTLSeconds)
             
