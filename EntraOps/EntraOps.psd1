@@ -49,23 +49,10 @@
     # ProcessorArchitecture = ''
 
     # Modules that must be imported into the global environment prior to importing this module
-
-    <# Required modules will be installed by loading the module
-    RequiredModules      = @(
-        @{
-            ModuleName    = 'Az.Accounts'
-            ModuleVersion = '2.19.0'
-        }
-        @{
-            ModuleName    = 'Az.Resources'
-            ModuleVersion = '6.16.2'
-        }
-        @{
-            ModuleName    = 'Microsoft.Graph.Authentication'
-            ModuleVersion = '2.18.0'
-        }
-    )
-    #>
+    # Intentionally unset for repository clones and PowerShell Gallery installs: Connect-EntraOps installs
+    # Az.Accounts, Az.Resources and (unless UseInvokeRestMethodOnly) Microsoft.Graph.Authentication on
+    # demand, so Import-Module works without them and Az/Graph aren't loaded at import.
+    # RequiredModules = @()
 
     # Assemblies that must be loaded prior to importing this module
     # RequiredAssemblies = @()
@@ -126,7 +113,9 @@
         'Get-EntraOpsWorkloadIdentityAttackPaths'
         'Get-EntraOpsWorkloadIdentityInfo'
         'Get-EntraOpsWorkloadIdentityRecommendations'
+        'Initialize-EntraOpsWorkspace'
         'Install-EntraOpsAllRequiredModules'
+        'Install-EntraOpsReportingFolder'
         'Install-EntraOpsRequiredModule'
         'Invoke-EntraOpsAzGraphQuery'
         'Invoke-EntraOpsAzQuery'

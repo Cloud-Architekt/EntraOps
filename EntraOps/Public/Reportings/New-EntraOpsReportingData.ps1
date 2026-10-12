@@ -156,10 +156,24 @@
 .PARAMETER AllowPartialTenantGovernanceSnapshot
     Allow Configuration Analyzer generation from a partial snapshot with preserved stale resource types.
 
+.PARAMETER InstallMissingReportingFolder
+    Download the reporting apps (Install-EntraOpsReportingFolder) and the classification templates
+    required by the Classification Explorer (Initialize-EntraOpsWorkspace -Content Classification)
+    from the public EntraOps repository, main branch, when they are missing in the EntraOps working
+    folder, e.g. for a module-only installation from the PowerShell Gallery. Prefer
+    Initialize-EntraOpsWorkspace -Ref <release tag> beforehand, so the content matches the module version.
+    Without this switch, a missing Reports folder stops with an error and missing templates skip the
+    Classification Explorer (error with -FailureAction Stop).
+
 .EXAMPLE
     New-EntraOpsReportingData
 
     Regenerates the data for all reporting apps in this repository checkout.
+
+.EXAMPLE
+    New-EntraOpsReportingData -InstallMissingReportingFolder
+
+    Downloads the Reports folder first if only the EntraOps module folder exists, then regenerates the data.
 
 .EXAMPLE
     New-EntraOpsReportingData -ClassificationExplorerRepoRoot "C:\Repos\AzurePrivilegedIAM" -WhatIf
@@ -277,7 +291,10 @@ function New-EntraOpsReportingData {
         [switch]$AllowStaleTenantGovernanceSnapshot,
 
         [Parameter(Mandatory = $false)]
-        [switch]$AllowPartialTenantGovernanceSnapshot
+        [switch]$AllowPartialTenantGovernanceSnapshot,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$InstallMissingReportingFolder
     )
 
     # Resolve the repository root relative to the module location. Prefer the module's
@@ -290,8 +307,41 @@ function New-EntraOpsReportingData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
     if ([string]::IsNullOrWhiteSpace($EntraOpsRoot)) { $EntraOpsRoot = $RepositoryRoot }
+
+    # Module-only installations (e.g. PowerShell Gallery) ship neither the reporting apps nor the classification templates.
+    $ReportingFolder = Join-Path $RepositoryRoot 'Reports'
+    $ClassificationTemplatesFolder = Join-Path $EntraOpsRoot 'Classification/Templates'
+    $HasCustomAppRoot = @($PSBoundParameters.Keys | Where-Object { $_ -like '*AppRoot' }).Count -gt 0
+    $MissingReports = -not $HasCustomAppRoot -and -not (Test-Path -LiteralPath (Join-Path $ReportingFolder 'index.html') -PathType Leaf)
+    $MissingTemplates = -not $SkipClassificationExplorer -and -not (Test-Path -LiteralPath $ClassificationTemplatesFolder -PathType Container)
+
+    if ($MissingReports -or $MissingTemplates) {
+        $MissingItems = @(
+            if ($MissingReports) { "reporting apps folder '$ReportingFolder'" }
+            if ($MissingTemplates) { "classification templates folder '$ClassificationTemplatesFolder'" }
+        ) -join ' and '
+        $ModuleVersion = $MyInvocation.MyCommand.Module.Version
+        $MissingContentMessage = "The $MissingItems $(if ($MissingReports -and $MissingTemplates) { 'are' } else { 'is' }) missing (e.g. module-only installation). Run Initialize-EntraOpsWorkspace -Ref <release tag of EntraOps $ModuleVersion> to install the content that matches your module$(if ($MissingTemplates -and -not $MissingReports) { ', or run Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles to keep the classification files used for the export' }). -InstallMissingReportingFolder downloads it from the main branch instead."
+
+        if ($InstallMissingReportingFolder) {
+            if ($MissingReports) {
+                Install-EntraOpsReportingFolder -DestinationPath $ReportingFolder -Force:(Test-Path -LiteralPath $ReportingFolder) | Out-Null
+            }
+            if ($MissingTemplates) {
+                Initialize-EntraOpsWorkspace -Path $EntraOpsRoot -Content Classification -KeepWorkingFolder | Out-Null
+            }
+        } elseif ($WhatIfPreference) {
+            Write-Warning $MissingContentMessage
+            return
+        } elseif ($MissingReports -or $FailureAction -eq 'Stop') {
+            throw $MissingContentMessage
+        } else {
+            Write-Warning "$MissingContentMessage Skipping Classification Explorer data."
+            $SkipClassificationExplorer = [switch]$true
+        }
+    }
 
     Write-Verbose "Using EntraOps repository root: $EntraOpsRoot"
 

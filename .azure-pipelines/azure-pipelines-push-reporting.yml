@@ -69,7 +69,7 @@ steps:
     displayName: "Use Node.js 22"
     condition: eq(variables.ReportingEnabled, 'true')
     inputs:
-      versionSpec: "22.x"
+      version: "22.x"
 
   - script: npm ci
     displayName: "Install report test dependencies"

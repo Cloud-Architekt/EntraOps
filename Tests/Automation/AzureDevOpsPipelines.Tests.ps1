@@ -158,6 +158,9 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not
     It 'tests reports and gates artifacts on private project visibility' {
         $ReportingContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-push-reporting.yml') -Raw
         $ReportingContent | Should -Match 'task: UseNode@1'
+        # UseNode@1 ignores versionSpec (NodeTool@0 input) and falls back to Node 10.x
+        $ReportingContent | Should -Match 'task: UseNode@1[\s\S]*?inputs:\s*\r?\n\s*version: "22\.x"'
+        $ReportingContent | Should -Not -Match 'versionSpec'
         $ReportingContent | Should -Not -Match 'NodeTool@0'
         $ReportingContent | Should -Match 'Invoke-EntraOpsReportingGeneration'
         $ReportingContent | Should -Match 'npm run test:reports'

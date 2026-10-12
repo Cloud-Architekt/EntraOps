@@ -116,12 +116,12 @@ function New-EntraOpsAccessPathMapData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
     if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/AccessPathMap' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
-        throw "Access Path Map app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/AccessPathMap."
+        throw "Access Path Map app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/AccessPathMap, or run Install-EntraOpsReportingFolder to download the Reports folder."
     }
     if ([string]::IsNullOrWhiteSpace($ImportPath)) { $ImportPath = Join-Path $RepoRoot 'PrivilegedEAM' }
     if ([string]::IsNullOrWhiteSpace($OutFile)) { $OutFile = Join-Path $AppRoot 'data/access-path-map-data.js' }
