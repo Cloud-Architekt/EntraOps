@@ -15,7 +15,13 @@
 
 .PARAMETER GroupPrefix
     Prefix of the security group display names (e.g. "SG" for SG-<ServiceName>-WorkloadPlane-Users).
+    A prefix ending with '-', '_' or '.' is used as is (e.g. "SG_" for SG_<ServiceName>-WorkloadPlane-Users).
     Defaults to EntraOpsConfig.ServiceEM.GroupPrefix, otherwise "SG"; an explicitly passed value wins.
+
+.PARAMETER RoleAssignableWorkloadPlaneAdmins
+    Creates WorkloadPlane-Admins as role-assignable group. ControlPlane, ManagementPlane and CatalogPlane groups
+    are always role-assignable, WorkloadPlane-Users never. Only applies when a group is created. Defaults to
+    EntraOpsConfig.ServiceEM.RoleAssignableWorkloadPlaneAdmins; an explicitly passed value wins.
 
 .PARAMETER WorkloadPlaneAdmin
     The UserId (i.e., UPN) of the Workload Plane Admin. Assigned to the admin access package
@@ -197,6 +203,8 @@ function New-EntraOpsServiceBootstrap {
         [string]$GroupPrefix = "SG",
         [string]$GroupNamingDelimiter = "-",
 
+        [switch]$RoleAssignableWorkloadPlaneAdmins,
+
         [AllowEmptyString()]
         [string]$WorkloadPlaneAdmin,
 
@@ -253,7 +261,7 @@ function New-EntraOpsServiceBootstrap {
             $AzureRegion = $configRegion
             Write-Verbose "$logPrefix Using DefaultAzureRegion '$AzureRegion' from EntraOpsConfig"
         }
-        foreach ($switchName in 'SkipCatalogOwnerAssignment', 'CreateM365Group', 'AddWorkloadPlaneAdminToUsers') {
+        foreach ($switchName in 'SkipCatalogOwnerAssignment', 'CreateM365Group', 'AddWorkloadPlaneAdminToUsers', 'RoleAssignableWorkloadPlaneAdmins') {
             if (-not $PSBoundParameters.ContainsKey($switchName) -and (Get-EntraOpsServiceEMConfigValue -Path $switchName) -eq $true) {
                 Set-Variable -Name $switchName -Value ([switch]$true)
                 Write-Verbose "$logPrefix Using $switchName from EntraOpsConfig"
@@ -386,7 +394,7 @@ function New-EntraOpsServiceBootstrap {
                 Write-Verbose "$logPrefix Delegated $($delegation.Name): $($delegatedGroup.DisplayName) ($($delegatedGroup.Id))"
                 [PSCustomObject]@{
                     Id          = $delegatedGroup.Id
-                    DisplayName = "$GroupPrefix$GroupNamingDelimiter$ServiceName$GroupNamingDelimiter$($delegation.Name -replace '-', $GroupNamingDelimiter)"
+                    DisplayName = "$(if ($GroupPrefix -match '[-_.]$') { $GroupPrefix } else { "$GroupPrefix$GroupNamingDelimiter" })$ServiceName$GroupNamingDelimiter$($delegation.Name -replace '-', $GroupNamingDelimiter)"
                     IsDelegated = $true
                 }
             })
@@ -515,6 +523,7 @@ ManagementPlane,Admins,
             ServiceRoles            = $ServiceRoles
             GroupPrefix             = $GroupPrefix
             GroupNamingDelimiter    = $GroupNamingDelimiter
+            RoleAssignableWorkloadPlaneAdmins = $RoleAssignableWorkloadPlaneAdmins
         }
         if ($GroupOwnership -eq "Permanent" -and -not [string]::IsNullOrWhiteSpace($owner)) {
             $ServiceEntraGroupOptions.WorkloadPlaneAdmin = $owner
@@ -548,6 +557,8 @@ ManagementPlane,Admins,
             $report.PimPolicies = New-EntraOpsServicePIMPolicy -ServiceGroups $pimGroups -ServiceName $ServiceName
             Write-Verbose "$logPrefix Service PIM Policy IDs: $($report.PimPolicies.Id|ConvertTo-Json -Compress)"
         }
+
+        $report.WorkloadClassification = Set-EntraOpsServiceEMWorkloadClassification -ServiceGroups $ownedGroups -ServiceName $ServiceName -PimManagedWorkloadPlaneAdmins:$EnableWorkloadPlanePimForGroups -logPrefix $logPrefix
 
         Write-Verbose "$logPrefix Processing Catalog"
         $ServiceEMCatalogOptions = @{

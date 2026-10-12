@@ -163,7 +163,13 @@
 
 .PARAMETER GroupPrefix
     Prefix of the security group display names (e.g. "SG" for SG-Rg-<Prefix>-WorkloadPlane-Users).
+    A prefix ending with '-', '_' or '.' is used as is (e.g. "SG_" for SG_Rg-<Prefix>-WorkloadPlane-Users).
     Defaults to EntraOpsConfig.ServiceEM.GroupPrefix, otherwise "SG"; an explicitly passed value wins.
+
+.PARAMETER RoleAssignableWorkloadPlaneAdmins
+    Creates WorkloadPlane-Admins as role-assignable group. ControlPlane, ManagementPlane and CatalogPlane groups
+    are always role-assignable, WorkloadPlane-Users never. Only applies when a group is created. Defaults to
+    EntraOpsConfig.ServiceEM.RoleAssignableWorkloadPlaneAdmins; an explicitly passed value wins.
 
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
@@ -273,6 +279,8 @@ function New-EntraOpsSubscriptionLandingZone {
         [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_.-]*$')]
         [string]$GroupPrefix = "SG",
 
+        [switch]$RoleAssignableWorkloadPlaneAdmins,
+
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
@@ -323,7 +331,7 @@ function New-EntraOpsSubscriptionLandingZone {
             $AzureRegion = $configRegion
             Write-Verbose "$logPrefix Using DefaultAzureRegion '$AzureRegion' from EntraOpsConfig"
         }
-        foreach ($switchName in 'SkipCatalogOwnerAssignment', 'CreateM365Group', 'AddWorkloadPlaneAdminToUsers') {
+        foreach ($switchName in 'SkipCatalogOwnerAssignment', 'CreateM365Group', 'AddWorkloadPlaneAdminToUsers', 'RoleAssignableWorkloadPlaneAdmins') {
             if (-not $PSBoundParameters.ContainsKey($switchName) -and (Get-EntraOpsServiceEMConfigValue -Path $switchName) -eq $true) {
                 Set-Variable -Name $switchName -Value ([switch]$true)
                 Write-Verbose "$logPrefix Using $switchName from EntraOpsConfig"
@@ -506,6 +514,7 @@ function New-EntraOpsSubscriptionLandingZone {
             ServiceName                      = "$scopeName-$DeploymentPrefix"
             GroupPrefix                      = $GroupPrefix
             AddWorkloadPlaneAdminToUsers     = $AddWorkloadPlaneAdminToUsers
+            RoleAssignableWorkloadPlaneAdmins = $RoleAssignableWorkloadPlaneAdmins
             EnablePimForGroups               = $EnablePimForGroups
             EnableWorkloadPlanePimForGroups  = $EnableWorkloadPlanePimForGroups
             CreateM365Group                  = $CreateM365Group

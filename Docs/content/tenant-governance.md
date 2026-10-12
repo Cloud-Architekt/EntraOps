@@ -219,7 +219,7 @@ not write them. If you did not complete the workload-identity setup above, a Glo
 must first run `Register-EntraOpsTenantGovernanceServicePrincipal` once to configure the UTCM
 service principal for the resource types in `EntraOpsConfig.json`.
 
-When a configuration is loaded (`Connect-EntraOps -ConfigFilePath`), `ResourcesToInclude`,
+When a configuration is loaded by `Connect-EntraOps` (automatically or via `-ConfigFilePath`), `ResourcesToInclude`,
 `SnapshotDisplayNamePrefix` and `SnapshotResourceFileNaming` of `TenantGovernanceSnapshot` are used
 unless you pass the corresponding parameter, so manual runs name files the same way as the workflow.
 Without a loaded configuration, the defaults are the recommended resource set, `EntraOps TG` and

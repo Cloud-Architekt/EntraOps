@@ -343,6 +343,10 @@
             SemCreateM365Group: false,
             SemAddWorkloadPlaneAdminToUsers: false,
             SemGroupPrefix: "SG",
+            SemRoleAssignableWorkloadPlaneAdmins: false,
+            SemAuWorkloadPlane: "",
+            SemAuUserAccess: "",
+            SemUpdateObjectClassificationFile: false,
             SemMpExcludedRoleDefinitionIds: SERVICEEM_EXCLUDED_ROLE_IDS.join("\n"),
             SemMpAllowedTargetGroupFilter: "WorkloadPlane-Admins",
             SemWpAllowedRoleDefinitionIds: SERVICEEM_ALLOWED_ROLE_IDS.join("\n"),
@@ -722,7 +726,16 @@
                         { key: "SemSkipCatalogOwnerAssignment", label: "Skip Catalog Owner assignment", type: "checkbox", default: false, help: "Recommended. Without it, ControlPlane-Admins get a permanent Catalog Owner assignment on every service catalog, which PIM can't protect. Use an eligible Identity Governance Administrator assignment instead. An explicit -SkipCatalogOwnerAssignment parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
                         { key: "SemCreateM365Group", label: "Create Microsoft 365 group", type: "checkbox", default: false, help: "Creates the Microsoft 365 group '<Scope>-<Prefix> Members' for the service team: group mailbox and calendar for email and ChatOps notifications and, with SharePoint Online or Microsoft Teams, a site or team as knowledge base. Intended for the people behind the personas WorkloadPlane users and admins, ManagementPlane members and, in the PerService model, the ManagementPlane and ControlPlane admins; ServiceEM adds no members. The group gets no PIM for Groups eligibilities or other access; the admin and user groups are only granted through access packages. An explicit -CreateM365Group parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
                         { key: "SemAddWorkloadPlaneAdminToUsers", label: "Add workload plane admin to WorkloadPlane-Users", type: "checkbox", default: false, help: "Also assigns the -WorkloadPlaneAdmin to the WorkloadPlane-Users access package (data-plane user access), in addition to the WorkloadPlane-Admins access package. Leave unchecked when admins use dedicated admin accounts. An explicit -AddWorkloadPlaneAdminToUsers parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
-                        { key: "SemGroupPrefix", label: "Security group prefix", type: "text", default: "SG", help: "Prefix of the security group display names, e.g. SG-Rg-MyApp-WorkloadPlane-Users. Letters, digits, '_', '.' or '-'. Mail nicknames, access package and catalog names don't use the prefix, so existing landing zones keep their groups (and display names) after a change; only new groups get the new prefix. An explicit -GroupPrefix parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" }
+                        { key: "SemGroupPrefix", label: "Security group prefix", type: "text", default: "SG", help: "Prefix of the security group display names, e.g. SG-Rg-MyApp-WorkloadPlane-Users. Letters, digits, '_', '.' or '-'; a prefix ending with '-', '_' or '.' is used as is, e.g. SG_ for SG_Rg-MyApp-WorkloadPlane-Users. Mail nicknames, access package and catalog names don't use the prefix, so existing landing zones keep their groups (and display names) after a change; only new groups get the new prefix. An explicit -GroupPrefix parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemRoleAssignableWorkloadPlaneAdmins", label: "Role-assignable WorkloadPlane-Admins", type: "checkbox", default: false, help: "Creates WorkloadPlane-Admins as role-assignable group, so only Privileged Role Administrators and Global Administrators can manage its members and owners. ControlPlane-Admins, ManagementPlane-Admins and CatalogPlane-Members are always role-assignable, WorkloadPlane-Users never. Only applies when a group is created. An explicit -RoleAssignableWorkloadPlaneAdmins parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" }
+                    ]
+                },
+                {
+                    title: "Workload group classification",
+                    fields: [
+                        { key: "SemAuWorkloadPlane", label: "WorkloadPlane administrative unit id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an administrative unit that ServiceEM adds the WorkloadPlane-Admins groups to. Classify them with an Alternate Tier Level Attributes filter for groups, e.g. WorkloadPlane: $Object.AssignedAdministrativeUnits.id -contains \"<id>\". Role-assignable and PIM-managed groups can't be added to a restricted management administrative unit (a warning is shown). Leave empty to skip.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemAuUserAccess", label: "UserAccess administrative unit id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an administrative unit that ServiceEM adds the WorkloadPlane-Users groups to, e.g. for an Alternate Tier Level Attributes filter on UserAccess. Leave empty to skip.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemUpdateObjectClassificationFile", label: "Write workload groups to the Object Classification File", type: "checkbox", default: false, help: "Adds WorkloadPlane-Admins (WorkloadPlane) and WorkloadPlane-Users (UserAccess) to the Object Classification File of the repository; Remove-EntraOpsServiceCatalog removes them again. Can be combined with the administrative units. Existing entries with another tier are kept. Commit the file and enable the Object Classification File to use it. ControlPlane, ManagementPlane and administrator groups aren't classified by ServiceEM.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap, Remove-EntraOpsServiceCatalog" }
                     ]
                 },
                 {
@@ -1635,6 +1648,12 @@
                 CreateM365Group: state.SemCreateM365Group,
                 AddWorkloadPlaneAdminToUsers: state.SemAddWorkloadPlaneAdminToUsers,
                 GroupPrefix: state.SemGroupPrefix,
+                RoleAssignableWorkloadPlaneAdmins: state.SemRoleAssignableWorkloadPlaneAdmins,
+                AdministrativeUnits: {
+                    WorkloadPlane: state.SemAuWorkloadPlane,
+                    UserAccess: state.SemAuUserAccess
+                },
+                UpdateObjectClassificationFile: state.SemUpdateObjectClassificationFile,
                 ConstrainedDelegation: {
                     ManagementPlane: {
                         ExcludedRoleDefinitionIds: commaListToArray(state.SemMpExcludedRoleDefinitionIds),
@@ -1911,6 +1930,10 @@
         state.SemCreateM365Group = pick(cfg, "ServiceEM.CreateM365Group", state.SemCreateM365Group);
         state.SemAddWorkloadPlaneAdminToUsers = pick(cfg, "ServiceEM.AddWorkloadPlaneAdminToUsers", state.SemAddWorkloadPlaneAdminToUsers);
         state.SemGroupPrefix = pick(cfg, "ServiceEM.GroupPrefix", state.SemGroupPrefix);
+        state.SemRoleAssignableWorkloadPlaneAdmins = pick(cfg, "ServiceEM.RoleAssignableWorkloadPlaneAdmins", state.SemRoleAssignableWorkloadPlaneAdmins);
+        state.SemAuWorkloadPlane = pick(cfg, "ServiceEM.AdministrativeUnits.WorkloadPlane", state.SemAuWorkloadPlane);
+        state.SemAuUserAccess = pick(cfg, "ServiceEM.AdministrativeUnits.UserAccess", state.SemAuUserAccess);
+        state.SemUpdateObjectClassificationFile = pick(cfg, "ServiceEM.UpdateObjectClassificationFile", state.SemUpdateObjectClassificationFile);
         state.SemPimMaximumActivationDuration = pick(cfg, "ServiceEM.PIMForGroups.MaximumActivationDuration", state.SemPimMaximumActivationDuration);
         state.SemPimMaximumActiveAssignmentDuration = pick(cfg, "ServiceEM.PIMForGroups.MaximumActiveAssignmentDuration", state.SemPimMaximumActiveAssignmentDuration);
         state.SemApBaselineExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.BaselinePolicy.Expiration", state.SemApBaselineExpiration);

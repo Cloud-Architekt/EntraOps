@@ -14,11 +14,11 @@ landing zones.
 
 **How to configure delegation** (pick one):
 
-| Method | ControlPlane-Admins | ManagementPlane-Admins | CatalogPlane-Members |
+| Method                                    | ControlPlane-Admins                         | ManagementPlane-Admins                         | CatalogPlane-Members               |
 | ----------------------------------------- | ------------------------------------------- | ---------------------------------------------- | ---------------------------------- |
-| Parameter | `-ControlPlaneDelegationGroupId <ObjectId>` | `-ManagementPlaneDelegationGroupId <ObjectId>` | `-AdministratorGroupId <ObjectId>` |
-| EntraOpsConfig (landing zone cmdlet only) | `ServiceEM.ControlPlaneDelegationGroupId` | `ServiceEM.ManagementPlaneDelegationGroupId` | `ServiceEM.AdministratorGroupId` |
-| Skip flag (no delegation, no creation) | `-SkipControlPlaneDelegation` | `-SkipManagementPlaneDelegation` | — |
+| Parameter                                 | `-ControlPlaneDelegationGroupId <ObjectId>` | `-ManagementPlaneDelegationGroupId <ObjectId>` | `-AdministratorGroupId <ObjectId>` |
+| EntraOpsConfig (landing zone cmdlet only) | `ServiceEM.ControlPlaneDelegationGroupId`   | `ServiceEM.ManagementPlaneDelegationGroupId`   | `ServiceEM.AdministratorGroupId`   |
+| Skip flag (no delegation, no creation)    | `-SkipControlPlaneDelegation`               | `-SkipManagementPlaneDelegation`               | —                                  |
 
 When a delegation Group ID is set (via parameter **or** config), the skip flag is **automatically applied**:
 no new group is created, and the provided group is used for all catalog role, policy approver, and Azure RBAC
@@ -26,7 +26,7 @@ assignments that would otherwise reference the landing-zone-owned group.
 
 **What still uses the delegated group:**
 - Catalog Owner role (`ControlPlaneDelegationGroupId`), a permanent assignment unless `-SkipCatalogOwnerAssignment` is set (see [Catalog Owner assignment](../service-em/index.html#catalog-owner-assignment-for-controlplane-admins))
-- Catalog Reader and AP Assignment Manager catalog roles (`ManagementPlaneDelegationGroupId`, permanent, see [Access package assignment manager](../service-em/index.html#access-package-assignment-manager-for-managementplane-admins)), Catalog Reader (`AdministratorGroupId`)
+- AP Assignment Manager catalog role (`ManagementPlaneDelegationGroupId`, permanent, see [Access package assignment manager](../service-em/index.html#access-package-assignment-manager-for-managementplane-admins)); `AdministratorGroupId` gets no catalog role
 - Access package approver and access reviewer of the ManagementPlane-Admins access package, if one exists (`ControlPlaneDelegationGroupId`)
 - Access package approver in Workload Plane Policy, and access reviewer of all other policies except the WorkloadPlane-Users policies (`ManagementPlaneDelegationGroupId`)
 - Requestor scope (`AdministratorGroupId`)
@@ -117,9 +117,8 @@ flowchart TD
 
     %% ── Catalog Role Assignments (group → catalog role) ──────────────────────
     G_Ctrl   -->|"Catalog Owner\n(EM role)"| CR_Owner
-    G_CP     -->|"Catalog Reader\n(EM role)"| CR_Reader
     G_WP_Adm -->|"Catalog Reader\n(EM role)"| CR_Reader
-    G_MP_Adm -->|"Catalog Reader +\nAP Assignment Manager\n(EM roles)"| CR_ApMgr
+    G_MP_Adm -->|"AP Assignment Manager\n(EM role)"| CR_ApMgr
 
     %% ── Access Package Resource Role Scopes (AP → group membership) ──────────
     AP_CP_MBR   -->|"grants Member role"| G_CP
@@ -337,11 +336,13 @@ flowchart LR
     end
 
     G_Ctrl["SG-{Prefix}-ControlPlane-Admins\n(optional)"]  -->|"Catalog Owner"| CR_Owner
-    G_CP["SG-{Prefix}-CatalogPlane-Members"]                -->|"Catalog Reader"| CR_Reader
     G_WP_Adm["SG-{Prefix}-WorkloadPlane-Admins"]            -->|"Catalog Reader"| CR_Reader
-    G_MP_Adm["SG-{Prefix}-ManagementPlane-Admins"]          -->|"Catalog Reader"| CR_Reader
-    G_MP_Adm                                                -->|"AP Assignment Manager"| CR_ApMgr
+    G_MP_Adm["SG-{Prefix}-ManagementPlane-Admins"]          -->|"AP Assignment Manager"| CR_ApMgr
 ```
+
+CatalogPlane-Members get no catalog role; the assignment policies grant them requesting and approving. WorkloadPlane-Admins
+keep Catalog Reader for transparency over the catalog's assignments, and the AP Assignment Manager role of
+ManagementPlane-Admins includes reading the catalog.
 
 > **Security note:** Catalog roles can't be PIM-protected. The **Access package assignment manager** role of ManagementPlane-Admins
 > is permanent: its members can directly assign every access package of the catalog without approval, including
@@ -355,35 +356,35 @@ flowchart LR
 
 ## Summary Table
 
-| Resource | Name | Depends on |
+| Resource             | Name                                                                                                                                                                                                 | Depends on                                                                                                                                                                                                                                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unified Group        | `{Prefix} Members` (only with `-CreateM365Group`: team collaboration, email/ChatOps, SharePoint/Teams knowledge)                                                                                     | Resource (Member role) of every access package of the scope                                                                                                                                                                                                                                                 |
-| Security Group | `SG-{Prefix}-CatalogPlane-Members` | *(delegated via `AdministratorGroupId`)* |
+| Security Group       | `SG-{Prefix}-CatalogPlane-Members`                                                                                                                                                                   | *(delegated via `AdministratorGroupId`)*                                                                                                                                                                                                                                                                    |
 | Security Group       | `SG-{Prefix}-WorkloadPlane-Members`                                                                                                                                                                  | — (only with custom `-ServiceRoles`)                                                                                                                                                                                                                                                                        |
-| Security Group | `SG-{Prefix}-WorkloadPlane-Users` | — |
-| Security Group | `SG-{Prefix}-WorkloadPlane-Admins` | — |
-| Security Group | `SG-{Prefix}-ManagementPlane-Admins` | *(delegated)* |
+| Security Group       | `SG-{Prefix}-WorkloadPlane-Users`                                                                                                                                                                    | —                                                                                                                                                                                                                                                                                                           |
+| Security Group       | `SG-{Prefix}-WorkloadPlane-Admins`                                                                                                                                                                   | —                                                                                                                                                                                                                                                                                                           |
+| Security Group       | `SG-{Prefix}-ManagementPlane-Admins`                                                                                                                                                                 | *(delegated)*                                                                                                                                                                                                                                                                                               |
 | Security Group       | `SG-{Prefix}-ControlPlane-Admins`                                                                                                                                                                    | *(optional / delegated)*; initial members via `-ControlPlaneAdmins` (no access package)                                                                                                                                                                                                                     |
-| EM Catalog | `Catalog-{Prefix}` | All owned groups above (registered as resources; delegated groups are not) |
-| Catalog Role | Owner | ControlPlane-Admins as principal (own or delegated group) |
-| Catalog Role | Reader | CatalogPlane-Members, WorkloadPlane-Admins and ManagementPlane-Admins as principals |
+| EM Catalog           | `Catalog-{Prefix}`                                                                                                                                                                                   | All owned groups above (registered as resources; delegated groups are not)                                                                                                                                                                                                                                  |
+| Catalog Role         | Owner                                                                                                                                                                                                | ControlPlane-Admins as principal (own or delegated group)                                                                                                                                                                                                                                                   |
+| Catalog Role         | Reader                                                                                                                                                                                               | CatalogPlane-Members, WorkloadPlane-Admins and ManagementPlane-Admins as principals                                                                                                                                                                                                                         |
 | Catalog Role         | ApAssignmentManager                                                                                                                                                                                  | ManagementPlane-Admins as principal (own or delegated group); permanent, can assign every access package of the catalog without approval                                                                                                                                                                    |
-| Access Package | `AP-{Prefix}-CatalogPlane-Members` | Catalog · CatalogPlane-Members group |
-| Access Package | `AP-{Prefix}-WorkloadPlane-Members` | Catalog · WorkloadPlane-Members group |
-| Access Package | `AP-{Prefix}-WorkloadPlane-Users` | Catalog · WorkloadPlane-Users group |
-| Access Package | `AP-{Prefix}-WorkloadPlane-Admins` | Catalog · WorkloadPlane-Admins group |
-| Access Package | `AP-{Prefix}-ManagementPlane-Admins` | Catalog · ManagementPlane-Admins group (not created when delegated) |
-| Assignment Policy | Initial Workload Membership Policy | WorkloadPlane-Members AP · requestor's manager, then CatalogPlane-Members (approvers) |
-| Assignment Policy    | Workload Plane Policy                                                                                                                                                                                | WorkloadPlane-Admins AP · WorkloadPlane-Members (requestors; CatalogPlane-Members if no WorkloadPlane-Members group exists) · ManagementPlane-Admins (approver, own or delegated group) — not created without a ManagementPlane-Admins approver                                 |
-| Assignment Policy | Initial Workload Admin Policy | WorkloadPlane-Admins AP · admin-assigned only (targets: all member users), no approval |
+| Access Package       | `AP-{Prefix}-CatalogPlane-Members`                                                                                                                                                                   | Catalog · CatalogPlane-Members group                                                                                                                                                                                                                                                                        |
+| Access Package       | `AP-{Prefix}-WorkloadPlane-Members`                                                                                                                                                                  | Catalog · WorkloadPlane-Members group                                                                                                                                                                                                                                                                       |
+| Access Package       | `AP-{Prefix}-WorkloadPlane-Users`                                                                                                                                                                    | Catalog · WorkloadPlane-Users group                                                                                                                                                                                                                                                                         |
+| Access Package       | `AP-{Prefix}-WorkloadPlane-Admins`                                                                                                                                                                   | Catalog · WorkloadPlane-Admins group                                                                                                                                                                                                                                                                        |
+| Access Package       | `AP-{Prefix}-ManagementPlane-Admins`                                                                                                                                                                 | Catalog · ManagementPlane-Admins group (not created when delegated)                                                                                                                                                                                                                                         |
+| Assignment Policy    | Initial Workload Membership Policy                                                                                                                                                                   | WorkloadPlane-Members AP · requestor's manager, then CatalogPlane-Members (approvers)                                                                                                                                                                                                                       |
+| Assignment Policy    | Workload Plane Policy                                                                                                                                                                                | WorkloadPlane-Admins AP · WorkloadPlane-Members (requestors; CatalogPlane-Members if no WorkloadPlane-Members group exists) · ManagementPlane-Admins (approver, own or delegated group) — not created without a ManagementPlane-Admins approver                                                             |
+| Assignment Policy    | Initial Workload Admin Policy                                                                                                                                                                        | WorkloadPlane-Admins AP · admin-assigned only (targets: all member users), no approval                                                                                                                                                                                                                      |
 | Assignment Policy    | Workload Plane Users Policy                                                                                                                                                                          | WorkloadPlane-Users AP · all member users (requestors; `ServiceEM.AssignmentPolicies.WorkloadPlaneUsers.RequestorScope` = `CatalogPlaneMembers` restricts to CatalogPlane-Members) · WorkloadPlane-Admins (approver; ManagementPlane-Admins if no WorkloadPlane-Admins group exists, otherwise not created) |
-| Assignment Policy | Initial Workload Users Policy | WorkloadPlane-Users AP · admin-assigned only (targets: all member users), no approval |
-| Assignment Policy    | Management Plane Policy                                                                                                                                                                              | ManagementPlane-Admins AP · CatalogPlane-Members (requestors) · ControlPlane-Admins (approver, no escalation or fallback; default access reviewer) — only if ControlPlane-Admins (own or delegated) exists in the scope                                              |
-| Assignment Policy | Initial Management Admin Policy | ManagementPlane-Admins AP · admin-assigned only (targets: all member users), no approval |
-| Assignment Policy | Baseline Policy | CatalogPlane-Members AP · CatalogPlane-Members (requestors & approver) |
+| Assignment Policy    | Initial Workload Users Policy                                                                                                                                                                        | WorkloadPlane-Users AP · admin-assigned only (targets: all member users), no approval                                                                                                                                                                                                                       |
+| Assignment Policy    | Management Plane Policy                                                                                                                                                                              | ManagementPlane-Admins AP · CatalogPlane-Members (requestors) · ControlPlane-Admins (approver, no escalation or fallback; default access reviewer) — only if ControlPlane-Admins (own or delegated) exists in the scope                                                                                     |
+| Assignment Policy    | Initial Management Admin Policy                                                                                                                                                                      | ManagementPlane-Admins AP · admin-assigned only (targets: all member users), no approval                                                                                                                                                                                                                    |
+| Assignment Policy    | Baseline Policy                                                                                                                                                                                      | CatalogPlane-Members AP · CatalogPlane-Members (requestors & approver)                                                                                                                                                                                                                                      |
 | Assignment Policy    | Initial Catalog Members Policy                                                                                                                                                                       | CatalogPlane-Members AP · admin-assigned only (targets: all member users), no approval — not created with `AdministratorGroupId`                                                                                                                                                                            |
-| Initial Assignment | Service Members (+ the Service Owner with `-AddWorkloadPlaneAdminToUsers`) → WorkloadPlane-Members AP, or WorkloadPlane-Users AP if no WorkloadPlane-Members AP exists (landing zones) | Initial Workload Membership Policy (with approval) or Initial Workload Users Policy |
-| Initial Assignment | Service Owner (`-WorkloadPlaneAdmin`) → ManagementPlane-Admins AP, or WorkloadPlane-Admins AP if no ManagementPlane-Admins AP exists | Initial Management Admin Policy or Initial Workload Admin Policy |
+| Initial Assignment   | Service Members (+ the Service Owner with `-AddWorkloadPlaneAdminToUsers`) → WorkloadPlane-Members AP, or WorkloadPlane-Users AP if no WorkloadPlane-Members AP exists (landing zones)               | Initial Workload Membership Policy (with approval) or Initial Workload Users Policy                                                                                                                                                                                                                         |
+| Initial Assignment   | Service Owner (`-WorkloadPlaneAdmin`) → ManagementPlane-Admins AP, or WorkloadPlane-Admins AP if no ManagementPlane-Admins AP exists                                                                 | Initial Management Admin Policy or Initial Workload Admin Policy                                                                                                                                                                                                                                            |
 | Initial Assignment   | Service Owner (`-WorkloadPlaneAdmin`) and `-CatalogPlaneMembers` → CatalogPlane-Members AP                                                                                                           | Initial Catalog Members Policy                                                                                                                                                                                                                                                                              |
 | Initial Membership   | `-ControlPlaneAdmins` → ControlPlane-Admins group (PIM for Groups eligible with `-EnablePimForGroups`, otherwise permanent)                                                                          | PerService only                                                                                                                                                                                                                                                                                             |
 | PIM for Groups       | Policy for ControlPlane-Admins and ManagementPlane-Admins; their access packages grant eligible membership (Eligible Member)                                                                         | Only with `-EnablePimForGroups` (Microsoft Entra ID Governance license); never for delegated groups                                                                                                                                                                                                         |
@@ -405,16 +406,16 @@ When deploying `New-EntraOpsSubscriptionLandingZone` with `-GovernanceModel "Cen
 - AdministratorGroup (CatalogPlane-Members) → Shared group (e.g., `dug - PrivilegedAccounts`)
 
 **Groups (default `-DeploymentScope ResourceGroup`; `Subscription` uses `Sub-`):**
-| Group Created | Purpose |
+| Group Created                         | Purpose                                                             |
 | ------------------------------------- | ------------------------------------------------------------------- |
-| `Rg-{Prefix} Members` | Unified M365 group for team collaboration (with `-CreateM365Group`) |
-| `SG-Rg-{Prefix}-WorkloadPlane-Users` | Security group for data-plane access |
-| `SG-Rg-{Prefix}-WorkloadPlane-Admins` | Security group for workload admin elevation |
+| `Rg-{Prefix} Members`                 | Unified M365 group for team collaboration (with `-CreateM365Group`) |
+| `SG-Rg-{Prefix}-WorkloadPlane-Users`  | Security group for data-plane access                                |
+| `SG-Rg-{Prefix}-WorkloadPlane-Admins` | Security group for workload admin elevation                         |
 
 **Access Packages:**
-| Access Package | Grants Membership To | Policy | Initial Assignment |
+| Access Package                        | Grants Membership To                  | Policy                                                                                                                                                     | Initial Assignment                                                      |
 | ------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `AP-Rg-{Prefix}-WorkloadPlane-Users` | `SG-Rg-{Prefix}-WorkloadPlane-Users` | Workload Plane Users Policy (requestors: all member users, approver: WorkloadPlane-Admins) and Initial Workload Users Policy (admin-assigned only) | Service Members via Initial Workload Users Policy |
+| `AP-Rg-{Prefix}-WorkloadPlane-Users`  | `SG-Rg-{Prefix}-WorkloadPlane-Users`  | Workload Plane Users Policy (requestors: all member users, approver: WorkloadPlane-Admins) and Initial Workload Users Policy (admin-assigned only)         | Service Members via Initial Workload Users Policy                       |
 | `AP-Rg-{Prefix}-WorkloadPlane-Admins` | `SG-Rg-{Prefix}-WorkloadPlane-Admins` | Workload Plane Policy (requestors: AdministratorGroup, approver: ManagementPlane delegation group) and Initial Workload Admin Policy (admin-assigned only) | Service Owner (`-WorkloadPlaneAdmin`) via Initial Workload Admin Policy |
 
 **What's NOT Created (Centralized):**
@@ -465,8 +466,8 @@ flowchart TD
 
     %% ─── Delegation groups referenced in catalogs (roles only, not resources) ─
     G_Ctrl_Global -.->|"Catalog Owner"| CAT_Rg
-    G_MP_Global -.->|"Reader + AP Assignment Manager"| CAT_Rg
-    G_Admin_Global -.->|"Catalog Reader"| CAT_Rg
+    G_MP_Global -.->|"AP Assignment Manager"| CAT_Rg
+    G_Admin_Global -.->|"requestor scope"| AP_WP_Adm
 
     %% ─── Access packages grant membership ─────────────────────────────────
     AP_WP_Usr -->|"grants Member role"| G_WP_Usr

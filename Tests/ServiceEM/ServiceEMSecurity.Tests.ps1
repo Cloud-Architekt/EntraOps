@@ -31,6 +31,9 @@ BeforeAll {
     . "$script:TestRepositoryRoot/EntraOps/Private/Resolve-EntraOpsServiceEMDelegationGroup.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Wait-EntraOpsServiceEMCondition.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsServiceEMConfigValue.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsPathWithinRoot.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Update-EntraOpsServiceEMObjectClassificationFile.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Set-EntraOpsServiceEMWorkloadClassification.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/New-EntraOpsServiceEMCatalog.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/New-EntraOpsServiceEMAssignmentPolicy.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/New-EntraOpsServicePIMPolicy.ps1"
@@ -311,6 +314,21 @@ Describe 'ServiceEM workload plane admin and group ownership' {
         Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly -ParameterFilter { $GroupPrefix -eq 'SEC' }
     }
 
+    It 'uses RoleAssignableWorkloadPlaneAdmins from ServiceEM config unless the parameter is set explicitly' {
+        try {
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-A' -SkipAzureResourceGroup -ServiceMembers @() 6>$null | Out-Null
+            $Global:EntraOpsConfig = @{ ServiceEM = @{ RoleAssignableWorkloadPlaneAdmins = $true } }
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-B' -SkipAzureResourceGroup -ServiceMembers @() 6>$null | Out-Null
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-C' -SkipAzureResourceGroup -ServiceMembers @() -RoleAssignableWorkloadPlaneAdmins:$false 6>$null | Out-Null
+        } finally {
+            $Global:EntraOpsConfig = $null
+        }
+
+        Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-A' -and -not $RoleAssignableWorkloadPlaneAdmins }
+        Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-B' -and $RoleAssignableWorkloadPlaneAdmins }
+        Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-C' -and -not $RoleAssignableWorkloadPlaneAdmins }
+    }
+
     It 'stops before creating objects when a user lookup fails' {
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Uri -eq '/v1.0/users/missing@contoso.com') { return $null }
@@ -467,6 +485,18 @@ Describe 'ServiceEM catalog owner assignment' {
 
         @($script:RoleBodies | Where-Object { $_.roleDefinitionId -eq $script:OwnerRoleId }).Count | Should -Be 0
         $script:RoleBodies.Count | Should -BeGreaterThan 0
+    }
+
+    It 'assigns Catalog Reader only to WorkloadPlane-Admins' {
+        $groups = @($script:CatalogGroups) + [pscustomobject]@{ Id = 'mp'; DisplayName = 'SG-Rg-X-ManagementPlane-Admins' }
+
+        New-EntraOpsServiceEMCatalogResourceRole -ServiceGroups $groups -ServiceCatalogId 'cat' -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        @($script:RoleBodies | Where-Object { $_.roleDefinitionId -eq '44272f93-9762-48e8-af59-1b5351b1d6b3' } | ForEach-Object { $_.principalId }) |
+        Should -Be @('id:SG-Rg-X-WorkloadPlane-Admins')
+        @($script:RoleBodies | Where-Object { $_.principalId -eq 'id:SG-Rg-X-CatalogPlane-Members' }).Count | Should -Be 0
+        @($script:RoleBodies | Where-Object { $_.principalId -eq 'mp' } | ForEach-Object { $_.roleDefinitionId }) |
+        Should -Be @('e2182095-804a-4656-ae11-64734e9b7ae5')
     }
 
     It 'warns about same-tier escalation only for a per-service ManagementPlane-Admins group' {
@@ -636,8 +666,8 @@ Describe 'ServiceEM access package assignment fulfillment' {
         $script:NextState = { param($id) 'delivering' }
 
         { New-EntraOpsServiceEMAssignment -ServiceCatalogId 'cat' -ServiceMembers @([pscustomobject]@{ Id = 'admin' }) `
-            -ServiceAssignmentPolicies $script:Policies -ServicePackages $script:Packages `
-            -WarningVariable script:warnings -WarningAction SilentlyContinue 6>$null } | Should -Not -Throw
+                -ServiceAssignmentPolicies $script:Policies -ServicePackages $script:Packages `
+                -WarningVariable script:warnings -WarningAction SilentlyContinue 6>$null } | Should -Not -Throw
 
         @($script:warnings | Where-Object { "$_" -like '*continuing without waiting*req-admin=delivering*' }).Count | Should -Be 1
         Should -Invoke Start-Sleep -Times 15 -Exactly
@@ -829,6 +859,19 @@ Describe 'ServiceEM landing zone deployment scope' {
         Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-A' -and $GroupPrefix -eq 'SG' }
         Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-B' -and $GroupPrefix -eq 'GRP' }
         Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-C' -and $GroupPrefix -eq 'SEC' }
+    }
+
+    It 'forwards RoleAssignableWorkloadPlaneAdmins from parameter or ServiceEM config' {
+        New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'A' -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel PerService 6>$null | Out-Null
+        New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'B' -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel PerService -RoleAssignableWorkloadPlaneAdmins 6>$null | Out-Null
+        $Global:EntraOpsConfig = @{ ServiceEM = @{ RoleAssignableWorkloadPlaneAdmins = $true } }
+        New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'C' -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel PerService 6>$null | Out-Null
+        New-EntraOpsSubscriptionLandingZone -DeploymentPrefix 'D' -AzureRegion 'westeurope' -SubscriptionId $script:TargetSub -GovernanceModel PerService -RoleAssignableWorkloadPlaneAdmins:$false 6>$null | Out-Null
+
+        Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-A' -and -not $RoleAssignableWorkloadPlaneAdmins }
+        Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-B' -and $RoleAssignableWorkloadPlaneAdmins }
+        Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-C' -and $RoleAssignableWorkloadPlaneAdmins }
+        Should -Invoke New-EntraOpsServiceBootstrap -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Rg-D' -and -not $RoleAssignableWorkloadPlaneAdmins }
     }
 
     It 'forwards CreateM365Group and creates no Microsoft 365 group by default' {
@@ -1374,7 +1417,10 @@ Describe 'ServiceEM assignment policy group references' {
                             InitialWorkloadUsers  = @{ ReviewerType = 'Manager' }
                             WorkloadPlaneAdmins   = @{ ReviewerType = 'SpecificReviewers'; Reviewers = @('11111111-1111-1111-1111-111111111111', 'admin@contoso.com') }
                             InitialWorkloadAdmins = @{ ReviewerType = 'Group'; Reviewers = @('22222222-2222-2222-2222-222222222222', 'CatalogPlane-Members') }
-                        } } } }
+                        } 
+                    } 
+                } 
+            }
 
             New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $script:ArGroups -ServicePackages $script:ArPackages | Out-Null
 
@@ -1470,7 +1516,9 @@ Describe 'ServiceEM assignment policy group references' {
             $Global:EntraOpsConfig = @{ ServiceEM = @{ AssignmentPolicies = @{
                         WorkloadPlaneAdmins = @{ Expiration = 'PT8H'; ApprovalTimeout = 'P1D' }
                         WorkloadPlaneUsers  = @{ RequestorScope = 'CatalogPlaneMembers' }
-                    } } }
+                    } 
+                } 
+            }
             $groups = @($script:WpGroups) + (New-TestGroup 'SG-Rg-X-CatalogPlane-Members')
 
             New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages $script:WpPackages | Out-Null
@@ -1517,7 +1565,9 @@ Describe 'ServiceEM assignment policy group references' {
             $Global:EntraOpsConfig = @{ ServiceEM = @{ AssignmentPolicies = @{
                         WorkloadPlaneUsers  = @{ AllowExtension = $false }
                         WorkloadPlaneAdmins = @{ Expiration = 'noExpiration' }
-                    } } }
+                    } 
+                } 
+            }
 
             New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $script:WpGroups -ServicePackages $script:WpPackages | Out-Null
 
@@ -1560,7 +1610,7 @@ Describe 'ServiceEM catalog removal resource group' {
             if ($Method -eq 'DELETE') { $script:DeletedUris.Add($Uri); return }
             if ($Uri -like '/v1.0/groups/*') {
                 $id = ($Uri -split '/|\?')[3]
-                $nickname = @{ 'own'= 'Rg-MyApp.WorkloadPlane.Users'; 'pim' = 'PIM.Rg-MyApp.ManagementPlane.Admins'; 'foreign' = 'Shared.Admins' }[$id]
+                $nickname = @{ 'own' = 'Rg-MyApp.WorkloadPlane.Users'; 'pim' = 'PIM.Rg-MyApp.ManagementPlane.Admins'; 'foreign' = 'Shared.Admins' }[$id]
                 return [pscustomobject]@{ Id = $id; MailNickname = $nickname }
             }
             if ($Method -eq 'GET') { return [pscustomobject]@{ Id = 'catalog-id'; accessPackages = @(); Resources = $script:CatalogResources } }
@@ -1631,6 +1681,139 @@ Describe 'ServiceEM catalog removal resource group' {
         $script:DeletedUris.Count | Should -Be 0
         Should -Invoke Remove-AzResourceGroup -Times 0 -Exactly
         Should -Invoke Set-AzContext -Times 0 -Exactly
+    }
+}
+
+Describe 'ServiceEM workload group classification' {
+    BeforeEach {
+        Mock Start-Sleep {}
+        $script:AuPosts = [System.Collections.Generic.List[string]]::new()
+        $script:AuRestricted = $false
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'GET') { return [pscustomobject]@{ id = ($Uri -split '/|\?')[3]; displayName = 'AU'; isMemberManagementRestricted = $script:AuRestricted } }
+            if ($Method -eq 'POST') { $script:AuPosts.Add("$(($Uri -split '/')[3])|$(($Body | ConvertFrom-Json).'@odata.id' -replace '.*/')") }
+        }
+        $script:WorkloadGroups = @(
+            [pscustomobject]@{ Id = 'wa'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins'; MailNickname = 'Rg-X.WorkloadPlane.Admins'; IsAssignableToRole = $true }
+            [pscustomobject]@{ Id = 'wu'; DisplayName = 'SG-Rg-X-WorkloadPlane-Users'; MailNickname = 'Rg-X.WorkloadPlane.Users'; IsAssignableToRole = $false }
+            [pscustomobject]@{ Id = 'ca'; DisplayName = 'SG-Rg-X-ControlPlane-Admins'; MailNickname = 'Rg-X.ControlPlane.Admins'; IsAssignableToRole = $true }
+            [pscustomobject]@{ Id = 'ma'; DisplayName = 'SG-Rg-X-ManagementPlane-Admins'; IsDelegated = $true }
+        )
+        $script:AuWorkload = '11111111-1111-1111-1111-111111111111'
+        $script:AuUsers = '22222222-2222-2222-2222-222222222222'
+    }
+
+    AfterEach {
+        $Global:EntraOpsConfig = $null
+    }
+
+    It 'adds only WorkloadPlane-Admins and WorkloadPlane-Users to the configured administrative units' {
+        $Global:EntraOpsConfig = @{ ServiceEM = @{ AdministrativeUnits = @{ WorkloadPlane = $script:AuWorkload; UserAccess = $script:AuUsers } } }
+
+        $result = Set-EntraOpsServiceEMWorkloadClassification -ServiceGroups $script:WorkloadGroups -ServiceName 'Rg-X' 6>$null
+
+        @($script:AuPosts | Sort-Object) | Should -Be @("$($script:AuWorkload)|wa", "$($script:AuUsers)|wu")
+        ($result | Where-Object Id -EQ 'wu').AdminTierLevelName | Should -Be 'UserAccess'
+    }
+
+    It 'warns and skips role-assignable or PIM-managed groups for a restricted management administrative unit' {
+        $Global:EntraOpsConfig = @{ ServiceEM = @{ AdministrativeUnits = @{ WorkloadPlane = $script:AuWorkload; UserAccess = $script:AuUsers } } }
+        $script:AuRestricted = $true
+
+        Set-EntraOpsServiceEMWorkloadClassification -ServiceGroups $script:WorkloadGroups -ServiceName 'Rg-X' -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        $script:AuPosts | Should -Be @("$($script:AuUsers)|wu")
+        @($warnings | Where-Object { "$_" -like '*restricted management administrative unit*role-assignable*' }).Count | Should -Be 1
+    }
+
+    It 'writes new entries to the Object Classification File and keeps existing entries' {
+        $EntraOpsBaseFolder = $TestDrive
+        $Global:EntraOpsConfig = @{ ServiceEM = @{ UpdateObjectClassificationFile = $true }; ObjectClassificationFile = @{ Enabled = $true; FilePath = './Classification/ObjectClassification.json' } }
+        $groups = @($script:WorkloadGroups | ForEach-Object { $_.PSObject.Copy() })
+        $groups[0].Id = '33333333-3333-3333-3333-333333333333'
+        $groups[1].Id = '44444444-4444-4444-4444-444444444444'
+        $filePath = Join-Path $TestDrive 'Classification/ObjectClassification.json'
+        New-Item -ItemType Directory -Path (Split-Path $filePath) -Force | Out-Null
+        ConvertTo-Json -InputObject @([pscustomobject]@{ ObjectId = $groups[1].Id; ObjectType = 'group'; AdminTierLevelName = 'WorkloadPlane' }) | Set-Content $filePath
+
+        $warnings = @(Set-EntraOpsServiceEMWorkloadClassification -ServiceGroups $groups -ServiceName 'Rg-X' 3>&1 6>$null | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+
+        $entries = Get-Content $filePath -Raw | ConvertFrom-Json
+        ($entries | Where-Object ObjectId -EQ $groups[0].Id).AdminTierLevelName | Should -Be 'WorkloadPlane'
+        ($entries | Where-Object ObjectId -EQ $groups[1].Id).AdminTierLevelName | Should -Be 'WorkloadPlane'
+        @($entries).Count | Should -Be 2
+        @($warnings | Where-Object { "$_" -like '*already lists*kept*' }).Count | Should -Be 1
+        $script:AuPosts.Count | Should -Be 0
+
+        Update-EntraOpsServiceEMObjectClassificationFile -RemoveObjectIds @($groups[0].Id) | Out-Null
+        @(Get-Content $filePath -Raw | ConvertFrom-Json).ObjectId | Should -Be @($groups[1].Id)
+    }
+}
+
+Describe 'ServiceEM catalog removal with open assignment requests' {
+    BeforeEach {
+        Mock Start-Sleep {}
+        $script:DeletedUris = [System.Collections.Generic.List[string]]::new()
+        $script:PostedUris = [System.Collections.Generic.List[string]]::new()
+        $script:OpenRequest = [pscustomobject]@{ id = 'open-req'; requestType = 'userAdd'; state = 'pendingApproval'; status = 'PendingApproval' }
+        $script:AdminRemoveFails = $false
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'DELETE') { $script:DeletedUris.Add($Uri); return }
+            if ($Method -eq 'POST') {
+                $script:PostedUris.Add($Uri)
+                if ($Uri -like '*/open-req/cancel') { $script:OpenRequest.state = 'canceled'; $script:OpenRequest.status = 'Canceled'; return }
+                if ($script:AdminRemoveFails) { throw 'There is already an existing open request.' }
+                return [pscustomobject]@{ id = 'remove-req' }
+            }
+            if ($Uri -like '*/assignmentRequests/open-req') { return $script:OpenRequest }
+            if ($Uri -like '*/assignmentRequests/remove-req') { return [pscustomobject]@{ id = 'remove-req'; state = 'delivered'; status = 'Delivered' } }
+            if ($Uri -like '*/assignmentRequests?*') { return $script:OpenRequest }
+            if ($Uri -like '*/assignments?*') { return [pscustomobject]@{ id = 'assignment-1'; state = 'delivered'; target = [pscustomobject]@{ displayName = 'User' } } }
+            if ($Uri -like '*/resourceRoleScopes') { return @() }
+            if ($Uri -like '/v1.0/groups/*') { return [pscustomobject]@{ Id = 'own'; MailNickname = 'Rg-MyApp.WorkloadPlane.Users' } }
+            return [pscustomobject]@{
+                Id             = 'catalog-id'
+                accessPackages = @([pscustomobject]@{ Id = 'ap-1'; displayName = 'AP-Rg-MyApp-WorkloadPlane-Users' })
+                Resources      = @([pscustomobject]@{ OriginSystem = 'AadGroup'; OriginId = 'own'; DisplayName = 'own' })
+            }
+        }
+    }
+
+    It 'cancels a pending approval request before removing the assignment' {
+        Remove-EntraOpsServiceCatalog -ServiceCatalogName 'Catalog-Rg-MyApp' -Force -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        $script:PostedUris[0] | Should -BeLike '*/assignmentRequests/open-req/cancel'
+        $script:PostedUris | Should -Contain '/v1.0/identityGovernance/entitlementManagement/assignmentRequests'
+        $script:DeletedUris | Should -Contain '/v1.0/identityGovernance/entitlementManagement/accessPackages/ap-1'
+        $script:DeletedUris | Should -Contain '/v1.0/identityGovernance/entitlementManagement/catalogs/catalog-id'
+        $script:DeletedUris | Should -Contain '/v1.0/groups/own'
+    }
+
+    It 'waits for a request that cannot be canceled instead of canceling it' {
+        $script:OpenRequest = [pscustomobject]@{ id = 'open-req'; requestType = 'adminRemove'; state = 'delivering'; status = 'Delivering' }
+        Mock Wait-EntraOpsServiceEMCondition { & $Condition | Out-Null; $script:OpenRequest.state = 'delivered'; $script:OpenRequest.status = 'Delivered'; & $Condition }
+
+        Remove-EntraOpsServiceCatalog -ServiceCatalogName 'Catalog-Rg-MyApp' -Force -WarningAction SilentlyContinue 6>$null | Out-Null
+
+        @($script:PostedUris | Where-Object { $_ -like '*/cancel' }).Count | Should -Be 0
+        $script:DeletedUris | Should -Contain '/v1.0/identityGovernance/entitlementManagement/catalogs/catalog-id'
+    }
+
+    It 'keeps the catalog and groups when an assignment cannot be removed' {
+        $script:AdminRemoveFails = $true
+
+        { Remove-EntraOpsServiceCatalog -ServiceCatalogName 'Catalog-Rg-MyApp' -Force -WarningAction SilentlyContinue 6>$null } |
+        Should -Throw '*incomplete*adminRemove of assignment assignment-1*'
+        $script:DeletedUris | Should -Not -Contain '/v1.0/identityGovernance/entitlementManagement/catalogs/catalog-id'
+        $script:DeletedUris | Should -Not -Contain '/v1.0/groups/own'
+    }
+
+    It 'keeps the catalog and groups when an open request does not complete' {
+        $script:OpenRequest = [pscustomobject]@{ id = 'open-req'; requestType = 'adminRemove'; state = 'delivering'; status = 'Delivering' }
+
+        { Remove-EntraOpsServiceCatalog -ServiceCatalogName 'Catalog-Rg-MyApp' -Force -WarningAction SilentlyContinue 6>$null } |
+        Should -Throw '*1 open assignment request(s) did not complete*'
+        $script:DeletedUris | Should -Not -Contain '/v1.0/groups/own'
     }
 }
 
@@ -1709,6 +1892,124 @@ Describe 'ServiceEM PIM policy safety' {
 
         { New-EntraOpsServicePIMPolicy -ServiceGroups @([pscustomobject]@{ Id = 'failed-group'; DisplayName = 'SG-Test-ControlPlane-Admins' }) } |
         Should -Throw '*Failed to update PIM policy for 1 group(s)*failed-group*'
+    }
+
+    It 'retries the policy PATCH while the policy object returns 404' {
+        Mock Start-Sleep {}
+        $script:PatchCalls = 0
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'GET') { return [pscustomobject]@{ Id = 'assignment-member'; PolicyId = 'policy-id' } }
+            if ($Method -eq 'PATCH') {
+                $script:PatchCalls++
+                if ($script:PatchCalls -lt 3) {
+                    $ex = [System.InvalidOperationException]::new('404 (Not Found)')
+                    $ex.Data['StatusCode'] = 404
+                    throw $ex
+                }
+            }
+        }
+
+        New-EntraOpsServicePIMPolicy -ServiceGroups @([pscustomobject]@{ Id = 'group-id'; DisplayName = 'SG-Test-ControlPlane-Admins' }) 6>$null | Out-Null
+
+        $script:PatchCalls | Should -Be 3
+    }
+
+    It 'does not retry the policy PATCH on non-404 errors' {
+        Mock Start-Sleep {}
+        $script:PatchCalls = 0
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'GET') { return [pscustomobject]@{ Id = 'assignment-member'; PolicyId = 'policy-id' } }
+            if ($Method -eq 'PATCH') {
+                $script:PatchCalls++
+                $ex = [System.InvalidOperationException]::new('403 (Forbidden)')
+                $ex.Data['StatusCode'] = 403
+                throw $ex
+            }
+        }
+
+        { New-EntraOpsServicePIMPolicy -ServiceGroups @([pscustomobject]@{ Id = 'group-id'; DisplayName = 'SG-Test-ControlPlane-Admins' }) 6>$null } |
+        Should -Throw '*Failed to update PIM policy for 1 group(s)*'
+        $script:PatchCalls | Should -Be 1
+    }
+
+    It 'waits for the member policy assignment of a new group without using the cache' {
+        Mock Start-Sleep {}
+        $script:GetCalls = 0
+        $script:PatchCalls = 0
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'GET') {
+                $script:GetCalls++
+                if ($script:GetCalls -lt 2) { return $null }
+                return [pscustomobject]@{ Id = 'assignment-member'; PolicyId = 'policy-id' }
+            }
+            if ($Method -eq 'PATCH') { $script:PatchCalls++ }
+        }
+
+        New-EntraOpsServicePIMPolicy -ServiceGroups @([pscustomobject]@{ Id = 'group-id'; DisplayName = 'SG-Test-ControlPlane-Admins' }) 6>$null | Out-Null
+
+        $script:GetCalls | Should -Be 2
+        $script:PatchCalls | Should -Be 1
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'GET' -and -not $DisableCache } -Times 0 -Exactly
+    }
+
+    It 'fails when the policy PATCH keeps returning 404 until the wait times out' {
+        Mock Start-Sleep {}
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'GET') { return [pscustomobject]@{ Id = 'assignment-member'; PolicyId = 'policy-id' } }
+            if ($Method -eq 'PATCH') {
+                $ex = [System.InvalidOperationException]::new('404 (Not Found)')
+                $ex.Data['StatusCode'] = 404
+                throw $ex
+            }
+        }
+
+        { New-EntraOpsServicePIMPolicy -ServiceGroups @([pscustomobject]@{ Id = 'group-id'; DisplayName = 'SG-Test-ControlPlane-Admins' }) 3>$null 6>$null } |
+        Should -Throw '*group-id: Policy policy-id still not found*Last error: 404 (Not Found)*'
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'PATCH' -and -not $SuppressNotFoundWarning } -Times 0 -Exactly
+    }
+
+    It 'updates the remaining groups after a failed group and then reports the failure' {
+        Mock Start-Sleep {}
+        $script:PatchedUris = [System.Collections.Generic.List[string]]::new()
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'GET') {
+                if ($Uri -like "*'failed-group'*") { throw 'Forbidden' }
+                $groupId = [regex]::Match($Uri, "scopeId eq '([^']+)'").Groups[1].Value
+                return [pscustomobject]@{ Id = "$groupId-member"; PolicyId = "policy-$groupId" }
+            }
+            if ($Method -eq 'PATCH') { $script:PatchedUris.Add($Uri) }
+        }
+        $groups = @(
+            [pscustomobject]@{ Id = 'failed-group'; DisplayName = 'SG-Test-ControlPlane-Admins' },
+            [pscustomobject]@{ Id = 'ok-group'; DisplayName = 'SG-Test-ManagementPlane-Admins' }
+        )
+
+        { New-EntraOpsServicePIMPolicy -ServiceGroups $groups 3>$null 6>$null } |
+        Should -Throw '*Failed to update PIM policy for 1 group(s)*failed-group*'
+        $script:PatchedUris | Should -Be @('/v1.0/policies/roleManagementPolicies/policy-ok-group')
+    }
+
+    It 'fails when no member policy assignment appears before the wait times out' {
+        Mock Start-Sleep {}
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'GET') { return $null }
+            if ($Method -eq 'PATCH') { throw 'PATCH must not be called' }
+        }
+
+        { New-EntraOpsServicePIMPolicy -ServiceGroups @([pscustomobject]@{ Id = 'group-id'; DisplayName = 'SG-Test-ControlPlane-Admins' }) 3>$null 6>$null } |
+        Should -Throw '*group-id: no member policy assignment found*'
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'PATCH' } -Times 0 -Exactly
+    }
+
+    It 'fails when the member policy assignment lookup fails' {
+        Mock Start-Sleep {}
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'GET') { throw 'Forbidden' }
+        }
+
+        { New-EntraOpsServicePIMPolicy -ServiceGroups @([pscustomobject]@{ Id = 'group-id'; DisplayName = 'SG-Test-ControlPlane-Admins' }) 3>$null 6>$null } |
+        Should -Throw '*group-id: policy assignment lookup failed*'
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'GET' } -Times 1 -Exactly
     }
 
     It 'updates only the policies of the admin groups' {

@@ -635,6 +635,12 @@ function New-EntraOpsConfigFile {
             CreateM365Group                  = $false
             AddWorkloadPlaneAdminToUsers     = $false
             GroupPrefix                      = "SG"
+            RoleAssignableWorkloadPlaneAdmins = $false
+            AdministrativeUnits              = [ordered]@{
+                WorkloadPlane = ""
+                UserAccess    = ""
+            }
+            UpdateObjectClassificationFile   = $false
             ConstrainedDelegation            = [ordered]@{
                 ManagementPlane = [ordered]@{
                     ExcludedRoleDefinitionIds = @(

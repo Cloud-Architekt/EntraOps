@@ -80,6 +80,9 @@ test("exports Service EM defaults and preserves imported Service EM settings", a
     expect(preview.ServiceEM.CreateM365Group).toBe(false);
     expect(preview.ServiceEM.AddWorkloadPlaneAdminToUsers).toBe(false);
     expect(preview.ServiceEM.GroupPrefix).toBe("SG");
+    expect(preview.ServiceEM.RoleAssignableWorkloadPlaneAdmins).toBe(false);
+    expect(preview.ServiceEM.AdministrativeUnits).toEqual({ WorkloadPlane: "", UserAccess: "" });
+    expect(preview.ServiceEM.UpdateObjectClassificationFile).toBe(false);
     expect(preview.ServiceEM.PIMForGroups).toEqual({ MaximumActivationDuration: "PT10H", MaximumActiveAssignmentDuration: "P15D" });
     expect(preview.ServiceEM.AssignmentPolicies.BaselinePolicy).toEqual({ Expiration: "P365D", ApprovalTimeout: "P2D", AllowExtension: true });
     expect(preview.ServiceEM.AssignmentPolicies.WorkloadPlaneUsers.RequestorScope).toBe("AllMemberUsers");
@@ -100,6 +103,9 @@ test("exports Service EM defaults and preserves imported Service EM settings", a
                 ConstrainedDelegation: { WorkloadPlane: { AllowedRoleDefinitionIds: ["00482a5a-887f-4fb3-b363-3b7fe8e74483"] } },
                 PIMAuthenticationContext: { EnableAuthenticationContext: true, ControlPlane: { AuthenticationContextClassReferenceId: "c1" } },
                 DefaultAzureRegion: "swedencentral",
+                RoleAssignableWorkloadPlaneAdmins: true,
+                AdministrativeUnits: { WorkloadPlane: "55555555-5555-5555-5555-555555555555" },
+                UpdateObjectClassificationFile: true,
                 CreateM365Group: true,
                 PIMForGroups: { MaximumActivationDuration: "PT8H" },
                 AssignmentPolicies: { WorkloadPlaneUsers: { RequestorScope: "CatalogPlaneMembers" } },
@@ -117,6 +123,10 @@ test("exports Service EM defaults and preserves imported Service EM settings", a
     expect(preview.ServiceEM.ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds).toEqual(["8e3af657-a8ff-443c-a75c-2fe8c4bcb635", "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9"]);
     expect(preview.ServiceEM.PIMAuthenticationContext.ControlPlane.AuthenticationContextClassReferenceId).toBe("c1");
     expect(preview.ServiceEM.DefaultAzureRegion).toBe("swedencentral");
+    expect(preview.ServiceEM.RoleAssignableWorkloadPlaneAdmins).toBe(true);
+    await expect(page.locator('[data-key="SemRoleAssignableWorkloadPlaneAdmins"]')).toBeChecked();
+    expect(preview.ServiceEM.AdministrativeUnits).toEqual({ WorkloadPlane: "55555555-5555-5555-5555-555555555555", UserAccess: "" });
+    expect(preview.ServiceEM.UpdateObjectClassificationFile).toBe(true);
     expect(preview.ServiceEM.CreateM365Group).toBe(true);
     await expect(page.locator('[data-key="SemCreateM365Group"]')).toBeChecked();
     expect(preview.ServiceEM.PIMForGroups.MaximumActivationDuration).toBe("PT8H");

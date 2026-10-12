@@ -268,6 +268,45 @@ Describe "New-EntraOpsServiceEntraGroup" {
 
             $result.IsAssignableToRole | Should -Contain $true
         }
+
+        It "Should create admin and catalog groups role-assignable, but not WorkloadPlane groups by default" {
+            $roles = @(
+                [pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = "" },
+                [pscustomobject]@{accessLevel = "ManagementPlane"; name = "Admins"; groupType = "" },
+                [pscustomobject]@{accessLevel = "CatalogPlane"; name = "Members"; groupType = "" },
+                [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Admins"; groupType = "" },
+                [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Users"; groupType = "" }
+            )
+
+            $result = New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles $roles
+
+            @($result | Where-Object IsAssignableToRole | ForEach-Object MailNickname | Sort-Object) |
+            Should -Be @('TestService.CatalogPlane.Members', 'TestService.ControlPlane.Admins', 'TestService.ManagementPlane.Admins')
+        }
+
+        It "Should create WorkloadPlane-Admins role-assignable only with RoleAssignableWorkloadPlaneAdmins" {
+            $roles = @(
+                [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Users"; groupType = "" },
+                [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Admins"; groupType = "" }
+            )
+
+            $result = New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles $roles -RoleAssignableWorkloadPlaneAdmins
+
+            ($result | Where-Object MailNickname -EQ 'TestService.WorkloadPlane.Admins').IsAssignableToRole | Should -BeTrue
+            ($result | Where-Object MailNickname -EQ 'TestService.WorkloadPlane.Users').IsAssignableToRole | Should -BeFalse
+        }
+    }
+
+    Context "Group naming" {
+        It "Should not add a delimiter after a GroupPrefix that ends with a separator" {
+            $roles = @([pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Admins"; groupType = "" })
+
+            $underscore = New-EntraOpsServiceEntraGroup -ServiceName "Rg-A" -ServiceRoles $roles -GroupPrefix 'SG_'
+            $plain = New-EntraOpsServiceEntraGroup -ServiceName "Rg-B" -ServiceRoles $roles -GroupPrefix 'SG'
+
+            $underscore.DisplayName | Should -Be 'SG_Rg-A-WorkloadPlane-Admins'
+            $plain.DisplayName | Should -Be 'SG-Rg-B-WorkloadPlane-Admins'
+        }
     }
 }
 
