@@ -100,7 +100,7 @@ Describe 'Connect-EntraOps configuration file detection' {
     }
 
     It 'reports when no configuration file exists and drops a configuration of a previous connection' {
-        $Global:EntraOpsConfig = @{ TenantName = 'previous.onmicrosoft.com' }
+        $Global:EntraOpsConfig = @{ TenantName = 'contoso.onmicrosoft.com' }
 
         $Output = Invoke-TestConnect
 
