@@ -281,6 +281,16 @@ function Remove-EntraOpsServiceCatalog {
                 if ($rg -and $rg.Tags.EntraOpsServiceEM -ne $serviceName) {
                     Write-Warning "$logPrefix Keeping Azure Resource Group '$rgName': it isn't tagged EntraOpsServiceEM=$serviceName, so it wasn't created by this landing zone. Delete it manually if needed."
                 } elseif ($rg) {
+                    # PIM eligible schedules outlive the resource group and would block a later landing zone with the same name
+                    try {
+                        $schedules = @(Get-AzRoleEligibilitySchedule -Scope $rg.ResourceId -ErrorAction Stop | Where-Object { $_.Scope -ieq $rg.ResourceId })
+                        foreach ($schedule in $schedules) {
+                            Write-Verbose "$logPrefix Removing eligible assignment $($schedule.RoleDefinitionDisplayName) of $($schedule.PrincipalId) on $rgName"
+                            New-AzRoleEligibilityScheduleRequest -Name ([guid]::NewGuid()) -Scope $rg.ResourceId -RoleDefinitionId $schedule.RoleDefinitionId -PrincipalId $schedule.PrincipalId -RequestType AdminRemove -ErrorAction Stop | Out-Null
+                        }
+                    } catch {
+                        Write-Warning "$logPrefix Failed to remove PIM eligible assignments on '$rgName': $($_.Exception.Message). They may remain as leftovers."
+                    }
                     Write-Verbose "$logPrefix Deleting Azure Resource Group: $rgName"
                     Remove-AzResourceGroup -Name $rgName -Force | Out-Null
                     Write-Verbose "$logPrefix Azure Resource Group deleted: $rgName"

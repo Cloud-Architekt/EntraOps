@@ -419,12 +419,33 @@ function New-EntraOpsServiceAZContainer {
                 }
             }
 
+            if ($add.Condition) {
+                # Azure allows one eligible assignment per principal, role and scope, so a leftover of a deleted resource group has to go first
+                $isStale = {
+                    "$($_.RoleDefinitionId)" -like "*$($add.RoleId)" -and $_.PrincipalId -eq $add.PrincipalId -and $_.Scope -ieq $scopeId
+                }
+                if (@($existing | Where-Object $isStale).Count -gt 0) {
+                    Write-Warning "$logPrefix Removing leftover eligible assignment of $($add.PrincipalId) on $scopeId; its condition doesn't match the current constrained delegation"
+                    try {
+                        New-AzRoleEligibilityScheduleRequest -Name ([guid]::NewGuid()) -Scope $scopeId -RoleDefinitionId $add.RoleDefinitionId -PrincipalId $add.PrincipalId -RequestType AdminRemove -ErrorAction Stop | Out-Null
+                    } catch {
+                        throw "$logPrefix Failed to remove leftover eligible assignment of $($add.PrincipalId) on ${scopeId}: $($_.Exception.Message)"
+                    }
+                    $removed = Wait-EntraOpsServiceEMCondition -Activity "Removal of leftover eligible assignment $($add.PrincipalId)" -logPrefix $logPrefix -Condition {
+                        @(Get-AzRoleEligibilitySchedule -Scope $scopeId | Where-Object $isStale).Count -eq 0
+                    }
+                    if (-not $removed) {
+                        throw "$logPrefix Leftover eligible assignment of $($add.PrincipalId) on $scopeId was not removed in time"
+                    }
+                }
+            }
+
             try {
                 Write-Verbose "$logPrefix Creating PIM Eligible Assignment for PrincipalId: $($add.PrincipalId)"
-                New-AzRoleEligibilityScheduleRequest @scheduleRequestParams | Out-Null
+                New-AzRoleEligibilityScheduleRequest @scheduleRequestParams -ErrorAction Stop | Out-Null
             } catch {
                 Write-Verbose "$logPrefix Failed to create PIM Eligible Assignment"
-                Write-Error $_
+                throw "$logPrefix Failed to create PIM eligible assignment for $($add.PrincipalId) on ${scopeId}: $($_.Exception.Message)"
             }
         }
     }
