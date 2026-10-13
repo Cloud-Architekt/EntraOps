@@ -635,6 +635,12 @@ function New-EntraOpsConfigFile {
             CreateM365Group                  = $false
             AddWorkloadPlaneAdminToUsers     = $false
             GroupPrefix                      = "SG"
+            RoleAssignableWorkloadPlaneAdmins = $false
+            AdministrativeUnits              = [ordered]@{
+                WorkloadPlane = ""
+                UserAccess    = ""
+            }
+            UpdateObjectClassificationFile   = $false
             ConstrainedDelegation            = [ordered]@{
                 ManagementPlane = [ordered]@{
                     ExcludedRoleDefinitionIds = @(
@@ -693,10 +699,10 @@ function New-EntraOpsConfigFile {
                 WorkloadPlaneAdmins         = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
                 ManagementPlaneAdmins       = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P1D"; AllowExtension = $true }
                 InitialWorkloadMembership   = [ordered]@{ Expiration = "P365D" }
-                InitialManagementMembership = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D" }
                 InitialManagementAdmins     = [ordered]@{ Expiration = "P365D" }
                 InitialWorkloadUsers        = [ordered]@{ Expiration = "P365D" }
                 InitialWorkloadAdmins       = [ordered]@{ Expiration = "P365D" }
+                InitialCatalogMembers       = [ordered]@{ Expiration = "P365D" }
             }
             AccessReviews                    = [ordered]@{
                 EnableAccessReviews        = $true
@@ -707,12 +713,12 @@ function New-EntraOpsConfigFile {
                     BaselinePolicy              = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
                     WorkloadPlaneUsers          = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
                     WorkloadPlaneAdmins         = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
-                    ManagementPlaneAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    ManagementPlaneAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ControlPlane-Admins") }
                     InitialWorkloadMembership   = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
-                    InitialManagementMembership = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
-                    InitialManagementAdmins     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialManagementAdmins     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ControlPlane-Admins") }
                     InitialWorkloadUsers        = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
                     InitialWorkloadAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialCatalogMembers       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
                 }
             }
         }

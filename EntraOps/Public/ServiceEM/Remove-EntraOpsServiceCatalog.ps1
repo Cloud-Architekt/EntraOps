@@ -5,15 +5,21 @@
 
 .DESCRIPTION
     Performs a complete teardown of a ServiceEM landing zone:
-    1. Revokes all active (non-expired) access package assignments via
+    1. Cancels open assignment requests of the access packages (e.g. pending approval) and waits for
+       requests that can't be canceled (e.g. delivering), because Graph rejects a removal while a
+       request is open.
+    2. Revokes all active (non-expired) access package assignments via
        adminRemove requests and waits for them to reach a terminal state.
-    2. Deletes all access packages in the catalog.
-    3. Deletes the catalog itself.
-    4. Deletes the Entra groups registered as catalog resources that were created by the landing zone
-       (mailNickname "<ServiceName>.*" or "PIM.<ServiceName>.*", ServiceName = catalog name without
+    3. Deletes all access packages in the catalog.
+       If a request doesn't complete, a removal or an access package deletion fails, the cmdlet stops
+       with an error and keeps the catalog, the groups and the Azure resource group, so a re-run can
+       finish the removal.
+    4. Deletes the catalog itself.
+    5. Deletes the Entra groups registered as catalog resources that were created by the landing zone
+       (mailNickname "<ServiceName>.*", ServiceName = catalog name without
        "Catalog-"). Other catalog resources, e.g. shared groups added manually, are kept, as well as any
        group whose Object ID appears in ExcludeGroupIds.
-    5. Only with -RemoveAzureResourceGroup: deletes the Azure resource group created
+    6. Only with -RemoveAzureResourceGroup: deletes the Azure resource group created
        for the service in -SubscriptionId if it exists: RG-<ServiceName> with a
        leading "Rg-" removed (e.g. Catalog-Rg-MyApp -> RG-MyApp), only if it has the tag
        EntraOpsServiceEM = <ServiceName> set by New-EntraOpsServiceAZContainer. Subscription scope
@@ -118,57 +124,119 @@ function Remove-EntraOpsServiceCatalog {
         # Terminal states for assignment requests — any of these means processing is done (success or failure).
         # Graph EM uses camelCase; comparisons are case-insensitive via -iin/-inotin equivalents.
         $terminalStates = @("fulfilled", "delivered", "canceled", "deliveryfailed", "denied", "completed", "partiallydelivered", "dropped")
+        $cancellableStatuses = @("accepted", "pendingApproval", "pendingNotBefore", "pendingApprovalEscalated")
+        $failures = [System.Collections.Generic.List[string]]::new()
 
-        # Step 1: Submit ALL adminRemove requests across all packages at once.
-        $allRemoveRequestIds = [System.Collections.Generic.List[string]]::new()
+        function Test-OpenRequest ($Request) {
+            $Request -and $Request.id -and ($terminalStates -notcontains "$($Request.status)".ToLower()) -and ($terminalStates -notcontains "$($Request.state)".ToLower())
+        }
+
+        function Wait-OpenRequest ([string[]]$RequestIds, [string]$Activity) {
+            $check = @{ Pending = @() }
+            $completed = Wait-EntraOpsServiceEMCondition -Activity $Activity -logPrefix $logPrefix -Condition {
+                $check.Pending = @($RequestIds | ForEach-Object {
+                        Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests/$_" -OutputType PSObject -DisableCache
+                    } | Where-Object { Test-OpenRequest $_ })
+                $check.Pending.Count -eq 0
+            }
+            if ($completed) { return }
+            return $check.Pending
+        }
+
+        # Step 1: Cancel open requests (e.g. pending approval) or wait for them; Graph rejects adminRemove while one is open.
+        $openRequestIds = [System.Collections.Generic.List[string]]::new()
+        foreach ($accessPackage in $catalog.accessPackages) {
+            $requests = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests?`$expand=accessPackage&`$filter=accessPackage/id eq '$($accessPackage.Id)'" -OutputType PSObject -DisableCache
+            foreach ($request in @($requests) | Where-Object { Test-OpenRequest $_ }) {
+                if ($request.status -in $cancellableStatuses -or $request.state -in @("pendingApproval", "scheduled")) {
+                    Write-Verbose "$logPrefix Canceling open $($request.requestType) request $($request.id) ($($request.status)) in $($accessPackage.displayName)"
+                    try {
+                        Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests/$($request.id)/cancel" -ThrowOnFailure | Out-Null
+                    } catch {
+                        Write-Warning "$logPrefix Failed to cancel request $($request.id) in $($accessPackage.displayName): $($_.Exception.Message)"
+                    }
+                } else {
+                    Write-Verbose "$logPrefix Waiting for open $($request.requestType) request $($request.id) ($($request.status)) in $($accessPackage.displayName)"
+                }
+                $openRequestIds.Add($request.id)
+            }
+        }
+        if ($openRequestIds.Count -gt 0) {
+            $stillOpen = @(Wait-OpenRequest -RequestIds $openRequestIds -Activity "Open assignment requests")
+            if ($stillOpen.Count -gt 0) {
+                $details = ($stillOpen | ForEach-Object { "$($_.id) (state '$($_.state)', status '$($_.status)')" }) -join ', '
+                $failures.Add("$($stillOpen.Count) open assignment request(s) did not complete: $details")
+            }
+        }
+
+        # Step 2: Submit ALL adminRemove requests across all packages at once.
+        $removeRequests = [System.Collections.Generic.List[object]]::new()
         foreach ($accessPackage in $catalog.accessPackages) {
             # Filtering by navigation path 'accessPackage/id' requires ConsistencyLevel:eventual + $count=true.
             $assignments = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignments?`$count=true&`$filter=accessPackage/id eq '$($accessPackage.Id)'&`$expand=target" -OutputType PSObject -DisableCache -ConsistencyLevel "eventual"
             foreach ($assignment in @($assignments) | Where-Object { $_ -and ($_.state -ine "expired") }) {
-                Write-Verbose "$logPrefix Queuing adminRemove for $($assignment.target.displayName) [$($assignment.target.email)] in $($accessPackage.displayName)"
+                $targetEmail = if ($assignment.target.PSObject.Properties.Name -contains 'email') { " [$($assignment.target.email)]" }
+                $description = "$($assignment.target.displayName)$targetEmail in $($accessPackage.displayName)"
+                Write-Verbose "$logPrefix Queuing adminRemove for $description"
                 $params = @{ requestType = "adminRemove"; assignment = @{id = $assignment.id } }
-                $req = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests" -Body ($params | ConvertTo-Json -Depth 10) -OutputType PSObject
-                if ($req -and $req.id) {
-                    $allRemoveRequestIds.Add($req.id)
-                } else {
-                    Write-Warning "$logPrefix adminRemove POST returned null for assignment '$($assignment.id)' — skipping"
+                try {
+                    $req = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests" -Body ($params | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
+                    $removeRequests.Add([pscustomobject]@{
+                            Id              = $req.id
+                            AccessPackageId = $accessPackage.Id
+                            Description     = $description
+                        })
+                } catch {
+                    $failures.Add("adminRemove of assignment $($assignment.id) ($($assignment.target.displayName)) in $($accessPackage.displayName) failed: $($_.Exception.Message)")
                 }
             }
         }
 
-        # Step 2: Wait for ALL removal requests to reach a terminal state (single polling loop).
-        if ($allRemoveRequestIds.Count -gt 0) {
-            Write-Verbose "$logPrefix Waiting for $($allRemoveRequestIds.Count) assignment removal request(s) to complete"
-            $check = @{}
-            $completed = Wait-EntraOpsServiceEMCondition -Activity "Assignment removals" -logPrefix $logPrefix -Condition {
-                $check.Pending = @($allRemoveRequestIds | ForEach-Object {
-                        Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests/$_" -OutputType PSObject -DisableCache
-                    } | Where-Object { $_ -and ($terminalStates -notcontains $_.status.ToLower()) })
-                $check.Pending.Count -eq 0
-            }
-            if (-not $completed) {
-                Write-Warning "$logPrefix $($check.Pending.Count) assignment removal(s) still pending after 5 minutes — proceeding anyway"
+        # Step 3: Wait for ALL removal requests to reach a terminal state (single polling loop).
+        # Access packages with a pending removal still have active grants, Graph rejects their deletion (InvalidDeleteEntitlementHasGrants).
+        $blockedAccessPackageIds = [System.Collections.Generic.List[string]]::new()
+        if ($removeRequests.Count -gt 0) {
+            Write-Verbose "$logPrefix Waiting for $($removeRequests.Count) assignment removal request(s) to complete"
+            $stillPending = @(Wait-OpenRequest -RequestIds @($removeRequests | ForEach-Object { $_.Id }) -Activity "Assignment removals")
+            foreach ($pending in $stillPending) {
+                $removeRequest = $removeRequests | Where-Object { $_.Id -eq $pending.id } | Select-Object -First 1
+                $blockedAccessPackageIds.Add($removeRequest.AccessPackageId)
+                $failures.Add("removal of $($removeRequest.Description) is still in progress after 5 minutes (request $($pending.id), state '$($pending.state)', status '$($pending.status)')")
             }
         }
 
-        # Step 3: Delete each access package (remove resource role scopes first — Graph 400s otherwise).
+        # Step 4: Delete each access package (remove resource role scopes first — Graph 400s otherwise).
         foreach ($accessPackage in $catalog.accessPackages) {
-            $resourceRoleScopes = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($accessPackage.Id)/resourceRoleScopes" -OutputType PSObject -DisableCache
-            foreach ($rrs in @($resourceRoleScopes) | Where-Object { $_ -and $_.Id }) {
-                Write-Verbose "$logPrefix Removing resource role scope $($rrs.Id) from $($accessPackage.displayName)"
-                Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($accessPackage.Id)/resourceRoleScopes/$($rrs.Id)" | Out-Null
+            if ($accessPackage.Id -in $blockedAccessPackageIds) {
+                Write-Warning "$logPrefix Keeping $($accessPackage.displayName) [$($accessPackage.Id)]: assignment removal still in progress"
+                continue
             }
-            Write-Verbose "$logPrefix Deleting $($accessPackage.displayName) [$($accessPackage.Id)]"
-            Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($accessPackage.Id)" | Out-Null
+            try {
+                $resourceRoleScopes = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($accessPackage.Id)/resourceRoleScopes" -OutputType PSObject -DisableCache
+                foreach ($rrs in @($resourceRoleScopes) | Where-Object { $_ -and $_.Id }) {
+                    Write-Verbose "$logPrefix Removing resource role scope $($rrs.Id) from $($accessPackage.displayName)"
+                    Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($accessPackage.Id)/resourceRoleScopes/$($rrs.Id)" -ThrowOnFailure | Out-Null
+                }
+                Write-Verbose "$logPrefix Deleting $($accessPackage.displayName) [$($accessPackage.Id)]"
+                Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($accessPackage.Id)" -ThrowOnFailure | Out-Null
+            } catch {
+                $failures.Add("deleting access package $($accessPackage.displayName) failed: $($_.Exception.Message)")
+            }
         }
 
-        # Step 4: Delete the catalog.
-        Write-Verbose "$logPrefix Deleting Catalog"
-        Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$($catalog.Id)" | Out-Null
+        # Groups that still back access package assignments must stay, so a re-run can finish the removal.
+        if ($failures.Count -gt 0) {
+            throw "$logPrefix Removal of '$ServiceCatalogName' is incomplete; the catalog, its groups and the Azure resource group were kept. Resolve the following and run the cmdlet again: $($failures -join '; ')"
+        }
 
-        # Step 5: Delete the Entra groups created by the landing zone (identified by their mailNickname).
+        # Step 5: Delete the catalog.
+        Write-Verbose "$logPrefix Deleting Catalog"
+        Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$($catalog.Id)" -ThrowOnFailure | Out-Null
+
+        # Step 6: Delete the Entra groups created by the landing zone (identified by their mailNickname).
         $serviceName = $ServiceCatalogName -replace '^Catalog-'
         Write-Verbose "$logPrefix Deleting associated Entra groups from catalog resources"
+        $deletedGroupIds = [System.Collections.Generic.List[string]]::new()
         foreach ($resource in $catalog.Resources | Where-Object { $_.OriginSystem -eq "AadGroup" }) {
             if ($resource.OriginId -in $ExcludeGroupIds) {
                 Write-Verbose "$logPrefix Skipping excluded group: $($resource.DisplayName) [$($resource.OriginId)]"
@@ -180,19 +248,23 @@ function Remove-EntraOpsServiceCatalog {
                     Write-Verbose "$logPrefix Group $($resource.DisplayName) [$($resource.OriginId)] not found, skipping"
                     continue
                 }
-                if ($group.MailNickname -notlike "$serviceName.*" -and $group.MailNickname -notlike "PIM.$serviceName.*") {
+                if ($group.MailNickname -notlike "$serviceName.*") {
                     Write-Warning "$logPrefix Keeping group $($resource.DisplayName) [$($resource.OriginId)]: it wasn't created by this landing zone (mailNickname '$($group.MailNickname)')"
                     continue
                 }
                 Write-Verbose "$logPrefix Deleting group: $($resource.DisplayName) [$($resource.OriginId)]"
-                Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/groups/$($resource.OriginId)" | Out-Null
+                Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/groups/$($resource.OriginId)" -ThrowOnFailure | Out-Null
+                $deletedGroupIds.Add($resource.OriginId)
             } catch {
                 Write-Verbose "$logPrefix Failed to delete group $($resource.DisplayName) [$($resource.OriginId)]"
                 Write-Error $_
             }
         }
+        if ($deletedGroupIds.Count -gt 0 -and (Get-EntraOpsServiceEMConfigValue -Path 'UpdateObjectClassificationFile') -eq $true) {
+            Update-EntraOpsServiceEMObjectClassificationFile -RemoveObjectIds $deletedGroupIds -logPrefix $logPrefix | Out-Null
+        }
 
-        # Step 6: Delete Azure resource group (opt-in).
+        # Step 7: Delete Azure resource group (opt-in).
         # Only the Rg scope creates a resource group, named without its "Rg-" prefix (see New-EntraOpsServiceAZContainer)
         $rgName = "RG-$($serviceName -replace '^Rg-')"
         if ($serviceName -like 'Sub-*') {
@@ -209,6 +281,16 @@ function Remove-EntraOpsServiceCatalog {
                 if ($rg -and $rg.Tags.EntraOpsServiceEM -ne $serviceName) {
                     Write-Warning "$logPrefix Keeping Azure Resource Group '$rgName': it isn't tagged EntraOpsServiceEM=$serviceName, so it wasn't created by this landing zone. Delete it manually if needed."
                 } elseif ($rg) {
+                    # PIM eligible schedules outlive the resource group and would block a later landing zone with the same name
+                    try {
+                        $schedules = @(Get-AzRoleEligibilitySchedule -Scope $rg.ResourceId -ErrorAction Stop | Where-Object { $_.Scope -ieq $rg.ResourceId })
+                        foreach ($schedule in $schedules) {
+                            Write-Verbose "$logPrefix Removing eligible assignment $($schedule.RoleDefinitionDisplayName) of $($schedule.PrincipalId) on $rgName"
+                            New-AzRoleEligibilityScheduleRequest -Name ([guid]::NewGuid()) -Scope $rg.ResourceId -RoleDefinitionId $schedule.RoleDefinitionId -PrincipalId $schedule.PrincipalId -RequestType AdminRemove -ErrorAction Stop | Out-Null
+                        }
+                    } catch {
+                        Write-Warning "$logPrefix Failed to remove PIM eligible assignments on '$rgName': $($_.Exception.Message). They may remain as leftovers."
+                    }
                     Write-Verbose "$logPrefix Deleting Azure Resource Group: $rgName"
                     Remove-AzResourceGroup -Name $rgName -Force | Out-Null
                     Write-Verbose "$logPrefix Azure Resource Group deleted: $rgName"

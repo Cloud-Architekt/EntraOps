@@ -23,9 +23,6 @@
 .PARAMETER ConfigFilePath
     Path to EntraOpsConfig.json for persistence.
 
-.PARAMETER AssignOwner
-    Sets the signed-in user as owner of an auto-created group. Without this switch the group is created without owner.
-
 .PARAMETER logPrefix
     Log prefix for verbose output.
 
@@ -49,8 +46,6 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
         [string]$ConfigKey,
 
         [string]$ConfigFilePath = "$PWD/EntraOpsConfig.json",
-
-        [switch]$AssignOwner,
 
         [string]$logPrefix = "[Resolve-EntraOpsServiceEMDelegationGroup]"
     )
@@ -138,13 +133,6 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
             securityEnabled     = $true
             mailEnabled         = $false
             isAssignableToRole  = $true
-        }
-        if ($AssignOwner) {
-            if ([string]::IsNullOrWhiteSpace($mgContext.Account)) {
-                throw "No signed-in user available as owner of the new group (app-only sign-in)."
-            }
-            $ownerUser = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/users/$([uri]::EscapeDataString($mgContext.Account))" -OutputType PSObject -ThrowOnFailure
-            $newGroupParams["owners@odata.bind"] = @("https://graph.microsoft.com/v1.0/users/$($ownerUser.Id)")
         }
         $newGroup = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($newGroupParams | ConvertTo-Json -Depth 5) -OutputType PSObject -ThrowOnFailure
         if (-not $newGroup.Id) {

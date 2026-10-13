@@ -29,12 +29,12 @@
         { key: "BaselinePolicy", label: "Baseline Policy", reviewers: "ManagementPlane-Admins" },
         { key: "WorkloadPlaneUsers", label: "Workload Plane Users Policy", reviewers: "WorkloadPlane-Admins" },
         { key: "WorkloadPlaneAdmins", label: "Workload Plane Policy", reviewers: "ManagementPlane-Admins" },
-        { key: "ManagementPlaneAdmins", label: "Management Plane Policy", reviewers: "ManagementPlane-Admins" },
+        { key: "ManagementPlaneAdmins", label: "Management Plane Policy", reviewers: "ControlPlane-Admins" },
         { key: "InitialWorkloadMembership", label: "Initial Workload Membership Policy", reviewers: "ManagementPlane-Admins" },
-        { key: "InitialManagementMembership", label: "Initial Management Membership Policy", reviewers: "ManagementPlane-Admins" },
-        { key: "InitialManagementAdmins", label: "Initial Management Admin Policy", reviewers: "ManagementPlane-Admins" },
+        { key: "InitialManagementAdmins", label: "Initial Management Admin Policy", reviewers: "ControlPlane-Admins" },
         { key: "InitialWorkloadUsers", label: "Initial Workload Users Policy", reviewers: "WorkloadPlane-Admins" },
-        { key: "InitialWorkloadAdmins", label: "Initial Workload Admin Policy", reviewers: "ManagementPlane-Admins" }
+        { key: "InitialWorkloadAdmins", label: "Initial Workload Admin Policy", reviewers: "ManagementPlane-Admins" },
+        { key: "InitialCatalogMembers", label: "Initial Catalog Members Policy", reviewers: "ManagementPlane-Admins" }
     ];
     // Azure role definition ids emitted by New-EntraOpsConfigFile for ServiceEM.ConstrainedDelegation.
     var SERVICEEM_EXCLUDED_ROLE_IDS = [
@@ -343,6 +343,10 @@
             SemCreateM365Group: false,
             SemAddWorkloadPlaneAdminToUsers: false,
             SemGroupPrefix: "SG",
+            SemRoleAssignableWorkloadPlaneAdmins: false,
+            SemAuWorkloadPlane: "",
+            SemAuUserAccess: "",
+            SemUpdateObjectClassificationFile: false,
             SemMpExcludedRoleDefinitionIds: SERVICEEM_EXCLUDED_ROLE_IDS.join("\n"),
             SemMpAllowedTargetGroupFilter: "WorkloadPlane-Admins",
             SemWpAllowedRoleDefinitionIds: SERVICEEM_ALLOWED_ROLE_IDS.join("\n"),
@@ -370,11 +374,10 @@
             SemApWpAdminsAllowExtension: true,
             SemApMpAdminsAllowExtension: true,
             SemApInitialWorkloadMembershipExpiration: "P365D",
-            SemApInitialManagementMembershipExpiration: "P365D",
-            SemApInitialManagementMembershipApprovalTimeout: "P2D",
             SemApInitialManagementAdminsExpiration: "P365D",
             SemApInitialWorkloadUsersExpiration: "P365D",
             SemApInitialWorkloadAdminsExpiration: "P365D",
+            SemApInitialCatalogMembersExpiration: "P365D",
             SemArEnableAccessReviews: true,
             SemArRecurrenceIntervalInMonths: 3,
             SemArStartAfterDays: 4,
@@ -723,7 +726,16 @@
                         { key: "SemSkipCatalogOwnerAssignment", label: "Skip Catalog Owner assignment", type: "checkbox", default: false, help: "Recommended. Without it, ControlPlane-Admins get a permanent Catalog Owner assignment on every service catalog, which PIM can't protect. Use an eligible Identity Governance Administrator assignment instead. An explicit -SkipCatalogOwnerAssignment parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
                         { key: "SemCreateM365Group", label: "Create Microsoft 365 group", type: "checkbox", default: false, help: "Creates the Microsoft 365 group '<Scope>-<Prefix> Members' for the service team: group mailbox and calendar for email and ChatOps notifications and, with SharePoint Online or Microsoft Teams, a site or team as knowledge base. Intended for the people behind the personas WorkloadPlane users and admins, ManagementPlane members and, in the PerService model, the ManagementPlane and ControlPlane admins; ServiceEM adds no members. The group gets no PIM for Groups eligibilities or other access; the admin and user groups are only granted through access packages. An explicit -CreateM365Group parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
                         { key: "SemAddWorkloadPlaneAdminToUsers", label: "Add workload plane admin to WorkloadPlane-Users", type: "checkbox", default: false, help: "Also assigns the -WorkloadPlaneAdmin to the WorkloadPlane-Users access package (data-plane user access), in addition to the WorkloadPlane-Admins access package. Leave unchecked when admins use dedicated admin accounts. An explicit -AddWorkloadPlaneAdminToUsers parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
-                        { key: "SemGroupPrefix", label: "Security group prefix", type: "text", default: "SG", help: "Prefix of the security group display names, e.g. SG-Rg-MyApp-WorkloadPlane-Users. Letters, digits, '_', '.' or '-'. Mail nicknames, access package and catalog names don't use the prefix, so existing landing zones keep their groups (and display names) after a change; only new groups get the new prefix. An explicit -GroupPrefix parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" }
+                        { key: "SemGroupPrefix", label: "Security group prefix", type: "text", default: "SG", help: "Prefix of the security group display names, e.g. SG-Rg-MyApp-WorkloadPlane-Users. Letters, digits, '_', '.' or '-'; a prefix ending with '-', '_' or '.' is used as is, e.g. SG_ for SG_Rg-MyApp-WorkloadPlane-Users. Mail nicknames, access package and catalog names don't use the prefix, so existing landing zones keep their groups (and display names) after a change; only new groups get the new prefix. An explicit -GroupPrefix parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemRoleAssignableWorkloadPlaneAdmins", label: "Role-assignable WorkloadPlane-Admins", type: "checkbox", default: false, help: "Creates WorkloadPlane-Admins as role-assignable group, so only Privileged Role Administrators and Global Administrators can manage its members and owners. ControlPlane-Admins, ManagementPlane-Admins and CatalogPlane-Members are always role-assignable, WorkloadPlane-Users never. Only applies when a group is created. An explicit -RoleAssignableWorkloadPlaneAdmins parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" }
+                    ]
+                },
+                {
+                    title: "Workload group classification",
+                    fields: [
+                        { key: "SemAuWorkloadPlane", label: "WorkloadPlane administrative unit id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an administrative unit that ServiceEM adds the WorkloadPlane-Admins groups to. Classify them with an Alternate Tier Level Attributes filter for groups, e.g. WorkloadPlane: $Object.AssignedAdministrativeUnits.id -contains \"<id>\". Role-assignable and PIM-managed groups can't be added to a restricted management administrative unit (a warning is shown). Leave empty to skip.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemAuUserAccess", label: "UserAccess administrative unit id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an administrative unit that ServiceEM adds the WorkloadPlane-Users groups to, e.g. for an Alternate Tier Level Attributes filter on UserAccess. Leave empty to skip.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemUpdateObjectClassificationFile", label: "Write workload groups to the Object Classification File", type: "checkbox", default: false, help: "Adds WorkloadPlane-Admins (WorkloadPlane) and WorkloadPlane-Users (UserAccess) to the Object Classification File of the repository; Remove-EntraOpsServiceCatalog removes them again. Can be combined with the administrative units. Existing entries with another tier are kept. Commit the file and enable the Object Classification File to use it. ControlPlane, ManagementPlane and administrator groups aren't classified by ServiceEM.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap, Remove-EntraOpsServiceCatalog" }
                     ]
                 },
                 {
@@ -771,17 +783,16 @@
                         { key: "SemApMpAdminsApprovalTimeout", label: "Management Plane Policy approval timeout", type: "text", default: "P1D" },
                         { key: "SemApMpAdminsAllowExtension", label: "Management Plane Policy: allow users to extend access", type: "checkbox", default: true, help: "Extension of expiring ManagementPlane-Admins assignments, with approval." },
                         { key: "SemApInitialWorkloadMembershipExpiration", label: "Initial Workload Membership Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the WorkloadPlane-Members access package (manager and CatalogPlane-Members approval)." },
-                        { key: "SemApInitialManagementMembershipExpiration", label: "Initial Management Membership Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the ManagementPlane-Members access package." },
-                        { key: "SemApInitialManagementMembershipApprovalTimeout", label: "Initial Management Membership Policy approval timeout", type: "text", default: "P2D" },
                         { key: "SemApInitialManagementAdminsExpiration", label: "Initial Management Admin Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the admin-only direct assignment of -WorkloadPlaneAdmin to the ManagementPlane-Admins access package (no approval)." },
                         { key: "SemApInitialWorkloadUsersExpiration", label: "Initial Workload Users Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the admin-only direct assignment of -ServiceMembers to the WorkloadPlane-Users access package (no approval)." },
-                        { key: "SemApInitialWorkloadAdminsExpiration", label: "Initial Workload Admin Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the admin-only direct assignment of -WorkloadPlaneAdmin to the WorkloadPlane-Admins access package (no approval)." }
+                        { key: "SemApInitialWorkloadAdminsExpiration", label: "Initial Workload Admin Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the admin-only direct assignment of -WorkloadPlaneAdmin to the WorkloadPlane-Admins access package (no approval)." },
+                        { key: "SemApInitialCatalogMembersExpiration", label: "Initial Catalog Members Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the admin-only direct assignment of -WorkloadPlaneAdmin and -CatalogPlaneMembers to the CatalogPlane-Members access package (no approval)." }
                     ]
                 },
                 {
                     title: "Access reviews",
                     fields: [
-                        { key: "SemArEnableAccessReviews", label: "Enable access reviews", type: "checkbox", default: true, help: "Adds recurring access reviews to all assignment policies. Reviewers are configured per policy below (default WorkloadPlane-Admins for the WorkloadPlane-Users access package, ManagementPlane-Admins for all others, fallback CatalogPlane-Members); access is kept if a review isn't completed.", usedIn: "New-EntraOpsServiceEMAssignmentPolicy" },
+                        { key: "SemArEnableAccessReviews", label: "Enable access reviews", type: "checkbox", default: true, help: "Adds recurring access reviews to all assignment policies. Reviewers are configured per policy below (default WorkloadPlane-Admins for the WorkloadPlane-Users access package, ManagementPlane-Admins for all others; a missing group falls back to a higher tier only, never to CatalogPlane-Members); access is kept if a review isn't completed.", usedIn: "New-EntraOpsServiceEMAssignmentPolicy" },
                         { key: "SemArRecurrenceIntervalInMonths", label: "Recurrence interval (months)", type: "number", default: 3, min: 1, max: 12, help: "Months between two reviews, e.g. 3 = quarterly." },
                         { key: "SemArStartAfterDays", label: "First review after (days)", type: "number", default: 4, min: 0, help: "Days after the deployment when the first review starts." },
                         { key: "SemArReviewDuration", label: "Review duration", type: "text", default: "P25D", help: "ISO 8601 duration in days a review stays open, e.g. P25D. Keep it shorter than the recurrence interval." }
@@ -1637,6 +1648,12 @@
                 CreateM365Group: state.SemCreateM365Group,
                 AddWorkloadPlaneAdminToUsers: state.SemAddWorkloadPlaneAdminToUsers,
                 GroupPrefix: state.SemGroupPrefix,
+                RoleAssignableWorkloadPlaneAdmins: state.SemRoleAssignableWorkloadPlaneAdmins,
+                AdministrativeUnits: {
+                    WorkloadPlane: state.SemAuWorkloadPlane,
+                    UserAccess: state.SemAuUserAccess
+                },
+                UpdateObjectClassificationFile: state.SemUpdateObjectClassificationFile,
                 ConstrainedDelegation: {
                     ManagementPlane: {
                         ExcludedRoleDefinitionIds: commaListToArray(state.SemMpExcludedRoleDefinitionIds),
@@ -1672,10 +1689,10 @@
                     WorkloadPlaneAdmins: { Expiration: state.SemApWpAdminsExpiration, ApprovalTimeout: state.SemApWpAdminsApprovalTimeout, AllowExtension: state.SemApWpAdminsAllowExtension },
                     ManagementPlaneAdmins: { Expiration: state.SemApMpAdminsExpiration, ApprovalTimeout: state.SemApMpAdminsApprovalTimeout, AllowExtension: state.SemApMpAdminsAllowExtension },
                     InitialWorkloadMembership: { Expiration: state.SemApInitialWorkloadMembershipExpiration },
-                    InitialManagementMembership: { Expiration: state.SemApInitialManagementMembershipExpiration, ApprovalTimeout: state.SemApInitialManagementMembershipApprovalTimeout },
                     InitialManagementAdmins: { Expiration: state.SemApInitialManagementAdminsExpiration },
                     InitialWorkloadUsers: { Expiration: state.SemApInitialWorkloadUsersExpiration },
-                    InitialWorkloadAdmins: { Expiration: state.SemApInitialWorkloadAdminsExpiration }
+                    InitialWorkloadAdmins: { Expiration: state.SemApInitialWorkloadAdminsExpiration },
+                    InitialCatalogMembers: { Expiration: state.SemApInitialCatalogMembersExpiration }
                 },
                 AccessReviews: {
                     EnableAccessReviews: state.SemArEnableAccessReviews,
@@ -1913,6 +1930,10 @@
         state.SemCreateM365Group = pick(cfg, "ServiceEM.CreateM365Group", state.SemCreateM365Group);
         state.SemAddWorkloadPlaneAdminToUsers = pick(cfg, "ServiceEM.AddWorkloadPlaneAdminToUsers", state.SemAddWorkloadPlaneAdminToUsers);
         state.SemGroupPrefix = pick(cfg, "ServiceEM.GroupPrefix", state.SemGroupPrefix);
+        state.SemRoleAssignableWorkloadPlaneAdmins = pick(cfg, "ServiceEM.RoleAssignableWorkloadPlaneAdmins", state.SemRoleAssignableWorkloadPlaneAdmins);
+        state.SemAuWorkloadPlane = pick(cfg, "ServiceEM.AdministrativeUnits.WorkloadPlane", state.SemAuWorkloadPlane);
+        state.SemAuUserAccess = pick(cfg, "ServiceEM.AdministrativeUnits.UserAccess", state.SemAuUserAccess);
+        state.SemUpdateObjectClassificationFile = pick(cfg, "ServiceEM.UpdateObjectClassificationFile", state.SemUpdateObjectClassificationFile);
         state.SemPimMaximumActivationDuration = pick(cfg, "ServiceEM.PIMForGroups.MaximumActivationDuration", state.SemPimMaximumActivationDuration);
         state.SemPimMaximumActiveAssignmentDuration = pick(cfg, "ServiceEM.PIMForGroups.MaximumActiveAssignmentDuration", state.SemPimMaximumActiveAssignmentDuration);
         state.SemApBaselineExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.BaselinePolicy.Expiration", state.SemApBaselineExpiration);
@@ -1929,11 +1950,10 @@
         state.SemApWpAdminsAllowExtension = pick(cfg, "ServiceEM.AssignmentPolicies.WorkloadPlaneAdmins.AllowExtension", state.SemApWpAdminsAllowExtension);
         state.SemApMpAdminsAllowExtension = pick(cfg, "ServiceEM.AssignmentPolicies.ManagementPlaneAdmins.AllowExtension", state.SemApMpAdminsAllowExtension);
         state.SemApInitialWorkloadMembershipExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialWorkloadMembership.Expiration", state.SemApInitialWorkloadMembershipExpiration);
-        state.SemApInitialManagementMembershipExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialManagementMembership.Expiration", state.SemApInitialManagementMembershipExpiration);
-        state.SemApInitialManagementMembershipApprovalTimeout = pick(cfg, "ServiceEM.AssignmentPolicies.InitialManagementMembership.ApprovalTimeout", state.SemApInitialManagementMembershipApprovalTimeout);
         state.SemApInitialManagementAdminsExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialManagementAdmins.Expiration", state.SemApInitialManagementAdminsExpiration);
         state.SemApInitialWorkloadUsersExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialWorkloadUsers.Expiration", state.SemApInitialWorkloadUsersExpiration);
         state.SemApInitialWorkloadAdminsExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialWorkloadAdmins.Expiration", state.SemApInitialWorkloadAdminsExpiration);
+        state.SemApInitialCatalogMembersExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialCatalogMembers.Expiration", state.SemApInitialCatalogMembersExpiration);
         state.SemArEnableAccessReviews = pick(cfg, "ServiceEM.AccessReviews.EnableAccessReviews", state.SemArEnableAccessReviews);
         state.SemArRecurrenceIntervalInMonths = pick(cfg, "ServiceEM.AccessReviews.RecurrenceIntervalInMonths", state.SemArRecurrenceIntervalInMonths);
         state.SemArStartAfterDays = pick(cfg, "ServiceEM.AccessReviews.StartAfterDays", state.SemArStartAfterDays);

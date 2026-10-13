@@ -77,25 +77,22 @@ function New-EntraOpsServiceEMCatalogResource {
                 $added = Wait-EntraOpsServiceEMCondition -Activity "Group $($group.DisplayName) in Entitlement Management" -logPrefix $logPrefix -Condition {
                     try{
                         Write-Verbose "$logPrefix $($group.DisplayName) not found as catalog resource, adding"
-                        $result = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/resourceRequests" -Body ($resourceRequestParam | ConvertTo-Json -Depth 10) -OutputType PSObject -ErrorAction Stop
-                        if($null -ne $result){
-                            return $true
-                        }
-                        # null return means wrapper absorbed the error as a warning — treat as retriable
-                        Write-Verbose "$logPrefix Resource request returned null — will retry"
+                        Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/resourceRequests" -Body ($resourceRequestParam | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure -SuppressBadRequestWarning -SuppressNotFoundWarning | Out-Null
+                        return $true
                     }catch{
-                        Write-Verbose "$logPrefix Failed to add catalog resource"
-                        if($_.FullyQualifiedErrorId -like "ResourceAlreadyOnboarded*"){
-                            Write-Verbose "$logPrefix Resource already onboarded"
-                            return $true
-                        }elseif($_.FullyQualifiedErrorId -like "ResourceNotFoundInOriginSystem*"){
-                            # Expected right after group creation; Write-Error would stop callers with ErrorActionPreference Stop
-                            Write-Verbose "$logPrefix Group not yet indexed by Entitlement Management, will retry"
-                        }else{
-                            Write-Warning "$logPrefix Unexpected error adding catalog resource: $($_.Exception.Message)"
+                        switch ($_.Exception.Data['ErrorCode']) {
+                            'ResourceAlreadyOnboarded' {
+                                Write-Verbose "$logPrefix Resource already onboarded"
+                                return $true
+                            }
+                            'ResourceNotFoundInOriginSystem' {
+                                Write-Verbose "$logPrefix Group not yet indexed by Entitlement Management, will retry"
+                                return $false
+                            }
                         }
+                        if ($_.Exception.Data['StatusCode'] -eq 404) { return $false }
+                        throw
                     }
-                    return $false
                 }
                 if(-not $added){
                     throw "Group object consistency with Entitlement Management not achieved for $($group.DisplayName)"

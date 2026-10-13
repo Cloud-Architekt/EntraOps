@@ -259,6 +259,11 @@ Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso
 Continue with [Privileged EAM &rarr; Collecting and exporting data](../privileged-eam/index.html#collecting-and-exporting-data)
 once you are signed in, or follow the steps below to deploy EntraOps as an automated GitHub pipeline.
 
+> [!NOTE]
+> `Connect-EntraOps` automatically loads `EntraOpsConfig.json` from the current folder, otherwise from the
+> EntraOps working folder, unless its `TenantName` differs from `-TenantName`. Use `-ConfigFilePath` for another
+> file. The line `Config File` in the connection summary shows which file is used.
+
 ## Configured local or custom automation run {#configured-local-run}
 
 Use this path when you want repeatable settings locally or on a supported automation platform such

@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     Updates the Unified Role Management Policy for the member role of each
-    non-Members group in ServiceGroups. Policies enforce:
+    admin group (ControlPlane-Admins, ManagementPlane-Admins, WorkloadPlane-Admins) in
+    ServiceGroups. Other groups are ignored. Policies enforce:
 
     - Expiration_Admin_Eligibility: no expiration for eligible assignments.
     - Expiration_Admin_Assignment: 15-day maximum for active assignments
@@ -21,12 +22,16 @@
     Access level is determined from the group DisplayName (ControlPlane,
     ManagementPlane, or WorkloadPlane).
 
-    When all admin groups are delegated and no non-Members groups remain,
-    returns an empty array without error.
+    When ServiceGroups contains no admin group, returns an empty array without error.
+
+    The member policy assignment of a new group and its policy object can appear with a delay, so the
+    lookup is retried until it returns the assignment and the update is retried while Graph returns 404.
+    All admin groups are processed; if the assignment lookup fails, no assignment appears or the update
+    fails for any group, the cmdlet then throws one error that lists every failed group.
 
 .PARAMETER ServiceGroups
-    All owned service group objects. Non-Members groups receive policy updates.
-    Pass only owned (non-delegated) groups.
+    Owned service group objects that should be managed by PIM for Groups. Only the admin groups
+    receive policy updates. Pass only owned (non-delegated) groups.
 
 .PARAMETER ServiceName
     Name of the service. Optional; not currently used in policy computation
@@ -39,7 +44,7 @@
     New-EntraOpsServicePIMPolicy -ServiceGroups $ownedGroups
 
     Applies PIM policy (MFA + Justification, 10h activation limit) to all
-    non-Members groups for the service.
+    admin groups for the service.
 
 .EXAMPLE
     New-EntraOpsServicePIMPolicy -ServiceGroups $ownedGroups -ServiceName "MyService"
@@ -60,6 +65,7 @@ function New-EntraOpsServicePIMPolicy {
     )
 
     begin {
+        $pimGroups = @($ServiceGroups | Where-Object { $_.DisplayName -match '(Control|Management|Workload)Plane-Admins$' -and $_.GroupTypes -notcontains 'Unified' })
         $groupPolicies = @()
         $groupPolicyAssignments = @()
         $policyUpdateFailures = [System.Collections.Generic.List[string]]::new()
@@ -91,7 +97,7 @@ function New-EntraOpsServicePIMPolicy {
     process {
         Write-Verbose "$logPrefix Beginning PIM Policy"
 
-        foreach ($group in $ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" }) {
+        foreach ($group in $pimGroups) {
             # Determine access level from group DisplayName
             $accessLevel = $null
             if ($group.DisplayName -match 'ControlPlane') {
@@ -160,24 +166,47 @@ function New-EntraOpsServicePIMPolicy {
                 Write-Verbose "$logPrefix Authentication context not enabled for $($group.DisplayName) - enforcing MFA + Justification only"
             }
 
+            # Policy assignments of a newly created group appear with a delay after PIM onboarding
+            $assignmentState = @{ Assignment = $null }
             try {
                 Write-Verbose "$logPrefix Looking up PIM Policies with Assignments"
-                $groupPolicyAssignment = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/policies/roleManagementPolicyAssignments?`$filter=scopeId eq '$($group.Id)' and scopeType eq 'Group'" -OutputType PSObject
-                $groupPolicyAssignments += $groupPolicyAssignment
+                $assignmentReady = Wait-EntraOpsServiceEMCondition -Activity "PIM policy assignment for $($group.DisplayName)" -MaxWaitSeconds 60 -logPrefix $logPrefix -Condition {
+                    $assignmentState.Assignment = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/policies/roleManagementPolicyAssignments?`$filter=scopeId eq '$($group.Id)' and scopeType eq 'Group'" -OutputType PSObject -DisableCache -ThrowOnFailure
+                    $null -ne ($assignmentState.Assignment | Where-Object { $_.id -like "*member" })
+                }
             } catch {
                 Write-Warning "$logPrefix Failed to find PIM Policies with Assignments for group $($group.Id). Ensure the caller has RoleManagementPolicy.ReadWrite.Directory or RoleManagement.Read.Directory permission. Error: $_"
+                $policyUpdateFailures.Add("$($group.Id): policy assignment lookup failed: $($_.Exception.Message)")
                 continue
             }
 
-            $memberPolicy = $groupPolicyAssignment | Where-Object { $_.id -like "*member" }
-            if (-not $memberPolicy) {
-                Write-Warning "$logPrefix No member policy assignment found for group $($group.Id). Skipping policy update."
+            if (-not $assignmentReady) {
+                Write-Warning "$logPrefix No member policy assignment found for group $($group.Id) before the wait timed out."
+                $policyUpdateFailures.Add("$($group.Id): no member policy assignment found")
                 continue
             }
+            $groupPolicyAssignments += $assignmentState.Assignment
+            $memberPolicy = $assignmentState.Assignment | Where-Object { $_.id -like "*member" }
 
             try {
                 Write-Verbose "$logPrefix Updating PIM Policy ID: $($memberPolicy.policyId)"
-                Invoke-EntraOpsMsGraphQuery -Method PATCH -Uri "/v1.0/policies/roleManagementPolicies/$($memberPolicy.policyId)" -Body ($currentGroupPolicyParams | ConvertTo-Json -Depth 10) -ThrowOnFailure | Out-Null
+                # The policy object can return 404 for a short time after its assignment is visible
+                $patchState = @{ LastError = $null }
+                $patched = Wait-EntraOpsServiceEMCondition -Activity "PIM policy $($memberPolicy.policyId)" -MaxWaitSeconds 60 -logPrefix $logPrefix -Condition {
+                    try {
+                        Invoke-EntraOpsMsGraphQuery -Method PATCH -Uri "/v1.0/policies/roleManagementPolicies/$($memberPolicy.policyId)" -Body ($currentGroupPolicyParams | ConvertTo-Json -Depth 10) -ThrowOnFailure -SuppressNotFoundWarning | Out-Null
+                        $true
+                    } catch {
+                        if ($_.Exception.Data['StatusCode'] -eq 404) {
+                            $patchState.LastError = $_.Exception.Message
+                            return $false
+                        }
+                        throw
+                    }
+                }
+                if (-not $patched) {
+                    throw "Policy $($memberPolicy.policyId) still not found when the wait timed out. Last error: $($patchState.LastError)"
+                }
             } catch {
                 Write-Warning "$logPrefix Failed to update PIM Policy for group $($group.Id). Error: $_"
                 $policyUpdateFailures.Add("$($group.Id): $($_.Exception.Message)")
@@ -190,27 +219,9 @@ function New-EntraOpsServicePIMPolicy {
             throw "$logPrefix Failed to update PIM policy for $($policyUpdateFailures.Count) group(s): $($policyUpdateFailures -join '; ')"
         }
 
-        # When no non-Members groups exist (e.g., all admin groups delegated), nothing to return.
-        if (($ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" } | Measure-Object).Count -eq 0) {
+        if ($pimGroups.Count -eq 0) {
             return [psobject[]]@()
         }
-        # Update-MgPolicyRoleManagementPolicy updates policy rules synchronously — there is no
-        # eventual consistency to wait for. The PolicyId (assignment) never changes across the
-        # update, so a retry loop comparing PolicyIds is both unnecessary and fragile under
-        # transient Graph timeouts. Return the assignments collected during process; fall back
-        # to a single fresh lookup if $groupPolicyAssignments is empty (transient failure in process).
-        $result = @($groupPolicyAssignments | Where-Object { $_.id -like "*member" })
-        if ($result.Count -eq 0) {
-            Write-Verbose "$logPrefix groupPolicyAssignments empty — performing single recovery lookup"
-            try {
-                foreach ($group in $ServiceGroups | Where-Object { $_.DisplayName -notlike "*Members*" }) {
-                    $recovery = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/policies/roleManagementPolicyAssignments?`$filter=scopeId eq '$($group.Id)' and scopeType eq 'Group'" -OutputType PSObject
-                    $result += @($recovery | Where-Object { $_.id -like "*member" })
-                }
-            } catch {
-                Write-Warning "$logPrefix Recovery lookup failed — returning empty result. Error: $_"
-            }
-        }
-        return [psobject[]]$result
+        return [psobject[]]@($groupPolicyAssignments | Where-Object { $_.id -like "*member" })
     }
 }

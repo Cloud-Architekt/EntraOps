@@ -24,6 +24,19 @@
     Connect-MgGraph -Scopes can trigger the interactive/incremental consent prompt that delegated
     Graph scopes require; a warning is emitted when this fallback applies.
 
+.PARAMETER Scope
+    Delegated Microsoft Graph scopes requested for interactive sign-in. "Report" (default) requests read scopes,
+    "ServiceEM" the ServiceEM write scopes and "ApplyProtection" the write scopes of the protection cmdlets of
+    Push-EntraOpsPrivilegedEAM (administrative units, Conditional Access groups, catalog protection). Catalog
+    protection (EntitlementManagement.ReadWrite.All) and ServiceEM administrative units (AdministrativeUnit.ReadWrite.All)
+    are only requested when enabled in EntraOpsConfig.json.
+
+.PARAMETER ConfigFilePath
+    Path to the EntraOpsConfig.json to load into the session ($EntraOpsConfig). Without this parameter,
+    EntraOpsConfig.json in the current folder, otherwise in the EntraOps working folder, is loaded
+    automatically unless its TenantName differs from -TenantName. The connection summary shows which
+    file is used.
+
 .EXAMPLE
     Using Interactive Sign-In of User with double authentication to Az PowerShell (Connect-AzAccount) and Microsoft Graph SDK (Connect-MgGraph)
     Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
@@ -49,7 +62,7 @@ function Connect-EntraOps {
         [System.String]$AuthenticationType = "AlreadyAuthenticated"
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("Report", "ServiceEM")]
+        [ValidateSet("Report", "ServiceEM", "ApplyProtection")]
         [System.String]$Scope = "Report"
         ,        
         [Parameter(Mandatory = $False)]
@@ -134,6 +147,36 @@ Community Project by Thomas Naunheim - www.entraops.com
             Write-Host $Splash -ForegroundColor Blue
         }
 
+        #region Resolve EntraOpsConfig.json when -ConfigFilePath is not passed
+        $ConfigFileStatus = if ($ConfigFilePath) { 'Parameter' } else { 'NotFound' }
+        $ConfigFileSkipReason = $null
+        if (-not $ConfigFilePath) {
+            $ConfigCandidates = @(
+                Join-Path (Get-Location -PSProvider FileSystem).ProviderPath 'EntraOpsConfig.json'
+                if (-not [string]::IsNullOrWhiteSpace($EntraOpsBaseFolder)) { Join-Path $EntraOpsBaseFolder 'EntraOpsConfig.json' }
+            ) | Select-Object -Unique
+            $DetectedConfigPath = $ConfigCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+            if ($DetectedConfigPath) {
+                try {
+                    $DetectedConfig = Get-Content -LiteralPath $DetectedConfigPath -Raw | ConvertFrom-Json
+                    $DetectedTenantName = if ($DetectedConfig.PSObject.Properties.Name -contains 'TenantName') { [string]$DetectedConfig.TenantName }
+                    if (-not [string]::IsNullOrWhiteSpace($DetectedTenantName) -and $DetectedTenantName -ne $TenantName) {
+                        $ConfigFileSkipReason = "TenantName '$DetectedTenantName' in $DetectedConfigPath does not match -TenantName '$TenantName'"
+                    } else {
+                        $ConfigFilePath = $DetectedConfigPath
+                        $ConfigFileStatus = 'AutoDetected'
+                    }
+                } catch {
+                    $ConfigFileSkipReason = "$DetectedConfigPath is not valid JSON: $($_.Exception.Message)"
+                }
+                if ($ConfigFileSkipReason) {
+                    $ConfigFileStatus = 'Skipped'
+                    Write-Warning "EntraOpsConfig.json is not used: $ConfigFileSkipReason. Pass -ConfigFilePath to load a configuration explicitly."
+                }
+            }
+        }
+        #endregion
+
         #region Load tenant and managing tenant settings from config file if not provided as parameters
         if ($ConfigFilePath -and (Test-Path $ConfigFilePath)) {
             $EarlyConfig = Get-Content -Path $ConfigFilePath | ConvertFrom-Json
@@ -213,43 +256,9 @@ Community Project by Thomas Naunheim - www.entraops.com
                     Install-EntraOpsRequiredModule -ModuleName $_.ModuleName -MinimalVersion $_.ModuleVersion
                 }
             }
-
-            $Scopes = @(
-                "AdministrativeUnit.Read.All",
-                "Application.Read.All",
-                "CustomSecAttributeAssignment.Read.All",
-                "DeviceManagementConfiguration.Read.All",
-                "DeviceManagementManagedDevices.Read.All",
-                "DeviceManagementRBAC.Read.All",
-                "DeviceManagementServiceConfig.Read.All",
-                "Directory.Read.All",
-                "DirectoryRecommendations.Read.All",
-                "EntitlementManagement.Read.All",
-                "Group.Read.All",
-                "PrivilegedAccess.Read.AzureADGroup",
-                "PrivilegedEligibilitySchedule.Read.AzureADGroup",
-                "Policy.Read.All",
-                "RemoteTenantGroups.Read.All",
-                "RoleManagement.Read.All",
-                "TenantGovernance-Relationship.Read.All",
-                "ThreatHunting.Read.All",
-                "User.Read.All",
-                "Zone.Read.All"
-            )
-
-            if ($Scope -eq "ServiceEM") {
-                $MgGraphScopesServiceEM = @(
-                    "Directory.AccessAsUser.All",
-                    "EntitlementManagement.ReadWrite.All",
-                    "RoleManagementPolicy.ReadWrite.AzureADGroup",
-                    "RoleManagementPolicy.ReadWrite.Directory",
-                    "RoleManagement.ReadWrite.Directory",
-                    "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
-                    "PrivilegedAccess.ReadWrite.AzureADGroup"
-                )
-                $Scopes += $MgGraphScopesServiceEM
-            }
         }
+        # Read before sign-in: optional write scopes depend on the features enabled in EntraOpsConfig.json
+        $Scopes = Get-EntraOpsMsGraphDelegatedScope -Scope $Scope -Config $EarlyConfig
         #endregion
 
         # In UseInvokeRestMethodOnly mode, Invoke-EntraOps*Query cmdlets acquire and cache their own
@@ -529,8 +538,8 @@ Community Project by Thomas Naunheim - www.entraops.com
                 Write-Error "Issue to import config file $($ConfigFilePath)! Check if the file exists and is in JSON format."
             }
             # Remove Ingest or Apply* parameters from config file and show configuration
-            $EntraOpsConfig.AutomatedClassificationUpdate.Remove("ApplyAutomatedClassificationUpdate")
-            $EntraOpsConfig.AutomatedControlPlaneScopeUpdate.Remove("ApplyAutomatedControlPlaneScopeUpdate")
+            if ($EntraOpsConfig.AutomatedClassificationUpdate) { $EntraOpsConfig.AutomatedClassificationUpdate.Remove("ApplyAutomatedClassificationUpdate") }
+            if ($EntraOpsConfig.AutomatedControlPlaneScopeUpdate) { $EntraOpsConfig.AutomatedControlPlaneScopeUpdate.Remove("ApplyAutomatedControlPlaneScopeUpdate") }
             if ($EntraOpsConfig.LogAnalytics) { $EntraOpsConfig.LogAnalytics.Remove("IngestToLogAnalytics") }
             if ($EntraOpsConfig.SentinelWatchLists) { $EntraOpsConfig.SentinelWatchLists.Remove("IngestToWatchLists") }
             if ($EntraOpsConfig.AutomatedAdministrativeUnitManagement) { $EntraOpsConfig.AutomatedAdministrativeUnitManagement.Remove("ApplyAdministrativeUnitAssignments") }
@@ -543,7 +552,17 @@ Community Project by Thomas Naunheim - www.entraops.com
 
             New-Variable -Name EntraOpsConfig -Value $EntraOpsConfig -Scope Global -Force
             Write-Verbose -Message "Config file $($ConfigFilePath) imported"
+        } else {
+            # A configuration from a previous connection may belong to another tenant
+            Remove-Variable -Name EntraOpsConfig -Scope Global -Force -ErrorAction SilentlyContinue
         }
+        $ConfigFileSummary = switch ($ConfigFileStatus) {
+            'Parameter' { "$ConfigFilePath" }
+            'AutoDetected' { "$ConfigFilePath (found automatically)" }
+            'Skipped' { "Not used - $ConfigFileSkipReason" }
+            default { 'Not used - no EntraOpsConfig.json found, defaults apply' }
+        }
+        Write-Verbose -Message "EntraOpsConfig.json: $ConfigFileSummary"
         #endregion
 
         #region Set global variables
@@ -575,6 +594,8 @@ Community Project by Thomas Naunheim - www.entraops.com
             Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
             
             Write-Host "  Authentication Type : $AuthenticationType" -ForegroundColor White
+            Write-Host "  EntraOps Scope      : $Scope" -ForegroundColor White
+            Write-Host "  Config File         : $ConfigFileSummary" -ForegroundColor $(switch ($ConfigFileStatus) { 'Skipped' { 'Yellow' } 'NotFound' { 'Gray' } default { 'Green' } })
 
             # Display managing tenant info if configured
             if (-not [string]::IsNullOrEmpty($ManagingTenantId)) {
