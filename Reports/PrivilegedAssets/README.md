@@ -18,41 +18,58 @@ Related object IDs outside the export are resolved through Microsoft Graph unles
 dataset also contains the Custom Security Attribute names and the current Object Classification File
 entries from `EntraOpsConfig.json`.
 
+### Maester findings
+
+`-MaesterTestResultPath` points to the Maester test results: a `TestResults-<yyyy-MM-dd-HHmmss>.json`
+file, the same path without `.json`, or a folder (the latest `TestResults-*.json` is used). The
+parameter is optional: without it, or when no result file is found, the Maester integration is skipped.
+
+```powershell
+New-EntraOpsPrivilegedAssetsData -MaesterTestResultPath ~/maester/test-results
+```
+
+The generator reads the failed tests (`Tests`) and their affected objects (`AffectedObjects`, or
+`AssetInventory` in older Maester versions) and matches them to privileged objects by object ID, app
+ID (app registrations) or user principal name. Failed Maester tests show up as chips next to the other
+findings (the first two, then `+N Maester tests`); a chip opens a blade with the test description,
+result, affected object, tags and the other privileged objects with the same finding. The Finding
+filter and the metrics tile select objects with Maester findings.
+
 ## Views
 
 ### Overview (`index.html`)
 
-| Section    | Content                                                                                                                                                  |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Metrics    | Object count per tier, tier breaches by object tier, relationship findings and worklist changes. Tiles filter the inventory or open the worklist.        |
+| Section    | Content                                                                                                                                                                                                                     |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Metrics    | Object count per tier, tier breaches by object tier, relationship findings and worklist changes. Tiles filter the inventory or open the worklist.                                                                           |
 | Inventory  | Objects with type, sub type, object tier, assignment tier summary, relationships, administrative units and findings. Filterable and sortable, CSV export. Selected objects can be added to the worklist with a target tier. |
-| Side panel | Identity, classification, findings, related objects with their tier, and all role assignments with links to the EAM Dashboard and Access Path Map.       |
+| Side panel | Identity, classification, findings, related objects with their tier, and all role assignments with links to the EAM Dashboard and Access Path Map.                                                                          |
 
 Deep link to an object: `index.html#asset=<objectId>`.
 
 ### Object Classification (`index.html?view=classification`)
 
-| Section           | Content                                                                                                                                                                                |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Section           | Content                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Worklist          | Objects with their current tier, the role assignments with the highest classification (linked to the EAM Dashboard), an editable target tier and justification, and their change status. Add objects by name or object ID and import/export CSV or JSON. With the Object Classification File enabled, the worklist starts from the repository file and can be downloaded as the file or reset to it. |
-| PowerShell Script | Only with Custom Security Attributes enabled (`CustomSecurityAttributes.Enabled`): generates a script that sets both tier custom security attributes for users, service principals and applications in the worklist. Custom security attributes win over the other classification sources. |
+| PowerShell Script | Only with Custom Security Attributes enabled (`CustomSecurityAttributes.Enabled`): generates a script that sets both tier custom security attributes for users, service principals and applications in the worklist. Custom security attributes win over the other classification sources.                                                                                                           |
 
 ## Findings
 
-| Finding                             | Condition                                                                                            |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Object tier below role assignments  | The object tier is less privileged than its most privileged role assignment classification.         |
-| Unclassified object                 | No object tier is defined.                                                                           |
-| Owner with lower tier               | An owner is less privileged than the object (owners not in the export count as User Access).         |
-| Owns higher-tier object             | The object owns a privileged object with a more privileged tier.                                     |
-| Identity parent with lower tier     | The agent identity blueprint or agent identity parent is less privileged than the object.            |
-| No sponsor                          | Agent identity or agent user without a sponsor (not applied to regular users).                       |
-| Owns non-PAW devices                | Control or Management Plane user owning devices that aren't its associated PAW device.               |
-| No associated PAW                   | Control Plane user without an associated PAW device.                                                 |
-| No associated work account          | Control or Management Plane member user without an associated work account.                          |
-| Synchronized Control Plane identity | Control Plane object synchronized from Active Directory.                                             |
-| Restricted management not applied   | Control or Management Plane user or group without restricted management (or with a conflict).        |
-| Outside home tenant                 | Object from another tenant.                                                                          |
+| Finding                             | Condition                                                                                     |
+| ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| Object tier below role assignments  | The object tier is less privileged than its most privileged role assignment classification.   |
+| Unclassified object                 | No object tier is defined.                                                                    |
+| Owner with lower tier               | An owner is less privileged than the object (owners not in the export count as User Access).  |
+| Owns higher-tier object             | The object owns a privileged object with a more privileged tier.                              |
+| Identity parent with lower tier     | The agent identity blueprint or agent identity parent is less privileged than the object.     |
+| No sponsor                          | Agent identity or agent user without a sponsor (not applied to regular users).                |
+| Owns non-PAW devices                | Control or Management Plane user owning devices that aren't its associated PAW device.        |
+| No associated PAW                   | Control Plane user without an associated PAW device.                                          |
+| No associated work account          | Control or Management Plane member user without an associated work account.                   |
+| Synchronized Control Plane identity | Control Plane object synchronized from Active Directory.                                      |
+| Restricted management not applied   | Control or Management Plane user or group without restricted management (or with a conflict). |
+| Outside home tenant                 | Object from another tenant.                                                                   |
 
 The tier used for the relationship findings is the more privileged of the object tier and its role
 assignment tier. With *What-if*, the worklist target tiers are used instead of the current object

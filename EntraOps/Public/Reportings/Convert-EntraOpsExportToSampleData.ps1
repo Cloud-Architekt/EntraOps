@@ -605,6 +605,7 @@ the progress display, for example in non-interactive automation.
                         AppRoot                 = Join-Path $ReportRoot 'PrivilegedAssets'
                         ConfigFilePath          = Join-Path $AnonymizedRoot 'EntraOpsConfig.json'
                         ResolveRelatedObjectIds = $false
+                        MaesterTestResultPath   = ''
                     }
                 }
             )

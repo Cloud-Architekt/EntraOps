@@ -55,6 +55,36 @@
     FINDINGS.forEach(function (finding) { FINDING_BY_ID[finding.id] = finding; });
     var RELATIONSHIP_FINDINGS = ["ownerLowerTier", "ownsHigherTier", "parentLowerTier"];
 
+    // Failed Maester tests (Maester test results joined with their affected objects) per privileged object.
+    var MAESTER = (DATA || {}).maester || null;
+    var MAESTER_TESTS = (MAESTER && MAESTER.tests) || {};
+    var MAESTER_SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+    var MAESTER_MAX_CHIPS = 3;
+    var MAESTER_OTHER_OBJECTS = 12;
+
+    function maesterTest(id) { return Object.prototype.hasOwnProperty.call(MAESTER_TESTS, id) ? MAESTER_TESTS[id] : null; }
+    function maesterSeverity(test) {
+        var key = String((test && test.severity) || "").toLowerCase();
+        return MAESTER_SEVERITY_ORDER[key] === undefined ? "unknown" : key;
+    }
+    function maesterSeverityLabel(test) { var key = maesterSeverity(test); return key === "unknown" ? "Unknown" : key.charAt(0).toUpperCase() + key.slice(1); }
+    function maesterSeverityClass(test) { var key = maesterSeverity(test); return key === "critical" || key === "high" ? "high" : key === "medium" ? "medium" : "info"; }
+    function maesterRank(test) { var rank = MAESTER_SEVERITY_ORDER[maesterSeverity(test)]; return rank === undefined ? 5 : rank; }
+
+    function computeMaester(object) {
+        var byTest = Object.create(null);
+        (object.maesterAssets || []).forEach(function (asset) {
+            (asset.tests || []).forEach(function (id) {
+                var test = maesterTest(id);
+                if (!test) return;
+                (byTest[id] = byTest[id] || { testId: id, test: test, assets: [] }).assets.push(asset);
+            });
+        });
+        return Object.keys(byTest).map(function (id) { return byTest[id]; }).sort(function (a, b) {
+            return maesterRank(a.test) - maesterRank(b.test) || a.testId.localeCompare(b.testId);
+        });
+    }
+
     var state = {
         search: "", type: "", subType: "", tier: "", assignmentTier: "", au: "", restricted: "", sync: "", finding: "", worklist: "",
         whatIf: false, sort: "tier", sortDir: 1, page: 0, selected: new Set(), worklistEntries: {}, script: ""
@@ -266,7 +296,7 @@
         fillSelect("paiFilterAu", [{ value: "__none", label: "No administrative unit" }].concat(Object.keys(units).sort(function (a, b) { return units[a].localeCompare(units[b]); }).map(function (id) { return { value: id, label: units[id] }; })));
         fillSelect("paiFilterRestricted", ["Applied", "Not applied", "Conflict", "Not available"].map(function (value) { return { value: value, label: value }; }));
         fillSelect("paiFilterSync", [{ value: "cloud", label: "Cloud-only" }, { value: "hybrid", label: "Synchronized (hybrid)" }]);
-        fillSelect("paiFilterFinding", [{ value: "__any", label: "Any finding" }, { value: "__relationship", label: "Any relationship finding" }].concat(FINDINGS.map(function (finding) { return { value: finding.id, label: finding.label }; })));
+        fillSelect("paiFilterFinding", [{ value: "__any", label: "Any finding" }, { value: "__relationship", label: "Any relationship finding" }].concat(FINDINGS.map(function (finding) { return { value: finding.id, label: finding.label }; })).concat(maesterFilterOptions()));
         fillSelect("paiFilterWorklist", [{ value: "in", label: "In worklist" }, { value: "pending", label: "Pending changes" }, { value: "out", label: "Not in worklist" }]);
         $("paiBulkTier").innerHTML = TIERS.map(function (tier) { return '<option value="' + tier + '">' + esc(TIER_LABEL[tier]) + "</option>"; }).join("");
     }
@@ -285,9 +315,11 @@
         if (state.restricted && object.restrictedManagement !== state.restricted) return false;
         if (state.sync === "hybrid" && !object.onPremSynchronized) return false;
         if (state.sync === "cloud" && object.onPremSynchronized) return false;
-        if (state.finding === "__any" && !object._findings.length) return false;
+        if (state.finding === "__any" && !object._findings.length && !object._maester.length) return false;
         if (state.finding === "__relationship" && !object._findings.some(function (id) { return RELATIONSHIP_FINDINGS.indexOf(id) >= 0; })) return false;
-        if (state.finding && state.finding.indexOf("__") !== 0 && object._findings.indexOf(state.finding) < 0) return false;
+        if (state.finding === "__maester" && !object._maester.length) return false;
+        if (state.finding.indexOf("maester:") === 0 && !object._maester.some(function (finding) { return finding.testId === state.finding.slice(8); })) return false;
+        if (state.finding && state.finding.indexOf("__") !== 0 && state.finding.indexOf("maester:") !== 0 && object._findings.indexOf(state.finding) < 0) return false;
         if (state.worklist === "in" && !state.worklistEntries[object.objectId]) return false;
         if (state.worklist === "out" && state.worklistEntries[object.objectId]) return false;
         if (state.worklist === "pending" && ["Added", "Changed", "Removed"].indexOf(worklistStatus(object.objectId)) < 0) return false;
@@ -304,7 +336,7 @@
             case "type": return (object.objectType + "|" + object.objectSubType).toLowerCase();
             case "assignmentTier": return TIER_ORDER[object.assignmentSummary.highestTierName];
             case "relationships": return -relationshipCount(object);
-            case "findings": return -object._findings.length;
+            case "findings": return -(object._findings.length + object._maester.length);
             default: return TIER_ORDER[effectiveTier(object)];
         }
     }
@@ -319,7 +351,7 @@
     }
 
     function refreshFindings() {
-        objects.forEach(function (object) { object._findings = computeFindings(object); });
+        objects.forEach(function (object) { object._findings = computeFindings(object); object._maester = computeMaester(object); });
     }
 
     function renderStats() {
@@ -333,9 +365,19 @@
         var tiles = [
             { label: "Privileged objects", value: counts.total, sub: TIERS.map(function (tier) { return TIER_LABEL[tier] + ": " + objects.filter(function (o) { return effectiveTier(o) === tier; }).length; }).join(" · "), filter: {} },
             { label: "Object tier below role assignments", value: counts.breach, sub: "Tier breaches by object tier", filter: { finding: "tierBreach" } },
-            { label: "Relationship findings", value: counts.relationship, sub: "Owner, owned object or identity parent with a lower tier", filter: { finding: "__relationship" } },
-            { label: "Object Classification worklist", value: Object.keys(state.worklistEntries).length, sub: pending.Added + " added · " + pending.Changed + " changed · " + pending.Removed + " removed", view: "classification" }
+            { label: "Relationship findings", value: counts.relationship, sub: "Owner, owned object or identity parent with a lower tier", filter: { finding: "__relationship" } }
         ];
+        if (MAESTER) {
+            var maesterTests = {};
+            objects.forEach(function (object) { object._maester.forEach(function (finding) { maesterTests[finding.testId] = true; }); });
+            var executed = MAESTER.executedAt ? new Date(MAESTER.executedAt) : null;
+            tiles.push({
+                label: "Objects with Maester findings", value: objects.filter(function (object) { return object._maester.length; }).length,
+                sub: Object.keys(maesterTests).length + " failed Maester tests" + (executed && !isNaN(executed) ? " · run " + executed.toLocaleDateString() : ""), filter: { finding: "__maester" }
+            });
+        }
+        tiles.push({ label: "Object Classification worklist", value: Object.keys(state.worklistEntries).length, sub: pending.Added + " added · " + pending.Changed + " changed · " + pending.Removed + " removed", view: "classification" });
+        $("paiStats").className = "grid " + (tiles.length > 4 ? "cols-5" : "cols-4");
         $("paiStats").innerHTML = tiles.map(function (tile, index) {
             return '<button class="stat stat-action" type="button" data-stat="' + index + '"><div class="stat-accent"></div><div class="stat-label">' + esc(tile.label) + '</div><div class="stat-value">' + esc(tile.value) + '</div><div class="stat-sub">' + esc(tile.sub) + "</div></button>";
         }).join("");
@@ -377,6 +419,33 @@
         }).join(" ");
     }
 
+    function maesterChip(finding, objectId) {
+        var test = finding.test;
+        var tip = finding.testId + " (" + maesterSeverityLabel(test) + "): " + (test.title || "") + " - select for details";
+        return '<button type="button" class="chip pai-finding pai-maester sev-' + maesterSeverityClass(test) + '" data-maester-open="' + esc(finding.testId) + '" data-maester-object="' + esc(objectId) + '" title="' + esc(tip) + '">' +
+            '<span class="pai-maester-mark">Maester</span>' + breakable(finding.testId) + "</button>";
+    }
+
+    // Up to MAESTER_MAX_CHIPS failed tests; beyond that the most severe ones plus a "+N Maester tests" chip.
+    function maesterChips(object) {
+        var list = object._maester || [];
+        if (!list.length) return "";
+        var shown = list.length > MAESTER_MAX_CHIPS ? MAESTER_MAX_CHIPS - 1 : list.length;
+        var html = list.slice(0, shown).map(function (finding) { return maesterChip(finding, object.objectId); }).join(" ");
+        if (list.length > shown) {
+            var hidden = list.slice(shown);
+            html += ' <button type="button" class="chip pai-finding pai-maester sev-' + maesterSeverityClass(hidden[0].test) + '" data-maester-more="' + esc(object.objectId) + '" title="' +
+                esc(hidden.map(function (finding) { return finding.testId; }).join(", ")) + '">+' + hidden.length + " Maester tests</button>";
+        }
+        return html;
+    }
+
+    function maesterFilterOptions() {
+        if (!MAESTER) return [];
+        var ids = Object.keys(MAESTER_TESTS).sort(function (a, b) { return maesterRank(MAESTER_TESTS[a]) - maesterRank(MAESTER_TESTS[b]) || a.localeCompare(b); });
+        return [{ value: "__maester", label: "Any Maester finding" }].concat(ids.map(function (id) { return { value: "maester:" + id, label: "Maester " + id + " - " + String(MAESTER_TESTS[id].title || "").slice(0, 70) }; }));
+    }
+
     function renderInventory() {
         var list = filteredObjects();
         var pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
@@ -399,7 +468,7 @@
                 "<td>" + assignmentCell(object) + "</td>" +
                 "<td>" + relationshipCell(object) + "</td>" +
                 "<td>" + (units ? '<div class="pai-units">' + units + "</div>" : '<span class="muted">None</span>') + "</td>" +
-                "<td>" + (findingChips(object._findings) || '<span class="muted">None</span>') + "</td></tr>";
+                "<td>" + ((findingChips(object._findings) + " " + maesterChips(object)).trim() || '<span class="muted">None</span>') + "</td></tr>";
         }).join("") || '<tr><td colspan="8" class="muted">No objects match the current filters.</td></tr>';
 
         $("paiPager").innerHTML = pages > 1 ? '<button type="button" class="btn small" data-page="-1"' + (state.page === 0 ? " disabled" : "") + '>&lsaquo; Previous</button><span>Page ' + (state.page + 1) + " of " + pages + '</span><button type="button" class="btn small" data-page="1"' + (state.page >= pages - 1 ? " disabled" : "") + ">Next &rsaquo;</button>" : "";
@@ -608,6 +677,7 @@
             '<details class="drawer-section" open><summary>Identity</summary><dl class="kv">' + identity + "</dl></details>" +
             '<details class="drawer-section" open><summary>Classification</summary><dl class="kv">' + classification + "</dl></details>" +
             (findings ? '<details class="drawer-section" open><summary>Findings (' + object._findings.length + ')</summary><ul class="drawer-list pai-related">' + findings + "</ul></details>" : "") +
+            maesterDrawerSection(object) +
             relatedList("Owners", object.owners, { object: object, compareTier: true }) +
             relatedList("Sponsors", object.sponsors, { object: object }) +
             relatedList("Owned objects", object.ownedObjects, { object: object, higherTier: true }) +
@@ -635,6 +705,7 @@
     }
 
     function closeDrawer() {
+        closeMaesterBlade(false);
         $("paiDrawer").classList.remove("open");
         $("paiDrawerBackdrop").classList.remove("open");
         $("paiDrawer").setAttribute("aria-hidden", "true");
@@ -642,9 +713,158 @@
     }
 
     function applyDeepLink() {
-        var match = /^#asset=([^&]+)$/.exec(location.hash || "");
+        var match = /^#asset=([^&]+)(?:&maester=(.+))?$/.exec(location.hash || "");
         if (!match) return;
-        try { openDrawer(decodeURIComponent(match[1]), false); } catch (_) { /* malformed hash */ }
+        try {
+            openDrawer(decodeURIComponent(match[1]), false);
+            if (match[2]) openMaesterBlade(decodeURIComponent(match[2]), decodeURIComponent(match[1]), false);
+        } catch (_) { /* malformed hash */ }
+    }
+
+    // ---- Maester finding blade ---------------------------------------------------------------------
+    // Small, escaped Markdown subset (headings, lists, tables, bold, code, https links) for Maester descriptions and results.
+    function renderMarkdown(text) {
+        var inline = function (value) {
+            return esc(value)
+                .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
+                .replace(/`([^`]+)`/g, "<code>$1</code>")
+                .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+                .replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g, '<a class="cell-link" href="$2" target="_blank" rel="noopener noreferrer">$1 &#8599;</a>');
+        };
+        var html = [], paragraph = [], items = [], listTag = "", rows = [];
+        var flush = function () {
+            if (paragraph.length) html.push("<p>" + paragraph.map(inline).join("<br>") + "</p>");
+            if (items.length) html.push("<" + listTag + ">" + items.map(function (item) { return "<li>" + inline(item) + "</li>"; }).join("") + "</" + listTag + ">");
+            if (rows.length) {
+                var cells = function (row, tag) { return "<tr>" + row.map(function (cell) { return "<" + tag + ">" + inline(cell) + "</" + tag + ">"; }).join("") + "</tr>"; };
+                html.push('<div class="pai-md-table"><table class="grid-table"><thead>' + cells(rows[0], "th") + "</thead><tbody>" + rows.slice(1).map(function (row) { return cells(row, "td"); }).join("") + "</tbody></table></div>");
+            }
+            paragraph = []; items = []; rows = []; listTag = "";
+        };
+        String(text || "").replace(/\r/g, "").split("\n").forEach(function (line) {
+            var trimmed = line.trim(), match;
+            if (!trimmed) { flush(); return; }
+            if (/^\|.*\|$/.test(trimmed)) {
+                if (!rows.length) flush();
+                if (!/^\|[\s:|-]+\|$/.test(trimmed)) rows.push(trimmed.slice(1, -1).split("|").map(function (cell) { return cell.trim(); }));
+                return;
+            }
+            if ((match = /^(#{1,6})\s+(.*)$/.exec(trimmed))) { flush(); html.push("<h5>" + inline(match[2]) + "</h5>"); return; }
+            if ((match = /^(?:[*-]|\d+\.)\s+(.*)$/.exec(trimmed))) {
+                var tag = /^\d/.test(trimmed) ? "ol" : "ul";
+                if (listTag && listTag !== tag) flush();
+                if (!listTag) { flush(); listTag = tag; }
+                items.push(match[1]);
+                return;
+            }
+            if (rows.length || items.length) flush();
+            paragraph.push(trimmed);
+        });
+        flush();
+        return html.join("");
+    }
+
+    function safeHttpsLink(url, label) {
+        return /^https:\/\//i.test(String(url || "")) ? '<a class="cell-link" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + esc(label || url) + " &#8599;</a>" : "";
+    }
+
+    function maesterDrawerSection(object) {
+        var list = object._maester || [];
+        if (!list.length) return "";
+        var items = list.map(function (finding) {
+            return "<li>" + maesterChip(finding, object.objectId) + ' <span class="muted pai-small">' + esc(maesterSeverityLabel(finding.test)) + '</span><div class="muted pai-small">' + esc(finding.test.title) + "</div></li>";
+        }).join("");
+        return '<details class="drawer-section" id="paiDrawerMaester" open><summary>Maester findings (' + list.length + ')</summary><ul class="drawer-list pai-related">' + items + "</ul></details>";
+    }
+
+    var blade = { testId: "", objectId: "" };
+
+    function openMaesterBlade(testId, objectId, updateUrl) {
+        var test = maesterTest(testId);
+        if (!test) return;
+        var object = objectsById[String(objectId || "").toLowerCase()] || null;
+        var current = object ? (object._maester || []).filter(function (finding) { return finding.testId === testId; })[0] : null;
+        var assets = current ? current.assets : [];
+        var severityClass = maesterSeverityClass(test);
+        var chip = function (value, extra) { return value ? '<span class="chip' + (extra ? " " + extra : "") + '">' + esc(value) + "</span>" : ""; };
+        var kv = function (label, value) { return value === "" || value == null ? "" : "<dt>" + esc(label) + "</dt><dd>" + value + "</dd>"; };
+        var mono = function (value) { return value ? '<span class="cell-mono">' + esc(value) + "</span>" : ""; };
+        var affected = objects.filter(function (candidate) { return candidate.objectId !== (object && object.objectId) && (candidate._maester || []).some(function (finding) { return finding.testId === testId; }); });
+        var affectedTotal = affected.length + (object ? 1 : 0);
+        var executed = MAESTER && MAESTER.executedAt ? new Date(MAESTER.executedAt) : null;
+        var totals = (MAESTER && MAESTER.totals) || {};
+
+        $("paiMaesterKicker").textContent = "Maester \u00b7 Failed test";
+        $("paiMaesterTitle").textContent = test.title || test.name || test.id;
+        $("paiMaesterChips").innerHTML = '<span class="chip pai-finding sev-' + severityClass + '">' + esc(maesterSeverityLabel(test)) + " severity</span>" +
+            chip(test.id, "brand") + chip(test.result || "Failed", "priv") + chip(test.block) + chip(test.service);
+        $("paiMaesterBlade").className = "drawer pai-blade open sev-" + severityClass;
+
+        var stats = [
+            ["Severity", esc(maesterSeverityLabel(test))],
+            ["Affected assets on object", object ? String(assets.length) : "-"],
+            ["Privileged objects affected", String(affectedTotal)],
+            ["Failed in Maester run", esc(String(totals.failed != null ? totals.failed : "-")) + (totals.total ? ' <span class="muted pai-small">of ' + esc(String(totals.total)) + "</span>" : "")]
+        ].map(function (stat) { return '<div class="pai-blade-stat"><div class="pai-blade-stat-label">' + esc(stat[0]) + '</div><div class="pai-blade-stat-value">' + stat[1] + "</div></div>"; }).join("");
+
+        var actions = /^https:\/\//i.test(test.helpUrl || "") ? '<a class="btn small primary" href="' + esc(test.helpUrl) + '" target="_blank" rel="noopener noreferrer">Maester test documentation &#8599;</a>' : "";
+        assets.forEach(function (asset) {
+            if (/^https:\/\//i.test(asset.portalLink || "")) actions += ' <a class="btn small" href="' + esc(asset.portalLink) + '" target="_blank" rel="noopener noreferrer">Open ' + esc(asset.displayName || asset.type || "object") + " in portal &#8599;</a>";
+        });
+        if (object) actions += ' <button type="button" class="btn small" data-open="' + esc(object.objectId) + '">Show privileged object</button>';
+
+        var assetSections = assets.map(function (asset, index) {
+            return '<details class="drawer-section" open><summary>Affected object' + (assets.length > 1 ? " " + (index + 1) + " of " + assets.length : "") + '</summary><dl class="kv">' +
+                kv("System", esc(asset.system)) + kv("Anchor kind", esc(asset.anchorKind)) + kv("Type", esc(asset.type)) +
+                kv("Id", mono(asset.id)) + kv("Unique id", mono(asset.uniqueId)) + kv("Display name", esc(asset.displayName)) +
+                kv("User principal name", esc(asset.userPrincipalName)) + kv("Portal link", safeHttpsLink(asset.portalLink, "Open in portal")) +
+                kv("Sources", (asset.sources || []).map(function (source) { return chip(source); }).join(" ")) +
+                kv("Failed tests", (asset.tests || []).filter(maesterTest).map(function (id) { return '<button type="button" class="chip pai-finding pai-maester sev-' + maesterSeverityClass(maesterTest(id)) + '" data-maester-open="' + esc(id) + '" data-maester-object="' + esc(object.objectId) + '">' + breakable(id) + "</button>"; }).join(" ")) +
+                "</dl></details>";
+        }).join("");
+
+        var others = affected.slice(0, MAESTER_OTHER_OBJECTS).map(function (candidate) {
+            return '<li><button type="button" class="pai-link" data-open="' + esc(candidate.objectId) + '">' + esc(candidate.displayName) + "</button> " + tierBadge(effectiveTier(candidate)) +
+                '<div class="muted pai-small">' + esc([TYPE_LABEL[candidate.objectType] || candidate.objectType, candidate.objectSubType].filter(Boolean).join(" \u00b7 ")) + "</div></li>";
+        }).join("");
+        if (affected.length > MAESTER_OTHER_OBJECTS) others += '<li class="muted pai-small">+' + (affected.length - MAESTER_OTHER_OBJECTS) + " more privileged objects</li>";
+
+        var siblings = object ? (object._maester || []).filter(function (finding) { return finding.testId !== testId; }) : [];
+
+        $("paiMaesterBody").innerHTML = '<div class="pai-blade-stats">' + stats + '</div><div class="pai-drawer-actions">' + actions + "</div>" +
+            (test.description ? '<details class="drawer-section" open><summary>Description and remediation</summary><div class="pai-md pai-drawer-pad">' + renderMarkdown(test.description) + "</div></details>" : "") +
+            (test.testResult ? '<details class="drawer-section" open><summary>Test result</summary><div class="pai-md pai-md-scroll pai-drawer-pad">' + renderMarkdown(test.testResult) + "</div></details>" : "") +
+            assetSections +
+            '<details class="drawer-section" open><summary>Test details</summary><dl class="kv">' +
+            kv("Index", esc(test.index)) + kv("Test id", mono(test.id)) + kv("Name", esc(test.name)) + kv("Title", esc(test.title)) +
+            kv("Severity", '<span class="chip pai-finding sev-' + severityClass + '">' + esc(maesterSeverityLabel(test)) + "</span>") + kv("Result", esc(test.result)) +
+            kv("Block", esc(test.block)) + kv("Service", esc(test.service)) + kv("Tags", (test.tags || []).map(function (tag) { return chip(tag); }).join(" ")) +
+            kv("Documentation", safeHttpsLink(test.helpUrl, test.helpUrl)) + "</dl></details>" +
+            (siblings.length ? '<details class="drawer-section" open><summary>Other Maester findings on this object (' + siblings.length + ')</summary><ul class="drawer-list pai-related">' + siblings.map(function (finding) {
+                return "<li>" + maesterChip(finding, object.objectId) + '<div class="muted pai-small">' + esc(finding.test.title) + "</div></li>";
+            }).join("") + "</ul></details>" : "") +
+            (others ? '<details class="drawer-section" open><summary>Other privileged objects with this finding (' + affected.length + ')</summary><ul class="drawer-list pai-related">' + others + "</ul></details>" : "") +
+            (MAESTER ? '<details class="drawer-section"><summary>Maester run</summary><dl class="kv">' +
+                kv("Result file", mono(MAESTER.sourceFile)) + kv("Executed at", executed && !isNaN(executed) ? esc(executed.toLocaleString()) : esc(MAESTER.executedAt)) +
+                kv("Tenant", esc([MAESTER.tenantName, MAESTER.tenantId].filter(Boolean).join(" \u00b7 "))) +
+                kv("Tests", esc([totals.passed != null ? totals.passed + " passed" : "", totals.failed != null ? totals.failed + " failed" : "", totals.skipped != null ? totals.skipped + " skipped" : ""].filter(Boolean).join(" \u00b7 "))) +
+                kv("Affected objects", esc(MAESTER.affectedObjectCount) + (MAESTER.matchedObjectCount != null ? ' <span class="muted">(' + esc(MAESTER.matchedObjectCount) + " matched to privileged objects)</span>" : "")) +
+                "</dl></details>" : "");
+
+        blade.testId = testId;
+        blade.objectId = object ? object.objectId : "";
+        $("paiMaesterBody").scrollTop = 0;
+        $("paiMaesterBackdrop").classList.add("open");
+        $("paiMaesterBlade").setAttribute("aria-hidden", "false");
+        if (updateUrl && object) history.replaceState(null, "", "#asset=" + encodeURIComponent(object.objectId) + "&maester=" + encodeURIComponent(testId));
+    }
+
+    function closeMaesterBlade(updateUrl) {
+        if (!$("paiMaesterBlade").classList.contains("open")) return;
+        $("paiMaesterBlade").classList.remove("open");
+        $("paiMaesterBackdrop").classList.remove("open");
+        $("paiMaesterBlade").setAttribute("aria-hidden", "true");
+        if (updateUrl !== false && blade.objectId) history.replaceState(null, "", "#asset=" + encodeURIComponent(blade.objectId));
     }
 
     // ---- Import / export ------------------------------------------------------------------------
@@ -752,7 +972,7 @@
     }
 
     function exportInventory() {
-        var headers = ["ObjectId", "DisplayName", "UserPrincipalName", "ObjectType", "ObjectSubType", "ObjectTier", "TargetTier", "HighestAssignmentTier", "Assignments", "EligibleAssignments", "RoleSystems", "Owners", "Sponsors", "OwnedObjects", "OwnedDevices", "IdentityParent", "AdministrativeUnits", "RestrictedManagement", "SyncSource", "Findings"];
+        var headers = ["ObjectId", "DisplayName", "UserPrincipalName", "ObjectType", "ObjectSubType", "ObjectTier", "TargetTier", "HighestAssignmentTier", "Assignments", "EligibleAssignments", "RoleSystems", "Owners", "Sponsors", "OwnedObjects", "OwnedDevices", "IdentityParent", "AdministrativeUnits", "RestrictedManagement", "SyncSource", "Findings", "MaesterFindings"];
         var names = function (ids) { return (ids || []).map(function (id) { return relatedInfo(id).displayName; }).join("; "); };
         var rows = filteredObjects().map(function (object) {
             var entry = state.worklistEntries[object.objectId];
@@ -764,7 +984,8 @@
                 IdentityParent: object.identityParent ? relatedInfo(object.identityParent).displayName : "",
                 AdministrativeUnits: (object.administrativeUnits || []).map(function (unit) { return unit.displayName || unit.id; }).join("; "),
                 RestrictedManagement: object.restrictedManagement, SyncSource: object.onPremSynchronized ? "Hybrid" : "Cloud-only",
-                Findings: object._findings.map(function (id) { return FINDING_BY_ID[id].label; }).join("; ")
+                Findings: object._findings.map(function (id) { return FINDING_BY_ID[id].label; }).join("; "),
+                MaesterFindings: object._maester.map(function (finding) { return finding.testId + " (" + maesterSeverityLabel(finding.test) + ")"; }).join("; ")
             };
         });
         download("PrivilegedAssets.csv", "text/csv;charset=utf-8", toCsv(headers, rows));
@@ -967,8 +1188,17 @@
             renderInventory();
         });
         document.addEventListener("click", function (ev) {
+            var maesterOpener = ev.target.closest ? ev.target.closest("[data-maester-open]") : null;
+            if (maesterOpener) { openMaesterBlade(maesterOpener.getAttribute("data-maester-open"), maesterOpener.getAttribute("data-maester-object"), true); return; }
+            var maesterMore = ev.target.closest ? ev.target.closest("[data-maester-more]") : null;
+            if (maesterMore) {
+                openDrawer(maesterMore.getAttribute("data-maester-more"), true);
+                var section = $("paiDrawerMaester");
+                if (section) section.scrollIntoView({ block: "start" });
+                return;
+            }
             var opener = ev.target.closest ? ev.target.closest("[data-open]") : null;
-            if (opener) { openDrawer(opener.getAttribute("data-open"), true); return; }
+            if (opener) { closeMaesterBlade(false); openDrawer(opener.getAttribute("data-open"), true); return; }
             var remove = ev.target.closest ? ev.target.closest("[data-remove]") : null;
             if (remove) { removeFromWorklist([remove.getAttribute("data-remove")]); renderAll(); return; }
             var restore = ev.target.closest ? ev.target.closest("[data-restore]") : null;
@@ -1050,7 +1280,13 @@
 
         $("paiDrawerClose").addEventListener("click", closeDrawer);
         $("paiDrawerBackdrop").addEventListener("click", closeDrawer);
-        document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && $("paiDrawer").classList.contains("open")) closeDrawer(); });
+        $("paiMaesterClose").addEventListener("click", function () { closeMaesterBlade(true); });
+        $("paiMaesterBackdrop").addEventListener("click", function () { closeMaesterBlade(true); });
+        document.addEventListener("keydown", function (ev) {
+            if (ev.key !== "Escape") return;
+            if ($("paiMaesterBlade").classList.contains("open")) closeMaesterBlade(true);
+            else if ($("paiDrawer").classList.contains("open")) closeDrawer();
+        });
         window.addEventListener("hashchange", applyDeepLink);
     }
 

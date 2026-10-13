@@ -10,6 +10,7 @@ let fixtureRoot;
 let appUrl;
 let csaAppUrl;
 let mixedAppUrl;
+let maesterAppUrl;
 
 const userId = "11111111-1111-1111-1111-111111111111";
 const servicePrincipalId = "22222222-2222-2222-2222-222222222222";
@@ -108,7 +109,30 @@ test.beforeAll(async () => {
     appUrl = await writeAppFixture("PrivilegedAssets", fixtureData);
     csaAppUrl = await writeAppFixture("PrivilegedAssetsCsa", csaData);
     mixedAppUrl = await writeAppFixture("PrivilegedAssetsMixed", mixedData);
+    maesterAppUrl = await writeAppFixture("PrivilegedAssetsMaester", maesterData());
 });
+
+function maesterTestRecord(id, severity, title) {
+    return {
+        index: 1, id, title, name: `${id}: ${title}`, severity, result: "Failed", tags: ["Maester", id], helpUrl: `https://maester.dev/docs/tests/${id}`,
+        block: "Maester/Entra", service: "", description: "Owners can <script>alert(1)</script> manage the app.\n\n#### Remediation action\n\n1. Remove owners\n2. Review [docs](https://maester.dev)\n",
+        testResult: "Your tenant has issues:\n\n| Name | Status |\n| --- | --- |\n| App B | **Failed** |\n"
+    };
+}
+
+function maesterData() {
+    const ids = [["MT.1001", "Critical"], ["MT.1002", "High"], ["MT.1003", "Medium"], ["MT.1004", "Low"], ["MT.1005", "Medium"]];
+    const tests = Object.fromEntries(ids.map(([id, severity]) => [id, maesterTestRecord(id, severity, `Title of ${id}`)]));
+    const asset = (id, testIds) => ({
+        system: "EntraID", anchorKind: "Instance", type: "ServicePrincipal", id, uniqueId: `object-${id.slice(0, 4)}`, displayName: "App B",
+        userPrincipalName: "", portalLink: "https://entra.microsoft.com/#view/app", sources: ["Markdown", "GraphCache"], tests: testIds
+    });
+    const data = JSON.parse(JSON.stringify(fixtureData));
+    data.maester = { sourceFile: "TestResults-2026-10-04-103542.json", executedAt: "2026-10-04T08:35:43Z", tenantId: "t1", tenantName: "contoso", totals: { total: 825, failed: 4, passed: 3, skipped: 0 }, affectedObjectCount: 49, matchedObjectCount: 2, tests };
+    data.objects.find((o) => o.objectId === servicePrincipalId).maesterAssets = [asset(servicePrincipalId, ids.map(([id]) => id))];
+    data.objects.find((o) => o.objectId === userId).maesterAssets = [asset(userId, ["MT.1002"])];
+    return data;
+}
 
 async function writeAppFixture(folderName, data) {
     const appFixtureDir = join(fixtureRoot, "Reports", folderName);
@@ -302,6 +326,41 @@ test("import validates object ids, tier names and object types", async ({ page }
     const entry = await page.evaluate((id) => JSON.parse(localStorage.getItem("entraops.privilegedAssets.objectClassification.v1")).entries[id], groupId);
     expect(entry.adminTierLevelName).toBe("ManagementPlane");
     expect(entry.justification).toBe("=Imported");
+});
+
+test("Maester failed tests show as findings and open a detail blade", async ({ page }) => {
+    const pageErrors = await openApp(page, maesterAppUrl);
+    const appRow = page.locator(`#paiTableBody tr[data-object="${servicePrincipalId}"]`);
+
+    await expect(appRow.locator("button[data-maester-open]")).toHaveCount(2);
+    await expect(appRow.locator("button[data-maester-open]").first()).toContainText("MT.1001");
+    await expect(appRow.locator("button[data-maester-more]")).toHaveText(/\+3 Maester tests/);
+    await expect(page.locator(`#paiTableBody tr[data-object="${userId}"] button[data-maester-open]`)).toHaveCount(1);
+    await expect(page.locator(`#paiTableBody tr[data-object="${groupId}"] button[data-maester-open]`)).toHaveCount(0);
+
+    await page.selectOption("#paiFilterFinding", "maester:MT.1002");
+    await expect(page.locator("#paiTableBody tr")).toHaveCount(2);
+    await page.selectOption("#paiFilterFinding", "__maester");
+    await expect(page.locator("#paiTableBody tr")).toHaveCount(2);
+    await page.click("#paiResetFilters");
+
+    await appRow.locator('button[data-maester-open="MT.1001"]').click();
+    const blade = page.locator("#paiMaesterBlade");
+    await expect(blade).toHaveClass(/open/);
+    await expect(page.locator("#paiMaesterTitle")).toHaveText("Title of MT.1001");
+    await expect(blade).toContainText("Remediation action");
+    await expect(blade.locator(".pai-md-table td").first()).toHaveText("App B");
+    await expect(blade.locator(".pai-md script")).toHaveCount(0);
+    await expect(blade).toContainText("object-2222");
+    await expect(blade.locator('a[href="https://maester.dev/docs/tests/MT.1001"]')).toHaveCount(2);
+    await expect(page).toHaveURL(new RegExp(`#asset=${servicePrincipalId}&maester=MT.1001$`));
+
+    await page.keyboard.press("Escape");
+    await expect(blade).not.toHaveClass(/open/);
+    await page.click('#paiTableBody button[data-maester-more]');
+    await expect(page.locator("#paiDrawer")).toHaveClass(/open/);
+    await expect(page.locator("#paiDrawerMaester li")).toHaveCount(5);
+    expect(pageErrors).toEqual([]);
 });
 
 for (const viewport of [{ name: "desktop", width: 1600, height: 900 }, { name: "laptop", width: 1175, height: 800 }]) {

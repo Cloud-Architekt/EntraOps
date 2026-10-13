@@ -75,15 +75,15 @@
             <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiWorklist"><span
                     class="ico">&#9998;</span><span>Worklist</span></div>
             <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiScript"
-                data-classification-method="csa"><span
-                    class="ico">&#8984;</span><span>PowerShell Script</span></div>
+                data-classification-method="csa"><span class="ico">&#8984;</span><span>PowerShell Script</span></div>
         </nav>
 
         <main class="main" id="app">
             <div class="page-head">
                 <div class="breadcrumb"><a href="../index.html">Privileged EAM Reporting</a> &rsaquo;
                     <a href="index.html" data-view-link="overview">Privileged Assets</a> &rsaquo; <span
-                        id="paiViewCrumb">Overview</span></div>
+                        id="paiViewCrumb">Overview</span>
+                </div>
                 <h1 id="paiViewTitle">Privileged Assets</h1>
                 <p data-view="overview">An object-centric view of every privileged user, group, service principal and
                     application (including all object sub types) from the Privileged EAM export. It shows the
@@ -97,15 +97,18 @@
                     classification method configured in <code>EntraOpsConfig.json</code>: compare the current
                     tier of each object with its target tier and the role assignments with the highest classification,
                     import or export the worklist as CSV or JSON, and download the <b>Object Classification
-                    File</b> or generate a PowerShell script that sets the tier custom security attributes, depending on
+                        File</b> or generate a PowerShell script that sets the tier custom security attributes,
+                    depending on
                     the enabled classification sources. Select
                     objects in the
-                    <a href="index.html" data-view-link="overview">Overview</a> or add them below.</p>
+                    <a href="index.html" data-view-link="overview">Overview</a> or add them below.
+                </p>
             </div>
 
             <div class="card-pad" id="paiEmptyState">
                 <p><strong>No Privileged Assets dataset found.</strong> Generate
-                    <code>data/privileged-assets-data.js</code> from your Privileged EAM export first:</p>
+                    <code>data/privileged-assets-data.js</code> from your Privileged EAM export first:
+                </p>
                 <p><code>Import-Module ./EntraOps -Force; New-EntraOpsPrivilegedAssetsData</code></p>
                 <p>Run <code>Save-EntraOpsPrivilegedEAMJson</code> before if no export exists yet. Then reload this
                     page.</p>
@@ -126,24 +129,34 @@
                                 <input type="search" id="paiSearch" class="pai-input"
                                     placeholder="Name, UPN, app id or object id" autocomplete="off" />
                             </label>
-                            <label class="eam-filter">Object type<select id="paiFilterType" class="pai-input"></select></label>
-                            <label class="eam-filter">Sub type<select id="paiFilterSubType" class="pai-input"></select></label>
-                            <label class="eam-filter">Object tier<select id="paiFilterTier" class="pai-input"></select></label>
-                            <label class="eam-filter">Assignment tier<select id="paiFilterAssignmentTier" class="pai-input"></select></label>
+                            <label class="eam-filter">Object type<select id="paiFilterType"
+                                    class="pai-input"></select></label>
+                            <label class="eam-filter">Sub type<select id="paiFilterSubType"
+                                    class="pai-input"></select></label>
+                            <label class="eam-filter">Object tier<select id="paiFilterTier"
+                                    class="pai-input"></select></label>
+                            <label class="eam-filter">Assignment tier<select id="paiFilterAssignmentTier"
+                                    class="pai-input"></select></label>
                         </div>
                         <div class="eam-filter-row pai-filters">
-                            <label class="eam-filter">Administrative unit<select id="paiFilterAu" class="pai-input"></select></label>
-                            <label class="eam-filter">Restricted management<select id="paiFilterRestricted" class="pai-input"></select></label>
-                            <label class="eam-filter">Sync source<select id="paiFilterSync" class="pai-input"></select></label>
-                            <label class="eam-filter">Finding<select id="paiFilterFinding" class="pai-input"></select></label>
-                            <label class="eam-filter">Worklist<select id="paiFilterWorklist" class="pai-input"></select></label>
+                            <label class="eam-filter">Administrative unit<select id="paiFilterAu"
+                                    class="pai-input"></select></label>
+                            <label class="eam-filter">Restricted management<select id="paiFilterRestricted"
+                                    class="pai-input"></select></label>
+                            <label class="eam-filter">Sync source<select id="paiFilterSync"
+                                    class="pai-input"></select></label>
+                            <label class="eam-filter">Finding<select id="paiFilterFinding"
+                                    class="pai-input"></select></label>
+                            <label class="eam-filter">Worklist<select id="paiFilterWorklist"
+                                    class="pai-input"></select></label>
                         </div>
                         <div class="pai-toolbar">
                             <label class="pai-check"><input type="checkbox" id="paiWhatIf" /> What-if: evaluate
                                 findings with worklist target tiers</label>
                             <span class="spacer"></span>
                             <button type="button" class="btn small" id="paiResetFilters">Reset filters</button>
-                            <button type="button" class="btn small" id="paiExportInventory">Export inventory (CSV)</button>
+                            <button type="button" class="btn small" id="paiExportInventory">Export inventory
+                                (CSV)</button>
                         </div>
                         <div class="pai-bulk" id="paiBulk">
                             <span id="paiSelectionCount">0 selected</span>
@@ -184,10 +197,11 @@
                         <div class="callout" id="paiFileStatus"></div>
                         <div class="pai-toolbar">
                             <input type="search" id="paiAddObject" class="pai-input pai-add-object"
-                                list="paiObjectOptions" placeholder="Add object by name or object id"
-                                autocomplete="off" aria-label="Object to add" />
+                                list="paiObjectOptions" placeholder="Add object by name or object id" autocomplete="off"
+                                aria-label="Object to add" />
                             <datalist id="paiObjectOptions"></datalist>
-                            <select id="paiAddTier" class="pai-input" aria-label="Target tier for the added object"></select>
+                            <select id="paiAddTier" class="pai-input"
+                                aria-label="Target tier for the added object"></select>
                             <button type="button" class="btn small primary" id="paiAddButton">Add to worklist</button>
                         </div>
                         <div class="pai-toolbar">
@@ -233,7 +247,8 @@
                             <code>CustomSecurityAttributes</code>) for users, service principals and applications in
                             the worklist whose target tier differs from the current tier. Groups are skipped because
                             they don't support custom security attributes - classify them with Alternate Tier Level
-                            Attributes <code>Group</code> filters. Nothing is executed from this page.</p>
+                            Attributes <code>Group</code> filters. Nothing is executed from this page.
+                        </p>
                         <div class="callout scope" id="paiScriptCrossTenant" hidden></div>
                         <div class="callout control hidden" id="paiScriptWarning"></div>
                         <div class="pai-toolbar">
@@ -262,6 +277,19 @@
             <button type="button" class="close" id="paiDrawerClose" aria-label="Close details">&times;</button>
         </div>
         <div class="drawer-body" id="paiDrawerBody"></div>
+    </aside>
+
+    <div id="paiMaesterBackdrop" class="drawer-backdrop pai-blade-backdrop"></div>
+    <aside id="paiMaesterBlade" class="drawer pai-blade" aria-label="Maester finding details" aria-hidden="true">
+        <div class="drawer-head pai-blade-head">
+            <div class="pai-blade-heading">
+                <div class="pai-blade-kicker" id="paiMaesterKicker"></div>
+                <div class="title" id="paiMaesterTitle"></div>
+                <div class="pai-blade-chips" id="paiMaesterChips"></div>
+            </div>
+            <button type="button" class="close" id="paiMaesterClose" aria-label="Close Maester details">&times;</button>
+        </div>
+        <div class="drawer-body" id="paiMaesterBody"></div>
     </aside>
 
     <script src="data/privileged-assets-data.js"></script>

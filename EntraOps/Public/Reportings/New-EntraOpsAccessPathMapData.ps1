@@ -209,6 +209,19 @@ function New-EntraOpsAccessPathMapData {
         }
     )
     if (-not @($RoleCatalogFiles | Where-Object { $_ })) {
+        # Last resort: AzurePrivilegedIAM catalog files downloaded into the EntraOps cache folder.
+        $CatalogCacheRoot = Get-EntraOpsClassificationSourceCache -FileName @($RoleCatalogFileNames | ForEach-Object { Split-Path -Leaf $_ })
+        if ($CatalogCacheRoot) {
+            $RoleCatalogRoots += $CatalogCacheRoot
+            $RoleCatalogFiles = @(
+                foreach ($catalogFileName in $RoleCatalogFileNames) {
+                    $catalogPath = Join-Path $CatalogCacheRoot $catalogFileName
+                    if (Test-Path -LiteralPath $catalogPath -PathType Leaf) { $catalogPath }
+                }
+            )
+        }
+    }
+    if (-not @($RoleCatalogFiles | Where-Object { $_ })) {
         Write-Warning "No role catalog classification files found; role node descriptions/categories stay empty. Paths tried: $(@($RoleCatalogRoots | ForEach-Object { $root = $_; $RoleCatalogFileNames | ForEach-Object { Join-Path $root $_ } }) -join ', ')"
     }
     foreach ($catalogFile in $RoleCatalogFiles) {

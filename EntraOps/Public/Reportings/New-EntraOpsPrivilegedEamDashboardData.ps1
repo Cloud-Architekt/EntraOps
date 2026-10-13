@@ -177,6 +177,14 @@ function New-EntraOpsPrivilegedEamDashboardData {
         (Join-Path (Join-Path $RepoRoot '.reporting/AzurePrivilegedIAM') 'Classification/Classification_EntraIdDirectoryRoles.json')
     )
     $directoryRoleClassificationPath = @($directoryRoleClassificationCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1)[0]
+    if (-not $directoryRoleClassificationPath) {
+        # Last resort: the AzurePrivilegedIAM file downloaded into the EntraOps cache folder.
+        $catalogCacheRoot = Get-EntraOpsClassificationSourceCache -FileName 'Classification_EntraIdDirectoryRoles.json'
+        if ($catalogCacheRoot) {
+            $directoryRoleClassificationPath = Join-Path $catalogCacheRoot 'Classification/Classification_EntraIdDirectoryRoles.json'
+            Write-Verbose "Using the cached directory role classification $directoryRoleClassificationPath"
+        }
+    }
     if ($directoryRoleClassificationPath) {
         try {
             foreach ($role in @([System.IO.File]::ReadAllText($directoryRoleClassificationPath) | ConvertFrom-Json)) {

@@ -57,6 +57,11 @@
     the generator falls back to `PrivilegedAssets.ResolveRelatedObjectIds` in
     EntraOpsConfig.json, or $true.
 
+.PARAMETER PrivilegedAssetsMaesterTestResultPath
+    Forwarded as -MaesterTestResultPath to New-EntraOpsPrivilegedAssetsData: Maester result JSON,
+    path without extension, or folder (latest TestResults JSON). Optional; the Maester integration is
+    skipped when omitted or when no result file is found.
+
 .PARAMETER SkipPrivilegedAssets
     Do not generate Privileged Assets data.
 
@@ -222,6 +227,11 @@ function New-EntraOpsReportingData {
 
         [Parameter(Mandatory = $false)]
         [System.Nullable[bool]]$PrivilegedAssetsResolveRelatedObjectIds,
+
+        [Parameter(Mandatory = $false)]
+        [Alias('MaesterTestResultPath')]
+        [AllowEmptyString()]
+        [System.String]$PrivilegedAssetsMaesterTestResultPath,
 
         [Parameter(Mandatory = $false)]
         [switch]$SkipPrivilegedAssets,
@@ -432,6 +442,7 @@ function New-EntraOpsReportingData {
         if (-not [string]::IsNullOrWhiteSpace($EamDashboardImportPath)) { $PrivilegedAssetsParams.ImportPath = $EamDashboardImportPath }
         if (-not [string]::IsNullOrWhiteSpace($PrivilegedAssetsAppRoot)) { $PrivilegedAssetsParams.AppRoot = $PrivilegedAssetsAppRoot }
         if ($null -ne $PrivilegedAssetsResolveRelatedObjectIds) { $PrivilegedAssetsParams.ResolveRelatedObjectIds = $PrivilegedAssetsResolveRelatedObjectIds }
+        if ($PSBoundParameters.ContainsKey('PrivilegedAssetsMaesterTestResultPath')) { $PrivilegedAssetsParams.MaesterTestResultPath = $PrivilegedAssetsMaesterTestResultPath }
         if ($PassThru) { $PrivilegedAssetsParams.PassThru = $true }
 
         Write-Verbose "Generating Privileged Assets data..."

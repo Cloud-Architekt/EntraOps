@@ -74,3 +74,51 @@ Describe 'New-EntraOpsClassificationExplorerData history configuration' {
     }
 }
 
+
+Describe 'New-EntraOpsClassificationExplorerData catalog fallback' {
+    BeforeAll {
+        function Update-EntraOpsClassificationExplorerData {
+            [CmdletBinding(SupportsShouldProcess = $true)]
+            param (
+                [string]$Mode,
+                [string]$RepoRoot,
+                [string]$EntraOpsRoot,
+                [string]$AppRoot,
+                [switch]$SkipManifest,
+                [switch]$SkipEmbed,
+                [switch]$SkipHistory,
+                [switch]$PassThru
+            )
+
+            if (-not $RepoRoot) { throw 'Could not auto-detect the AzurePrivilegedIAM repository (looked for x).' }
+            $script:ReceivedRepoRoot = $RepoRoot
+        }
+
+        function Get-EntraOpsClassificationSourceCache { $script:CatalogRootToReturn }
+    }
+
+    BeforeEach {
+        $script:ReceivedRepoRoot = $null
+        $script:CatalogRootToReturn = Join-Path $TestDrive 'catalog'
+        $script:EntraOpsRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -Path $script:EntraOpsRoot -ItemType Directory -Force | Out-Null
+    }
+
+    It 'uses the cached catalog folder as RepoRoot when no local AzurePrivilegedIAM is found' {
+        New-EntraOpsClassificationExplorerData -EntraOpsRoot $script:EntraOpsRoot
+
+        $script:ReceivedRepoRoot | Should -Be $script:CatalogRootToReturn
+    }
+
+    It 'throws when the catalog files cannot be downloaded' {
+        $script:CatalogRootToReturn = $null
+
+        { New-EntraOpsClassificationExplorerData -EntraOpsRoot $script:EntraOpsRoot } | Should -Throw '*could not be downloaded*'
+    }
+
+    It 'does not touch the cache with -WhatIf' {
+        New-EntraOpsClassificationExplorerData -EntraOpsRoot $script:EntraOpsRoot -WhatIf
+
+        $script:ReceivedRepoRoot | Should -BeNullOrEmpty
+    }
+}
