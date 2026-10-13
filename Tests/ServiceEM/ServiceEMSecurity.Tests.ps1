@@ -1139,6 +1139,24 @@ Describe 'ServiceEM access package resource roles' {
             @($warnings | Where-Object { "$_" -like '*Replacing the active Member role*' }).Count | Should -Be 1
         }
 
+        It 'keeps the removed active Member role out of the consistency check when the Microsoft 365 group is processed (<Name>)' -ForEach @(
+            @{ Name = 'Microsoft 365 group last'; Order = @('ma', 'm365') }
+            @{ Name = 'Microsoft 365 group first'; Order = @('m365', 'ma') }
+        ) {
+            $all = @{
+                ma   = $script:EligibleGroups[1]
+                m365 = [pscustomobject]@{ Id = 'm365'; DisplayName = 'Rg-X Members'; GroupTypes = @('Unified') }
+            }
+            $groups = @($Order | ForEach-Object { $all[$_] })
+            $resources = @($groups | ForEach-Object { [pscustomobject]@{ Id = "res-$($_.Id)"; DisplayName = $_.DisplayName; OriginSystem = 'AadGroup'; OriginId = $_.Id } })
+            $existing = [pscustomobject]@{ Id = 'rrs-active'; Role = [pscustomobject]@{ OriginId = 'Member_ma' }; Scope = [pscustomobject]@{ OriginId = 'ma' } }
+            $packages = @([pscustomobject]@{ Id = 'ap:mp'; DisplayName = 'AP-Rg-X-ManagementPlane-Admins'; ResourceRoleScopes = @($existing) })
+
+            { New-EntraOpsServiceEMAccessPackageResourceAssignment -ServiceCatalogId 'cat' -ServiceName 'Rg-X' -ServiceGroups $groups -ServicePackages $packages -ServiceCatalogResources $resources -EligibleMemberGroupIds @('ma') -WarningAction SilentlyContinue 6>$null | Out-Null } | Should -Not -Throw
+
+            ($script:RoleScopeBodies | Where-Object { $_.Body.scope.originId -eq 'ma' }).Body.role.originId | Should -Be 'EligibleMember_ma'
+        }
+
         It 'does not add Eligible Member when the active Member role cannot be removed' {
             Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'DELETE' } -MockWith { throw 'Graph 500' }
             $existing = [pscustomobject]@{ Id = 'rrs-active'; Role = [pscustomobject]@{ OriginId = 'Member_ma' }; Scope = [pscustomobject]@{ OriginId = 'ma' } }
@@ -1890,6 +1908,19 @@ Describe 'ServiceEM catalog removal with open assignment requests' {
 
         { Remove-EntraOpsServiceCatalog -ServiceCatalogName 'Catalog-Rg-MyApp' -Force -WarningAction SilentlyContinue 6>$null } |
         Should -Throw '*1 open assignment request(s) did not complete*'
+        $script:DeletedUris | Should -Not -Contain '/v1.0/groups/own'
+    }
+
+    It 'keeps the access package when an assignment removal does not complete' {
+        $script:OpenRequest = [pscustomobject]@{ id = 'open-req'; requestType = 'userAdd'; state = 'delivered'; status = 'Delivered' }
+        Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Uri -like '*/assignmentRequests/remove-req' } {
+            [pscustomobject]@{ id = 'remove-req'; state = 'delivering'; status = 'Delivering' }
+        }
+
+        { Remove-EntraOpsServiceCatalog -ServiceCatalogName 'Catalog-Rg-MyApp' -Force -WarningAction SilentlyContinue 6>$null } |
+        Should -Throw "*removal of User*still in progress*request remove-req, state 'delivering'*"
+        $script:DeletedUris | Should -Not -Contain '/v1.0/identityGovernance/entitlementManagement/accessPackages/ap-1'
+        $script:DeletedUris | Should -Not -Contain '/v1.0/identityGovernance/entitlementManagement/catalogs/catalog-id'
         $script:DeletedUris | Should -Not -Contain '/v1.0/groups/own'
     }
 }

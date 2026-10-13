@@ -28,7 +28,7 @@
     Copyright            = '(c) 2024-2026 Thomas Naunheim. All rights reserved.'
 
     # Description of the functionality provided by this module
-    Description          = 'PowerShell module for EntraOps'
+    Description          = 'EntraOps classifies and reports privileged access in Microsoft Entra ID, Azure RBAC, Identity Governance, Intune, Defender and Microsoft Graph app roles against the Enterprise Access Model (EAM). It exports privileged assets as JSON, Microsoft Sentinel watchlists and BloodHound data, provides Tenant Governance snapshots and offline reports, and provisions service-scoped landing zones (Service EM). Requires PowerShell 7.4+.'
 
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion    = '7.4'
@@ -181,7 +181,6 @@
         'New-EntraOpsServicePIMPolicy'
         'New-EntraOpsSubscriptionLandingZone'
         'Remove-EntraOpsServiceCatalog'
-        'Resolve-EntraOpsServiceEMDelegationGroup'
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
@@ -218,7 +217,8 @@
                 'RBAC',
                 'IdentityGovernance',
                 'Intune',
-                'Defender'
+                'Defender',
+                'EntraOps'
             )
 
 
@@ -226,13 +226,13 @@
             ProjectUri   = 'https://github.com/cloud-architekt/EntraOps'
 
             # A URL to the license for this project.
-            LicenseUri   = 'https://github.com/Cloud-Architekt/EntraOps/blob/main/LICENSE'
+            LicenseUri   = 'https://github.com/cloud-Architekt/EntraOps/blob/main/LICENSE'
 
             # A URL to an icon representing this module.
-            # IconUri = ''
+            IconUri      = 'https://www.entraops.com/entraops_icon.png'
 
             # ReleaseNotes of this module
-            ReleaseNotes = 'First stable release. Classifies and exports privileged access across Entra ID, Azure RBAC, Identity Governance, Intune, Defender and Microsoft Graph app roles against the Enterprise Access Model, including Azure ABAC constrained delegation, Tenant Governance snapshots, offline reporting apps and a browser-based configuration wizard. Full changelog: https://github.com/Cloud-Architekt/EntraOps/blob/main/CHANGELOG.md'
+            ReleaseNotes = 'Adds Service EM: service-scoped landing zones aligned with the Enterprise Access Model (Azure resource group, Entra groups, Identity Governance access packages, PIM and Azure RBAC with ABAC constrained delegation). Full changelog: https://github.com/Cloud-Architekt/EntraOps/blob/main/CHANGELOG.md'
 
         } # End of PSData hashtable
 

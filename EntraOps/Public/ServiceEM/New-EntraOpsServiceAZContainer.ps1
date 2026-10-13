@@ -89,32 +89,32 @@ function New-EntraOpsServiceAZContainer {
         if ($AzureScope -eq "Subscription") {
             Write-Verbose "$logPrefix Using subscription scope $subscriptionScope (no resource group)"
         } else {
-        # Normalize resource group name: strip Sub-/Rg- scope prefix to avoid RG-Sub-/RG-Rg- duplication
-        $rgBaseName = $serviceName
-        if ($rgBaseName -match '^(Sub|Rg)-') {
-            $rgBaseName = $rgBaseName.Substring(3)
-        }
-        $rgName = "RG-$rgBaseName"
-
-        try{
-            Write-Verbose "$logPrefix Looking up Azure Resource Group"
-            $resourceGroup = Get-AzResourceGroup -Name $rgName -ErrorAction Stop
-        }catch{
-            if($_.Exception.Message -like "*not exist."){
-                Write-Verbose "$logPrefix Azure Resource Group not found, creating"
-                # Remove-EntraOpsServiceCatalog -RemoveAzureResourceGroup only deletes resource groups with this tag
-                $resourceGroup = New-AzResourceGroup -Name $rgName -Location $Location -Tag @{ EntraOpsServiceEM = $ServiceName }
-                $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Azure resource group $rgName" -logPrefix $logPrefix -Condition {
-                    (@(Get-AzResourceGroup -Name $rgName -ErrorAction SilentlyContinue) | Measure-Object).Count -eq 1
-                }
-                if(-not $confirmed){
-                    throw "Resource Group consistency with Azure not achieved"
-                }
-            }else{
-                Write-Verbose "$logPrefix Failed to lookup Azure Resource Group"
-                Write-Error $_
+            # Normalize resource group name: strip Sub-/Rg- scope prefix to avoid RG-Sub-/RG-Rg- duplication
+            $rgBaseName = $serviceName
+            if ($rgBaseName -match '^(Sub|Rg)-') {
+                $rgBaseName = $rgBaseName.Substring(3)
             }
-        }
+            $rgName = "RG-$rgBaseName"
+
+            try {
+                Write-Verbose "$logPrefix Looking up Azure Resource Group"
+                $resourceGroup = Get-AzResourceGroup -Name $rgName -ErrorAction Stop
+            } catch {
+                if ($_.Exception.Message -like "*not exist*" -or $_.Exception.Message -like "*ResourceGroupNotFound*") {
+                    Write-Verbose "$logPrefix Azure Resource Group not found, creating"
+                    # Remove-EntraOpsServiceCatalog -RemoveAzureResourceGroup only deletes resource groups with this tag
+                    $resourceGroup = New-AzResourceGroup -Name $rgName -Location $Location -Tag @{ EntraOpsServiceEM = $ServiceName }
+                    $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Azure resource group $rgName" -logPrefix $logPrefix -Condition {
+                        (@(Get-AzResourceGroup -Name $rgName -ErrorAction SilentlyContinue) | Measure-Object).Count -eq 1
+                    }
+                    if (-not $confirmed) {
+                        throw "Resource Group consistency with Azure not achieved"
+                    }
+                } else {
+                    Write-Verbose "$logPrefix Failed to lookup Azure Resource Group"
+                    throw
+                }
+            }
         }
         $scopeId = if ($AzureScope -eq "Subscription") { $subscriptionScope } else { $resourceGroup.ResourceId }
         # Parent scopes (subscription, management groups, root) only; child and sibling scopes don't inherit
@@ -129,10 +129,10 @@ function New-EntraOpsServiceAZContainer {
         try {
             # Use -WarningAction SilentlyContinue to suppress Az.Resources breaking-change warnings
             # about flattened properties (Actions, NotActions, etc.) that this code does not use.
-            $reader          = Get-AzRoleDefinition -Name Reader -WarningAction SilentlyContinue
+            $reader = Get-AzRoleDefinition -Name Reader -WarningAction SilentlyContinue
             $userAccessAdmin = Get-AzRoleDefinition -Name "User Access Administrator" -WarningAction SilentlyContinue
-            $contributor     = Get-AzRoleDefinition -Name Contributor -WarningAction SilentlyContinue
-            $rbacAdmin       = Get-AzRoleDefinition -Name "Role Based Access Control Administrator" -WarningAction SilentlyContinue
+            $contributor = Get-AzRoleDefinition -Name Contributor -WarningAction SilentlyContinue
+            $rbacAdmin = Get-AzRoleDefinition -Name "Role Based Access Control Administrator" -WarningAction SilentlyContinue
         } catch {
             Write-Verbose "$logPrefix Failed to find role definitions"
             Write-Error $_
@@ -140,11 +140,11 @@ function New-EntraOpsServiceAZContainer {
         if ($SkipControlPlaneDelegation) {
             Write-Verbose "$logPrefix Skipping Control Plane delegation setup"
         } else {
-            $control    = $ServiceGroups|Where-Object{$_.DisplayName -like "*-ControlPlane-Admins"}
+            $control = $ServiceGroups | Where-Object { $_.DisplayName -like "*-ControlPlane-Admins" }
         }
-        $management     = $ServiceGroups|Where-Object{$_.DisplayName -like "*-ManagementPlane-Admins"}
-        $workloadAdmins = $ServiceGroups|Where-Object{$_.DisplayName -like "*-WorkloadPlane-Admins"}
-        $workloadUsers  = $ServiceGroups|Where-Object{$_.DisplayName -like "*-WorkloadPlane-Users"}
+        $management = $ServiceGroups | Where-Object { $_.DisplayName -like "*-ManagementPlane-Admins" }
+        $workloadAdmins = $ServiceGroups | Where-Object { $_.DisplayName -like "*-WorkloadPlane-Admins" }
+        $workloadUsers = $ServiceGroups | Where-Object { $_.DisplayName -like "*-WorkloadPlane-Users" }
         
         # Load constrained delegation configuration from global config
         $constrainedDelegationConfig = $null
@@ -156,14 +156,14 @@ function New-EntraOpsServiceAZContainer {
         }
         
         $scheduleRequestParams = @{
-            Name = ""
-            RoleDefinitionId = ""
-            PrincipalId = ""
-            Scope = $scopeId
-            RequestType = "AdminAssign"
-            Justification = "Initial Bootstrap"
+            Name                      = ""
+            RoleDefinitionId          = ""
+            PrincipalId               = ""
+            Scope                     = $scopeId
+            RequestType               = "AdminAssign"
+            Justification             = "Initial Bootstrap"
             #ExpirationDuration = "P1Y"
-            ExpirationType = "NoExpiration" #AfterDuration
+            ExpirationType            = "NoExpiration" #AfterDuration
             ScheduleInfoStartDateTime = (Get-Date -Format o)
         }
         $roleDefinitionPrefix = "/Subscriptions/$((Get-AzContext).Subscription.Id)/providers/Microsoft.Authorization/roleDefinitions/"
@@ -175,14 +175,14 @@ function New-EntraOpsServiceAZContainer {
         Write-Verbose "$logPrefix Beginning AZ Container"
 
         # Permanent Reader for WorkloadPlane-Admins; all other Azure roles are PIM eligible
-        if($workloadAdmins){
+        if ($workloadAdmins) {
             $wlExisting = @()
             try {
                 $wlExisting = Get-AzRoleAssignment -Scope $scopeId -ObjectId $workloadAdmins.Id
             } catch {
                 Write-Verbose "$logPrefix Failed to check existing Reader assignment for WorkloadPlane-Admins: $_"
             }
-            if("$($workloadAdmins.Id)_$($reader.Id)" -notin ($wlExisting | ForEach-Object { "$($_.ObjectId)_$($_.RoleDefinitionId)" })){
+            if ("$($workloadAdmins.Id)_$($reader.Id)" -notin ($wlExisting | ForEach-Object { "$($_.ObjectId)_$($_.RoleDefinitionId)" })) {
                 try {
                     Write-Verbose "$logPrefix Creating permanent Reader assignment for WorkloadPlane-Admins: $($workloadAdmins.Id)"
                     New-AzRoleAssignment -Scope $scopeId -RoleDefinitionName $reader.Name -ObjectId $workloadAdmins.Id | Out-Null
@@ -193,11 +193,12 @@ function New-EntraOpsServiceAZContainer {
             }
         }
 
-        try{
+        $existing = @()
+        try {
             Write-Verbose "$logPrefix Getting PIM Eligible Assignments"
-            $existing = Get-AzRoleEligibilitySchedule -Scope $scopeId
-            $eligibleRbacSet += $existing|Select-Object @{n="c";e={$_.RoleDefinitionDisplayName + "_" + $_.PrincipalId}}|ForEach-Object c
-        }catch{
+            $existing = @(Get-AzRoleEligibilitySchedule -Scope $scopeId)
+            $eligibleRbacSet += $existing | Select-Object @{n = "c"; e = { $_.RoleDefinitionDisplayName + "_" + $_.PrincipalId } } | ForEach-Object c
+        } catch {
             Write-Verbose "$logPrefix Failed to get PIM Eligible Assignments"
             Write-Error $_
         }
@@ -213,9 +214,9 @@ function New-EntraOpsServiceAZContainer {
                 $mgmtInherited = Get-AzRoleEligibilityScheduleInstance -Scope $subscriptionScope `
                     -Filter "principalId eq '$($management.Id)'" -ErrorAction Stop
                 if ($mgmtInherited | Where-Object {
-                    $_.RoleDefinitionDisplayName -eq $contributor.Name -and
-                    (& $isInheritedScope $_.Scope)
-                }) {
+                        $_.RoleDefinitionDisplayName -eq $contributor.Name -and
+                        (& $isInheritedScope $_.Scope)
+                    }) {
                     Write-Verbose "$logPrefix ManagementPlane-Admins already has Contributor eligible at a higher scope — skipping assignment"
                     $skipContributorForMgmt = $true
                 }
@@ -232,9 +233,9 @@ function New-EntraOpsServiceAZContainer {
                 $ctrlInherited = Get-AzRoleEligibilityScheduleInstance -Scope $subscriptionScope `
                     -Filter "principalId eq '$($control.Id)'" -ErrorAction Stop
                 if ($ctrlInherited | Where-Object {
-                    $_.RoleDefinitionDisplayName -eq $userAccessAdmin.Name -and
-                    (& $isInheritedScope $_.Scope)
-                }) {
+                        $_.RoleDefinitionDisplayName -eq $userAccessAdmin.Name -and
+                        (& $isInheritedScope $_.Scope)
+                    }) {
                     Write-Verbose "$logPrefix ControlPlane-Admins already has User Access Administrator eligible at a higher scope — skipping assignment"
                     $skipUaaForControl = $true
                 }
@@ -243,28 +244,37 @@ function New-EntraOpsServiceAZContainer {
             }
         }
 
-        if($management -and -not $skipContributorForMgmt -and "$($contributor.Name)_$($management.Id)" -notin $eligibleRbacSet){
+        if ($management -and -not $skipContributorForMgmt -and "$($contributor.Name)_$($management.Id)" -notin $eligibleRbacSet) {
             $toAdd += @{
                 RoleDefinitionId = "$roleDefinitionPrefix/$($contributor.Id)"
-                RoleId = $contributor.Id
-                PrincipalId = $management.Id
+                RoleId           = $contributor.Id
+                PrincipalId      = $management.Id
             }
         }
-        if($control -and -not $skipUaaForControl -and "$($userAccessAdmin.Name)_$($control.Id)" -notin $eligibleRbacSet -and -not $SkipControlPlaneDelegation){
+        if ($control -and -not $skipUaaForControl -and "$($userAccessAdmin.Name)_$($control.Id)" -notin $eligibleRbacSet -and -not $SkipControlPlaneDelegation) {
             $toAdd += @{
                 RoleDefinitionId = "$roleDefinitionPrefix/$($userAccessAdmin.Id)"
-                RoleId = $userAccessAdmin.Id
-                PrincipalId = $control.Id
+                RoleId           = $userAccessAdmin.Id
+                PrincipalId      = $control.Id
             }
         }
         if ($workloadAdmins -and -not $management) {
             Write-Warning "$logPrefix No ManagementPlane-Admins for $scopeId; nobody gets Contributor from ServiceEM and WorkloadPlane-Admins stay restricted to Reader and the constrained RBAC Administrator."
         }
 
+        # Leftover schedules of a deleted resource group reference the old target group ID and don't count
+        $hasConstrainedRbacAdmin = {
+            param([string]$PrincipalId, [string]$TargetGroupId)
+            [bool]($existing | Where-Object {
+                    $_.RoleDefinitionDisplayName -eq $rbacAdmin.Name -and $_.PrincipalId -eq $PrincipalId -and
+                    "$($_.Condition)" -like "*$TargetGroupId*"
+                })
+        }
+
         # Constrained RBAC Administrator for ManagementPlane-Admins
         # May assign any role EXCEPT high-privileged roles, only to the WorkloadPlane-Admins group
         if ($workloadAdmins -and $management -and
-            "$($rbacAdmin.Name)_$($management.Id)" -notin $eligibleRbacSet) {
+            -not (& $hasConstrainedRbacAdmin $management.Id $workloadAdmins.Id)) {
 
             # Load excluded role IDs from configuration or use defaults
             $highPrivRoleIds = @(
@@ -278,6 +288,10 @@ function New-EntraOpsServiceAZContainer {
             }
 
             $excludeRolesStr = ($highPrivRoleIds -join ", ")
+            $invalidRoleIds = @($highPrivRoleIds | Where-Object { -not [guid]::TryParse([string]$_, [ref][guid]::Empty) })
+            if ($invalidRoleIds.Count -gt 0) {
+                throw "$logPrefix ServiceEM.ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds contains invalid GUIDs: $($invalidRoleIds -join ', ')"
+            }
             $mgmtCondition = (
                 "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'}))" +
                 " OR " +
@@ -299,13 +313,13 @@ function New-EntraOpsServiceAZContainer {
                 ConditionVersion = "2.0"
             }
         } elseif ($workloadAdmins -and $management) {
-            Write-Verbose "$logPrefix ManagementPlane-Admins already has an eligible Role Based Access Control Administrator assignment at or above $scopeId — skipping; verify that its condition matches the constrained delegation"
+            Write-Verbose "$logPrefix ManagementPlane-Admins already has the constrained Role Based Access Control Administrator eligible assignment for $($workloadAdmins.Id) — skipping"
         }
 
         # Constrained RBAC Administrator for WorkloadPlane-Admins
         # May assign only data-plane roles (Key Vault, Storage) to the WorkloadPlane-Users group
         if ($workloadAdmins -and $workloadUsers -and
-            "$($rbacAdmin.Name)_$($workloadAdmins.Id)" -notin $eligibleRbacSet) {
+            -not (& $hasConstrainedRbacAdmin $workloadAdmins.Id $workloadUsers.Id)) {
 
             # Load allowed role IDs from configuration or use defaults
             $dataPlaneRoleIds = @(
@@ -334,6 +348,10 @@ function New-EntraOpsServiceAZContainer {
             }
 
             $allowRolesStr = ($dataPlaneRoleIds -join ", ")
+            $invalidRoleIds = @($dataPlaneRoleIds | Where-Object { -not [guid]::TryParse([string]$_, [ref][guid]::Empty) })
+            if ($invalidRoleIds.Count -gt 0) {
+                throw "$logPrefix ServiceEM.ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds contains invalid GUIDs: $($invalidRoleIds -join ', ')"
+            }
             $wlCondition = (
                 "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'}))" +
                 " OR " +
@@ -355,10 +373,10 @@ function New-EntraOpsServiceAZContainer {
                 ConditionVersion = "2.0"
             }
         } elseif ($workloadAdmins -and $workloadUsers) {
-            Write-Verbose "$logPrefix WorkloadPlane-Admins already has an eligible Role Based Access Control Administrator assignment at or above $scopeId — skipping; verify that its condition matches the constrained delegation"
+            Write-Verbose "$logPrefix WorkloadPlane-Admins already has the constrained Role Based Access Control Administrator eligible assignment for $($workloadUsers.Id) — skipping"
         }
 
-        foreach($add in $toAdd){
+        foreach ($add in $toAdd) {
             $scheduleRequestParams.Name = [guid]::NewGuid()
             $scheduleRequestParams.RoleDefinitionId = $add.RoleDefinitionId
             $scheduleRequestParams.PrincipalId = $add.PrincipalId
@@ -384,12 +402,12 @@ function New-EntraOpsServiceAZContainer {
                 Write-Verbose "$logPrefix Policy requires eligible expiration, updating"
                 $roleManagementPolicySplat = @{
                     Scope = $scopeId
-                    Name = $add.RoleId
-                    Rule = @(
+                    Name  = $add.RoleId
+                    Rule  = @(
                         @{
-                            id = "Expiration_Admin_Eligibility"
+                            id                   = "Expiration_Admin_Eligibility"
                             IsExpirationRequired = $false
-                            ruleType = "RoleManagementPolicyExpirationRule"
+                            ruleType             = "RoleManagementPolicyExpirationRule"
                         }
                     )
                 }

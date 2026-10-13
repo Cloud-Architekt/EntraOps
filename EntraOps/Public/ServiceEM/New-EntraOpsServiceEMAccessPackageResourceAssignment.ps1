@@ -90,6 +90,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
         $assignedRoles = @()
         $assignedRoles += $ServicePackages.ResourceRoleScopes
         $packageRoles = @()
+        $removedRoles = @()
     }
 
     process {
@@ -189,7 +190,8 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                     originSystem = $resource.OriginSystem
                 }
             }
-            $ex = $package.ResourceRoleScopes | ForEach-Object { "$($_.Role.OriginId)_$($_.Scope.OriginId)" }
+            # A package is paired with several groups; roles removed for an earlier group must not return from its stale snapshot
+            $ex = @($package.ResourceRoleScopes | ForEach-Object { "$($_.Role.OriginId)_$($_.Scope.OriginId)" } | Where-Object { $_ -notin $removedRoles })
             $packageRoles += $ex
             $activeRemovalFailed = $false
             if ($eligible) {
@@ -200,6 +202,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                     try {
                         Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($package.Id)/resourceRoleScopes/$($activeScope.Id)" -OutputType PSObject -ThrowOnFailure | Out-Null
                         $removed = "$($activeScope.Role.OriginId)_$($activeScope.Scope.OriginId)"
+                        $removedRoles += $removed
                         $packageRoles = @($packageRoles | Where-Object { $_ -ne $removed })
                     } catch {
                         $activeRemovalFailed = $true

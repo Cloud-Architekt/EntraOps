@@ -139,8 +139,8 @@ function Remove-EntraOpsServiceCatalog {
                     } | Where-Object { Test-OpenRequest $_ })
                 $check.Pending.Count -eq 0
             }
-            if ($completed) { return 0 }
-            return $check.Pending.Count
+            if ($completed) { return }
+            return $check.Pending
         }
 
         # Step 1: Cancel open requests (e.g. pending approval) or wait for them; Graph rejects adminRemove while one is open.
@@ -162,23 +162,30 @@ function Remove-EntraOpsServiceCatalog {
             }
         }
         if ($openRequestIds.Count -gt 0) {
-            $stillOpen = Wait-OpenRequest -RequestIds $openRequestIds -Activity "Open assignment requests"
-            if ($stillOpen -gt 0) {
-                $failures.Add("$stillOpen open assignment request(s) did not complete")
+            $stillOpen = @(Wait-OpenRequest -RequestIds $openRequestIds -Activity "Open assignment requests")
+            if ($stillOpen.Count -gt 0) {
+                $details = ($stillOpen | ForEach-Object { "$($_.id) (state '$($_.state)', status '$($_.status)')" }) -join ', '
+                $failures.Add("$($stillOpen.Count) open assignment request(s) did not complete: $details")
             }
         }
 
         # Step 2: Submit ALL adminRemove requests across all packages at once.
-        $allRemoveRequestIds = [System.Collections.Generic.List[string]]::new()
+        $removeRequests = [System.Collections.Generic.List[object]]::new()
         foreach ($accessPackage in $catalog.accessPackages) {
             # Filtering by navigation path 'accessPackage/id' requires ConsistencyLevel:eventual + $count=true.
             $assignments = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignments?`$count=true&`$filter=accessPackage/id eq '$($accessPackage.Id)'&`$expand=target" -OutputType PSObject -DisableCache -ConsistencyLevel "eventual"
             foreach ($assignment in @($assignments) | Where-Object { $_ -and ($_.state -ine "expired") }) {
-                Write-Verbose "$logPrefix Queuing adminRemove for $($assignment.target.displayName) [$($assignment.target.email)] in $($accessPackage.displayName)"
+                $targetEmail = if ($assignment.target.PSObject.Properties.Name -contains 'email') { " [$($assignment.target.email)]" }
+                $description = "$($assignment.target.displayName)$targetEmail in $($accessPackage.displayName)"
+                Write-Verbose "$logPrefix Queuing adminRemove for $description"
                 $params = @{ requestType = "adminRemove"; assignment = @{id = $assignment.id } }
                 try {
                     $req = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentRequests" -Body ($params | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
-                    $allRemoveRequestIds.Add($req.id)
+                    $removeRequests.Add([pscustomobject]@{
+                            Id              = $req.id
+                            AccessPackageId = $accessPackage.Id
+                            Description     = $description
+                        })
                 } catch {
                     $failures.Add("adminRemove of assignment $($assignment.id) ($($assignment.target.displayName)) in $($accessPackage.displayName) failed: $($_.Exception.Message)")
                 }
@@ -186,16 +193,24 @@ function Remove-EntraOpsServiceCatalog {
         }
 
         # Step 3: Wait for ALL removal requests to reach a terminal state (single polling loop).
-        if ($allRemoveRequestIds.Count -gt 0) {
-            Write-Verbose "$logPrefix Waiting for $($allRemoveRequestIds.Count) assignment removal request(s) to complete"
-            $stillPending = Wait-OpenRequest -RequestIds $allRemoveRequestIds -Activity "Assignment removals"
-            if ($stillPending -gt 0) {
-                Write-Warning "$logPrefix $stillPending assignment removal(s) still pending after 5 minutes — proceeding anyway"
+        # Access packages with a pending removal still have active grants, Graph rejects their deletion (InvalidDeleteEntitlementHasGrants).
+        $blockedAccessPackageIds = [System.Collections.Generic.List[string]]::new()
+        if ($removeRequests.Count -gt 0) {
+            Write-Verbose "$logPrefix Waiting for $($removeRequests.Count) assignment removal request(s) to complete"
+            $stillPending = @(Wait-OpenRequest -RequestIds @($removeRequests | ForEach-Object { $_.Id }) -Activity "Assignment removals")
+            foreach ($pending in $stillPending) {
+                $removeRequest = $removeRequests | Where-Object { $_.Id -eq $pending.id } | Select-Object -First 1
+                $blockedAccessPackageIds.Add($removeRequest.AccessPackageId)
+                $failures.Add("removal of $($removeRequest.Description) is still in progress after 5 minutes (request $($pending.id), state '$($pending.state)', status '$($pending.status)')")
             }
         }
 
         # Step 4: Delete each access package (remove resource role scopes first — Graph 400s otherwise).
         foreach ($accessPackage in $catalog.accessPackages) {
+            if ($accessPackage.Id -in $blockedAccessPackageIds) {
+                Write-Warning "$logPrefix Keeping $($accessPackage.displayName) [$($accessPackage.Id)]: assignment removal still in progress"
+                continue
+            }
             try {
                 $resourceRoleScopes = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($accessPackage.Id)/resourceRoleScopes" -OutputType PSObject -DisableCache
                 foreach ($rrs in @($resourceRoleScopes) | Where-Object { $_ -and $_.Id }) {
@@ -238,7 +253,7 @@ function Remove-EntraOpsServiceCatalog {
                     continue
                 }
                 Write-Verbose "$logPrefix Deleting group: $($resource.DisplayName) [$($resource.OriginId)]"
-                Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/groups/$($resource.OriginId)" | Out-Null
+                Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/groups/$($resource.OriginId)" -ThrowOnFailure | Out-Null
                 $deletedGroupIds.Add($resource.OriginId)
             } catch {
                 Write-Verbose "$logPrefix Failed to delete group $($resource.DisplayName) [$($resource.OriginId)]"
