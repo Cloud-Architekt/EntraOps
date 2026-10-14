@@ -51,7 +51,7 @@ function Update-EntraOps {
         [System.String]$ConfigFile = "./EntraOpsConfig.json"
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("./.github/actions", "./.github/agents", "./.github/scripts", "./.github/workflows", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")]
+        [ValidateSet("./.azure-pipelines", "./.github/actions", "./.github/agents", "./.github/scripts", "./.github/workflows", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")]
         [Object]$TargetUpdateFolders = @("./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
         ,
         [Parameter(Mandatory = $False)]
@@ -105,7 +105,7 @@ function Update-EntraOps {
     # Validate config-derived targets explicitly. ValidateSet protects command-line arguments, but
     # values read from JSON bypass parameter binding and must not escape the intended repository
     # update boundary.
-    $AllowedUpdateTargets = @('./.github/actions', './.github/agents', './.github/scripts', './.github/workflows', './Docs', './EntraOps', './Parsers', './Queries', './Reports', './Samples', './Tests', './Workbooks', './package.json', './package-lock.json', './playwright.config.mjs', './CHANGELOG.md', './EntraOpsUpdateContract.json')
+    $AllowedUpdateTargets = @('./.azure-pipelines', './.github/actions', './.github/agents', './.github/scripts', './.github/workflows', './Docs', './EntraOps', './Parsers', './Queries', './Reports', './Samples', './Tests', './Workbooks', './package.json', './package-lock.json', './playwright.config.mjs', './CHANGELOG.md', './EntraOpsUpdateContract.json')
     $TargetUpdateFolders = @($TargetUpdateFolders | ForEach-Object { [string]$_ } | Select-Object -Unique)
     if ($TargetUpdateFolders.Count -eq 0) {
         throw 'At least one TargetUpdateFolders entry is required.'

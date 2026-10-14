@@ -74,6 +74,7 @@ Describe 'Update-EntraOps update scope' {
 
         $ValidateSet.ValidValues | Should -Contain './Docs'
         $ValidateSet.ValidValues | Should -Contain './Tests'
+        $ValidateSet.ValidValues | Should -Contain './.azure-pipelines'
         $ValidateSet.ValidValues | Should -Contain './.github/actions'
         $ValidateSet.ValidValues | Should -Contain './.github/workflows'
         $ValidateSet.ValidValues | Should -Not -Contain './.github'
