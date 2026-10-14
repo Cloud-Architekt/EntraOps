@@ -365,6 +365,9 @@ test("normalizes a removal threshold from any automation section", async ({ page
         }))
     });
 
+    // Import is applied asynchronously via FileReader.
+    await expect.poll(async () => JSON.parse(await page.locator("#wizPreview").textContent())
+        .AutomatedConditionalAccessTargetGroups.RemovalSafetyThreshold).toBe(0.25);
     const preview = JSON.parse(await page.locator("#wizPreview").textContent());
     expect(preview.AutomatedConditionalAccessTargetGroups.RemovalSafetyThreshold).toBe(0.25);
     expect(preview.AutomatedAdministrativeUnitManagement.RemovalSafetyThreshold).toBe(0.25);
