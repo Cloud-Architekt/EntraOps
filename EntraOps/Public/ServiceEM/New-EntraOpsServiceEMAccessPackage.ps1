@@ -52,10 +52,10 @@ function New-EntraOpsServiceEMAccessPackage {
     begin {
         $accessPackageUri = "/v1.0/identityGovernance/entitlementManagement/accessPackages?`$filter=catalog/id eq '$($ServiceCatalogId)'&`$expand=resourceRoleScopes(`$expand=role,scope),catalog"
         Write-Verbose "$logPrefix Looking up Access Packages"
-        try{
+        try {
             # Use [object[]] so PSCustomObject or mixed typed entries can be appended with +=
             [object[]]$ServiceAccessPackages = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $accessPackageUri -OutputType PSObject -DisableCache)
-        }catch{
+        } catch {
             Write-Verbose "$logPrefix Failed to find Access Packages"
             Write-Error $_
         }
@@ -64,20 +64,22 @@ function New-EntraOpsServiceEMAccessPackage {
     process {
         Write-Verbose "$logPrefix Beginning EM Access Package"
 
-        Write-Verbose "$logPrefix Processing $(($ServiceRoles|Where-Object{$_.groupType -ne "Unified"}|Measure-Object).Count) Access Package Roles"
-        foreach($role in $ServiceRoles|Where-Object{$_.groupType -ne "Unified" -and -not ($_.accessLevel -eq "ControlPlane" -and $_.name -eq "Admins")}){
+        # ControlPlane-Admins is governed outside the catalog and gets no access package
+        $packageRoles = @($ServiceRoles | Where-Object { $_.groupType -ne "Unified" -and -not ($_.accessLevel -eq "ControlPlane" -and $_.name -eq "Admins") })
+        Write-Verbose "$logPrefix Processing $($packageRoles.Count) Access Package Roles"
+        foreach ($role in $packageRoles) {
             $packageParams = @{
-                catalog = @{
+                catalog     = @{
                     id = $ServiceCatalogId
                 }
                 DisplayName = "AP-$ServiceName-$($role.accessLevel +"-"+ $role.name)"
                 Description = "Access Package for $ServiceName $($role.accessLevel +" "+ $role.name)"
             }
-            if($packageParams.DisplayName -notin $ServiceAccessPackages.DisplayName){
-                try{
+            if ($packageParams.DisplayName -notin $ServiceAccessPackages.DisplayName) {
+                try {
                     Write-Verbose "$logPrefix Creating Access Package"
-                    $ServiceAccessPackages += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages" -Body (@{catalog=@{id=$ServiceCatalogId};displayName=$packageParams.DisplayName;description=$packageParams.Description} | ConvertTo-Json -Depth 10) -OutputType PSObject
-                }catch{
+                    $ServiceAccessPackages += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages" -Body (@{catalog = @{id = $ServiceCatalogId }; displayName = $packageParams.DisplayName; description = $packageParams.Description } | ConvertTo-Json -Depth 10) -OutputType PSObject
+                } catch {
                     Write-Verbose "$logPrefix Failed to create Access Package"
                     Write-Error $_
                 }
@@ -99,7 +101,7 @@ function New-EntraOpsServiceEMAccessPackage {
             $chkIds = @($check.Packages.id | Where-Object { $_ })
             $refIds.Count -eq 0 -or (Compare-Object $refIds $chkIds | Measure-Object).Count -eq 0
         }
-        if(-not $confirmed){
+        if (-not $confirmed) {
             throw "Access Package object consistency with Entra not achieved"
         }
         return [psobject[]]$check.Packages

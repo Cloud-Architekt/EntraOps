@@ -22,7 +22,8 @@
     Key inside ServiceEM config to persist the group ID (e.g., ControlPlaneDelegationGroupId).
 
 .PARAMETER ConfigFilePath
-    Path to EntraOpsConfig.json for persistence.
+    Path to EntraOpsConfig.json for persistence. Defaults to EntraOpsConfig.json in the current folder
+    when it exists, otherwise in the EntraOps working folder ($EntraOpsBaseFolder).
 
 .PARAMETER logPrefix
     Log prefix for verbose output.
@@ -46,7 +47,8 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
         [Parameter(Mandatory)]
         [string]$ConfigKey,
 
-        [string]$ConfigFilePath = "$PWD/EntraOpsConfig.json",
+        # Like Connect-EntraOps: the current folder's EntraOpsConfig.json, otherwise the one in the working folder
+        [string]$ConfigFilePath = $(if ((Test-Path -LiteralPath "$PWD/EntraOpsConfig.json" -PathType Leaf) -or [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { "$PWD/EntraOpsConfig.json" } else { Join-Path $Global:EntraOpsBaseFolder 'EntraOpsConfig.json' }),
 
         [string]$logPrefix = "[Resolve-EntraOpsServiceEMDelegationGroup]"
     )

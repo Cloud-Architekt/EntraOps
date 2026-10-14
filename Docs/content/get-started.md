@@ -524,13 +524,13 @@ to the service connection, and Microsoft Entra permissions to create or update t
 Initial provisioning requires Global Administrator or Application Administrator plus User Access
 Administrator when Azure role assignments are configured.
 
-1. Create or import EntraOps into a **private** Azure Repos repository. Generated exports and reports contain tenant identifiers and access data.
+1. Create or import EntraOps into a **private** Azure DevOps project. Generated exports and reports contain tenant identifiers and access data; this is enforced: the pull, Tenant Governance and update pipelines refuse to commit and push when the project isn't private, and the reporting pipeline skips publishing its artifact.
 2. Generate the configuration with `New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -DevOpsPlatform AzureDevOps`, or select Azure DevOps in the guided setup above.
 3. Run `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps-ADO" -ConfigFile "./EntraOpsConfig.json"` to create the app registration and configured permissions.
 4. Create an **Azure Resource Manager -> Workload Identity Federation (manual)** service connection. Add the exact issuer and subject shown by Azure DevOps as a federated credential on the app registration; use `api://AzureADTokenExchange` as the audience.
 5. Import the five production YAML pipelines from `.azure-pipelines/`: pull, push, reporting, Tenant Governance, and update. Name the pull pipeline `azure-pipelines-pull` so its completion triggers resolve without modification. Optionally import `azure-pipelines-test.yml` for repository, cross-platform Pester, and browser validation; configure it as a build-validation policy for Azure Repos pull requests.
 6. Name the service connection `EntraOps-ServiceConnection` to use the shipped default. Define `EntraOpsAzureServiceConnection` only when you use a different name. Add the secret `EntraOpsUpdatePat` only for a private update source.
-7. Grant `<Project> Build Service (<Organization>)` **Contribute** permission on the repository, and authorize the service connection for the imported pipelines.
+7. Grant `<Project> Build Service (<Organization>)` **Contribute** permission on the repository, and authorize the service connection for the imported pipelines. The build service also needs **View project-level information** (granted by default) so the push step can verify that the project is private.
 8. Apply config-driven schedules and commit the result:
 
 ```powershell

@@ -115,12 +115,12 @@ function New-EntraOpsServiceEntraGroup {
             #Groups
             $groups = @()
             Write-Verbose "$logPrefix Looking up Groups"
-            $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
+            $groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache -ThrowOnFailure
             # $search also matches tokens inside the nickname (e.g. PIM.<ServiceName>.*)
             $groups = @($groups | Where-Object { $_.MailNickname -like "$ServiceName.*" })
         } catch {
-            Write-Verbose "$logPrefix Failed processing Groups"
-            Write-Error $_
+            # Without the lookup result every group would be created again (mailNickname isn't unique for security groups)
+            throw "Failed to look up the existing groups of '$ServiceName'; no group was created: $($_.Exception.Message)"
         }
 
         $catalogDisplayName = "Catalog-$ServiceName"

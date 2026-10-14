@@ -557,8 +557,11 @@ function New-EntraOpsWorkloadIdentity {
         } elseif ($Config.DevOpsPlatform -eq "AzureDevOps") {
             Write-Output "Add Federated Credential to $AppDisplayName for Azure DevOps..."
 
+            # Graph only accepts URL-friendly credential names; project and service connection names may contain spaces
+            $AdoFederatedCredentialName = "$($AdoOrgName)-$($AdoProjectName)-$($AdoServiceConnectionName)" -replace '[^A-Za-z0-9._~-]', '-'
+            if ($AdoFederatedCredentialName.Length -gt 120) { $AdoFederatedCredentialName = $AdoFederatedCredentialName.Substring(0, 120) }
             $FederatedCredentialParam = @{
-                name      = "$($AdoOrgName)-$($AdoProjectName)-$($AdoServiceConnectionName)"
+                name      = $AdoFederatedCredentialName
                 issuer    = $AdoFederatedCredentialIssuer
                 subject   = "sc://$($AdoOrgName)/$($AdoProjectName)/$($AdoServiceConnectionName)"
                 audiences = @(

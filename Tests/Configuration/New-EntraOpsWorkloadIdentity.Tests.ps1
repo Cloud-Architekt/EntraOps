@@ -203,6 +203,20 @@ Describe 'New-EntraOpsWorkloadIdentity provisioning safety' {
         }
     }
 
+    It 'uses a URL-friendly Azure DevOps federated credential name but keeps the raw subject' {
+        $ConfigPath = Join-Path $TestDrive 'ado-federation-spaces.json'
+        New-WorkloadIdentityTestConfig -Path $ConfigPath -RbacSystems @('EntraID') -DevOpsPlatform AzureDevOps
+        $Issuer = 'https://vstoken.dev.azure.com/11111111-2222-3333-4444-555555555555'
+
+        New-EntraOpsWorkloadIdentity -AppDisplayName 'entraops' -ConfigFile $ConfigPath -ExistingSpObjectId 'workload-sp-object-id' -CreateFederatedCredential `
+            -AdoOrgName 'Contoso' -AdoProjectName 'Identity Operations' -AdoServiceConnectionName 'EntraOps (WIF)' -AdoFederatedCredentialIssuer $Issuer 6>$null | Out-Null
+
+        Should -Invoke New-MgApplicationFederatedIdentityCredential -Times 1 -ParameterFilter {
+            $BodyParameter.name -ceq 'Contoso-Identity-Operations-EntraOps--WIF-' -and
+            $BodyParameter.subject -ceq 'sc://Contoso/Identity Operations/EntraOps (WIF)'
+        }
+    }
+
     It 'skips application permissions and a federated credential that already exist' {
         $ConfigPath = Join-Path $TestDrive 'idempotent.json'
         New-WorkloadIdentityTestConfig -Path $ConfigPath -RbacSystems @('EntraID')

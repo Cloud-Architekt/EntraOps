@@ -639,9 +639,9 @@ ManagementPlane,Admins,
                 GroupNamingDelimiter    = $GroupNamingDelimiter
                 EligibleMemberGroupIds  = @($pimGroups | ForEach-Object { $_.Id })
             }
-            $ServiceEMAccessPackageAssignments = New-EntraOpsServiceEMAccessPackageResourceAssignment @ServiceEMAccessPackageResourceAssignmentOptions
-            $report.AccessPackageAssignments = $ServiceEMAccessPackageAssignments
-            Write-Verbose "$logPrefix Service Access Package Resource Assignments: $($report.AccessPackageAssignments.Id|ConvertTo-Json -Compress)"
+            $ServiceEMAccessPackageResourceRoleScopes = New-EntraOpsServiceEMAccessPackageResourceAssignment @ServiceEMAccessPackageResourceAssignmentOptions
+            $report.AccessPackageResourceRoleScopes = $ServiceEMAccessPackageResourceRoleScopes
+            Write-Verbose "$logPrefix Service Access Package Resource Role Scopes: $($report.AccessPackageResourceRoleScopes.Id|ConvertTo-Json -Compress)"
 
             Write-Verbose "$logPrefix Processing access package policy assignment"
             $ServiceEMAssignmentPolicyOptions = @{

@@ -152,7 +152,7 @@ function New-EntraOpsServiceAZContainer {
             $constrainedDelegationConfig = $Global:EntraOpsConfig.ServiceEM.ConstrainedDelegation
             Write-Verbose "$logPrefix Loaded constrained delegation configuration from EntraOpsConfig"
         } else {
-            Write-Warning "$logPrefix No constrained delegation configuration found in EntraOpsConfig.ServiceEM.ConstrainedDelegation"
+            Write-Verbose "$logPrefix No EntraOpsConfig.ServiceEM.ConstrainedDelegation found, using the built-in constrained delegation defaults"
         }
         
         $scheduleRequestParams = @{

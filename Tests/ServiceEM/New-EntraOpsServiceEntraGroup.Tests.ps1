@@ -381,6 +381,14 @@ Describe "New-EntraOpsServiceEntraGroup" {
             @($result).MailNickname | Should -Be @('TestService.ControlPlane.Admins')
         }
 
+        It "Should stop without creating groups when the lookup of existing groups fails" {
+            Mock Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -ParameterFilter { $Method -eq 'GET' } -MockWith { if ($ThrowOnFailure) { throw 'Graph unavailable' } }
+
+            { New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles $script:AdminRoles } |
+            Should -Throw "*Failed to look up the existing groups of 'TestService'*"
+            Should -Invoke Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -Times 0 -Exactly -ParameterFilter { $Method -eq 'POST' }
+        }
+
         It "Should stop when the mailNickname is ambiguous" {
             foreach ($id in 'dup1', 'dup2') {
                 $script:MockGroups[$id] = [pscustomobject]@{ Id = $id; DisplayName = 'SG-TestService-ControlPlane-Admins'; MailNickname = 'TestService.ControlPlane.Admins'; IsAssignableToRole = $true; SecurityEnabled = $true }

@@ -309,6 +309,16 @@ function Update-EntraOps {
             }
         }
 
+        # The upstream pipeline templates ship with default schedules; re-apply the ones from the configuration
+        if ($TargetUpdateFolders -contains './.azure-pipelines') {
+            Write-Host "Re-applying the configured schedules in Azure DevOps pipelines after update..."
+            try {
+                Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile -PipelineFolder './.azure-pipelines'
+            } catch {
+                throw "Failed to update the Azure DevOps pipeline schedules. Error: $_"
+            }
+        }
+
         $UpdateManifest = [ordered]@{
             SchemaVersion        = 1
             Repository           = $SourceRepository

@@ -78,6 +78,19 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not
         $GitPushScript | Should -Match '(?s)finally\s*\{.*SetEnvironmentVariable\(\$Name, \$PreviousEnvironment\[\$Name\]\)'
     }
 
+    It 'refuses to push generated output to a public project and rebases before pushing' {
+        $GitPushScript = Get-Content -LiteralPath (Join-Path $PipelineRoot 'scripts/Ado-GitPush.ps1') -Raw
+
+        # Visibility is checked before anything is staged, mirroring Publish-EntraOpsGitHubChanges.ps1
+        $GitPushScript.IndexOf('_apis/projects/') | Should -BeGreaterThan -1
+        $GitPushScript.IndexOf('_apis/projects/') | Should -BeLessThan $GitPushScript.IndexOf('git add --all')
+        $GitPushScript | Should -Match "visibility -ne 'private'"
+        $GitPushScript | Should -Match 'git fetch origin \$BranchName[\s\S]*git rebase --autostash "origin/\$BranchName"[\s\S]*git push origin HEAD:\$BranchName'
+        # BUILD_SOURCEBRANCHNAME is only the last segment of the ref
+        $GitPushScript | Should -Match "BUILD_SOURCEBRANCH -replace '\^refs/heads/'"
+        $GitPushScript | Should -Not -Match 'BUILD_SOURCEBRANCHNAME,'
+    }
+
     It 'splats the config sections loaded by Connect-EntraOps in the push pipeline' {
         $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-push.yml') -Raw
         foreach ($Section in 'LogAnalytics', 'SentinelWatchLists', 'AutomatedAdministrativeUnitManagement', 'AutomatedRmauAssignmentsForUnprotectedObjects', 'AutomatedConditionalAccessTargetGroups', 'AutomatedElmCatalogProtection') {

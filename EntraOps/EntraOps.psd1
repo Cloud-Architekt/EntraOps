@@ -234,7 +234,7 @@
             IconUri      = 'https://www.entraops.com/entraops_icon.png'
 
             # ReleaseNotes of this module
-            ReleaseNotes = 'Adds Service EM: service-scoped landing zones aligned with the Enterprise Access Model (Azure resource group, Entra groups, Identity Governance access packages, PIM and Azure RBAC with ABAC constrained delegation). Full changelog: https://github.com/Cloud-Architekt/EntraOps/blob/main/CHANGELOG.md'
+            ReleaseNotes = 'Adds Service EM: service-scoped landing zones aligned with the Enterprise Access Model (Azure resource group, Entra groups, Identity Governance access packages, PIM and Azure RBAC with ABAC constrained delegation), Azure DevOps pipelines, module-only use from the PowerShell Gallery (Initialize-EntraOpsWorkspace, Remove-EntraOpsData), the Object Classification File, agent identity collection and the Privileged Assets report with Maester findings. Full changelog: https://github.com/Cloud-Architekt/EntraOps/blob/main/CHANGELOG.md'
 
         } # End of PSData hashtable
 

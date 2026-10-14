@@ -95,6 +95,8 @@ Describe 'Update-EntraOps update scope' {
         $Source.IndexOf('Test-EntraOpsUpdateContract') | Should -BeLessThan $ReplacementIndex
         $Source | Should -Match "TargetUpdateFolders -contains './\.github/workflows'"
         $Source | Should -Match 'Update-EntraOpsRequiredWorkflowParameters -ConfigFile \$ConfigFile'
+        $Source | Should -Match "TargetUpdateFolders -contains './\.azure-pipelines'"
+        $Source | Should -Match 'Update-EntraOpsAzureDevOpsSchedules -ConfigFile \$ConfigFile'
     }
 
     It 'requires workflow dependencies and prevents validation bypass' {
