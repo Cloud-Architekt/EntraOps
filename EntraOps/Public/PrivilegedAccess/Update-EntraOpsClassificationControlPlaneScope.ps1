@@ -133,8 +133,7 @@
     "ControlPlaneDevicesOnly": Only devices owned by Tier0 (ControlPlane) users are included; Tier1 and user group memberships are skipped.
     Tier0/Tier1 users are selected by their designated tier (ObjectAdminTierLevelName from Custom Security Attributes or
     AlternateObjectTierLevelAttributes), not by role-derived Control Plane membership. Role-derived Control Plane users with
-    devices that are not designated are reported as IntuneDeviceScopeDesignatedTierGap warnings. These distinguish
-    devices classified through Tier1 (ManagementPlane) designation from devices excluded by the active scope mode.
+    devices that are not designated are reported as IntuneDeviceScopeDesignatedTierGap warnings.
 
 .PARAMETER IncludeObjectDetails
     Include object display names, UPNs, classification reasons, and related descriptive metadata in console
@@ -565,8 +564,8 @@ function Update-EntraOpsClassificationControlPlaneScope {
         }
         if ($HasHomeTenantId) {
             $PrivilegedDeviceOwners = @($PrivilegedDeviceOwners | Where-Object {
-                [string]::IsNullOrEmpty($_.ObjectTenantId) -or $_.ObjectTenantId -eq $HomeTenantId
-            })
+                    [string]::IsNullOrEmpty($_.ObjectTenantId) -or $_.ObjectTenantId -eq $HomeTenantId
+                })
         }
         $PrivilegedUsersOwnedDevices = @($PrivilegedDeviceOwners | Where-Object { $null -ne $_.OwnedDevices } | Select-Object -ExpandProperty OwnedDevices)
         $PrivilegedUsersPawDevices = @($PrivilegedDeviceOwners | Where-Object { $null -ne $_.AssociatedPawDevice } | Select-Object -ExpandProperty AssociatedPawDevice)
@@ -708,7 +707,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
         $PrivilegedServicePrincipals = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" })
         $PrivilegedApplicationObjects = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "application" })
         Write-Host "  Service Principals : $($PrivilegedServicePrincipals.Count)" -ForegroundColor Gray
-        Write-Host "  Application objects: $($PrivilegedApplicationObjects.Count)" -ForegroundColor Gray
+        Write-Host "  Direct application objects: $($PrivilegedApplicationObjects.Count) (application objects of single-tenant service principals are resolved below)" -ForegroundColor Gray
         # Initialized here (not just inside the branch below) so the "@(...).Count -gt 0"
         # guard further down stays false - not $null, whose @($null).Count is 1 - when no
         # privileged service principals/applications were found.
@@ -927,18 +926,19 @@ function Update-EntraOpsClassificationControlPlaneScope {
 
         # Intune device scope uses the designated tier (ObjectAdminTierLevelName from Custom Security Attributes or
         # AlternateObjectTierLevelAttributes), not role-derived Control Plane membership. Surface role-derived
-        # Control Plane users whose devices are selected through Tier 1 designation or excluded from the privileged scope.
-        $IntuneDeviceScopeTierGaps = @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects $PrivilegedObjects -Tier0Users $Tier0Users -Tier1Users $Tier1Users -HomeTenantId $HomeTenantId)
-        $Tier1DeviceScopeGaps = @($IntuneDeviceScopeTierGaps | Where-Object { $_.DeviceScopeTier -eq 'ManagementPlane' })
-        $ExcludedDeviceScopeGaps = @($IntuneDeviceScopeTierGaps | Where-Object { $_.DeviceScopeTier -eq 'None' })
-        if ($Tier1DeviceScopeGaps.Count -gt 0) {
-            Write-Warning "  $($Tier1DeviceScopeGaps.Count) Control Plane user(s) with owned or PAW devices are designated ManagementPlane - their devices are classified as Tier 1 (ManagementPlane) instead of Tier 0 (ControlPlane)."
-        }
-        if ($ExcludedDeviceScopeGaps.Count -gt 0) {
-            Write-Warning "  $($ExcludedDeviceScopeGaps.Count) Control Plane user(s) with owned or PAW devices are not designated ControlPlane by ObjectAdminTierLevelName - their devices are not in the privileged Intune device scope."
-        }
-        foreach ($TierGap in $IntuneDeviceScopeTierGaps) {
-            $WarningMessages.Add($TierGap)
+        # Control Plane users with devices that are therefore not covered, instead of producing an empty scope silently.
+        $Tier0UserIds = @($Tier0Users | ForEach-Object { "$($_.ObjectId)".ToLowerInvariant() })
+        $UndesignatedControlPlaneDeviceUsers = @($PrivilegedObjects | Where-Object {
+                $_.ObjectType -eq "user" -and
+                ([string]::IsNullOrWhiteSpace($HomeTenantId) -or [string]::IsNullOrEmpty($_.ObjectTenantId) -or $_.ObjectTenantId -eq $HomeTenantId) -and
+                (@($_.OwnedDevices | Where-Object { $_ }).Count -gt 0 -or @($_.AssociatedPawDevice | Where-Object { $_ }).Count -gt 0) -and
+                "$($_.ObjectId)".ToLowerInvariant() -notin $Tier0UserIds
+            } | Sort-Object ObjectId -Unique)
+        if ($UndesignatedControlPlaneDeviceUsers.Count -gt 0) {
+            Write-Warning "  $($UndesignatedControlPlaneDeviceUsers.Count) Control Plane user(s) with owned or PAW devices are not designated ControlPlane by ObjectAdminTierLevelName - their devices are not included in the Intune device scope."
+            foreach ($UndesignatedUser in $UndesignatedControlPlaneDeviceUsers) {
+                $WarningMessages.Add([PSCustomObject]@{ Type = "IntuneDeviceScopeDesignatedTierGap"; Message = "Control Plane user $($UndesignatedUser.ObjectId) with owned or PAW devices is not designated ControlPlane by ObjectAdminTierLevelName and is not used for the Intune device scope" })
+            }
         }
 
         Write-Host "  Scope mode               : $DeviceMgmtPrivilegedTierScope" -ForegroundColor Cyan

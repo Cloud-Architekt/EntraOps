@@ -66,4 +66,16 @@ Describe 'EntraOps automation log privacy' {
         $Output | Should -Match ([regex]::Escape($script:ObjectId))
         $Output | Should -Match ([regex]::Escape($script:PrincipalName))
     }
+
+    It 'merges hidden-detail warnings that would print the same object IDs' {
+        $Warnings = [System.Collections.Generic.List[psobject]]::new()
+        $Warnings.Add([pscustomobject]@{ Type = 'Lookup'; Message = "Object $script:ObjectId in context one was not found" })
+        $Warnings.Add([pscustomobject]@{ Type = 'Lookup'; Message = "Object $script:ObjectId in context two was not found" })
+
+        $Output = Show-EntraOpsWarningSummary -WarningMessages $Warnings 6>&1 | Out-String
+
+        ([regex]::Matches($Output, [regex]::Escape($script:ObjectId))).Count | Should -Be 1
+        $Output | Should -Match '\[1 distinct ID\(s\) in 2 warning\(s\)\]'
+        $Output | Should -Not -Match 'context'
+    }
 }

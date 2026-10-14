@@ -65,15 +65,29 @@ function Show-EntraOpsWarningSummary {
             }
         }
 
+        # Without object details only the IDs are shown, so messages that differ only in hidden text
+        # (e.g. the same object reported from two contexts) would print identical lines - merge those.
+        $IdOnlyWarningCounts = @{}
+        if (-not $IncludeObjectDetails) {
+            foreach ($Entry in $NormalizedGroups.Values) {
+                if ($Entry.DistinctIds.Count -eq 0) { continue }
+                $IdSetKey = (@($Entry.DistinctIds | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)) -join ','
+                $IdOnlyWarningCounts[$IdSetKey] = [int]$IdOnlyWarningCounts[$IdSetKey] + $Entry.Count
+            }
+        }
+        $PrintedIdSets = [System.Collections.Generic.HashSet[string]]::new()
+
         foreach ($Entry in $NormalizedGroups.Values) {
             $DistinctIdCount = $Entry.DistinctIds.Count
             if (-not $IncludeObjectDetails -and $DistinctIdCount -gt 0) {
+                $IdSetKey = (@($Entry.DistinctIds | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)) -join ','
+                if (-not $PrintedIdSets.Add($IdSetKey)) { continue }
                 $SampleIds = $Entry.DistinctIds | Select-Object -First 3
                 $SampleText = $SampleIds -join ", "
                 if ($DistinctIdCount -gt $SampleIds.Count) {
                     $SampleText += " (+$($DistinctIdCount - $SampleIds.Count) more)"
                 }
-                Write-Host "    - Object ID(s): $SampleText [$DistinctIdCount distinct, $($Entry.Count) occurrences]" -ForegroundColor DarkYellow
+                Write-Host "    - Object ID(s): $SampleText [$DistinctIdCount distinct ID(s) in $($IdOnlyWarningCounts[$IdSetKey]) warning(s)]" -ForegroundColor DarkYellow
                 continue
             }
 
@@ -88,7 +102,7 @@ function Show-EntraOpsWarningSummary {
                 if ($DistinctIdCount -gt $SampleIds.Count) {
                     $SampleText += " (+$($DistinctIdCount - $SampleIds.Count) more)"
                 }
-                Write-Host "    - $($Entry.SampleMessage) [$DistinctIdCount distinct, $($Entry.Count) occurrences] IDs: $SampleText" -ForegroundColor DarkYellow
+                Write-Host "    - $($Entry.SampleMessage) [$DistinctIdCount distinct ID(s) in $($Entry.Count) warning(s)] IDs: $SampleText" -ForegroundColor DarkYellow
             }
         }
     }
