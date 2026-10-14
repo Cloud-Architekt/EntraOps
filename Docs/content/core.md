@@ -97,6 +97,13 @@ uses `EntraOpsConfig.json` from the current folder, otherwise from the EntraOps 
 `TenantName` differs from `-TenantName` is not used. The line `Config File` in the connection summary shows
 which file is used, or why none is used. Without a configuration file, defaults apply.
 
+> [!WARNING]
+> Treat `EntraOpsConfig.json` like code: the filter expressions of `AlternateObjectTierLevelAttributes` run as
+> PowerShell with the permissions of the EntraOps session, and the file controls which objects are changed by the
+> protection cmdlets. Because `Connect-EntraOps` loads the file from the current folder automatically, only run
+> EntraOps in folders you trust, or pass `-ConfigFilePath` explicitly. Protect the file in a repository like the
+> module scripts (branch protection, reviews).
+
 | Section / setting                                                                                                                                                              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `TenantId` / `TenantName` / `ClientId`                                                                                                                                         | Target tenant and the workload identity used by EntraOps. `ClientId` is filled in automatically by `New-EntraOpsWorkloadIdentity`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -150,8 +157,26 @@ the duration of a run) to avoid re-fetching the same data multiple times within 
 are shared safely across the runspaces used for parallel object resolution.
 
 - `Get-EntraOpsCacheStatistics` (`-Detailed`) reports entry counts, TTL/expiry status and cache hit/miss statistics for the current session.
+- `Remove-EntraOpsData` removes the generated output of the working folder (Privileged EAM export, report data, tenant classification files, Tenant Governance snapshots) together with the cache - see [Working folder](../get-started/index.html#working-folder).
 - `Clear-EntraOpsCache` (`-CacheType All|Memory|Persistent|Expired`, `-Pattern <wildcard>`) resets the cache - use it to force a refresh of already-cached data within the same session, or to selectively clear entries matching a URI pattern (e.g. `-Pattern "*roleManagement*"`).
 - `Install-EntraOpsRequiredModule` / `Install-EntraOpsAllRequiredModules` verify that the required PowerShell modules (`Az.Accounts`, `Az.Resources`, `Microsoft.Graph.Authentication`) are installed at the minimum supported version, installing them if missing - useful to run once on a new client, agent or runner before `Connect-EntraOps`.
+
+## Query and ingestion helpers {#query-and-ingestion-helpers}
+
+The collectors use these exported helpers, which you can also call in your own scripts after `Connect-EntraOps`.
+They add caching, paging, retries with backoff for throttling, and token handling:
+
+| Cmdlet                              | Purpose                                                                                                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Invoke-EntraOpsMsGraphQuery`       | Microsoft Graph request (`-Method`, `-Uri`, `-Body`, `-ConsistencyLevel`, `-OutputType`); follows `@odata.nextLink` unless `-FirstPageOnly`; `-DisableCache` bypasses the cache; `-ThrowOnFailure` stops on errors |
+| `Invoke-EntraOpsAzQuery`            | Azure Resource Manager request (`-Uri`, `-ApiVersion`, `-TenantId`) or ARM batch (`-BatchRequest`, `-BatchSize`); results are cached per tenant                                                               |
+| `Invoke-EntraOpsAzGraphQuery`       | Azure Resource Graph KQL query (`-KqlQuery`, `-BatchSize`) with `$skipToken` paging; `-ThrowOnFailure` stops instead of returning a partial result                                                          |
+| `Invoke-EntraOpsGraphSecurityQuery` | Microsoft Defender XDR Advanced Hunting query through the Microsoft Graph security API (`-Query`, `-Timespan`)                                                                                               |
+| `Push-EntraOpsLogsIngestionAPI`     | Sends JSON to a Log Analytics custom table through the Logs Ingestion API (`-JsonContent`, `-DataCollectionRuleName`, `-DataCollectionResourceGroupName`, `-DataCollectionRuleSubscriptionId`, `-TableName`) |
+
+ARM and Resource Graph tokens are requested with `Get-AzAccessToken -ResourceTypeName Arm`, so an access token
+supplied with `Connect-AzAccount -AccessToken` (or `Connect-EntraOps -AuthenticationType AlreadyAuthenticated` with
+`-AccountId`, `-AzArmAccessToken` and `-MsGraphAccessToken`) is used.
 
 ## Tenant Governance
 

@@ -78,6 +78,14 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not
         $GitPushScript | Should -Match '(?s)finally\s*\{.*SetEnvironmentVariable\(\$Name, \$PreviousEnvironment\[\$Name\]\)'
     }
 
+    It 'splats the config sections loaded by Connect-EntraOps in the push pipeline' {
+        $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-push.yml') -Raw
+        foreach ($Section in 'LogAnalytics', 'SentinelWatchLists', 'AutomatedAdministrativeUnitManagement', 'AutomatedRmauAssignmentsForUnprotectedObjects', 'AutomatedConditionalAccessTargetGroups', 'AutomatedElmCatalogProtection') {
+            $Content | Should -Match ('Params = \$EntraOpsConfig\.' + $Section + '\r?\n')
+            $Content | Should -Not -Match ('Params = \$Config\.' + $Section + '\r?\n')
+        }
+    }
+
     It 'uses the documented service connection by default and allows an override' {
         foreach ($PipelineName in @('azure-pipelines-pull.yml', 'azure-pipelines-push.yml', 'azure-pipelines-push-reporting.yml', 'azure-pipelines-pull-tenant-governance.yml', 'azure-pipelines-update.yml')) {
             $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw

@@ -284,6 +284,16 @@ Describe "New-EntraOpsServiceEntraGroup" {
             Should -Be @('TestService.CatalogPlane.Members', 'TestService.ControlPlane.Admins', 'TestService.ManagementPlane.Admins')
         }
 
+        It "Should create a security group for groupType Security" {
+            $roles = @([pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Users"; groupType = "Security" })
+
+            $result = New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles $roles
+
+            @($result).MailNickname | Should -Be @('TestService.WorkloadPlane.Users')
+            @($result).DisplayName | Should -Be @('SG-TestService-WorkloadPlane-Users')
+            Should -Invoke Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { $Method -eq 'POST' -and ($Body | ConvertFrom-Json).groupTypes -eq $null }
+        }
+
         It "Should create WorkloadPlane-Admins role-assignable only with RoleAssignableWorkloadPlaneAdmins" {
             $roles = @(
                 [pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Users"; groupType = "" },
@@ -306,6 +316,77 @@ Describe "New-EntraOpsServiceEntraGroup" {
 
             $underscore.DisplayName | Should -Be 'SG_Rg-A-WorkloadPlane-Admins'
             $plain.DisplayName | Should -Be 'SG-Rg-B-WorkloadPlane-Admins'
+        }
+
+        It "Should reject a GroupNamingDelimiter that the other ServiceEM cmdlets can't match" {
+            $roles = @([pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Admins"; groupType = "" })
+
+            { New-EntraOpsServiceEntraGroup -ServiceName "Rg-A" -ServiceRoles $roles -GroupNamingDelimiter '_' } | Should -Throw '*does not belong to the set*'
+        }
+    }
+
+    Context "Reuse of existing groups" {
+        BeforeEach {
+            $script:AdminRoles = @([pscustomobject]@{accessLevel = "ControlPlane"; name = "Admins"; groupType = "" })
+            $script:WorkloadRoles = @([pscustomobject]@{accessLevel = "WorkloadPlane"; name = "Users"; groupType = "" })
+        }
+
+        It "Should not reuse a pre-created ControlPlane group that isn't role-assignable" {
+            $squatted = [pscustomobject]@{ Id = 'squatted'; DisplayName = 'SG-TestService-ControlPlane-Admins'; MailNickname = 'TestService.ControlPlane.Admins'; IsAssignableToRole = $false; SecurityEnabled = $true }
+            $script:MockGroups[$squatted.Id] = $squatted
+
+            { New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles $script:AdminRoles } |
+            Should -Throw "*'SG-TestService-ControlPlane-Admins' (squatted*isn't a role-assignable security group*"
+            Should -Invoke Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -Times 0 -Exactly -ParameterFilter { $Method -eq 'POST' }
+        }
+
+        It "Should reuse an existing role-assignable ControlPlane group" {
+            $existing = [pscustomobject]@{ Id = 'existing-cp'; DisplayName = 'SG-TestService-ControlPlane-Admins'; MailNickname = 'TestService.ControlPlane.Admins'; IsAssignableToRole = $true; SecurityEnabled = $true }
+            $script:MockGroups[$existing.Id] = $existing
+
+            $result = New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles $script:AdminRoles
+
+            @($result).Id | Should -Be @('existing-cp')
+            Should -Invoke Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -Times 0 -Exactly -ParameterFilter { $Method -eq 'POST' }
+        }
+
+        It "Should not reuse a pre-created WorkloadPlane group that isn't a resource of the service catalog" {
+            $squatted = [pscustomobject]@{ Id = 'squatted'; DisplayName = 'SG-TestService-WorkloadPlane-Users'; MailNickname = 'TestService.WorkloadPlane.Users'; IsAssignableToRole = $false; SecurityEnabled = $true }
+            $script:MockGroups[$squatted.Id] = $squatted
+
+            { New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles $script:WorkloadRoles } |
+            Should -Throw "*isn't a resource of the catalog 'Catalog-TestService'*"
+            Should -Invoke Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -Times 0 -Exactly -ParameterFilter { $Method -eq 'POST' }
+        }
+
+        It "Should reuse a WorkloadPlane group that is a resource of the service catalog" {
+            $existing = [pscustomobject]@{ Id = 'existing-wu'; DisplayName = 'SG-TestService-WorkloadPlane-Users'; MailNickname = 'TestService.WorkloadPlane.Users'; IsAssignableToRole = $false; SecurityEnabled = $true }
+            $script:MockGroups[$existing.Id] = $existing
+            Mock Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -ParameterFilter { $Uri -like '*/catalogs?*' } -MockWith {
+                @([pscustomobject]@{ Id = 'cat'; DisplayName = 'Catalog-TestService'; Resources = @([pscustomobject]@{ OriginId = 'existing-wu' }) })
+            }
+
+            $result = New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles $script:WorkloadRoles
+
+            @($result).Id | Should -Be @('existing-wu')
+            Should -Invoke Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -Times 0 -Exactly -ParameterFilter { $Method -eq 'POST' }
+        }
+
+        It "Should not return other groups with the ServiceName mailNickname prefix" {
+            $extra = [pscustomobject]@{ Id = 'extra'; DisplayName = 'Evil-ControlPlane-Admins'; MailNickname = 'TestService.Extra'; IsAssignableToRole = $false; SecurityEnabled = $true }
+            $script:MockGroups[$extra.Id] = $extra
+
+            $result = New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles $script:AdminRoles
+
+            @($result).MailNickname | Should -Be @('TestService.ControlPlane.Admins')
+        }
+
+        It "Should stop when the mailNickname is ambiguous" {
+            foreach ($id in 'dup1', 'dup2') {
+                $script:MockGroups[$id] = [pscustomobject]@{ Id = $id; DisplayName = 'SG-TestService-ControlPlane-Admins'; MailNickname = 'TestService.ControlPlane.Admins'; IsAssignableToRole = $true; SecurityEnabled = $true }
+            }
+
+            { New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles $script:AdminRoles } | Should -Throw "*Found 2 groups with mailNickname 'TestService.ControlPlane.Admins'*"
         }
     }
 }

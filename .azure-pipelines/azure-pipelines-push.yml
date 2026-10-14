@@ -74,30 +74,30 @@ steps:
         Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName $Config.TenantName -ConfigFilePath '$(ConfigFile)'
         try {
           if ($Config.LogAnalytics.IngestToLogAnalytics -eq $true) {
-            $LogAnalyticsParams = $Config.LogAnalytics
+            $LogAnalyticsParams = $EntraOpsConfig.LogAnalytics
             Save-EntraOpsPrivilegedEAMInsightsCustomTable @LogAnalyticsParams
           }
           if ($Config.SentinelWatchLists.IngestToWatchLists -eq $true) {
-            $WatchListParams = $Config.SentinelWatchLists
+            $WatchListParams = $EntraOpsConfig.SentinelWatchLists
             Save-EntraOpsPrivilegedEAMWatchLists @WatchListParams
           }
           if ($Config.AutomatedAdministrativeUnitManagement.ApplyAdministrativeUnitAssignments -eq $true) {
-            $AdministrativeUnitParams = $Config.AutomatedAdministrativeUnitManagement
+            $AdministrativeUnitParams = $EntraOpsConfig.AutomatedAdministrativeUnitManagement
             New-EntraOpsPrivilegedAdministrativeUnit @AdministrativeUnitParams
             Update-EntraOpsPrivilegedAdministrativeUnit @AdministrativeUnitParams
           }
           if ($Config.AutomatedRmauAssignmentsForUnprotectedObjects.ApplyRmauAssignmentsForUnprotectedObjects -eq $true) {
-            $RmauParams = $Config.AutomatedRmauAssignmentsForUnprotectedObjects
+            $RmauParams = $EntraOpsConfig.AutomatedRmauAssignmentsForUnprotectedObjects
             New-EntraOpsPrivilegedUnprotectedAdministrativeUnit @RmauParams
             Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit @RmauParams
           }
           if ($Config.AutomatedConditionalAccessTargetGroups.ApplyConditionalAccessTargetGroups -eq $true) {
-            $ConditionalAccessParams = $Config.AutomatedConditionalAccessTargetGroups
+            $ConditionalAccessParams = $EntraOpsConfig.AutomatedConditionalAccessTargetGroups
             New-EntraOpsPrivilegedConditionalAccessGroup @ConditionalAccessParams
             Update-EntraOpsPrivilegedConditionalAccessGroup @ConditionalAccessParams
           }
           if ($Config.AutomatedElmCatalogProtection.ApplyPrivilegedElmCatalogProtection -eq $true) {
-            $ElmCatalogParams = $Config.AutomatedElmCatalogProtection
+            $ElmCatalogParams = $EntraOpsConfig.AutomatedElmCatalogProtection
             Update-EntraOpsPrivilegedUnprotectedElmCatalog @ElmCatalogParams
           }
         } finally {

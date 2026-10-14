@@ -223,7 +223,7 @@ Describe 'ServiceEM workload plane admin and group ownership' {
         It 'gives delegated admin groups of a governance landing zone their Azure roles on this scope' {
             Mock New-EntraOpsServiceEntraGroup { @([pscustomobject]@{ Id = 'wa'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins' }) }
             Mock Invoke-EntraOpsMsGraphQuery {
-                if ($Uri -like '/v1.0/groups/*') { return [pscustomobject]@{ Id = ($Uri -replace '^/v1.0/groups/'); DisplayName = 'governance group' } }
+                if ($Uri -like '/v1.0/groups/*') { return [pscustomobject]@{ Id = ($Uri -replace '^/v1.0/groups/' -replace '\?.*$'); DisplayName = 'governance group'; IsAssignableToRole = $true; SecurityEnabled = $true } }
                 return @()
             }
             $mp = '22222222-2222-2222-2222-222222222222'; $cp = '33333333-3333-3333-3333-333333333333'
@@ -256,6 +256,17 @@ Describe 'ServiceEM workload plane admin and group ownership' {
             $script:CpRequests.Count | Should -Be 0
             @($warnings | Where-Object { "$_" -like '*-ControlPlaneAdmins is ignored*' }).Count | Should -Be 1
         }
+    }
+
+    It 'stops before creating objects when a delegated admin group is not role-assignable' {
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
+            if ($Uri -like '/v1.0/groups/*') { return [pscustomobject]@{ Id = '11111111-1111-1111-1111-111111111111'; DisplayName = 'Helpdesk'; IsAssignableToRole = $false; SecurityEnabled = $true } }
+        }
+
+        { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -ControlPlaneDelegationGroupId '11111111-1111-1111-1111-111111111111' 6>$null } |
+        Should -Throw "*Delegated ControlPlane-Admins group 'Helpdesk'*isn't a role-assignable security group*"
+        Should -Invoke New-EntraOpsServiceEntraGroup -Times 0 -Exactly
     }
 
     It 'stops before creating objects when a delegated group lookup fails' {
@@ -414,9 +425,11 @@ Describe 'ServiceEM workload plane admin and group ownership' {
         }
 
         BeforeEach {
+            $script:AdminGroupRoleAssignable = $true
+            $script:AdminGroupSecurityEnabled = $true
             Mock Invoke-EntraOpsMsGraphQuery {
                 if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
-                if ($Uri -eq "/v1.0/groups/$script:AdminGroupId") { return [pscustomobject]@{ Id = $script:AdminGroupId; DisplayName = 'PRG-Admins' } }
+                if ($Uri -like "/v1.0/groups/$script:AdminGroupId*") { return [pscustomobject]@{ Id = $script:AdminGroupId; DisplayName = 'PRG-Admins'; IsAssignableToRole = $script:AdminGroupRoleAssignable; SecurityEnabled = $script:AdminGroupSecurityEnabled } }
                 if ($Uri -like '*/checkMemberGroups') { return $script:MemberOfResult }
             }
         }
@@ -438,6 +451,26 @@ Describe 'ServiceEM workload plane admin and group ownership' {
             Should -Not -Throw
 
             Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly
+        }
+
+        It 'warns when the administrator group is not role-assignable' {
+            $script:MemberOfResult = @($script:AdminGroupId)
+            $script:AdminGroupRoleAssignable = $false
+
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -WorkloadPlaneAdmin 'admin@contoso.com' -ServiceMembers @() -ServiceRoles $script:RgRoles -AdministratorGroupId $script:AdminGroupId -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            @($warnings | Where-Object { "$_" -like "*CatalogPlane-Members group 'PRG-Admins'*isn't role-assignable*" }).Count | Should -Be 1
+            Should -Invoke New-EntraOpsServiceEntraGroup -Times 1 -Exactly
+        }
+
+        It 'throws before creating groups when the administrator group is not a security group' {
+            $script:MemberOfResult = @($script:AdminGroupId)
+            $script:AdminGroupRoleAssignable = $false
+            $script:AdminGroupSecurityEnabled = $false
+
+            { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -WorkloadPlaneAdmin 'admin@contoso.com' -ServiceMembers @() -ServiceRoles $script:RgRoles -AdministratorGroupId $script:AdminGroupId 6>$null } |
+            Should -Throw "*CatalogPlane-Members group 'PRG-Admins'*isn't a security group*"
+            Should -Invoke New-EntraOpsServiceEntraGroup -Times 0 -Exactly
         }
 
         It 'skips the check when WorkloadPlane-Members scopes the admin policy' {
@@ -1270,14 +1303,14 @@ Describe 'ServiceEM Graph lookup safety' {
         $script:GroupLookupUri = $null
         Mock Invoke-EntraOpsMsGraphQuery {
             $script:GroupLookupUri = $Uri
-            return [pscustomobject]@{ Id = 'group-id'; DisplayName = "Tier 'Zero' Admins" }
+            return [pscustomobject]@{ Id = 'group-id'; DisplayName = "Tier 'Zero' Admins"; isAssignableToRole = $true; securityEnabled = $true }
         }
         Mock Save-EntraOpsServiceEMConfigKey {}
 
         $result = Resolve-EntraOpsServiceEMDelegationGroup -Plane ControlPlane -DefaultGroupName "Tier 'Zero' Admins" -ConfigKey ControlPlaneDelegationGroupId
 
         $result | Should -Be 'group-id'
-        $script:GroupLookupUri | Should -BeLike "*displayName eq 'Tier%20%27%27Zero%27%27%20Admins'"
+        $script:GroupLookupUri | Should -BeLike "*displayName eq 'Tier%20%27%27Zero%27%27%20Admins'*"
         $script:GroupLookupUri | Should -Not -Match "Tier 'Zero'"
     }
 
@@ -1285,13 +1318,47 @@ Describe 'ServiceEM Graph lookup safety' {
         $script:GroupLookupUris = [System.Collections.Generic.List[string]]::new()
         Mock Invoke-EntraOpsMsGraphQuery {
             $script:GroupLookupUris.Add($Uri)
-            return [pscustomobject]@{ Id = 'group-id'; DisplayName = 'PRG-Tenant-ControlPlane-IdentityOps' }
+            return [pscustomobject]@{ Id = 'group-id'; DisplayName = 'PRG-Tenant-ControlPlane-IdentityOps'; isAssignableToRole = $true; securityEnabled = $true }
         }
         Mock Save-EntraOpsServiceEMConfigKey {}
 
         Resolve-EntraOpsServiceEMDelegationGroup -Plane ControlPlane -GroupId '../users' -DefaultGroupName 'PRG-Tenant-ControlPlane-IdentityOps' -ConfigKey ControlPlaneDelegationGroupId -WarningAction SilentlyContinue |
         Should -Be 'group-id'
         @($script:GroupLookupUris | Where-Object { $_ -like '*../users*' }) | Should -BeNullOrEmpty
+    }
+
+    It 'rejects a configured delegation group ID that is not a role-assignable security group' {
+        Mock Invoke-EntraOpsMsGraphQuery { [pscustomobject]@{ Id = '11111111-1111-1111-1111-111111111111'; DisplayName = 'Helpdesk'; isAssignableToRole = $false; securityEnabled = $true } }
+        Mock Save-EntraOpsServiceEMConfigKey {}
+
+        { Resolve-EntraOpsServiceEMDelegationGroup -Plane ControlPlane -GroupId '11111111-1111-1111-1111-111111111111' -DefaultGroupName 'PRG-Test' -ConfigKey ControlPlaneDelegationGroupId } |
+        Should -Throw "*ControlPlane delegation group 'Helpdesk'*isn't a role-assignable security group*"
+        Should -Invoke Save-EntraOpsServiceEMConfigKey -Times 0 -Exactly
+    }
+
+    It 'accepts a configured delegation group ID of a role-assignable security group' {
+        Mock Invoke-EntraOpsMsGraphQuery { [pscustomobject]@{ Id = '11111111-1111-1111-1111-111111111111'; DisplayName = 'PRG-Test'; isAssignableToRole = $true; securityEnabled = $true } }
+
+        Resolve-EntraOpsServiceEMDelegationGroup -Plane ControlPlane -GroupId '11111111-1111-1111-1111-111111111111' -DefaultGroupName 'PRG-Test' -ConfigKey ControlPlaneDelegationGroupId |
+        Should -Be '11111111-1111-1111-1111-111111111111'
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -like '/v1.0/groups/11111111-1111-1111-1111-111111111111?*isAssignableToRole*' }
+    }
+
+    It 'ignores a same-named delegation group that is not a role-assignable security group' {
+        $script:CreatedGroupBodies = [System.Collections.Generic.List[object]]::new()
+        Mock Get-MgContext { [pscustomobject]@{ Scopes = @('RoleManagement.ReadWrite.Directory'); Account = 'admin@contoso.com' } }
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'POST') {
+                $script:CreatedGroupBodies.Add(($Body | ConvertFrom-Json -Depth 5))
+                return [pscustomobject]@{ Id = 'new-group-id' }
+            }
+            return [pscustomobject]@{ Id = 'lookalike-id'; DisplayName = 'PRG-Test'; isAssignableToRole = $false; securityEnabled = $true }
+        }
+        Mock Save-EntraOpsServiceEMConfigKey {}
+
+        Resolve-EntraOpsServiceEMDelegationGroup -Plane ControlPlane -DefaultGroupName 'PRG-Test' -ConfigKey ControlPlaneDelegationGroupId -WarningAction SilentlyContinue | Should -Be 'new-group-id'
+
+        Should -Invoke Save-EntraOpsServiceEMConfigKey -Times 1 -Exactly -ParameterFilter { $Value -eq 'new-group-id' }
     }
 
     It 'creates delegation groups without owner' {

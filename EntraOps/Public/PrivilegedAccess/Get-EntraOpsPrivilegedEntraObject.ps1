@@ -49,7 +49,7 @@
 
 .EXAMPLE
     Details of privileged object by using ObjectId
-    Get-EntraOpsPrivilegedEntraObject -AadObjectId "bdf10e92-30c7-4cc8-93e7-2982ea6cf371"
+    Get-EntraOpsPrivilegedEntraObject -AadObjectId "11111111-1111-1111-1111-111111111111"
 #>
 function Get-EntraOpsPrivilegedEntraObject {
     [cmdletbinding()]

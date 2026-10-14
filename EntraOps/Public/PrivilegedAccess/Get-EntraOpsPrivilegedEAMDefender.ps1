@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Get a list in schema of EntraOps with all privileged principals in Microsoft Intune and assigned roles and classifications.
+    Get a list in schema of EntraOps with all privileged principals in Microsoft Defender XDR Unified RBAC and assigned roles and classifications.
 
 .DESCRIPTION
-    Get a list in schema of EntraOps with all privileged principals in Microsoft Intune and assigned roles and classifications.
+    Get a list in schema of EntraOps with all privileged principals in Microsoft Defender XDR Unified RBAC and assigned roles and classifications.
 
 .PARAMETER TenantId
     Tenant ID of the Microsoft Entra ID tenant. Default is the current tenant ID.

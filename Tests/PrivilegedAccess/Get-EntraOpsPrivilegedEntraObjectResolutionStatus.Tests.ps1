@@ -32,7 +32,7 @@ Describe 'Get-EntraOpsPrivilegedEntraObject resolution status' {
     }
 
     It 'marks the CloudLab orphan as not found only after both identity endpoints return 404' {
-        $ObjectId = '4fbcb88a-18b5-42cf-82ac-30ca6d4f6919'
+        $ObjectId = 'dddddddd-dddd-dddd-dddd-dddddddddddd'
 
         $Result = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $global:TenantIdContext
 

@@ -130,21 +130,81 @@ function Connect-EntraOps {
 
             $PSEnvironment = "PowerShell " + ($PSVersionTable.PSEdition) + " " + ($PSVersionTable.PSVersion.ToString())
 
-            $Splash = @"
- ______       _              ____
-|  ____|     | |            / __ \
-| |__   _ __ | |_ _ __ __ _| |  | |_ __  ___
-|  __| | '_ \| __| '__/ _`  | |  | | '_ \/ __|
-| |____| | | | |_| | | (_| | |__| | |_) \__ \
-|______|_| |_|\__|_|  \__,_|\____/| .__/|___/
-                                  | |
-                                  |_|
+            # Splash art and a color map of the same shape: each map character sets the color of the art character at that position
+            $SplashArt = @'
+         .  .  .                  ______      __             ____
+         |\/ \/|                 / ____/___  / /__________ _/ __ \____  _____
+        _'-----'_               / __/ / __ \/ __/ ___/ __ `/ / / / __ \/ ___/
+       /_________/|            / /___/ / / / /_/ /  / /_/ / /_/ / /_/ (__  )
+     __|_________|/_          /_____/_/ /_/\__/_/   \__,_/\____/ .___/____/
+    /_______________/|                                        /_/
+  __|_______________|/_
+ /_____________________/|
+ |_____________________|/
+'@ -split '\r?\n'
 
-Version $($ModuleVersion) on $($PSEnvironment)
-Community Project by Thomas Naunheim - www.entraops.com
-"@
+            $SplashColorMap = @'
+         C  C  C                  WWWWWW      WW             WWWW
+         CCC CCC                 W WWWWWWWW  W WWWWWWWWWWW WW WW WWWWW  WWWWW
+        0CCCCCCC0               W WWW W WW WW WWW WWWW WW WW W W W WW WW WWWW
+       000000000000            W WWWWW W W W WWW W  W WWW W WWW W WWW WWW  W
+     110000000000001          WWWWWWWWW WWWWWWWWW   WWWWWWWWWWWW WWWWWWWWWW
+    111111111111111111                                        WWW
+  221111111111111111112
+ 222222222222222222222222
+ 222222222222222222222222
+'@ -split '\r?\n'
 
-            Write-Host $Splash -ForegroundColor Blue
+            # 24-bit colors on terminals with virtual terminal support, console colors as fallback
+            $SplashUseRgb = $Host.UI.SupportsVirtualTerminal -and -not [Console]::IsOutputRedirected -and $PSStyle.OutputRendering -ne 'PlainText'
+            $SplashColors = @{
+                'C' = @{ Rgb = 0xF2C14E; Console = 'Yellow' }    # Crown (gold)
+                '0' = @{ Rgb = 0xE5534B; Console = 'Red' }       # Top level (red)
+                '1' = @{ Rgb = 0x4DA3E8; Console = 'Blue' }      # Middle level (blue)
+                '2' = @{ Rgb = 0x57C26B; Console = 'Green' }     # Lowest level (green)
+                'W' = @{ Console = 'Blue' }                      # EntraOps wordmark
+            }
+            $WriteSplashSegment = {
+                param($Text, $ColorKey)
+                $Color = $SplashColors[$ColorKey]
+                if ($SplashUseRgb -and $Color.Rgb) {
+                    Write-Host "$($PSStyle.Foreground.FromRgb($Color.Rgb))$Text$($PSStyle.Reset)" -NoNewline
+                } else {
+                    Write-Host $Text -ForegroundColor $Color.Console -NoNewline
+                }
+            }
+
+            # Info lines are printed to the right of the pyramid base
+            $SplashInfo = @{
+                 6 = @("📦 Version $($ModuleVersion) on $($PSEnvironment)", 'Gray')
+                 7 = @("👤 Community Project by Thomas Naunheim", 'Gray')
+                 8 = @("🌐 www.entraops.com", 'Cyan')
+            }
+
+            for ($Row = 0; $Row -lt $SplashArt.Count; $Row++) {
+                $Line = $SplashArt[$Row]
+                $Map = $SplashColorMap[$Row]
+                if ($SplashInfo.ContainsKey($Row)) { $Line = $Line.PadRight(31) }
+
+                # Group characters of the same color into segments to keep the number of Write-Host calls low
+                $Segment = ''
+                $SegmentKey = 'W'
+                for ($Col = 0; $Col -lt $Line.Length; $Col++) {
+                    $ColorKey = if ($Col -lt $Map.Length -and $Map[$Col] -ne ' ') { [string]$Map[$Col] } else { $SegmentKey }
+                    if ($ColorKey -ne $SegmentKey -and $Segment) {
+                        & $WriteSplashSegment $Segment $SegmentKey
+                        $Segment = ''
+                    }
+                    $SegmentKey = $ColorKey
+                    $Segment += $Line[$Col]
+                }
+                & $WriteSplashSegment $Segment $SegmentKey
+
+                if ($SplashInfo.ContainsKey($Row)) {
+                    Write-Host $SplashInfo[$Row][0] -ForegroundColor $SplashInfo[$Row][1] -NoNewline
+                }
+                Write-Host ''
+            }
         }
 
         #region Resolve EntraOpsConfig.json when -ConfigFilePath is not passed
@@ -399,9 +459,9 @@ Community Project by Thomas Naunheim - www.entraops.com
                     # should not fail Connect-EntraOps over this optimization.
                     try {
                         if (-not [string]::IsNullOrEmpty($TenantId)) {
-                            $SecureArmAccessToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -TenantId $TenantId -AsSecureString).Token
+                            $SecureArmAccessToken = (Get-AzAccessToken -ResourceTypeName Arm -TenantId $TenantId -AsSecureString).Token
                         } else {
-                            $SecureArmAccessToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -AsSecureString).Token
+                            $SecureArmAccessToken = (Get-AzAccessToken -ResourceTypeName Arm -AsSecureString).Token
                         }
                     } catch {
                         Write-Verbose "Could not pre-warm an Azure Resource Manager access token: $($_.Exception.Message)"
@@ -596,6 +656,15 @@ Community Project by Thomas Naunheim - www.entraops.com
             Write-Host "  Authentication Type : $AuthenticationType" -ForegroundColor White
             Write-Host "  EntraOps Scope      : $Scope" -ForegroundColor White
             Write-Host "  Config File         : $ConfigFileSummary" -ForegroundColor $(switch ($ConfigFileStatus) { 'Skipped' { 'Yellow' } 'NotFound' { 'Gray' } default { 'Green' } })
+            $WorkingFolderSource = if ($EntraOpsBaseFolderResolution -and $EntraOpsBaseFolderResolution.Path -eq $Global:EntraOpsBaseFolder) {
+                switch ($EntraOpsBaseFolderResolution.Source) {
+                    'EnvironmentVariable' { 'ENTRAOPS_ROOT' }
+                    'RepositoryCheckout' { 'repository clone' }
+                    'CurrentFolder' { 'current folder with EntraOpsConfig.json' }
+                    'UserFolder' { 'default, set ENTRAOPS_ROOT to change' }
+                }
+            } else { 'set in this session' }
+            Write-Host "  Working Folder      : $Global:EntraOpsBaseFolder ($WorkingFolderSource)" -ForegroundColor White
 
             # Display managing tenant info if configured
             if (-not [string]::IsNullOrEmpty($ManagingTenantId)) {

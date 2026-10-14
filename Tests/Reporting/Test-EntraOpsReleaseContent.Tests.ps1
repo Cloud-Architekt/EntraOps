@@ -81,6 +81,27 @@ Describe 'Test-EntraOpsReleaseContent' -Skip:(-not (Test-Path -LiteralPath $Vali
         & $ValidatorPath -RepositoryRoot $TestRoot | Should -Match 'Release content validation passed'
     }
 
+    It 'rejects a real-looking id assigned to <Description>' -ForEach @(
+        @{ Description = 'a TenantId key'; Content = '{ "TenantId": "4d3e5b65-8a52-4b2f-b5cd-1670c700136b" }' }
+        @{ Description = 'a delegation group id key'; Content = 'ControlPlaneDelegationGroupId: 4d3e5b65-8a52-4b2f-b5cd-1670c700136b' }
+        @{ Description = 'an -ObjectId parameter'; Content = 'Get-EntraOpsAgentObject -ObjectId "4d3e5b65-8a52-4b2f-b5cd-1670c700136b"' }
+        @{ Description = 'a workspace id parameter'; Content = 'Get-Data -SentinelWorkspaceId 4d3e5b65-8a52-4b2f-b5cd-1670c700136b' }
+    ) {
+        New-TestContent -Root $TestRoot -RelativePath 'Docs/content/sample.md' -Content $Content
+
+        { & $ValidatorPath -RepositoryRoot $TestRoot 6>$null } | Should -Throw '*validation failed*'
+    }
+
+    It 'accepts placeholder ids and public ids assigned to other keys' {
+        New-TestContent -Root $TestRoot -RelativePath 'Docs/content/sample.md' -Content @'
+{ "TenantId": "88888888-8888-8888-8888-888888888888", "ObjectId": "aaaaaaaa-0000-0000-0000-000000000003",
+  "PrincipalId": "aaaabbbb-0000-cccc-1111-dddd2222eeee", "RoleDefinitionId": "62e90394-69f5-4237-9190-012177145e10" }
+Get-EntraOpsAgentObject -ObjectId "11111111-1111-1111-1111-111111111111"
+'@
+
+        & $ValidatorPath -RepositoryRoot $TestRoot | Should -Match 'Release content validation passed'
+    }
+
     It 'rejects a non-empty shipped global principal exclusion list' {
         New-TestContent -Root $TestRoot -RelativePath 'Classification/Global.json' -Content '[ { "ExcludedPrincipalId": [ "11111111-1111-1111-1111-111111111111" ] } ]'
 

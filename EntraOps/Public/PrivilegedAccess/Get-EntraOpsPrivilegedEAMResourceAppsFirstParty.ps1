@@ -21,7 +21,7 @@
 
 .EXAMPLE
     Get a list of first party applications and activity from MicrosoftGraphActivity log and classify the audited permission scope.
-    Get-EntraOpsPrivilegedEamResourceAppsFirstParty -Source MsGraphActivity -SentinelWorkspaceId "sentinel-la-123" -SentinelWorkspaceId "3f72a077-c32a-423c-8503-41b93d3b0737"
+    Get-EntraOpsPrivilegedEamResourceAppsFirstParty -Source MsGraphActivity -SentinelWorkspaceId "22222222-2222-2222-2222-222222222222" -SentinelWorkspaceSubscriptionId "11111111-1111-1111-1111-111111111111"
 #>
 
 function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {

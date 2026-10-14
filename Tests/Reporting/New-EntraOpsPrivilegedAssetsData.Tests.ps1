@@ -101,4 +101,110 @@ Describe 'New-EntraOpsPrivilegedAssetsData' {
         $Settings.alternateObjectTierLevelAttributes.servicePrincipal | Should -BeFalse
         $Settings.alternateObjectTierLevelAttributes.group | Should -BeTrue
     }
+
+    Context 'Maester test results' {
+        BeforeEach {
+            $script:User2Id = '77777777-7777-7777-7777-777777777777'
+            $script:AppRegId = '88888888-8888-8888-8888-888888888888'
+            $script:AppRegAppId = 'bbbbbbbb-0000-0000-0000-000000000000'
+            New-Item -ItemType Directory -Path "$script:Root/PrivilegedEAM/IdentityGovernance" -Force | Out-Null
+            @(
+                [ordered]@{ ObjectId = $script:User2Id; ObjectTenantId = 't1'; ObjectType = 'user'; ObjectDisplayName = 'Admin D'; ObjectUserPrincipalName = 'admin.d@contoso.com'; ObjectAdminTierLevelName = 'ControlPlane'; RoleAssignments = @() }
+                [ordered]@{ ObjectId = $script:AppRegId; ObjectTenantId = 't1'; ObjectType = 'application'; ObjectDisplayName = 'App Reg E'; ObjectUserPrincipalName = $script:AppRegAppId; ObjectAdminTierLevelName = 'ManagementPlane'; RoleAssignments = @() }
+            ) | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$script:Root/PrivilegedEAM/IdentityGovernance/IdentityGovernance.json"
+
+            $script:NewMaesterResult = {
+                param([string]$TenantId = 't1', [string]$AssetProperty = 'AffectedObjects')
+                $test = {
+                    param($Id, $Result)
+                    [ordered]@{
+                        Id = $Id; Result = $Result; Title = "Title of $Id"; Name = "$($Id): Title of $Id"; Severity = 'High'; Tag = @('Maester', $Id)
+                        HelpUrl = "https://maester.dev/docs/tests/$Id"; Block = 'Maester/Entra'
+                        ResultDetail = [ordered]@{ TestDescription = "Description of $Id"; TestResult = "Result of $Id"; Service = 'EntraID' }
+                    }
+                }
+                [ordered]@{
+                    TenantId = $TenantId; TenantName = 'contoso'; ExecutedAt = '2026-10-04T08:35:43Z'
+                    TotalCount = 4; FailedCount = 3; PassedCount = 1; SkippedCount = 0
+                    Tests = @((& $test 'MT.1001' 'Failed'), (& $test 'MT.1002' 'Passed'), (& $test 'MT.1003' 'Failed'), (& $test 'MT.1004' 'Failed'))
+                    $AssetProperty = @(
+                        [ordered]@{ Id = $script:UserId; Type = 'User'; DisplayName = 'Admin A'; Tests = @('MT.1001', 'MT.1002') }
+                        [ordered]@{ Id = $script:AppRegAppId; Type = 'AppRegistration'; DisplayName = 'App Reg E'; Tests = @('MT.1003') }
+                        [ordered]@{ Id = 'cccccccc-0000-0000-0000-000000000000'; Type = 'User'; UserPrincipalName = 'Admin.D@contoso.com'; Tests = @('MT.1003') }
+                        [ordered]@{ Id = '99999999-9999-9999-9999-999999999999'; Type = 'User'; DisplayName = 'Not privileged'; Tests = @('MT.1004') }
+                    )
+                } | ConvertTo-Json -Depth 6
+            }
+            $script:MaesterRoot = Join-Path $script:Root 'maester'
+            New-Item -ItemType Directory -Path $script:MaesterRoot -Force | Out-Null
+            $script:GetObject = { param($Payload, $Id) @($Payload.objects | Where-Object { $_.objectId -eq $Id })[0] }
+        }
+
+        It 'matches failed tests by object id, app id of app registrations and user principal name' {
+            & $script:NewMaesterResult | Set-Content -LiteralPath "$script:MaesterRoot/TestResults-2026-10-04-103542.json"
+
+            $Payload = New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRelatedObjectIds $false -MaesterTestResultPath "$script:MaesterRoot/TestResults-2026-10-04-103542.json" -PassThru 6>$null
+
+            $Payload.maester.sourceFile | Should -Be 'TestResults-2026-10-04-103542.json'
+            $Payload.maester.matchedObjectCount | Should -Be 3
+            $Payload.maester.affectedObjectCount | Should -Be 4
+            $Payload.maester.totals.failed | Should -Be 3
+            @($Payload.maester.tests.Keys) | Should -Be @('MT.1001', 'MT.1003')
+            $Payload.maester.tests['MT.1001'].description | Should -Be 'Description of MT.1001'
+            $Payload.maester.tests['MT.1001'].service | Should -Be 'EntraID'
+            @((& $script:GetObject $Payload $script:UserId).maesterAssets.tests) | Should -Be @('MT.1001')
+            @((& $script:GetObject $Payload $script:AppRegId).maesterAssets.tests) | Should -Be @('MT.1003')
+            @((& $script:GetObject $Payload $script:User2Id).maesterAssets.tests) | Should -Be @('MT.1003')
+            (& $script:GetObject $Payload $script:AppId).Contains('maesterAssets') | Should -BeFalse
+        }
+
+        It 'uses the latest TestResults file of a folder' {
+            & $script:NewMaesterResult | Set-Content -LiteralPath "$script:MaesterRoot/TestResults-2026-10-01-080000.json"
+            & $script:NewMaesterResult | Set-Content -LiteralPath "$script:MaesterRoot/TestResults-2026-10-04-103542.json"
+            'not json' | Set-Content -LiteralPath "$script:MaesterRoot/TestResults-latest.json"
+
+            $Payload = New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRelatedObjectIds $false -MaesterTestResultPath $script:MaesterRoot -PassThru 6>$null
+
+            $Payload.maester.sourceFile | Should -Be 'TestResults-2026-10-04-103542.json'
+        }
+
+        It 'accepts the result path without the .json extension' {
+            & $script:NewMaesterResult | Set-Content -LiteralPath "$script:MaesterRoot/TestResults-2026-10-04-103542.json"
+
+            $Payload = New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRelatedObjectIds $false -MaesterTestResultPath "$script:MaesterRoot/TestResults-2026-10-04-103542" -PassThru 6>$null
+
+            $Payload.maester.sourceFile | Should -Be 'TestResults-2026-10-04-103542.json'
+        }
+
+        It 'reads AssetInventory of older Maester versions' {
+            & $script:NewMaesterResult -AssetProperty 'AssetInventory' | Set-Content -LiteralPath "$script:MaesterRoot/TestResults-2026-10-04-103542.json"
+
+            $Payload = New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRelatedObjectIds $false -MaesterTestResultPath $script:MaesterRoot -PassThru 6>$null
+
+            $Payload.maester.matchedObjectCount | Should -Be 3
+        }
+
+        It 'warns when the Maester result belongs to another tenant' {
+            & $script:NewMaesterResult -TenantId 't2' | Set-Content -LiteralPath "$script:MaesterRoot/TestResults-2026-10-04-103542.json"
+
+            $Payload = New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRelatedObjectIds $false -MaesterTestResultPath $script:MaesterRoot -PassThru -WarningVariable warnings -WarningAction SilentlyContinue 6>$null
+
+            @($warnings | Where-Object { "$_" -like '*belongs to tenant t2*' }).Count | Should -Be 1
+            $Payload.maester.tenantId | Should -Be 't2'
+        }
+
+        It 'skips the integration with a warning when an explicit path has no result' {
+            $Payload = New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRelatedObjectIds $false -MaesterTestResultPath "$script:MaesterRoot/missing" -PassThru -WarningVariable warnings -WarningAction SilentlyContinue 6>$null
+
+            $Payload.maester | Should -BeNullOrEmpty
+            @($warnings | Where-Object { "$_" -like '*No Maester test result found*' }).Count | Should -Be 1
+        }
+
+        It 'stops with a clear error for an unreadable result file' {
+            'not json' | Set-Content -LiteralPath "$script:MaesterRoot/TestResults-2026-10-04-103542.json"
+
+            { New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRelatedObjectIds $false -MaesterTestResultPath $script:MaesterRoot 6>$null } |
+            Should -Throw '*Failed to read or parse Maester test result*'
+        }
+    }
 }

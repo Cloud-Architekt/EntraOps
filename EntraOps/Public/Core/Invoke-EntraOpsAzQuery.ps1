@@ -150,9 +150,9 @@ function Invoke-EntraOpsAzQuery {
         }
 
         $TokenParams = @{
-            ResourceUrl     = "$ArmBaseUri/"
-            AsSecureString  = $true
-            ErrorAction     = 'Stop'
+            ResourceTypeName = 'Arm'
+            AsSecureString   = $true
+            ErrorAction      = 'Stop'
         }
         if (-not [string]::IsNullOrEmpty($ForTenantId)) { $TokenParams.TenantId = $ForTenantId }
 

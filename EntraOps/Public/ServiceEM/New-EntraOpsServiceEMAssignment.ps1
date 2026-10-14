@@ -91,7 +91,8 @@ function New-EntraOpsServiceEMAssignment {
             }
         }
 
-        $assignmentsSplat = "/v1.0/identityGovernance/entitlementManagement/assignments?`$filter=accessPackage/catalog/id eq '$ServiceCatalogId' and state eq 'delivered'&`$expand=accessPackage(`$expand=catalog),accessPackage,target"
+        $encodedServiceCatalogId = ConvertTo-EntraOpsODataStringLiteral -Value $ServiceCatalogId
+        $assignmentsSplat = "/v1.0/identityGovernance/entitlementManagement/assignments?`$filter=accessPackage/catalog/id eq '$encodedServiceCatalogId' and state eq 'delivered'&`$expand=accessPackage(`$expand=catalog),accessPackage,target"
         Write-Verbose "$logPrefix $($assignmentsSplat)"
         try{
             $assignments += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentsSplat -OutputType PSObject -DisableCache

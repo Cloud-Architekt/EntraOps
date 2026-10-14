@@ -20,6 +20,12 @@ Import-Module ./EntraOps -Force
 New-EntraOpsReportingData
 ```
 
+> [!NOTE]
+> Most apps are built from a Privileged EAM export in `PrivilegedEAM/`. Create it first with
+> `Save-EntraOpsPrivilegedEAMJson -RbacSystems @("EntraID", "Azure")` (accepted values: `Azure`, `EntraID`,
+> `IdentityGovernance`, `DeviceManagement`, `ResourceApps`, `Defender`) or `Invoke-EntraOpsPrivilegedEAM`.
+> `New-EntraOpsReportingData` prints the generated data files and the path of `Reports/index.html` to open.
+
 The generators write into the `Reports` folder of the EntraOps working folder (the repository
 checkout, or the folder described in
 [Working folder](../get-started/index.html#working-folder)).
@@ -48,7 +54,7 @@ Azure Pipelines, or local runner. If no Tenant Governance snapshot manifest exis
 Analyzer is skipped with a warning, matching the shipped workflow behavior.
 
 - `New-EntraOpsClassificationExplorerData` / `New-EntraOpsTierBreachAnalyzerData` / `New-EntraOpsPrivilegedEamDashboardData` / `New-EntraOpsPrivilegedAssetsData` / `New-EntraOpsPrivilegedEamPrivilegeHistoryData` / `New-EntraOpsAccessPathMapData` / `New-EntraOpsTenantGovernanceConfigurationAnalyzerData` generate the data bundle for the individual apps. `New-EntraOpsReportingData` is a convenience wrapper that runs them in one call and can also generate Access Package Flow enrichment. It forwards parameters such as `-ClassificationExplorerRepoRoot`, `-TierBreachImportPath`, `-EamDashboardImportPath`, `-AccessPathMapImportPath`, `-SkipClassificationExplorer`, `-SkipTierBreachAnalyzer`, `-SkipEamDashboard`, `-SkipPrivilegedAssets`, `-SkipPrivilegeHistory`, `-SkipAccessPathMap`, `-SkipConfigurationAnalyzer`, and `-SkipAccessPackageFlow`.
-- `Remove-EntraOpsReportingData` deletes the generated data bundles again (`-WhatIf`, the same eight `-Skip*` switches, and `-PassThru` are supported). Run it before sharing or committing a checkout to remove tenant-specific reporting data.
+- `Remove-EntraOpsReportingData` deletes the generated data bundles again (`Remove-EntraOpsData` also removes the Privileged EAM export, tenant classification files, Tenant Governance snapshots and the cache) (`-WhatIf`, the same eight `-Skip*` switches, and `-PassThru` are supported). Run it before sharing or committing a checkout to remove tenant-specific reporting data.
 - Reporting generation can be automated with the `AutomatedReportingGeneration` section in `EntraOpsConfig.json` (set with `New-EntraOpsConfigFile -ApplyAutomatedReportingGeneration`) and the `Push-EntraOpsPrivilegedReporting` GitHub workflow. The workflow regenerates the selected apps, runs the offline browser smoke suite, and uploads a 30-day build artifact in a private repository only when every report passes. A failing smoke test is reported in the workflow log and blocks the artifact upload; no artifact is produced for a failed run because report traces would contain tenant data. GitHub Release publishing is a separate, disabled-by-default option (`PublishReportsAsRelease`); when enabled, `ReportingReleasesToKeep` limits retained `reporting-*` releases because each release contains a full tenant-data snapshot.
 
 ### Classification Explorer
@@ -115,6 +121,12 @@ views don't show:
   missing sponsors, synchronized Control Plane identities and missing restricted management.
 - **Filters** by object type, sub type, object and assignment tier, administrative unit,
   restricted management, sync source, finding and worklist status.
+- **Maester findings** (optional): `New-EntraOpsPrivilegedAssetsData -MaesterTestResultPath <file|folder>`
+  (or `New-EntraOpsReportingData -PrivilegedAssetsMaesterTestResultPath`) reads the failed tests of a
+  Maester `TestResults-*.json` and matches them to privileged objects by object ID, app ID or user
+  principal name. They show up as finding chips next to the other findings. Without the parameter, or
+  without a result file, the integration is skipped. See the
+  [Privileged Assets README](../../Reports/PrivilegedAssets/README.md#maester-findings).
 
 The side panel lists all role assignments of an object and links each assignment to the EAM
 Dashboard (`#assignment=`), the object to the EAM Dashboard (`#asset=`) and to the Access Path Map

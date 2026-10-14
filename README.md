@@ -202,7 +202,7 @@ Both cmdlets process all supported RBAC systems by default. Use the `-RbacSystem
 - **ResourceApps** – [Microsoft Graph API permissions and app roles](https://learn.microsoft.com/en-us/entra/identity-platform/permissions-consent-overview) (application permissions)
 - **Defender** – [Microsoft Defender XDR Unified RBAC](https://learn.microsoft.com/en-us/defender-xdr/manage-rbac) (security operations roles)
 
-There are two ways, I've you want to filter the EntraOps results in PowerShell:
+There are two ways to filter the EntraOps results in PowerShell:
 **Option A** – Export RBAC systems to JSON files, then load one or more systems into a variable for filtering:
 
 ```powershell
@@ -752,8 +752,8 @@ Example of Identity Governance role which has been classified by tagging of clas
 ```json
 "RoleAssignments": [
       {
-        "RoleAssignmentId": "58c673ff-dc05-4038-9a59-826e777289c2",
-        "RoleAssignmentScopeId": "/AccessPackageCatalog/5279fb65-7ccf-460b-8893-75087b855588",
+        "RoleAssignmentId": "aaaaaaaa-0000-0000-0000-000000000001",
+        "RoleAssignmentScopeId": "/AccessPackageCatalog/aaaaaaaa-0000-0000-0000-000000000002",
         "RoleAssignmentScopeName": "Privileged Access - Helpdesk Delegation to change passwords of admins",
         "RoleAssignmentType": "Direct",
         "RoleAssignmentSubType": "",
@@ -763,7 +763,7 @@ Example of Identity Governance role which has been classified by tagging of clas
         "RoleDefinitionId": "ae79f266-94d4-4dab-b730-feca7e132178",
         "RoleType": "BuiltIn",
         "RoleIsPrivileged": null,
-        "ObjectId": "f742b7a6-d2b6-497d-9443-215505d5998a",
+        "ObjectId": "aaaaaaaa-0000-0000-0000-000000000003",
         "ObjectType": "user",
         "TransitiveByObjectId": "",
         "TransitiveByObjectDisplayName": "",
@@ -929,7 +929,7 @@ through a pull request; Azure DevOps uses direct push. Updating GitHub workflow 
 the separately configured publisher GitHub App, while Azure DevOps pipeline definitions are included
 in its default update targets.
 
-Regardless of the way to update EntraOps files, it could be required to update the EntraOps.config file and service principals of EntraOps to take benefit of new features. Create a new EntraOps.config file or add manually the named properties in the description of the feature. Use `New-EntraOpsWorkloadIdentity` in combination of the parameter `-ExistingSpObjectId` and the object ID of the EntraOps service principal (Example: `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps-CloudLab" -ExistingSpObjectId eca9154b-0d2a-4609-aa41-064eb317bfb3`). Ignore errors regarding existing API permissions or conflicts with existing roles.
+Regardless of the way to update EntraOps files, it could be required to update the EntraOps.config file and service principals of EntraOps to take benefit of new features. Create a new EntraOps.config file or add manually the named properties in the description of the feature. Use `New-EntraOpsWorkloadIdentity` in combination of the parameter `-ExistingSpObjectId` and the object ID of the EntraOps service principal (Example: `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps" -ExistingSpObjectId 11111111-1111-1111-1111-111111111111`). Ignore errors regarding existing API permissions or conflicts with existing roles.
 
 After changing automation settings, run `Update-EntraOpsRequiredWorkflowParameters` for GitHub or
 `Update-EntraOpsAzureDevOpsSchedules` for Azure DevOps, then commit the resulting definition changes.

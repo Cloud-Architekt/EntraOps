@@ -17,8 +17,8 @@ git config user.name "Azure DevOps"
 
 git add --all
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "git add failed or nothing to add."
-    exit 0
+    Write-Error "git add failed."
+    exit 1
 }
 
 # PrivilegedEAM is ignored for local safety because it contains tenant data, but
@@ -26,8 +26,8 @@ if ($LASTEXITCODE -ne 0) {
 if (Test-Path -LiteralPath './PrivilegedEAM' -PathType Container) {
     git add --force --all -- './PrivilegedEAM'
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "git add failed for generated PrivilegedEAM output."
-        exit 0
+        Write-Error "git add failed for generated PrivilegedEAM output."
+        exit 1
     }
 }
 
@@ -39,8 +39,8 @@ if ($LASTEXITCODE -eq 0) {
 
 git commit -m "$CommitMessage [skip ci]"
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "git commit failed."
-    exit 0
+    Write-Error "git commit failed."
+    exit 1
 }
 
 if ([string]::IsNullOrWhiteSpace($AccessToken)) {

@@ -8,7 +8,7 @@ BeforeAll {
     $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
     . "$script:TestRepositoryRoot/EntraOps/Private/Select-EntraOpsAzureRbacPrincipal.ps1"
 
-    $script:DeletedPrincipalId = '4fbcb88a-18b5-42cf-82ac-30ca6d4f6919'
+    $script:DeletedPrincipalId = 'dddddddd-dddd-dddd-dddd-dddddddddddd'
     $script:UnresolvedPrincipalId = '11111111-1111-1111-1111-111111111111'
     $script:ResolvedPrincipalId = '22222222-2222-2222-2222-222222222222'
 }

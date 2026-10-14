@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Creates one Entra group per entry in the ServiceRoles object. Security groups
-    are created for all roles with an empty or set groupType. Microsoft 365
+    are created for roles with an empty groupType or groupType = "Security". Microsoft 365
     (Unified) groups are created for roles with groupType = "Unified".
 
     ControlPlane, ManagementPlane and CatalogPlane security groups are created as role-assignable
@@ -18,7 +18,11 @@
     <GroupPrefix><Delimiter><ServiceName><Delimiter><AccessLevel><Delimiter><RoleName>
     A GroupPrefix that ends with '-', '_' or '.' (e.g. "SG_") is followed directly by the ServiceName.
 
-    Idempotent: existing groups (matched by MailNickname prefix) are reused.
+    Idempotent: an existing group with exactly the expected MailNickname is reused, but only when it can't
+    have been created by a less privileged user: ControlPlane, ManagementPlane and CatalogPlane groups must
+    be role-assignable security groups; all other groups must be role-assignable or already be a resource of
+    the catalog Catalog-<ServiceName>. Otherwise, or when the MailNickname is ambiguous, the function stops
+    before creating any group. Other groups with the <ServiceName>. MailNickname prefix aren't returned.
     Only called directly for custom implementations; New-EntraOpsServiceBootstrap
     is the standard entry point.
 
@@ -38,7 +42,8 @@
     Prefix prepended to all group DisplayNames and MailNicknames. Defaults to "SG".
 
 .PARAMETER GroupNamingDelimiter
-    Delimiter between name segments. Defaults to "-".
+    Delimiter between name segments. Only "-" is supported: the other ServiceEM cmdlets find the groups
+    by their "-" delimited display name suffix (e.g. *-ControlPlane-Admins).
 
 .PARAMETER RoleAssignableWorkloadPlaneAdmins
     Creates WorkloadPlane-Admins as role-assignable group.
@@ -69,6 +74,7 @@ function New-EntraOpsServiceEntraGroup {
         [string]$WorkloadPlaneAdmin,
 
         [string]$GroupPrefix = "SG",
+        [ValidateSet('-')]
         [string]$GroupNamingDelimiter = "-",
 
         [switch]$RoleAssignableWorkloadPlaneAdmins,
@@ -116,6 +122,34 @@ function New-EntraOpsServiceEntraGroup {
             Write-Verbose "$logPrefix Failed processing Groups"
             Write-Error $_
         }
+
+        $catalogDisplayName = "Catalog-$ServiceName"
+        $provenance = @{ CatalogResourceIds = $null }
+        $getCatalogResourceIds = {
+            if ($null -eq $provenance.CatalogResourceIds) {
+                $encodedCatalogDisplayName = ConvertTo-EntraOpsODataStringLiteral -Value $catalogDisplayName
+                $catalogs = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedCatalogDisplayName'&`$expand=resources" -OutputType PSObject -DisableCache -ThrowOnFailure |
+                    Where-Object { $_.DisplayName -eq $catalogDisplayName })
+                $provenance.CatalogResourceIds = if ($catalogs.Count -eq 1) { @($catalogs[0].Resources.OriginId | Where-Object { $_ }) } else { @() }
+            }
+            $provenance.CatalogResourceIds
+        }
+        $assertReusableGroup = {
+            param($existingGroup, [bool]$RequireRoleAssignable)
+            $details = $existingGroup
+            if ($null -eq $existingGroup.IsAssignableToRole -or $null -eq $existingGroup.SecurityEnabled) {
+                $details = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$($existingGroup.Id)?`$select=id,isAssignableToRole,securityEnabled" -OutputType PSObject -DisableCache -ThrowOnFailure
+            }
+            if ($details.IsAssignableToRole -eq $true -and $details.SecurityEnabled -eq $true) { return }
+            $groupLabel = "'$($existingGroup.DisplayName)' ($($existingGroup.Id), mailNickname $($existingGroup.MailNickname))"
+            if ($RequireRoleAssignable) {
+                throw "Existing group $groupLabel isn't a role-assignable security group and isn't reused, because any user who can create groups could have created it. Verify and delete the group, or rename its mailNickname, then run the landing zone again."
+            }
+            if ($existingGroup.Id -notin @(& $getCatalogResourceIds)) {
+                throw "Existing group $groupLabel isn't a resource of the catalog '$catalogDisplayName' and isn't reused, because any user who can create groups could have created it. Verify the group and delete it, or add it as resource to '$catalogDisplayName', then run the landing zone again."
+            }
+        }
+        $expectedNicknames = [System.Collections.Generic.List[string]]::new()
         # Base parameters shared by all group types
         $groupParams = @{
             description     = ""
@@ -201,11 +235,25 @@ function New-EntraOpsServiceEntraGroup {
             if ($ServiceRole.accessLevel -eq "WorkloadPlane" -and -not [string]::IsNullOrWhiteSpace($ownerUri)) {
                 $secParams["owners@odata.bind"] = @($ownerUri)
             }
+            $isSecurityGroup = [string]::IsNullOrEmpty($ServiceRole.groupType) -or $ServiceRole.groupType -eq "Security"
+            $expectedNickname = if ($ServiceRole.groupType -eq "Unified") { $unifiedParams.MailNickname } elseif ($isSecurityGroup) { $secParams.MailNickname } else { $null }
+            if ($expectedNickname) {
+                $expectedNicknames.Add($expectedNickname)
+                $existingGroups = @($groups | Where-Object { $_.MailNickname -eq $expectedNickname })
+                if ($existingGroups.Count -gt 1) {
+                    throw "Found $($existingGroups.Count) groups with mailNickname '$expectedNickname' ($($existingGroups.Id -join ', ')). Delete the groups that weren't created by ServiceEM, then run the landing zone again."
+                }
+                if ($existingGroups.Count -eq 1) {
+                    $requireRoleAssignable = $ServiceRole.groupType -ne "Unified" -and $ServiceRole.accessLevel -in @('ControlPlane', 'ManagementPlane', 'CatalogPlane')
+                    & $assertReusableGroup $existingGroups[0] $requireRoleAssignable
+                    Write-Verbose "$logPrefix Reusing existing group $($existingGroups[0].DisplayName) ($($existingGroups[0].Id))"
+                }
+            }
             try {
                 if ($ServiceRole.groupType -eq "Unified" -and $groups.MailNickname -notcontains $unifiedParams.MailNickname) {
                     Write-Verbose "$logPrefix $($unifiedParams|ConvertTo-Json -Compress)"
                     $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($unifiedParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
-                } elseif ($ServiceRole.groupType -like "" -and $groups.MailNickname -notcontains $secParams.MailNickname) {
+                } elseif ($isSecurityGroup -and $groups.MailNickname -notcontains $secParams.MailNickname) {
                     Write-Verbose "$logPrefix $($secParams|ConvertTo-Json -Compress)"
                     $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
                 }
@@ -217,12 +265,12 @@ function New-EntraOpsServiceEntraGroup {
 
     end {
         Write-Verbose "$logPrefix Verifying Groups are available"
-        $refIds = @($groups.id | Where-Object { $_ })
+        $refIds = @($groups | Where-Object { $_.MailNickname -in $expectedNicknames } | ForEach-Object { $_.id } | Where-Object { $_ })
         $check = @{}
         $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Groups" -logPrefix $logPrefix -Condition {
             $check.Groups = @()
             $check.Groups += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$search=`"mailNickname:$ServiceName.`"" -ConsistencyLevel "eventual" -OutputType PSObject -DisableCache
-            $check.Groups = @($check.Groups | Where-Object { $_.MailNickname -like "$ServiceName.*" })
+            $check.Groups = @($check.Groups | Where-Object { $_.MailNickname -in $expectedNicknames })
             $chkIds = @($check.Groups.id | Where-Object { $_ })
             $refIds.Count -gt 0 -and $chkIds.Count -ge $refIds.Count -and (Compare-Object $refIds $chkIds | Measure-Object).Count -eq 0
         }

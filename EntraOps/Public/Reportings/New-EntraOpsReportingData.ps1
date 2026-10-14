@@ -575,6 +575,8 @@ function New-EntraOpsReportingData {
         Write-Host "No EntraOps Reporting data was generated (all apps skipped)."
     } else {
         Write-Host "Generated EntraOps Reporting data for: $(($results.App) -join ', ')."
+        $ReportingPortal = Join-Path $EntraOpsRoot 'Reports/index.html'
+        if (Test-Path -LiteralPath $ReportingPortal -PathType Leaf) { Write-Host "Open the reporting apps: $ReportingPortal" }
     }
 
     if ($PassThru) { $results }

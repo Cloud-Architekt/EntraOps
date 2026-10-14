@@ -72,7 +72,8 @@ function New-EntraOpsServiceEMAssignmentPolicy {
 
     begin {
         $policies = @()
-        $assignmentPolicyUri = "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies?`$filter=catalog/id eq '$ServiceCatalogId'&`$expand=accessPackage,catalog"
+        $encodedServiceCatalogId = ConvertTo-EntraOpsODataStringLiteral -Value $ServiceCatalogId
+        $assignmentPolicyUri = "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies?`$filter=catalog/id eq '$encodedServiceCatalogId'&`$expand=accessPackage,catalog"
         try{
             Write-Verbose "$logPrefix Looking up Assignment Policy"
             $policies += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentPolicyUri -OutputType PSObject -DisableCache

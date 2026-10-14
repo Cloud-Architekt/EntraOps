@@ -69,7 +69,7 @@ function Invoke-EntraOpsAzGraphQuery {
       return $Cached.Token
     }
 
-    $TokenResponse = Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -AsSecureString -ErrorAction Stop
+    $TokenResponse = Get-AzAccessToken -ResourceTypeName Arm -AsSecureString -ErrorAction Stop
     $PlainToken = $TokenResponse.Token | ConvertFrom-SecureString -AsPlainText
     $Expiry = if ($TokenResponse.ExpiresOn) { $TokenResponse.ExpiresOn.UtcDateTime } else { $Now.AddMinutes(30) }
     $__EntraOpsSession.ArmTokenCache['default'] = @{ Token = $PlainToken; Expiry = $Expiry }

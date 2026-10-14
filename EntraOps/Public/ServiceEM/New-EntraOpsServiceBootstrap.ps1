@@ -18,6 +18,10 @@
     A prefix ending with '-', '_' or '.' is used as is (e.g. "SG_" for SG_<ServiceName>-WorkloadPlane-Users).
     Defaults to EntraOpsConfig.ServiceEM.GroupPrefix, otherwise "SG"; an explicitly passed value wins.
 
+.PARAMETER GroupNamingDelimiter
+    Delimiter between name segments. Only "-" is supported: the ServiceEM cmdlets find the groups by
+    their "-" delimited display name suffix (e.g. *-ControlPlane-Admins).
+
 .PARAMETER RoleAssignableWorkloadPlaneAdmins
     Creates WorkloadPlane-Admins as role-assignable group. ControlPlane, ManagementPlane and CatalogPlane groups
     are always role-assignable, WorkloadPlane-Users never. Only applies when a group is created. Defaults to
@@ -105,13 +109,15 @@
     Applied automatically when ManagementPlaneDelegationGroupId is provided.
 
 .PARAMETER ControlPlaneDelegationGroupId
-    Object ID of an existing Entra group to use as ControlPlane-Admins instead of creating a new one.
+    Object ID of an existing role-assignable security group to use as ControlPlane-Admins instead of
+    creating a new one; other groups are rejected before any object is created.
     When set, SkipControlPlaneDelegation is enforced automatically and the provided group is used for
     the Catalog Owner role assignment and the PIM-eligible Azure User Access Administrator role on the
     resource group.
 
 .PARAMETER ManagementPlaneDelegationGroupId
-    Object ID of an existing Entra group to use as ManagementPlane-Admins instead of creating a new one.
+    Object ID of an existing role-assignable security group to use as ManagementPlane-Admins instead of
+    creating a new one; other groups are rejected before any object is created.
     When set, SkipManagementPlaneDelegation is enforced automatically and the provided group is used for
     the AP Assignment Manager catalog role, access package approval policies, and the PIM-eligible Azure
     Contributor role on the resource group.
@@ -201,6 +207,7 @@ function New-EntraOpsServiceBootstrap {
         [string[]]$ServiceMembers,
 
         [string]$GroupPrefix = "SG",
+        [ValidateSet('-')]
         [string]$GroupNamingDelimiter = "-",
 
         [switch]$RoleAssignableWorkloadPlaneAdmins,
@@ -386,11 +393,24 @@ function New-EntraOpsServiceBootstrap {
         #region Delegated groups
         # Synthetic entries match the downstream filter patterns (*-ControlPlane-Admins, ...); IsDelegated keeps them out of the catalog and PIM
         $delegatedGroups = @(foreach ($delegation in @(
-                    @{ Id = $ControlPlaneDelegationGroupId; Name = 'ControlPlane-Admins' },
-                    @{ Id = $ManagementPlaneDelegationGroupId; Name = 'ManagementPlane-Admins' },
-                    @{ Id = $AdministratorGroupId; Name = 'CatalogPlane-Members' })) {
+                    @{ Id = $ControlPlaneDelegationGroupId; Name = 'ControlPlane-Admins'; RequireRoleAssignable = $true },
+                    @{ Id = $ManagementPlaneDelegationGroupId; Name = 'ManagementPlane-Admins'; RequireRoleAssignable = $true },
+                    @{ Id = $AdministratorGroupId; Name = 'CatalogPlane-Members'; RequireRoleAssignable = $false })) {
                 if ([string]::IsNullOrWhiteSpace($delegation.Id)) { continue }
-                $delegatedGroup = & $resolveDirectoryObject "/v1.0/groups/$($delegation.Id)" "delegated $($delegation.Name) group"
+                $delegatedGroup = & $resolveDirectoryObject "/v1.0/groups/$($delegation.Id)?`$select=id,displayName,isAssignableToRole,securityEnabled" "delegated $($delegation.Name) group"
+                # Membership of a group that isn't role-assignable can be managed by less privileged administrators
+                $isRoleAssignable = $delegatedGroup.IsAssignableToRole -eq $true -and $delegatedGroup.SecurityEnabled -eq $true
+                if ($delegation.RequireRoleAssignable -and -not $isRoleAssignable) {
+                    throw "Delegated $($delegation.Name) group '$($delegatedGroup.DisplayName)' ($($delegatedGroup.Id)) isn't a role-assignable security group. Use a role-assignable security group; no object was created."
+                }
+                if (-not $delegation.RequireRoleAssignable) {
+                    if ($delegatedGroup.SecurityEnabled -ne $true) {
+                        throw "Delegated $($delegation.Name) group '$($delegatedGroup.DisplayName)' ($($delegatedGroup.Id)) isn't a security group. Use a security group for AdministratorGroupId; no object was created."
+                    }
+                    if (-not $isRoleAssignable) {
+                        Write-Warning "$logPrefix Delegated $($delegation.Name) group '$($delegatedGroup.DisplayName)' ($($delegatedGroup.Id)) isn't role-assignable: Groups Administrators and group owners can change its members, who can request the administrator access packages of this landing zone. Use a role-assignable security group for AdministratorGroupId."
+                    }
+                }
                 Write-Verbose "$logPrefix Delegated $($delegation.Name): $($delegatedGroup.DisplayName) ($($delegatedGroup.Id))"
                 [PSCustomObject]@{
                     Id          = $delegatedGroup.Id
@@ -425,7 +445,7 @@ ManagementPlane,Admins,
                     throw "$($ServiceRole.accessLevel) is not in accepted values of 'WorkloadPlane', 'ControlPlane', 'ManagementPlane', 'CatalogPlane', or ''"
                 }
                 if (@("Unified", "Security", "") -inotcontains $ServiceRole.groupType) {
-                    throw "$($ServiceRole.groupType) is not in accepted values of 'Unified' or ''"
+                    throw "$($ServiceRole.groupType) is not in accepted values of 'Unified', 'Security' or '' (security group)"
                 }
                 if ($ServiceRole.name -ieq "Users" -and $ServiceRole.accessLevel -ine "WorkloadPlane") {
                     throw "Users should only be for WorkloadPlane access"

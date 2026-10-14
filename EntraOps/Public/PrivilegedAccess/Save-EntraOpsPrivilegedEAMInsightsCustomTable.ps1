@@ -31,7 +31,7 @@
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to custom table in Log Analytics or Sentinel Workspace defined in parameter.
-    Save-EntraOpsPrivilegedEAMInsightsCustomTable -DataCollectionRuleName "EntraOpsDataCollectionRule" -DataCollectionResourceGroupName "EntraOpsResourceGroup" -DataCollectionRuleSubscriptionId "3f72a077-c32a-423c-8503-41b93d3b0737"
+    Save-EntraOpsPrivilegedEAMInsightsCustomTable -DataCollectionRuleName "EntraOpsDataCollectionRule" -DataCollectionResourceGroupName "EntraOpsResourceGroup" -DataCollectionRuleSubscriptionId "11111111-1111-1111-1111-111111111111"
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to custom table in Log Analytics or Sentinel Workspace defined in config file and available in global variable.

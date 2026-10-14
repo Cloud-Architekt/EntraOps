@@ -3,7 +3,8 @@
     Resolves or creates a role-assignable delegation group for ServiceEM landing zones.
 
 .DESCRIPTION
-    Looks up the delegation group by config ID, then by default name. If neither exists,
+    Looks up the delegation group by config ID, then by default name (only role-assignable
+    security groups are accepted by name). If neither exists,
     attempts to create a role-assignable group (requires RoleManagement.ReadWrite.Directory
     scope). Persists the group ID back into EntraOpsConfig.json and the global variable
     to avoid duplicate creation on subsequent runs.
@@ -50,21 +51,29 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
         [string]$logPrefix = "[Resolve-EntraOpsServiceEMDelegationGroup]"
     )
 
-    # 1. If a GroupId was supplied (parameter or config), validate it exists and return.
+    # 1. If a GroupId was supplied (parameter or config), validate it and return.
     if (-not [string]::IsNullOrWhiteSpace($GroupId)) {
         Write-Verbose "$logPrefix $Plane delegation group ID supplied: $GroupId — validating"
+        $existing = $null
         try {
             if ($GroupId -notmatch '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') {
                 throw "'$GroupId' is not a valid object ID"
             }
-            $existing = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$GroupId" -OutputType PSObject -DisableCache -ThrowOnFailure -SuppressNotFoundWarning
+            $existing = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$($GroupId)?`$select=id,displayName,isAssignableToRole,securityEnabled" -OutputType PSObject -DisableCache -ThrowOnFailure -SuppressNotFoundWarning
             if (-not $existing.Id) {
                 throw "Group '$GroupId' not found"
             }
+        } catch {
+            $existing = $null
+            Write-Warning "$logPrefix Supplied $Plane group ID '$GroupId' could not be found. Falling back to name-based lookup."
+        }
+        if ($existing.Id) {
+            # Membership of a group that isn't role-assignable can be managed by less privileged administrators
+            if (-not ($existing.isAssignableToRole -eq $true -and $existing.securityEnabled -eq $true)) {
+                throw "$Plane delegation group '$($existing.DisplayName)' ($($existing.Id)) isn't a role-assignable security group. Use a role-assignable security group for ServiceEM.${Plane}DelegationGroupId."
+            }
             Write-Verbose "$logPrefix Validated $Plane group: $($existing.DisplayName) ($($existing.Id))"
             return $existing.Id
-        } catch {
-            Write-Warning "$logPrefix Supplied $Plane group ID '$GroupId' could not be found. Falling back to name-based lookup."
         }
     }
 
@@ -72,7 +81,12 @@ function Resolve-EntraOpsServiceEMDelegationGroup {
     Write-Verbose "$logPrefix Searching for existing $Plane group by name: '$DefaultGroupName'"
     try {
         $encodedDefaultGroupName = ConvertTo-EntraOpsODataStringLiteral -Value $DefaultGroupName
-        $found = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$filter=displayName eq '$encodedDefaultGroupName'" -OutputType PSObject -DisableCache -ThrowOnFailure | Where-Object { $_.Id })
+        $candidates = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups?`$filter=displayName eq '$encodedDefaultGroupName'&`$select=id,displayName,isAssignableToRole,securityEnabled" -OutputType PSObject -DisableCache -ThrowOnFailure | Where-Object { $_.Id })
+        # Display names are not unique: only accept role-assignable security groups to avoid binding to a look-alike group
+        $found = @($candidates | Where-Object { $_.isAssignableToRole -eq $true -and $_.securityEnabled -eq $true })
+        if ($candidates.Count -gt $found.Count) {
+            Write-Warning "$logPrefix Ignored $($candidates.Count - $found.Count) group(s) named '$DefaultGroupName' that are not role-assignable security groups."
+        }
     } catch {
         Write-Verbose "$logPrefix Name-based lookup failed: $_"
         $found = $null

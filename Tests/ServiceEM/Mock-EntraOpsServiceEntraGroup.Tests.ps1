@@ -231,6 +231,10 @@ Describe "New-EntraOpsServiceEntraGroup - Unit Tests" {
                             GroupTypes   = @("Unified")
                         })
                 }
+                # A group that isn't role-assignable is only reused as resource of the service catalog
+                if ($Method -eq "GET" -and $Uri -like '*/catalogs?*') {
+                    return @([pscustomobject]@{ Id = "cat"; DisplayName = "Catalog-TestSvc"; Resources = @([pscustomobject]@{ OriginId = "existing-id" }) })
+                }
                 return $null
             }
             

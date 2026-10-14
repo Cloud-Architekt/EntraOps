@@ -91,9 +91,34 @@ folder (`$EntraOpsBaseFolder`), which is resolved when the module is imported:
 3. The current folder, if it contains `EntraOpsConfig.json`.
 4. `<home>/EntraOps`.
 
-Run `Import-Module EntraOps -Verbose` to see which folder is used. To keep several tenants apart
-with a Gallery installation, use one folder per tenant and run EntraOps from it, or set
-`ENTRAOPS_ROOT` before importing the module.
+Run `Import-Module EntraOps -Verbose` to see which folder is used; the line `Working Folder` in the connection
+summary of `Connect-EntraOps` shows it as well. To keep several tenants apart with a Gallery installation, use one
+folder per tenant and run EntraOps from it, or set `ENTRAOPS_ROOT` before importing the module.
+
+To use the current folder with a Gallery installation, run `Initialize-EntraOpsWorkspace -Path .` once: it installs
+the content into the folder and uses it for the session. Create `EntraOpsConfig.json` there
+(`New-EntraOpsConfigFile -ConfigFilePath ./EntraOpsConfig.json`), so later sessions started from this folder use it
+automatically, or set `ENTRAOPS_ROOT`.
+
+| Output                       | Location                              | Shown by                                                                         | `Remove-EntraOpsData -Content` |
+| ---------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------ |
+| Privileged EAM export        | `PrivilegedEAM/<RbacSystem>/`         | `Save-EntraOpsPrivilegedEAMJson`, `Invoke-EntraOpsPrivilegedEAM` (summary)        | `PrivilegedEAM`                |
+| Reporting app data           | `Reports/<App>/data/`                 | `New-EntraOpsReportingData` (`Wrote ...`, `Open the reporting apps: ...`)        | `Reports`                      |
+| Tenant classification files  | `Classification/<TenantName>/`        | `Update-EntraOpsClassificationControlPlaneScope`, `Invoke-EntraOpsPrivilegedEAM` | `Classification`               |
+| Tenant Governance snapshots  | `TenantGovernance/Snapshots/`         | `Save-EntraOpsTenantGovernanceSnapshotJson`                                      | `TenantGovernance`             |
+| Graph and ARM response cache | `<user cache folder>/EntraOps`        | `Get-EntraOpsCacheStatistics`                                                    | `Cache`                        |
+
+`Remove-EntraOpsData` removes this output from the working folder, all content types by default. It prompts for
+confirmation (`-WhatIf` lists what would be removed), keeps the manually maintained
+`Classification_RoleActionOverwrites.json` / `Classification_RoleDefinitionOverwrites.json`, the classification
+templates, `Global.json` and the Object Classification File, and only removes the classification folders of
+`-TenantName` when it is passed. In a git repository the exports are tracked history, so it stops unless `-Force` is
+used:
+
+```powershell
+Remove-EntraOpsData -WhatIf
+Remove-EntraOpsData -Content PrivilegedEAM, Reports, Cache
+```
 
 `Initialize-EntraOpsWorkspace -Path <folder>` installs the content into another folder and uses it
 as working folder for the current PowerShell session. For new sessions, set `ENTRAOPS_ROOT` to that
@@ -262,7 +287,9 @@ once you are signed in, or follow the steps below to deploy EntraOps as an autom
 > [!NOTE]
 > `Connect-EntraOps` automatically loads `EntraOpsConfig.json` from the current folder, otherwise from the
 > EntraOps working folder, unless its `TenantName` differs from `-TenantName`. Use `-ConfigFilePath` for another
-> file. The line `Config File` in the connection summary shows which file is used.
+> file. The line `Config File` in the connection summary shows which file is used. The file can contain PowerShell
+> filter expressions, so only run EntraOps in folders you trust (see
+> [Configuration file reference](../core/index.html#configuration-file-reference)).
 
 ## Configured local or custom automation run {#configured-local-run}
 

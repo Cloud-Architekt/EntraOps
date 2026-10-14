@@ -40,7 +40,7 @@
     Prefix used in group DisplayNames (e.g. "SG"). Defaults to "SG".
 
 .PARAMETER GroupNamingDelimiter
-    Delimiter between name segments (e.g. "-"). Defaults to "-".
+    Delimiter between name segments. Only "-" is supported, see New-EntraOpsServiceEntraGroup.
 
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
@@ -81,6 +81,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
 
         [string]$GroupPrefix = "SG",
 
+        [ValidateSet('-')]
         [string]$GroupNamingDelimiter = "-",
 
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
