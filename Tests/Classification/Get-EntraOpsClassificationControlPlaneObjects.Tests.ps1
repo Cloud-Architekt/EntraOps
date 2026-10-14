@@ -21,7 +21,7 @@ BeforeAll {
                     ObjectType                    = 'user'
                     ObjectSubType                 = 'Member'
                     ObjectDisplayName             = 'Admin User'
-                    ObjectUserPrincipalName       = 'admin@contoso.onmicrosoft.com'
+                    ObjectUserPrincipalName       = 'AdeleV@contoso.com'
                     ObjectTenantId                = $script:TenantId
                     ObjectAdminTierLevel          = 'Unclassified'
                     ObjectAdminTierLevelName      = 'Unclassified'
@@ -56,7 +56,7 @@ BeforeAll {
                     ObjectType                    = 'User'
                     ObjectSubType                 = 'Member'
                     ObjectDisplayName             = 'Admin User'
-                    ObjectSignInName              = 'admin@contoso.onmicrosoft.com'
+                    ObjectSignInName              = 'AdeleV@contoso.com'
                     ObjectTenantId                = '99999999-9999-9999-9999-999999999999'
                     AssignedAdministrativeUnits   = @([pscustomobject]@{ id = 'aaaaaaaa-0000-0000-0000-000000000002'; displayName = 'AU2' })
                     RestrictedManagementByRAG     = $false
@@ -84,7 +84,7 @@ BeforeAll {
             ObjectType                    = 'User'
             ObjectSubType                 = 'Member'
             ObjectDisplayName             = $DisplayName
-            ObjectSignInName              = 'admin@contoso.onmicrosoft.com'
+            ObjectSignInName              = 'AdeleV@contoso.com'
             ObjectTenantId                = $script:TenantId
             AssignedAdministrativeUnits   = $AdministrativeUnits
             RestrictedManagementByAadRole = $Protection
@@ -254,7 +254,7 @@ Describe 'Get-EntraOpsClassificationControlPlaneObjects identity merge' {
         $Result = @(Invoke-ManualIdentityMerge -Sources @($IncompleteSource, $CompleteSource))
 
         $Result[0].ObjectSubType | Should -Be 'Member'
-        $Result[0].ObjectSignInName | Should -Be 'admin@contoso.onmicrosoft.com'
+        $Result[0].ObjectSignInName | Should -Be 'AdeleV@contoso.com'
         $Result[0].ObjectTenantId | Should -Be $script:TenantId
         ($Result[0].OwnedDevices -is [object[]]) | Should -BeTrue
         $Result[0].OwnedDevices | Should -Be @('device-one')
