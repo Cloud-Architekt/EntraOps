@@ -19,6 +19,14 @@
 trigger: none
 pr: none
 
+parameters:
+  # BEGIN EntraOps managed service connection
+  - name: serviceConnection
+    displayName: Azure Resource Manager service connection
+    type: string
+    default: 'EntraOps-ServiceConnection'
+  # END EntraOps managed service connection
+
 # Option A: Trigger automatically when the pull pipeline completes.
 # The source name must match the pull pipeline's name as configured in ADO.
 resources:
@@ -30,16 +38,23 @@ resources:
 variables:
   # Path to the environment-specific config file (committed in ado/main)
   ConfigFile: ./EntraOpsConfig.json
-  # ADO Service Connection name targeting the target tenant (Workload Identity Federation)
-  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
 pool:
   vmImage: ubuntu-latest
 
 steps:
   - checkout: self
-    persistCredentials: true
     displayName: "Checkout repository"
+
+  # A run triggered by entraops-pull starts on the commit the pull run started from; use the data it committed since
+  - task: PowerShell@2
+    displayName: "Checkout latest branch commit"
+    inputs:
+      targetType: filePath
+      filePath: "./.azure-pipelines/scripts/Ado-CheckoutLatest.ps1"
+      pwsh: true
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
   # Ingest collected PrivilegedEAM JSON to target tenant Log Analytics custom table.
   # Connect-EntraOps is intentionally omitted because this step does not require
@@ -48,7 +63,7 @@ steps:
   - task: AzurePowerShell@5
     displayName: "Run configured push operations"
     inputs:
-      azureSubscription: "$(AzureServiceConnection)"
+      azureSubscription: ${{ parameters.serviceConnection }}
       ScriptType: InlineScript
       Inline: |
         Import-Module ./EntraOps

@@ -16,11 +16,61 @@
     "EntraOps-Insiders" repository, which requires -PersonalAccessToken or the ENTRAOPS_PAT
     environment variable (the EntraOpsUpdatePat secret in the workflow).
 
+.PARAMETER Branch
+    Upstream ref to update from: a branch, release tag or full commit SHA. Default is "main".
+    Pin a release tag or commit SHA for unattended updates. Overridden by AutomatedEntraOpsUpdate.Branch
+    in the config file unless passed explicitly.
+
+.PARAMETER Repository
+    Distribution repository to update from, resolved through the local EntraOpsUpdateContract.json
+    (e.g. "EntraOps" or "EntraOps-Insiders"). Default is "EntraOps". Overridden by
+    AutomatedEntraOpsUpdate.Repository in the config file unless passed explicitly. Ignored when -UpstreamUrl is set.
+
+.PARAMETER UpstreamUrl
+    Git URL of a custom upstream repository to clone instead of the contract-resolved repository.
+    A Personal Access Token is used for this URL when one is provided.
+
+.PARAMETER PersonalAccessToken
+    Personal Access Token for private repositories (required for "EntraOps-Insiders"). Defaults to the
+    ENTRAOPS_PAT environment variable. Passed to git as an HTTP header via environment variables and never
+    sent to the public release repository.
+
+.PARAMETER ConfigFile
+    Path to the EntraOps configuration file. Default is "./EntraOpsConfig.json". Relative paths are
+    resolved against the EntraOps repository root. Its AutomatedEntraOpsUpdate section can override
+    -Repository, -Branch and -TargetUpdateFolders, and it is used to re-apply workflow parameters and
+    Azure DevOps schedules after the update.
+
+.PARAMETER TemporaryUpdateFolder
+    Folder for the temporary clone of the update candidate, relative to the current PowerShell location
+    unless absolute. Default is "TmpUpdate". Removed after the update.
+
+.PARAMETER RunBrowserTests
+    Also run the documentation and reporting browser tests when validating the update candidate.
+
+.PARAMETER SkipCandidateValidation
+    Skip validation of the update candidate before local files are replaced. Not allowed when
+    ./.github/workflows is updated. Use only for fully trusted sources.
+
+.PARAMETER PreparedCandidatePath
+    Path to an already downloaded update candidate (git checkout) to apply instead of cloning, relative
+    to the current PowerShell location unless absolute. The folder is left in place after the update.
+
+.PARAMETER ValidatedSourceCommit
+    Full commit SHA of a candidate that was already validated in a separate, credential-free job.
+    Requires -PreparedCandidatePath. The update fails if the prepared candidate is at another commit,
+    and validation is not repeated in this process.
+
+.PARAMETER BrowserTestsValidated
+    Records in .EntraOpsUpdateManifest.json that browser tests ran during the separate validation of
+    -ValidatedSourceCommit.
+
 .PARAMETER TargetUpdateFolders
     Repository-relative targets to replace from the configured upstream ref. Workflow definitions
     are supported but excluded by default. Select ./.github/workflows together with
     ./.github/actions and ./.github/scripts for an interactive workflow refresh. Automated workflow
     publication additionally requires the GitHub App credentials documented in Docs/content/core.md.
+    Targets are resolved against the EntraOps repository root, independent of the current location.
 
 .EXAMPLE
     This example updates EntraOps with default values of the main branch and the default target folders.
@@ -82,9 +132,12 @@ function Update-EntraOps {
     # Allow the config file's "AutomatedEntraOpsUpdate" section to override the default
     # Repository/Branch/TargetUpdateFolders used for self-update, unless the caller explicitly
     # passed -Repository, -Branch or -TargetUpdateFolders.
-    if (Test-Path -Path $ConfigFile) {
+    # Repository-relative paths (config file and update targets) resolve against the EntraOps
+    # repository root rather than the caller's current location.
+    $ConfigFilePath = if ([System.IO.Path]::IsPathRooted($ConfigFile)) { $ConfigFile } else { Join-Path $EntraOpsBaseFolder $ConfigFile }
+    if (Test-Path -LiteralPath $ConfigFilePath) {
         try {
-            $UpdateConfig = (Get-Content -Path $ConfigFile | ConvertFrom-Json).AutomatedEntraOpsUpdate
+            $UpdateConfig = (Get-Content -LiteralPath $ConfigFilePath | ConvertFrom-Json).AutomatedEntraOpsUpdate
             if (-not $PSBoundParameters.ContainsKey('Repository') -and -not [string]::IsNullOrWhiteSpace($UpdateConfig.Repository)) {
                 Write-Verbose "Using Repository '$($UpdateConfig.Repository)' from config file '$ConfigFile'."
                 $Repository = $UpdateConfig.Repository
@@ -276,11 +329,12 @@ function Update-EntraOps {
         }
 
         foreach ($TargetUpdateFolder in $TargetUpdateFolders) {
+            $TargetPath = Join-Path $EntraOpsBaseFolder $TargetUpdateFolder
 
-            if (Test-Path -Path $TargetUpdateFolder) {
+            if (Test-Path -LiteralPath $TargetPath) {
                 Write-Output "Removing folder $TargetUpdateFolder..."
                 try {
-                    Remove-Item -Path $TargetUpdateFolder -Force -Recurse
+                    Remove-Item -LiteralPath $TargetPath -Force -Recurse
                 } catch {
                     throw "Failed to remove folder $($TargetUpdateFolder). Error: $_"
                 }
@@ -288,7 +342,7 @@ function Update-EntraOps {
 
             Write-Output "Updating folder $TargetUpdateFolder..."
             try {
-                Copy-item -Path "$($TemporaryUpdateFolder)/$($TargetUpdateFolder)" -Destination "$($TargetUpdateFolder)" -Force -Recurse
+                Copy-Item -LiteralPath (Join-Path $TemporaryUpdateFolder $TargetUpdateFolder) -Destination $TargetPath -Force -Recurse
             } catch {
                 throw "Failed to copy folder $($TemporaryUpdateFolder)/$($TargetUpdateFolder) to $($TargetUpdateFolder). The local folder is now incomplete and must be restored from source control. Error: $_"
             }
@@ -300,23 +354,30 @@ function Update-EntraOps {
         # process/session after reviewing the applied diff.
         Write-Output 'Updated module import deferred until a subsequent clean process or session.'
 
-        if ($TargetUpdateFolders -contains './.github/workflows') {
-            Write-Host "Re-adding workflow parameters in GitHub workflows after update..."
-            try {
-                Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigFile
-            } catch {
-                throw "Failed to update required workflow parameters. Error: $_"
+        # Run from the repository root: both commands default to repository-relative folders, and the
+        # workflows keep the repository-relative ConfigFile value.
+        Push-Location -LiteralPath $EntraOpsBaseFolder
+        try {
+            if ($TargetUpdateFolders -contains './.github/workflows') {
+                Write-Host "Re-adding workflow parameters in GitHub workflows after update..."
+                try {
+                    Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigFile
+                } catch {
+                    throw "Failed to update required workflow parameters. Error: $_"
+                }
             }
-        }
 
-        # The upstream pipeline templates ship with default schedules; re-apply the ones from the configuration
-        if ($TargetUpdateFolders -contains './.azure-pipelines') {
-            Write-Host "Re-applying the configured schedules in Azure DevOps pipelines after update..."
-            try {
-                Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile -PipelineFolder './.azure-pipelines'
-            } catch {
-                throw "Failed to update the Azure DevOps pipeline schedules. Error: $_"
+            # The upstream pipeline templates ship with default schedules; re-apply the ones from the configuration
+            if ($TargetUpdateFolders -contains './.azure-pipelines') {
+                Write-Host "Re-applying the configured schedules in Azure DevOps pipelines after update..."
+                try {
+                    Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile -PipelineFolder './.azure-pipelines'
+                } catch {
+                    throw "Failed to update the Azure DevOps pipeline schedules. Error: $_"
+                }
             }
+        } finally {
+            Pop-Location
         }
 
         $UpdateManifest = [ordered]@{

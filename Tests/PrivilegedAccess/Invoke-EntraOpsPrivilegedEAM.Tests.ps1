@@ -15,6 +15,12 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
             if ($Variable) { $script:OriginalVariables[$Name] = $Variable.Value }
         }
 
+        # Separator-agnostic path comparison: the module builds '<base>/Classification/' while Join-Path emits '\' on Windows.
+        function ConvertTo-ComparablePath {
+            param ([string]$Path)
+            [System.IO.Path]::GetFullPath($Path).TrimEnd([char[]]@('/', '\'))
+        }
+
         $script:ImportFolder = Join-Path $TestDrive 'import-folder'
         $env:ENTRAOPS_ROOT = $script:ImportFolder
         Import-Module (Join-Path $script:TestRepositoryRoot 'EntraOps/EntraOps.psd1') -Force -WarningAction SilentlyContinue
@@ -112,8 +118,8 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
         Test-Path -LiteralPath "$script:Workspace/Classification/Templates/Classification_AadResources.json" | Should -BeTrue
         Test-Path -LiteralPath "$script:Workspace/Classification/contoso.onmicrosoft.com/Classification_AadResources.json" | Should -BeTrue
         Test-Path -LiteralPath $script:ImportFolder | Should -BeFalse
-        $Global:DefaultFolderClassifiedEam.TrimEnd('/') | Should -Be "$script:Workspace/PrivilegedEAM"
-        $Global:DefaultFolderClassification.TrimEnd('/') | Should -Be "$script:Workspace/Classification"
+        ConvertTo-ComparablePath $Global:DefaultFolderClassifiedEam | Should -Be (ConvertTo-ComparablePath (Join-Path $script:Workspace 'PrivilegedEAM'))
+        ConvertTo-ComparablePath $Global:DefaultFolderClassification | Should -Be (ConvertTo-ComparablePath (Join-Path $script:Workspace 'Classification'))
     }
 
     It 'honors an explicit export folder while keeping classification in the selected workspace' {
@@ -125,7 +131,7 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
         Test-Path -LiteralPath "$script:Workspace/Classification/contoso.onmicrosoft.com/Classification_AadResources.json" | Should -BeTrue
         Test-Path -LiteralPath "$script:Workspace/PrivilegedEAM" | Should -BeFalse
         Test-Path -LiteralPath $script:ImportFolder | Should -BeFalse
-        $Global:DefaultFolderClassifiedEam | Should -Be $ExportPath
+        ConvertTo-ComparablePath $Global:DefaultFolderClassifiedEam | Should -Be (ConvertTo-ComparablePath $ExportPath)
     }
 
     It 'uses zero-config defaults when no configuration is present' {
@@ -243,6 +249,55 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
         { Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles } | Should -Throw '*Microsoft Graph tenant*does not match*'
 
         Should -Invoke Save-EntraOpsPrivilegedEAMJson -ModuleName EntraOps -Times 0 -Exactly
+    }
+
+    It 'rejects mismatched Azure and Graph contexts in a zero-config run' {
+        Mock -ModuleName EntraOps Get-MgContext { [pscustomobject]@{ TenantId = 'another-tenant' } }
+
+        { Invoke-EntraOpsPrivilegedEAM -RbacSystems EntraID } | Should -Throw '*Microsoft Graph tenant*does not match*'
+
+        Should -Invoke Write-Host -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { "$Object" -match 'Zero-Config Run' }
+        Should -Invoke Update-EntraOpsClassificationFiles -ModuleName EntraOps -Times 0 -Exactly
+        Should -Invoke Save-EntraOpsPrivilegedEAMJson -ModuleName EntraOps -Times 0 -Exactly
+    }
+
+    It 'warns before running filter expressions from an automatically found configuration' {
+        $script:Config.AlternateObjectTierLevelAttributes = @{ User = @{ Enabled = $true; ControlPlane = '$Object.ObjectDisplayName -eq "admin"' } }
+        $script:ConfigPath = Join-Path $script:Workspace 'EntraOpsConfig.json'
+        $script:Config | ConvertTo-Json -Depth 10 | Set-Content $script:ConfigPath
+        $script:Events = [System.Collections.Generic.List[string]]::new()
+        Mock -ModuleName EntraOps Write-Warning { $script:Events.Add("warning:$Message") }
+        Mock -ModuleName EntraOps Save-EntraOpsPrivilegedEAMJson { $script:Events.Add('export') }
+
+        Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse
+
+        $FilterWarnings = @($script:Events | Where-Object { $_ -like 'warning:*AlternateObjectTierLevelAttributes*' })
+        $FilterWarnings.Count | Should -Be 1
+        $FilterWarnings[0] | Should -BeLike "*$script:ConfigPath*"
+        $FilterWarnings[0] | Should -BeLike '*executed as PowerShell code*'
+        $FilterWarnings[0] | Should -BeLike '*-ConfigFilePath*'
+        $script:Events.IndexOf($FilterWarnings[0]) | Should -BeLessThan $script:Events.IndexOf('export')
+        Should -Invoke Write-Warning -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { $Message -like '*AlternateObjectTierLevelAttributes*' }
+    }
+
+    It 'does not warn about filter expressions when the configuration is <Source>' -ForEach @(@{ Source = 'passed with -ConfigFilePath' }, @{ Source = 'loaded by Connect-EntraOps' }, @{ Source = 'found automatically without enabled filters' }) {
+        $Filters = @{ User = @{ Enabled = $true; ControlPlane = '$true' } }
+        if ($Source -like 'found*') { $Filters.User.Enabled = $false }
+        $script:Config.AlternateObjectTierLevelAttributes = $Filters
+        $ConfigPath = Join-Path $script:Workspace 'EntraOpsConfig.json'
+        $script:Config | ConvertTo-Json -Depth 10 | Set-Content $ConfigPath
+        Mock -ModuleName EntraOps Write-Warning {}
+
+        switch -Wildcard ($Source) {
+            'passed*' { Invoke-EntraOpsPrivilegedEAM -ConfigFilePath $ConfigPath -KeepClassificationFiles -ExistingClassificationAction Reuse }
+            'loaded*' {
+                $Global:EntraOpsConfig = $script:Config
+                Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse
+            }
+            default { Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse }
+        }
+
+        Should -Invoke Write-Warning -ModuleName EntraOps -Times 0 -Exactly -ParameterFilter { $Message -like '*AlternateObjectTierLevelAttributes*' }
     }
 
     It 'fails without downloading or exporting when an explicit config file is missing' {

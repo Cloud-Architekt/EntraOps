@@ -13,6 +13,14 @@
 trigger: none
 pr: none
 
+parameters:
+  # BEGIN EntraOps managed service connection
+  - name: serviceConnection
+    displayName: Azure Resource Manager service connection
+    type: string
+    default: 'EntraOps-ServiceConnection'
+  # END EntraOps managed service connection
+
 # BEGIN EntraOps managed schedules
 schedules:
   - cron: "30 9 * * *"
@@ -25,15 +33,12 @@ schedules:
 
 variables:
   ConfigFile: ./EntraOpsConfig.json
-  # ADO Service Connection name (configured in Project Settings -> Service Connections)
-  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
 pool:
   vmImage: ubuntu-latest
 
 steps:
   - checkout: self
-    persistCredentials: true
     displayName: "Checkout repository"
 
   - task: PowerShell@2
@@ -52,7 +57,7 @@ steps:
     displayName: "Get updated definition files for classification"
     condition: and(succeeded(), eq(variables['ApplyAutomatedClassificationUpdate'], 'true'))
     inputs:
-      azureSubscription: "$(AzureServiceConnection)"
+      azureSubscription: ${{ parameters.serviceConnection }}
       ScriptType: InlineScript
       Inline: |
         Import-Module ./EntraOps
@@ -71,7 +76,7 @@ steps:
     displayName: "Get updated scope for definition of Control Plane in Entra ID"
     condition: and(succeeded(), eq(variables['ApplyAutomatedControlPlaneScopeUpdate'], 'true'))
     inputs:
-      azureSubscription: "$(AzureServiceConnection)"
+      azureSubscription: ${{ parameters.serviceConnection }}
       ScriptType: InlineScript
       Inline: |
         Import-Module ./EntraOps
@@ -89,7 +94,7 @@ steps:
   - task: AzurePowerShell@5
     displayName: "Run Save-EntraOpsPrivilegedEAMJson"
     inputs:
-      azureSubscription: "$(AzureServiceConnection)"
+      azureSubscription: ${{ parameters.serviceConnection }}
       ScriptType: InlineScript
       Inline: |
         Import-Module ./EntraOps

@@ -1,3 +1,42 @@
+<#
+.SYNOPSIS
+    Validates the integrity of generated Privileged EAM exports and Tenant Governance snapshots.
+
+.DESCRIPTION
+    Checks the RBAC-system aggregate files (<PrivilegedEamPath>/<RbacSystem>/<RbacSystem>.json) for invalid JSON,
+    missing or duplicate object IDs, role assignments without RoleAssignmentInstanceId, duplicate assignment paths
+    and unsupported Classification shapes. Optionally checks a Tenant Governance snapshot folder for its manifest,
+    invalid JSON, resource types that don't match their folder, identities stored in multiple files and count
+    mismatches with the manifest.
+    Violations stop the validation with one error that lists all of them. Contradictory object tier pairs and
+    privileged assignments without classification are reported as warnings unless the related switch is set.
+    Used by the Privileged EAM pull workflow/pipeline and Invoke-EntraOpsTenantGovernanceSnapshot before generated
+    artifacts are committed.
+
+.PARAMETER PrivilegedEamPath
+    Folder of the Privileged EAM export. Default is ./PrivilegedEAM. Pass an empty value to validate only
+    -TenantGovernancePath.
+
+.PARAMETER FailOnContradictoryTierPair
+    Treats an object whose tier level contradicts its tier name (ObjectAdminTierLevel/ObjectAdminTierLevelName,
+    e.g. 0/ManagementPlane) as violation instead of a warning.
+
+.PARAMETER TenantGovernancePath
+    Folder of the Tenant Governance snapshots (e.g. ./TenantGovernance/Snapshots) to validate. Not validated
+    when empty (default).
+
+.PARAMETER FailOnPrivilegedAssignmentWithoutClassification
+    Treats a role assignment marked as privileged (RoleIsPrivileged) without classification as violation
+    instead of a warning.
+
+.EXAMPLE
+    Validate the Privileged EAM export in the default folder.
+    Test-EntraOpsGeneratedArtifacts
+
+.EXAMPLE
+    Validate the Privileged EAM export and the Tenant Governance snapshots, and fail on contradictory tier pairs.
+    Test-EntraOpsGeneratedArtifacts -PrivilegedEamPath ./PrivilegedEAM -TenantGovernancePath ./TenantGovernance/Snapshots -FailOnContradictoryTierPair
+#>
 function Test-EntraOpsGeneratedArtifacts {
 [CmdletBinding()]
 param (

@@ -22,7 +22,7 @@ test("builds a zero-configuration express quickstart", async ({ page }) => {
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByRole("alert")).toHaveText("Choose whether you use the GitHub template or the PowerShell Gallery.");
     await page.locator('label.setup-choice:has(input[value="gallery"])').click();
-    await expect(page.locator(".setup-command").filter({ hasText: "Install-PSResource -Name EntraOps" })).toHaveCount(1);
+    await expect(page.locator(".setup-command").filter({ hasText: "Install-PSResource -Name EntraOps -Prerelease -Repository PSGallery" })).toHaveCount(1);
     await expect(page.locator(".setup-command").filter({ hasText: "Initialize-EntraOpsWorkspace" })).toHaveCount(1);
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByRole("heading", { name: "Sign in interactively" })).toBeVisible();
@@ -30,8 +30,9 @@ test("builds a zero-configuration express quickstart", async ({ page }) => {
     const graphConsentNote = page.locator(".setup-note").filter({ hasText: "Microsoft Graph consent" });
     await expect(readAccessNote).toContainText("Global Reader");
     await expect(readAccessNote).toContainText("Reader");
-    await expect(readAccessNote).toContainText("-ApplicationId");
-    await expect(readAccessNote).not.toContainText("-SignInName");
+    await expect(readAccessNote).toContainText("-SignInName");
+    await expect(readAccessNote).not.toContainText("-ApplicationId");
+    await expect(readAccessNote).toContainText("/providers/Microsoft.Management/managementGroups/<tenant-id>");
     await expect(graphConsentNote).toContainText("Microsoft Graph consent");
     await expect(page.getByRole("link", { name: "baseline collection permissions" })).toHaveAttribute("href", "../core/index.html#service-principal-permissions");
     await expect(page.getByRole("link", { name: "New-AzRoleAssignment reference" })).toBeVisible();
@@ -50,11 +51,11 @@ test("builds a zero-configuration express quickstart", async ({ page }) => {
 
     await expect(page.getByRole("heading", { name: "Your EntraOps setup" })).toBeVisible();
     const commands = page.locator(".setup-command");
-    await expect(commands.filter({ hasText: "Install-PSResource -Name EntraOps" })).toHaveCount(1);
+    await expect(commands.filter({ hasText: "Install-PSResource -Name EntraOps -Prerelease -Repository PSGallery" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "Initialize-EntraOpsWorkspace" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "Import-Module EntraOps" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "Connect-EntraOps -AuthenticationType 'UserInteractive' -TenantName 'contoso.onmicrosoft.com'" })).toHaveCount(2);
-    await expect(commands.filter({ hasText: "Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles" })).toHaveCount(1);
+    await expect(commands.filter({ hasText: "Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "New-EntraOpsReportingData" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "New-EntraOpsReportingData" }).locator('code')).toHaveText("Connect-EntraOps -AuthenticationType 'UserInteractive' -TenantName 'contoso.onmicrosoft.com'\nNew-EntraOpsReportingData\nDisconnect-EntraOps");
 });
@@ -209,17 +210,23 @@ test("builds an Azure DevOps deployment with managed schedules and all pipelines
     const href = await configLink.getAttribute("href");
     const draft = JSON.parse(decodeURIComponent(href.split("#onboarding=")[1]));
     expect(draft.DevOpsPlatform).toBe("AzureDevOps");
-    expect(draft.AutomatedEntraOpsUpdate.PublicationMode).toBe("DirectPush");
+    expect(draft.AzureDevOpsServiceConnection).toBe("EntraOps-WIF");
+    expect(draft.AutomatedEntraOpsUpdate.PublicationMode).toBe("PullRequest");
     expect(draft.AutomatedEntraOpsUpdate.TargetUpdateFolders).toContain("./.azure-pipelines");
+    expect(draft.AutomatedEntraOpsUpdate.TargetUpdateFolders).toContain("./.github/scripts");
     expect(draft.AutomatedEntraOpsUpdate.TargetUpdateFolders).not.toContain("./.github/workflows");
 
     const steps = page.locator(".setup-run-list");
     await expect(steps).toContainText("Workload Identity Federation (manual)");
     await expect(steps).toContainText("EntraOps-WIF");
+    await expect(steps).not.toContainText("EntraOpsAzureServiceConnection");
+    await expect(steps).toContainText("Contribute to pull requests");
     await expect(steps).toContainText("Update-EntraOpsAzureDevOpsSchedules");
     await expect(steps).toContainText("entraops-pull-tenant-governance");
     await expect(steps).toContainText("reporting");
     await expect(page.getByRole("link", { name: "Open Azure Pipelines" })).toHaveAttribute("href", "https://dev.azure.com/contoso/Identity%20Operations/_build");
+    await expect(page.getByRole("link", { name: "Open Azure Repos" })).toHaveAttribute("href", "https://dev.azure.com/contoso/Identity%20Operations/_git/EntraOps-Contoso");
+    await expect(page.locator(".setup-command code").filter({ hasText: "git clone" })).toHaveText("git clone 'https://dev.azure.com/contoso/Identity%20Operations/_git/EntraOps-Contoso' 'EntraOps-Contoso'\ncd 'EntraOps-Contoso'");
 });
 
 test("lists selected local integrations only after the read-only review step", async ({ page }) => {

@@ -8,6 +8,40 @@ function Invoke-EntraOpsReportingGeneration {
         shared EntraOps connection for Graph-backed reports, and optionally removes an externally
         prepared classification repository checkout. CI-specific checkout, authentication bootstrap,
         browser setup, artifact upload, and release publication remain outside the module.
+
+    .PARAMETER ConfigFilePath
+        Path to the EntraOps configuration file with the AutomatedReportingGeneration settings. Default is
+        ./EntraOpsConfig.json. The file must exist.
+
+    .PARAMETER ClassificationRepositoryPath
+        Path to an AzurePrivilegedIAM checkout prepared outside the module. When the folder exists, it is used as
+        repository root of the Classification Explorer. Default is ./.reporting/AzurePrivilegedIAM.
+
+    .PARAMETER AuthenticationType
+        Authentication type passed to Connect-EntraOps when a selected report needs Microsoft Graph. Default is
+        AlreadyAuthenticated. The connection made by this cmdlet is disconnected after the run.
+
+    .PARAMETER AllowStaleTenantGovernanceSnapshot
+        Allows Configuration Analyzer data from a stale Tenant Governance snapshot. Default is false.
+
+    .PARAMETER AllowPartialTenantGovernanceSnapshot
+        Allows Configuration Analyzer data from a partially successful Tenant Governance snapshot. Defaults to
+        ConfigurationAnalyzer.AllowPartialTenantGovernanceSnapshot of the configuration file (true when not set).
+
+    .PARAMETER RemoveClassificationRepositoryAfterRun
+        Removes the folder of -ClassificationRepositoryPath after the run, also when the generation fails.
+
+    .PARAMETER Force
+        Generates the reports even when AutomatedReportingGeneration.ApplyAutomatedReportingGeneration is
+        disabled. Without it, the cmdlet returns the status Disabled.
+
+    .EXAMPLE
+        Generate the configured reports with the existing Azure context.
+        Invoke-EntraOpsReportingGeneration -ConfigFilePath ./EntraOpsConfig.json
+
+    .EXAMPLE
+        Generate the reports although automated reporting is disabled, and remove the prepared AzurePrivilegedIAM checkout afterwards.
+        Invoke-EntraOpsReportingGeneration -Force -RemoveClassificationRepositoryAfterRun
     #>
     [CmdletBinding()]
     param (

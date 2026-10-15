@@ -99,6 +99,44 @@ Describe 'Update-EntraOpsAzureDevOpsSchedules' {
         $SecondRun | Should -BeExactly $FirstRun
     }
 
+    It 'writes the configured service connection into every pipeline that signs in to Azure' -Skip:$SkipScheduleTests {
+        $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'service-connection')
+        $Config = Get-Content -LiteralPath $Fixture.ConfigPath -Raw | ConvertFrom-Json
+        $Config | Add-Member -NotePropertyName AzureDevOpsServiceConnection -NotePropertyValue "Contoso's EntraOps"
+        $Config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Fixture.ConfigPath -Encoding UTF8
+
+        Update-EntraOpsAzureDevOpsSchedules -ConfigFile $Fixture.ConfigPath -PipelineFolder $Fixture.PipelineFolder
+
+        Import-Module powershell-yaml -ErrorAction Stop
+        foreach ($PipelineName in 'entraops-pull.yml', 'entraops-push.yml', 'entraops-push-reporting.yml', 'entraops-pull-tenant-governance.yml') {
+            $Pipeline = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder $PipelineName) -Raw | ConvertFrom-Yaml
+            ($Pipeline.parameters | Where-Object name -EQ 'serviceConnection').default | Should -BeExactly "Contoso's EntraOps" -Because $PipelineName
+        }
+        Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'entraops-update.yml') -Raw | Should -Not -Match 'serviceConnection'
+    }
+
+    It 'uses the default service connection when the configuration does not define one' -Skip:$SkipScheduleTests {
+        $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'service-connection-default')
+
+        Update-EntraOpsAzureDevOpsSchedules -ConfigFile $Fixture.ConfigPath -PipelineFolder $Fixture.PipelineFolder
+
+        Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'entraops-pull.yml') -Raw | Should -Match "default: 'EntraOps-ServiceConnection'"
+    }
+
+    It 'rejects a multi-line service connection name' -Skip:$SkipScheduleTests {
+        $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'service-connection-invalid')
+        $Config = Get-Content -LiteralPath $Fixture.ConfigPath -Raw | ConvertFrom-Json
+        $Config | Add-Member -NotePropertyName AzureDevOpsServiceConnection -NotePropertyValue "EntraOps`nschedules:"
+        $Config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Fixture.ConfigPath -Encoding UTF8
+
+        $PullPath = Join-Path $Fixture.PipelineFolder 'entraops-pull.yml'
+        $Before = Get-Content -LiteralPath $PullPath -Raw
+
+        { Update-EntraOpsAzureDevOpsSchedules -ConfigFile $Fixture.ConfigPath -PipelineFolder $Fixture.PipelineFolder } |
+        Should -Throw '*single-line service connection name*'
+        Get-Content -LiteralPath $PullPath -Raw | Should -BeExactly $Before
+    }
+
     It 'rejects a malformed cron before changing its pipeline' -Skip:$SkipScheduleTests {
         $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'invalid')
         $PullPath = Join-Path $Fixture.PipelineFolder 'entraops-pull.yml'

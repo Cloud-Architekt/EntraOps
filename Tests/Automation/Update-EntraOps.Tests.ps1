@@ -308,6 +308,58 @@ Describe 'Update-EntraOps prepared candidate apply path' {
         @($Manifest.TargetUpdateFolders) | Should -Be @('./Samples')
         ($Output -join "`n") | Should -Match 'Using prepared update candidate'
     }
+
+    It 'replaces targets in the repository root when run from another location' {
+        $Deployment = Join-Path $TestDrive 'root-deployment'
+        $Candidate = Join-Path $TestDrive 'root-candidate'
+        $Elsewhere = Join-Path $TestDrive 'elsewhere'
+        New-Item -ItemType Directory -Path (Join-Path $Deployment 'Samples'), (Join-Path $Candidate 'Samples'), (Join-Path $Candidate '.azure-pipelines'), (Join-Path $Elsewhere 'Samples'), (Join-Path $Candidate '.git') -Force | Out-Null
+        $Contract = @{ SchemaVersion = 1; Product = 'EntraOps'; DistributionRepositories = @{ 'Cloud-Architekt/EntraOps' = @{ Channel = 'Release'; RequiresPersonalAccessToken = $false } }; SupportedUpdateTargets = @('./Samples', './.azure-pipelines'); RequiredValidationPaths = @() } | ConvertTo-Json -Depth 5
+        Set-Content -LiteralPath (Join-Path $Deployment 'EntraOpsUpdateContract.json') -Value $Contract
+        Set-Content -LiteralPath (Join-Path $Candidate 'EntraOpsUpdateContract.json') -Value $Contract
+        Set-Content -LiteralPath (Join-Path $Deployment 'Samples/old.txt') -Value 'old'
+        Set-Content -LiteralPath (Join-Path $Candidate 'Samples/new.txt') -Value 'new'
+        Set-Content -LiteralPath (Join-Path $Candidate '.azure-pipelines/entraops-pull.yml') -Value 'pipeline'
+        Set-Content -LiteralPath (Join-Path $Deployment 'EntraOpsConfig.json') -Value '{}'
+        Set-Content -LiteralPath (Join-Path $Elsewhere 'Samples/unrelated.txt') -Value 'keep'
+        $StubbedScheduleCommand = -not (Get-Command Update-EntraOpsAzureDevOpsSchedules -ErrorAction SilentlyContinue)
+        if ($StubbedScheduleCommand) { Set-Item -Path Function:\global:Update-EntraOpsAzureDevOpsSchedules -Value { param($ConfigFile, $PipelineFolder) } }
+        $script:ScheduleCall = $null
+
+        $PreviousBaseFolder = $script:EntraOpsBaseFolder
+        $PreviousPat = $env:ENTRAOPS_PAT
+        $script:EntraOpsBaseFolder = $Deployment
+        Push-Location $Elsewhere
+        try {
+            Remove-Item Env:ENTRAOPS_PAT -ErrorAction SilentlyContinue
+            Mock git {
+                if ($args -contains 'rev-parse') { $global:LASTEXITCODE = 0; return ('a' * 40) }
+                throw "git must not clone or fetch for a prepared candidate (called with: $($args -join ' '))"
+            }
+            Mock Update-EntraOpsAzureDevOpsSchedules {
+                $script:ScheduleCall = @{ Location = (Get-Location).ProviderPath; ConfigFile = $ConfigFile; PipelineFolder = $PipelineFolder }
+            }
+            Update-EntraOps -ConfigFile 'EntraOpsConfig.json' -Repository 'EntraOps' -PreparedCandidatePath $Candidate `
+                -TargetUpdateFolders @('./Samples', './.azure-pipelines') -ValidatedSourceCommit ('a' * 40) -WarningAction SilentlyContinue | Out-Null
+            (Get-Location).ProviderPath | Should -Be (Get-Item -LiteralPath $Elsewhere).FullName
+        } finally {
+            Pop-Location
+            $script:EntraOpsBaseFolder = $PreviousBaseFolder
+            if ($null -eq $PreviousPat) { Remove-Item Env:ENTRAOPS_PAT -ErrorAction SilentlyContinue } else { $env:ENTRAOPS_PAT = $PreviousPat }
+            if ($StubbedScheduleCommand) { Remove-Item -Path Function:\global:Update-EntraOpsAzureDevOpsSchedules -ErrorAction SilentlyContinue }
+        }
+
+        Test-Path -LiteralPath (Join-Path $Deployment 'Samples/new.txt') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $Deployment 'Samples/old.txt') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $Deployment '.azure-pipelines/entraops-pull.yml') | Should -BeTrue
+        $script:ScheduleCall.Location | Should -Be (Get-Item -LiteralPath $Deployment).FullName
+        $script:ScheduleCall.ConfigFile | Should -Be 'EntraOpsConfig.json'
+        $script:ScheduleCall.PipelineFolder | Should -Be './.azure-pipelines'
+        Test-Path -LiteralPath (Join-Path $Elsewhere '.azure-pipelines') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $Elsewhere 'Samples/unrelated.txt') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $Elsewhere 'Samples/new.txt') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $Elsewhere '.EntraOpsUpdateManifest.json') | Should -BeFalse
+    }
 }
 
 Describe 'Update candidate resolution' {
@@ -576,7 +628,7 @@ Describe 'Automated update defaults' {
         $ConfigGenerator | Should -Match "\[ValidateSet\('PullRequest', 'DirectPush'\)\]"
         $ConfigGenerator | Should -Match '\[string\]\$UpdatePublicationMode\s*=\s*''PullRequest'''
         $ConfigGenerator | Should -Match 'PublicationMode\s*=\s*\$DefaultUpdatePublicationMode'
-        $ConfigGenerator | Should -Match '(?s)\$DevOpsPlatform -eq ''AzureDevOps''.*DirectPush'
+        $ConfigGenerator | Should -Match '(?s)\$DefaultUpdatePublicationMode = if \(\$DevOpsPlatform -eq ''AzureDevOps''\).*?''PullRequest'''
         $ConfigGenerator | Should -Match "\[ValidateSet\('OnChange', 'Always', 'Never'\)\]"
         $ConfigGenerator | Should -Match '\[string\]\$ValidationFrequency\s*=\s*''OnChange'''
         $ConfigGenerator | Should -Match '\[boolean\]\$RunBrowserTests\s*=\s*\$true'

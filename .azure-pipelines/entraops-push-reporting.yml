@@ -4,6 +4,12 @@ trigger: none
 pr: none
 
 parameters:
+  # BEGIN EntraOps managed service connection
+  - name: serviceConnection
+    displayName: Azure Resource Manager service connection
+    type: string
+    default: 'EntraOps-ServiceConnection'
+  # END EntraOps managed service connection
   - name: allowStaleTenantGovernance
     displayName: Allow a Tenant Governance snapshot older than 30 hours
     type: boolean
@@ -24,7 +30,6 @@ resources:
 
 variables:
   ConfigFile: ./EntraOpsConfig.json
-  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
 pool:
   vmImage: ubuntu-latest
@@ -34,10 +39,20 @@ steps:
     fetchDepth: 0
     displayName: "Checkout repository"
 
+  # A run triggered by entraops-pull starts on the commit the pull run started from; use the data it committed since
+  - task: PowerShell@2
+    displayName: "Checkout latest branch commit"
+    inputs:
+      targetType: filePath
+      filePath: "./.azure-pipelines/scripts/Ado-CheckoutLatest.ps1"
+      pwsh: true
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
   - task: AzurePowerShell@5
     displayName: "Generate configured reports"
     inputs:
-      azureSubscription: "$(AzureServiceConnection)"
+      azureSubscription: ${{ parameters.serviceConnection }}
       ScriptType: InlineScript
       Inline: |
         Import-Module ./EntraOps

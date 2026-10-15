@@ -11,10 +11,11 @@ ingestion, automated protection, and full rollout.
 > # Repository clone
 > Import-Module ./EntraOps
 > # or PowerShell Gallery (downloads classification templates, samples and reporting apps once)
-> Install-PSResource EntraOps; Initialize-EntraOpsWorkspace
+> # -Prerelease is needed while 1.1.0 is a release candidate; drop it once 1.1.0 is generally available
+> Install-PSResource -Name EntraOps -Prerelease -Repository PSGallery -Scope CurrentUser; Initialize-EntraOpsWorkspace
 >
 > Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
-> Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles
+> Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse
 > # The collection disconnects; reconnect for report enrichment.
 > Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
 > New-EntraOpsReportingData
@@ -63,7 +64,7 @@ scheduled, automated setup, create your own repository from the template instead
 ### Option B: Install from the PowerShell Gallery {#install-from-powershell-gallery}
 
 ```powershell
-Install-PSResource EntraOps -Scope CurrentUser
+Install-PSResource -Name EntraOps -Repository PSGallery -Scope CurrentUser
 Initialize-EntraOpsWorkspace
 ```
 
@@ -172,7 +173,7 @@ systems and settings you want to automate.
 ## 1. Try it with zero configuration {#try-it-with-zero-configuration}
 
 You can run a full Privileged EAM classification without creating an `EntraOpsConfig.json` file or a
-`Classification` folder first. With a PowerShell Gallery installation, run
+`Classification` folder first; an existing configuration is used (see below). With a PowerShell Gallery installation, run
 [`Initialize-EntraOpsWorkspace`](#install-from-powershell-gallery) once if you want to generate the
 reporting apps from the export afterwards. EntraOps signs in to Azure and Microsoft Graph interactively, so the
 Microsoft Graph sign-in can request the delegated permissions required for collection:
@@ -182,17 +183,22 @@ Microsoft Graph sign-in can request the delegated permissions required for colle
 > the delegated scopes required for this run. Review the [baseline collection permissions](../core/index.html#service-principal-permissions).
 
 For complete interactive collection, use an account with **Global Reader** activated in Microsoft
-Entra ID and **Reader** on the root scope, which covers every management group,
-subscription and resource below it. Event directly assignments on the root scope through `elevateAccess` are also considered. An administrator who can create role assignments at that scope
-can grant the Azure role with
-[`New-AzRoleAssignment`](https://learn.microsoft.com/en-us/powershell/module/az.resources/new-azroleassignment):
+Entra ID and **Reader** on the root management group (Tenant Root Group), which covers every
+management group, subscription and resource below it. Role assignments made directly at the tenant
+root scope (`/`), e.g. through `elevateAccess`, are only visible with Reader at `/` as well. An
+administrator who can create role assignments at the root management group can grant the Azure role
+to the user with
+[`New-AzRoleAssignment`](https://learn.microsoft.com/en-us/powershell/module/az.resources/new-azroleassignment)
+(use `-ObjectId` instead of `-SignInName` to pass the user's object ID):
 
 
 ```powershell
-New-AzRoleAssignment -ApplicationId "<workload-identity-client-id>" -RoleDefinitionName "Reader" -Scope "/"
+$TenantId = (Get-AzContext).Tenant.Id
+New-AzRoleAssignment -SignInName "AdeleV@contoso.com" -RoleDefinitionName "Reader" `
+  -Scope "/providers/Microsoft.Management/managementGroups/$TenantId"
 ```
 
-`Invoke-EntraOpsPrivilegedEAM` resolves the tenant from the EntraOps connection, downloads the latest
+`Invoke-EntraOpsPrivilegedEAM` resolves the tenant from the EntraOps connection, provides the
 classification templates, computes the Control Plane scope, runs
 `Save-EntraOpsPrivilegedEAMJson`, and cleans up every intermediate file so only the PrivilegedEAM
 JSON output remains (except for any pre-existing `Classification_RoleActionOverwrites.json` /
@@ -201,7 +207,40 @@ preserved). Use `-RbacSystems` to limit the scope, or `-PrivilegedObjectClassifi
 change how Control Plane scope is determined - see
 [Privileged EAM &rarr; Automatic Control Plane scope updates](../privileged-eam/index.html#automatic-updated-control-plane-scope).
 Use `-KeepClassificationFiles` to keep the classification files, e.g. to review them in the
-Classification Explorer.
+Classification Explorer. The cmdlet stops when the Azure and Microsoft Graph contexts are connected to
+different tenants.
+
+No configuration file is required, but `Invoke-EntraOpsPrivilegedEAM` uses one when it finds it. The
+settings are applied in this order (first match wins):
+
+1. Parameters passed to the cmdlet.
+2. The file passed with `-ConfigFilePath`.
+3. The configuration loaded by `Connect-EntraOps`.
+4. `EntraOpsConfig.json` in the current folder.
+5. `EntraOpsConfig.json` in the EntraOps [working folder](#working-folder).
+6. Built-in defaults.
+
+> [!WARNING]
+> `AlternateObjectTierLevelAttributes` filters are PowerShell expressions that run as code. The cmdlet
+> shows a warning when an automatically found configuration file contains such filters; only use
+> configuration files you trust.
+
+When tenant classification files from a previous run exist (e.g. after `-KeepClassificationFiles`),
+`-ExistingClassificationAction` controls the classification templates:
+
+| Value              | Behavior                                                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `Prompt` (default) | Asks whether to reuse or regenerate, only when tenant classification files exist. Non-interactive hosts stop with an error. |
+| `Reuse`            | Keeps the local classification templates and downloads only missing ones.                                                  |
+| `Regenerate`       | Downloads the latest classification templates.                                                                              |
+
+Both `Reuse` and `Regenerate` rebuild the tenant classification files and the Control Plane scope
+reasoning, with the preserved overwrite files. Pass `Reuse` or `Regenerate` for repeat or unattended
+runs:
+
+```powershell
+Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse
+```
 
 > [!TIP]
 > This is the fastest way to try EntraOps or produce a one-off export. Continue with [2. Verify output with reports and workbooks](#phase-2-verify-output) before you keep using it, or jump straight to [3. Customize and automate collection with GitHub](#deploy-with-github) for a repeatable, automated setup.
@@ -218,7 +257,7 @@ Azure subscription required:
 
 ```powershell
 Initialize-EntraOpsWorkspace -Ref '<release tag of your module version>' # module-only installations
-Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles
+Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse
 Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
 New-EntraOpsReportingData
 Disconnect-EntraOps
@@ -535,11 +574,11 @@ Administrator when Azure role assignments are configured.
 1. Create or import EntraOps into a **private** Azure DevOps project. Generated exports and reports contain tenant identifiers and access data; this is enforced: the pull, Tenant Governance and update pipelines refuse to commit and push when the project isn't private, and the reporting pipeline skips publishing its artifact.
 2. Generate the configuration with `New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -DevOpsPlatform AzureDevOps`, or select Azure DevOps in the guided setup above.
 3. Run `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps-ADO" -ConfigFile "./EntraOpsConfig.json"` to create the app registration and configured permissions.
-4. Create an **Azure Resource Manager -> Workload Identity Federation (manual)** service connection. Add the exact issuer and subject shown by Azure DevOps as a federated credential on the app registration; use `api://AzureADTokenExchange` as the audience.
+4. Create an **Azure Resource Manager -> Workload Identity Federation (manual)** service connection. Add the exact issuer and subject identifier shown by Azure DevOps as a federated credential on the app registration; use `api://AzureADTokenExchange` as the audience.
 5. Import the five production YAML pipelines from `.azure-pipelines/`: pull, push, reporting, Tenant Governance, and update. Name the pull pipeline `entraops-pull` so its completion triggers resolve without modification. Optionally import `entraops-test.yml` for repository, cross-platform Pester, and browser validation; configure it as a build-validation policy for Azure Repos pull requests.
-6. Name the service connection `EntraOps-ServiceConnection` to use the shipped default. Define `EntraOpsAzureServiceConnection` only when you use a different name. Add the secret `EntraOpsUpdatePat` only for a private update source.
-7. Grant `<Project> Build Service (<Organization>)` **Contribute** permission on the repository, and authorize the service connection for the imported pipelines. The build service also needs **View project-level information** (granted by default) so the push step can verify that the project is private.
-8. Apply config-driven schedules and commit the result:
+6. Name the service connection `EntraOps-ServiceConnection` to use the shipped default. For another name, set `AzureDevOpsServiceConnection` in `EntraOpsConfig.json` (or `New-EntraOpsConfigFile -AzureDevOpsServiceConnection`); step 8 writes it into the pipelines. Add the secret `EntraOpsUpdatePat` only for a private update source.
+7. Grant `<Project> Build Service (<Organization>)` **Contribute** permission on the repository, plus **Create branch** and **Contribute to pull requests** for the update pipeline, and authorize the service connection for the imported pipelines. The build service also needs **View project-level information** (granted by default) so the pipelines can verify that the project is private.
+8. Apply the config-driven schedules and service connection, and commit the result:
 
 ```powershell
 Import-Module ./EntraOps
@@ -548,12 +587,17 @@ Update-EntraOpsAzureDevOpsSchedules `
   -BranchName "main"
 ```
 
-The module command changes only the marked YAML schedule regions; operational values remain in
-`EntraOpsConfig.json` and are read by each pipeline at runtime. The pull pipeline separately updates
+The module command changes only the marked YAML schedule and service connection regions; operational
+values remain in `EntraOpsConfig.json` and are read by each pipeline at runtime. Azure Pipelines
+resolves the service connection before runtime variables exist, so its name is written as the default
+of the `serviceConnection` pipeline parameter; `Update-EntraOps` applies it again after updating the
+pipelines. A manual run can select another authorized service connection. The pull pipeline separately updates
 classification definitions, updates Entra ID Control Plane scope, collects Privileged EAM data, and
 validates the generated artifacts. The push pipeline supports Log Analytics, Sentinel WatchLists,
 Administrative Units, RMAU assignments, Conditional Access target groups, and privileged ELM
-catalog protection. The reporting pipeline tests generated reports and publishes an artifact only
+catalog protection. The push and reporting pipelines check out the latest commit of their branch,
+because a run triggered by `entraops-pull` otherwise starts on the commit the pull run started from,
+without the data it committed. The reporting pipeline tests generated reports and publishes an artifact only
 after confirming the ADO project is private. The Tenant Governance pipeline supports manual
 `Start`, `Collect`, and `RunAndWait` operations plus the four configured start and collection
 schedules.
@@ -561,8 +605,16 @@ schedules.
 For cross-tenant service connections, use the exact issuer and subject displayed by Azure DevOps;
 do not derive either value. The pipeline runtime needs no client secret. `$(System.AccessToken)` is
 used for repository commits, so the project Build Service requires **Contribute** permission and any
-necessary branch-policy bypass. A PAT is needed only when the update pipeline reads a private
-upstream source.
+necessary branch-policy bypass. The token is passed to the individual git commands and never stored
+in the checkout. A PAT is needed only when the update pipeline reads a private upstream source.
+
+The update pipeline runs in three jobs: **Resolve** clones the configured upstream ref without
+executing it, **Validate** runs the candidate's tests without a repository checkout and without
+credentials, and **Apply** applies the validated candidate and opens a pull request from the branch
+`entraops/update-<commit>`. No job signs in to Azure. While the pull request is active, later runs
+leave its branch unchanged. Keep `./.github/scripts` in `AutomatedEntraOpsUpdate.TargetUpdateFolders`;
+it contains the trusted candidate validator. Candidate validation can't be skipped while
+`./.azure-pipelines` is an update target.
 
 ### Service connection details {#azure-devops-service-connection}
 
@@ -579,10 +631,14 @@ discovery does not work; enter these values manually:
 | Tenant ID            | Tenant containing the EntraOps app registration         |
 | Service principal ID | Application (client) ID from `EntraOpsConfig.json`      |
 
-Copy the exact issuer and subject displayed by the service connection. Add them to the app
+Copy the exact issuer and subject identifier displayed by the service connection. Add them to the app
 registration under **Certificates & secrets -> Federated credentials -> Other issuer**, with audience
 `api://AzureADTokenExchange`. You can add it in the portal or rerun
-`New-EntraOpsWorkloadIdentity` against the existing service principal:
+`New-EntraOpsWorkloadIdentity` against the existing service principal. New service connections use
+the Microsoft Entra issuer (`https://login.microsoftonline.com/<tenant-id>/v2.0`) with a generated
+subject, so `-AdoFederatedCredentialSubject` is required; only for the deprecated Azure DevOps issuer
+(`https://vstoken.dev.azure.com/<organization-id>`) can it be omitted, and the subject is then
+`sc://<organization>/<project>/<service-connection>`.
 
 ```powershell
 New-EntraOpsWorkloadIdentity `
@@ -593,7 +649,8 @@ New-EntraOpsWorkloadIdentity `
   -AdoOrgName "<organization>" `
   -AdoProjectName "<project>" `
   -AdoServiceConnectionName "<service-connection>" `
-  -AdoFederatedCredentialIssuer "<exact-issuer-from-ADO>"
+  -AdoFederatedCredentialIssuer "<exact-issuer-from-ADO>" `
+  -AdoFederatedCredentialSubject "<exact-subject-from-ADO>"
 ```
 
 On first use, select **View -> Permit** in the pipeline authorization prompt. To pre-authorize,
@@ -607,15 +664,16 @@ open the service connection's **Pipeline permissions** and add each imported Ent
 | `entraops-push.yml`                   | Runs enabled ingestion and protection operations                                           | Successful `entraops-pull` completion or manual                   |
 | `entraops-push-reporting.yml`         | Generates and tests reports, then publishes a private-project artifact                     | Pull completion, configured schedule, or manual                   |
 | `entraops-pull-tenant-governance.yml` | Starts or collects Tenant Governance snapshots and commits them                            | Configured start/collection schedules or manual                   |
-| `entraops-update.yml`                 | Updates EntraOps from the configured upstream                                              | Configured schedule or manual                                     |
+| `entraops-update.yml`                 | Validates an EntraOps update in isolation and opens a pull request                         | Configured schedule or manual                                     |
 | `entraops-test.yml`                   | Validates the repository on Linux, Windows, and macOS and runs browser tests               | Pushes to `main`; pull requests through a build-validation policy |
 
-The production pipelines default to the service connection name `EntraOps-ServiceConnection`. Set
-`EntraOpsAzureServiceConnection` on the pipeline, or through a linked Variable Group, only when the
-connection uses a different name. Define secret `EntraOpsUpdatePat` only for
+The production pipelines default to the service connection name `EntraOps-ServiceConnection`. For
+another name, set `AzureDevOpsServiceConnection` in `EntraOpsConfig.json` and run
+`Update-EntraOpsAzureDevOpsSchedules`. Define secret `EntraOpsUpdatePat` only for
 a private update source. In **Project Settings -> Repositories -> Security**, grant
-`<Project> Build Service (<Organization>)` **Contribute**; also grant branch-policy bypass when the
-pull, Tenant Governance, or update pipeline must write to a protected branch.
+`<Project> Build Service (<Organization>)` **Contribute**, **Create branch** and **Contribute to pull
+requests**; also grant branch-policy bypass when the pull or Tenant Governance pipeline must write
+to a protected branch. The update pipeline doesn't write to the branch; it opens a pull request.
 
 `AzurePowerShell@5` authenticates Azure PowerShell through the WIF service connection.
 `Connect-EntraOps -AuthenticationType FederatedCredentials` then obtains Microsoft Graph access
@@ -632,9 +690,9 @@ that reporting guide.
 
 ### Azure DevOps troubleshooting {#azure-devops-troubleshooting}
 
-- **Service connection unavailable:** verify the connection is named `EntraOps-ServiceConnection` or that `EntraOpsAzureServiceConnection` exactly matches its name, and authorize it for the pipeline.
+- **Service connection unavailable:** verify the connection is named `EntraOps-ServiceConnection`, or that `AzureDevOpsServiceConnection` in `EntraOpsConfig.json` exactly matches its name and `Update-EntraOpsAzureDevOpsSchedules` was run and committed; then authorize it for the pipeline.
 - **Federated sign-in fails:** compare the exact issuer, case-sensitive subject, and `api://AzureADTokenExchange` audience shown by Azure DevOps with the app registration credential.
-- **Git push returns HTTP 403:** grant `<Project> Build Service (<Organization>)` **Contribute** and any required branch-policy bypass.
+- **Git push returns HTTP 403:** grant `<Project> Build Service (<Organization>)` **Contribute** and any required branch-policy bypass; for the update pipeline also **Create branch** and **Contribute to pull requests**.
 - **Schedule is missing:** run `Update-EntraOpsAzureDevOpsSchedules`, commit the YAML changes, and verify `BranchName` matches the pipeline branch.
 - **Push or reporting does not follow pull:** keep the pull pipeline name `entraops-pull`, or update the dependent pipelines' `resources.pipelines.source`.
 - **Reporting has no artifact:** enable reporting and confirm the project is private; artifact publication fails closed when visibility cannot be verified.
@@ -647,11 +705,11 @@ automation plumbing differs:
 | Area                         | GitHub Actions                                                                           | Azure DevOps                                                                                                                    |
 | ---------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Definitions                  | `.github/workflows/*.yaml`                                                               | `.azure-pipelines/entraops-*.yml`                                                                                               |
-| Workload federation          | GitHub OIDC; subject `repo:<org>/<repo>:ref:refs/heads/<branch>`                         | Azure Resource Manager WIF service connection; subject `sc://<org>/<project>/<service-connection>`                              |
-| Runtime configuration        | `Update-EntraOpsRequiredWorkflowParameters` embeds values and schedules in workflow YAML | Pipelines read operational values from `EntraOpsConfig.json`; `Update-EntraOpsAzureDevOpsSchedules` materializes YAML schedules |
+| Workload federation          | GitHub OIDC; subject `repo:<org>/<repo>:ref:refs/heads/<branch>`                         | Azure Resource Manager WIF service connection; exact issuer and subject shown by the service connection                         |
+| Runtime configuration        | `Update-EntraOpsRequiredWorkflowParameters` embeds values and schedules in workflow YAML | Pipelines read operational values from `EntraOpsConfig.json`; `Update-EntraOpsAzureDevOpsSchedules` materializes YAML schedules and the service connection |
 | Repository writes            | Built-in `GITHUB_TOKEN`; workflow permissions are declared in YAML                       | `$(System.AccessToken)`; the Build Service needs repository **Contribute** permission                                           |
 | Pull/update linkage          | Native `workflow_run` triggers                                                           | Pipeline completion resources; keep the pull pipeline name `entraops-pull` or update each `source`                              |
-| Automated update publication | `PullRequest` by default, with optional `DirectPush`                                     | `DirectPush`                                                                                                                    |
+| Automated update publication | `PullRequest` by default, with optional `DirectPush`                                     | `PullRequest` only                                                                                                              |
 | Reporting                    | 30-day Actions artifact; optional releases in a private repository                       | Pipeline artifact only after ADO confirms the project is private                                                                |
 | CI and pull requests         | `Test-EntraOps` runs on pushes and pull requests; it can be a required status check      | `entraops-test.yml` runs on pushes; configure it as an Azure Repos build-validation policy for pull requests                    |
 | Tenant Governance            | One workflow with manual and materialized start/collection schedules                     | One parameterized pipeline with `Start`, `Collect`, and `RunAndWait`, plus materialized schedules                               |

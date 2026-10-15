@@ -107,7 +107,8 @@ function New-EntraOpsServiceEMCatalogResource {
             $check.Resources = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogResourceUri -OutputType PSObject -DisableCache
             $refNames = @($ServiceGroups.DisplayName | Where-Object { $_ })
             $chkNames = @($check.Resources.DisplayName | Where-Object { $_ })
-            $refNames.Count -gt 0 -and $chkNames.Count -ge $refNames.Count -and (Compare-Object $refNames $chkNames | Measure-Object).Count -eq 0
+            # The catalog may hold further resources (e.g. shared or manually added groups)
+            $refNames.Count -gt 0 -and @($refNames | Where-Object { $_ -notin $chkNames }).Count -eq 0
         }
         if(-not $confirmed){
             throw "Catalog Resource object consistency with Entra not achieved"

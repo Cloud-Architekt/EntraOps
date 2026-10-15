@@ -79,7 +79,10 @@ tiers.
 
 The view follows the enabled classification sources: the file download with
 `ObjectClassificationFile.Enabled`, the script with `CustomSecurityAttributes.Enabled`, or both. The
-worklist is stored in the browser's local storage. Download the Object Classification File and
+worklist is stored in the browser's local storage as changes (additions, edits and removals) on top of
+the repository file. When the repository file changed since these changes were saved (for example by
+another operator or `Update-EntraOpsServiceEMObjectClassificationFile`), the view applies the local
+changes to the current file entries and shows a notice with *Reset to repository file*. Download the Object Classification File and
 commit it to the path configured in `ObjectClassificationFile.FilePath` to apply it with the next
 Privileged EAM pull; a file entry only applies to objects that custom security attributes and
 Alternate Tier Level Attributes don't classify. Apply custom security attribute

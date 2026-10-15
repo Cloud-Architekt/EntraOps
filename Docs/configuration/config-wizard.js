@@ -19,7 +19,10 @@
     var WATCHLIST_WORKLOAD_IDENTITY = ["None", "All", "ManagedIdentityAssignedResourceId", "WorkloadIdentityAttackPaths", "WorkloadIdentityInfo", "WorkloadIdentityRecommendations"];
     // Must match the DistributionRepositories keys in EntraOpsUpdateContract.json (owner "Cloud-Architekt").
     var UPDATE_REPOSITORIES = ["EntraOps", "EntraOps-Insiders"];
-    var UPDATE_TARGETS = ["./.github/actions", "./.github/agents", "./.github/scripts", "./.github/workflows", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"];
+    var UPDATE_TARGETS = ["./.azure-pipelines", "./.github/actions", "./.github/agents", "./.github/scripts", "./.github/workflows", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"];
+    // Mirrors $DefaultUpdateTargets in New-EntraOpsConfigFile for GitHub/None and Azure DevOps.
+    var UPDATE_TARGET_DEFAULTS = ["./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"];
+    var UPDATE_TARGET_DEFAULTS_ADO = ["./.azure-pipelines", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"];
     var DOW_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     var SERVICEEM_GOVERNANCE_MODELS = ["Centralized", "PerService"];
     var SERVICEEM_REQUESTOR_SCOPES = ["AllMemberUsers", "CatalogPlaneMembers"];
@@ -208,6 +211,7 @@
             UseInvokeRestMethodOnly: false,
             IncludeObjectDetails: false,
             DevOpsPlatform: "GitHub",
+            AzureDevOpsServiceConnection: "EntraOps-ServiceConnection",
             ConfigFilePath: "./EntraOpsConfig.json",
             ClientId: "Use New-EntraOpsWorkloadIdentity to create a new App Registration or enter here manually",
             RbacSystems: ["Azure", "EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement"],
@@ -472,6 +476,7 @@
                         { key: "AuthenticationType", label: "Authentication Type", type: "select", options: AUTH_TYPES, default: "FederatedCredentials", help: "Used by Connect-EntraOps to determine the sign-in method - see Get Started \u2192 Import module and sign-in options.", usedIn: "Connect-EntraOps" },
                         { key: "UseInvokeRestMethodOnly", label: "Use Invoke-RestMethod only", type: "checkbox", default: false, help: "Avoid any dependency on Invoke-MgGraphRequest (Microsoft Graph SDK) or other REST API wrappers and rely only on the native Invoke-RestMethod cmdlet for all Invoke-EntraOps*Query calls. The Graph SDK is neither required nor installed in this mode; tokens come from Connect-EntraOps -MsGraphAccessToken or the Az PowerShell context. An explicit Connect-EntraOps -UseInvokeRestMethodOnly parameter wins over this setting. REST-only parallel object resolution pre-warms a Graph token from the Az PowerShell context; it falls back to sequential processing only when that token cannot be prepared.", usedIn: "Connect-EntraOps, Invoke-EntraOps*Query cmdlets" },
                         { key: "DevOpsPlatform", label: "DevOps Platform", type: "select", options: DEVOPS_PLATFORMS, default: "GitHub", help: "Select GitHub Actions, Azure Pipelines, or None for local and custom automation." },
+                        { key: "AzureDevOpsServiceConnection", label: "Azure DevOps service connection", type: "text", default: "EntraOps-ServiceConnection", usedIn: "Update-EntraOpsAzureDevOpsSchedules", help: "Name of the Azure Resource Manager service connection used by the Azure DevOps pipelines. Azure Pipelines resolves service connections before runtime variables exist, so Update-EntraOpsAzureDevOpsSchedules writes this name into the pipeline definitions; commit the result. Only used with DevOps Platform AzureDevOps." },
                         { key: "ConfigFilePath", label: "Config File Path", type: "text", default: "./EntraOpsConfig.json" },
                         { key: "ClientId", label: "Client Id", type: "text", help: "Filled in automatically by New-EntraOpsWorkloadIdentity after you create the app registration." }
                     ]
@@ -512,10 +517,10 @@
                         { key: "UpdateScheduledCron", label: "Update scheduled cron", type: "cron", default: "0 9 * * 3" },
                         { key: "UpdateRepository", label: "Update source repository", type: "select", options: UPDATE_REPOSITORIES, default: "EntraOps", help: "Repository name below the Cloud-Architekt organization. \"EntraOps\" is the public release channel and needs no credentials. \"EntraOps-Insiders\" is the private preview channel and requires the EntraOpsUpdatePat repository secret. Both are declared centrally in EntraOpsUpdateContract.json; another source is accepted only when it publishes a matching contract. An imported custom value is preserved." },
                         { key: "UpdateBranch", label: "Update source ref", type: "text", default: "main", help: "Branch, release tag or full 40-character commit SHA that the update is taken from. Defaults to \"main\" for maintenance-free updates; use a release tag or full commit SHA when reproducibility is required." },
-                        { key: "UpdatePublicationMode", label: "Update publication mode", type: "select", options: ["PullRequest", "DirectPush"], default: "PullRequest", help: "GitHub supports PullRequest or DirectPush. The shipped Azure DevOps update pipeline uses DirectPush.", warning: "GitHub PullRequest mode requires the repository (or organization) setting Settings \u2192 Actions \u2192 General \u2192 Workflow permissions \u2192 \"Allow GitHub Actions to create and approve pull requests\". Without it the Update-EntraOps workflow pushes the update branch but fails to open the pull request.", helpLink: { text: "GitHub Docs: Preventing GitHub Actions from creating or approving pull requests", href: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests" } },
+                        { key: "UpdatePublicationMode", label: "Update publication mode", type: "select", options: ["PullRequest", "DirectPush"], default: "PullRequest", help: "GitHub supports PullRequest or DirectPush. The Azure DevOps update pipeline always opens a pull request; DirectPush is ignored there.", warning: "GitHub PullRequest mode requires the repository (or organization) setting Settings \u2192 Actions \u2192 General \u2192 Workflow permissions \u2192 \"Allow GitHub Actions to create and approve pull requests\". Without it the Update-EntraOps workflow pushes the update branch but fails to open the pull request.", helpLink: { text: "GitHub Docs: Preventing GitHub Actions from creating or approving pull requests", href: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests" } },
                         { key: "UpdateValidationFrequency", label: "Candidate validation frequency", type: "select", options: ["OnChange", "Always", "Never"], default: "OnChange", help: "OnChange validates when the source, target set, or required validation depth changes. Always validates every triggered run. Never skips the candidate test suite before applying updates; use it only for a fully trusted source." },
                         { key: "UpdateRunBrowserTests", label: "Run browser tests for update candidates", type: "checkbox", default: true, help: "Runs the Playwright documentation and report tests when candidate validation is required. Disable to keep the core PowerShell and policy validation while reducing update time." },
-                        { key: "UpdateTargetFolders", label: "Update targets", type: "multiselect", options: UPDATE_TARGETS, default: ["./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"], help: "Repository-relative folders and root files staged, validated and replaced by Update-EntraOps. Workflow templates are excluded by default. Select ./.github/workflows only for a manual cmdlet update or after configuring the EntraOps update publisher GitHub App; ./.github/actions and ./.github/scripts must remain selected with it.", warning: "GITHUB_TOKEN cannot publish workflow-file changes. Automated workflow updates require EntraOpsUpdateAppClientId and EntraOpsUpdateAppPrivateKey for a repository-scoped GitHub App with Workflows write permission.", helpLink: { text: "GitHub Docs: Choosing permissions for a GitHub App", href: "https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app" } }
+                        { key: "UpdateTargetFolders", label: "Update targets", type: "multiselect", options: UPDATE_TARGETS, default: UPDATE_TARGET_DEFAULTS, help: "Repository-relative folders and root files staged, validated and replaced by Update-EntraOps. With DevOps Platform AzureDevOps the defaults include ./.azure-pipelines and ./.github/scripts (trusted candidate validator) instead of the other ./.github folders. Workflow templates are excluded by default. Select ./.github/workflows only for a manual cmdlet update or after configuring the EntraOps update publisher GitHub App; ./.github/actions and ./.github/scripts must remain selected with it.", warning: "GITHUB_TOKEN cannot publish workflow-file changes. Automated workflow updates require EntraOpsUpdateAppClientId and EntraOpsUpdateAppPrivateKey for a repository-scoped GitHub App with Workflows write permission.", helpLink: { text: "GitHub Docs: Choosing permissions for a GitHub App", href: "https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app" } }
                     ]
                 }
             ]
@@ -813,6 +818,31 @@
     function getVal(key) { return state[key]; }
     function setVal(key, value) { state[key] = value; renderPreview(); }
 
+    function updateTargetDefaults(platform) {
+        return platform === "AzureDevOps" ? UPDATE_TARGET_DEFAULTS_ADO : UPDATE_TARGET_DEFAULTS;
+    }
+
+    // Platform-aware default of a field (update targets follow the DevOps platform like New-EntraOpsConfigFile).
+    function fieldDefault(field) {
+        return field.key === "UpdateTargetFolders" ? updateTargetDefaults(state.DevOpsPlatform) : field.default;
+    }
+
+    // Switches the update targets to the new platform's defaults unless they were customized.
+    function alignUpdateTargetsToPlatform(previousPlatform) {
+        var current = Array.isArray(state.UpdateTargetFolders) ? state.UpdateTargetFolders : [];
+        var previous = updateTargetDefaults(previousPlatform);
+        var unchanged = current.length === previous.length && previous.every(function (target) { return current.indexOf(target) !== -1; });
+        if (unchanged) state.UpdateTargetFolders = updateTargetDefaults(state.DevOpsPlatform).slice();
+    }
+
+    // Field options plus selected values that are not known options (e.g. from an imported configuration), so
+    // toggling another option keeps them.
+    function multiselectOptions(field) {
+        var val = getVal(field.key);
+        var extra = (Array.isArray(val) ? val : []).filter(function (value) { return typeof value === "string" && field.options.indexOf(value) === -1; });
+        return field.options.concat(extra);
+    }
+
     function createElement(tagName, className, text) {
         var element = document.createElement(tagName);
         if (className) element.className = className;
@@ -838,8 +868,9 @@
     }
 
     function fieldDefaultBadge(field) {
-        if (field.default === undefined) return null;
-        var defaultValue = field.defaultLabel || (Array.isArray(field.default) ? field.default.join(", ") : String(field.default));
+        var fieldDefaultValue = fieldDefault(field);
+        if (fieldDefaultValue === undefined) return null;
+        var defaultValue = field.defaultLabel || (Array.isArray(fieldDefaultValue) ? fieldDefaultValue.join(", ") : String(fieldDefaultValue));
         return createElement("span", "wiz-field-default", "Default: " + defaultValue);
     }
 
@@ -988,6 +1019,7 @@
             container.appendChild(select);
         } else if (field.type === "multiselect") {
             var selectedCount = Array.isArray(val) ? val.length : 0;
+            var mselOptions = multiselectOptions(field);
             var actions = createElement("div", "wiz-msel-actions");
             actions.dataset.mselKey = field.key;
             [["all", "Select all"], ["none", "Clear"]].forEach(function (action) {
@@ -1000,12 +1032,12 @@
                 resetButton.dataset.msel = "default";
                 actions.appendChild(resetButton);
             }
-            actions.appendChild(createElement("span", "wiz-field-default", selectedCount + " of " + field.options.length + " selected"));
+            actions.appendChild(createElement("span", "wiz-field-default", selectedCount + " of " + mselOptions.length + " selected"));
             container.appendChild(actions);
             var chips = createElement("div", "wiz-chips" + (field.scroll ? " wiz-chips-scroll" : ""));
             chips.dataset.key = field.key;
             chips.dataset.type = "multiselect";
-            field.options.forEach(function (option) {
+            mselOptions.forEach(function (option) {
                 var checked = Array.isArray(val) && val.indexOf(option) !== -1;
                 var chip = createElement("label", "wiz-chip" + (checked ? " checked" : ""));
                 var chipInput = createElement("input");
@@ -1013,7 +1045,7 @@
                 chipInput.value = option;
                 chipInput.checked = checked;
                 chip.appendChild(chipInput);
-                appendText(chip, option);
+                appendText(chip, field.options.indexOf(option) === -1 ? option + " (imported)" : option);
                 chips.appendChild(chip);
             });
             container.appendChild(chips);
@@ -1463,6 +1495,7 @@
             },
             ClientId: state.ClientId,
             DevOpsPlatform: state.DevOpsPlatform,
+            AzureDevOpsServiceConnection: state.AzureDevOpsServiceConnection,
             RbacSystems: state.RbacSystems,
             AzureRbacClassification: {
                 ClassifyConstrainedDelegationAlwaysAsControlPlane: state.ClassifyConstrainedDelegationAlwaysAsControlPlane,
@@ -1752,7 +1785,9 @@
         state.UseInvokeRestMethodOnly = pick(cfg, "UseInvokeRestMethodOnly", state.UseInvokeRestMethodOnly);
         state.IncludeObjectDetails = pick(cfg, "ConsoleOutput.IncludeObjectDetails", state.IncludeObjectDetails);
         state.ClientId = pick(cfg, "ClientId", state.ClientId);
+        var platformBeforeImport = state.DevOpsPlatform;
         state.DevOpsPlatform = pick(cfg, "DevOpsPlatform", state.DevOpsPlatform);
+        state.AzureDevOpsServiceConnection = pick(cfg, "AzureDevOpsServiceConnection", state.AzureDevOpsServiceConnection);
         state.RbacSystems = pick(cfg, "RbacSystems", state.RbacSystems);
 
         state.ClassifyConstrainedDelegationAlwaysAsControlPlane = pick(cfg, "AzureRbacClassification.ClassifyConstrainedDelegationAlwaysAsControlPlane", false);
@@ -1791,6 +1826,7 @@
         state.UpdateValidationFrequency = pick(cfg, "AutomatedEntraOpsUpdate.ValidationFrequency", state.UpdateValidationFrequency);
         state.UpdateRunBrowserTests = pick(cfg, "AutomatedEntraOpsUpdate.RunBrowserTests", state.UpdateRunBrowserTests);
         state.UpdateTargetFolders = pick(cfg, "AutomatedEntraOpsUpdate.TargetUpdateFolders", state.UpdateTargetFolders);
+        if (pick(cfg, "AutomatedEntraOpsUpdate.TargetUpdateFolders", undefined) === undefined) alignUpdateTargetsToPlatform(platformBeforeImport);
 
         state.IngestToLogAnalytics = pick(cfg, "LogAnalytics.IngestToLogAnalytics", state.IngestToLogAnalytics);
         state.DataCollectionRuleName = pick(cfg, "LogAnalytics.DataCollectionRuleName", state.DataCollectionRuleName);
@@ -2045,7 +2081,12 @@
             var values = Array.prototype.slice.call(container.querySelectorAll("input:checked")).map(function (i) { return i.value; });
             applyMultiselectSelection(findFieldByKey(key), values, container);
         } else if (type === "number") setVal(key, el.value === "" ? "" : Number(el.value));
-        else setVal(key, el.value);
+        else if (key === "DevOpsPlatform") {
+            var previousPlatform = state.DevOpsPlatform;
+            state.DevOpsPlatform = el.value;
+            alignUpdateTargetsToPlatform(previousPlatform);
+            renderPreview();
+        } else setVal(key, el.value);
     }
 
     function findFieldByKey(key) {
@@ -2062,7 +2103,8 @@
 
     function applyMultiselectSelection(field, values, container) {
         if (!field) return;
-        var selected = field.options.filter(function (option) { return values.indexOf(option) !== -1; });
+        var options = multiselectOptions(field);
+        var selected = options.filter(function (option) { return values.indexOf(option) !== -1; });
         setVal(field.key, selected);
         if (!container) return;
         container.querySelectorAll("input").forEach(function (input) {
@@ -2070,7 +2112,7 @@
             input.closest("label.wiz-chip").classList.toggle("checked", input.checked);
         });
         var count = container.closest(".wiz-field").querySelector("[data-msel-key] .wiz-field-default");
-        if (count) count.textContent = selected.length + " of " + field.options.length + " selected";
+        if (count) count.textContent = selected.length + " of " + options.length + " selected";
     }
 
     function setTgResourceSelection(resources) {
@@ -2139,7 +2181,7 @@
             var mselField = findFieldByKey(mselContainer.getAttribute("data-msel-key"));
             if (mselField) {
                 var action = mselBtn.getAttribute("data-msel");
-                var values = action === "all" ? mselField.options.slice() : action === "none" ? [] : deepClone(mselField.default);
+                var values = action === "all" ? multiselectOptions(mselField) : action === "none" ? [] : deepClone(fieldDefault(mselField));
                 applyMultiselectSelection(mselField, values, mselContainer.closest(".wiz-field").querySelector(".wiz-chips"));
             }
             return;

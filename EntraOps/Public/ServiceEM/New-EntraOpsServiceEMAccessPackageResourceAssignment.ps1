@@ -129,6 +129,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
         }
 
         $resourceRolesByResource = @{}
+        $roleScopeFailures = [System.Collections.Generic.List[string]]::new()
         foreach ($pair in @($groupPackagePairs)) {
             $group = $pair.Group
             $package = $pair.Package
@@ -217,7 +218,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                 try {
                     Write-Verbose "$logPrefix Creating new role assignment"
                     Write-Verbose "$logPrefix Resource Param: $($resourceParams|ConvertTo-Json -Compress)"
-                    $postResult = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($package.Id)/resourceRoleScopes" -Body ($resourceParams | ConvertTo-Json -Depth 10) -OutputType PSObject
+                    $postResult = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages/$($package.Id)/resourceRoleScopes" -Body ($resourceParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
                     if ($null -ne $postResult) {
                         $assignedRoles += $postResult
                         $packageRoles += $tb
@@ -226,9 +227,12 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                     }
                 } catch {
                     Write-Verbose "$logPrefix Failed to create new role assignment"
-                    Write-Error $_
+                    $roleScopeFailures.Add("$($memberRole.DisplayName) of '$($group.DisplayName)' in '$($package.DisplayName)': $($_.Exception.Message)")
                 }
             }
+        }
+        if ($roleScopeFailures.Count -gt 0) {
+            throw "$logPrefix Failed to add $($roleScopeFailures.Count) resource role(s) to access packages: $($roleScopeFailures -join '; ')"
         }
     }
 
@@ -249,7 +253,8 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                 return $false
             }
             $checkAssignments = @($check.Packages.ResourceRoleScopes | ForEach-Object { "$($_.Role.OriginId)_$($_.Scope.OriginId)" } | Sort-Object -Unique)
-            (Compare-Object $expectedAssignments $checkAssignments | Measure-Object).Count -eq 0
+            # Packages of the catalog may hold further resource roles (e.g. added manually or by another deployment)
+            @($expectedAssignments | Where-Object { $_ -notin $checkAssignments }).Count -eq 0
         }
         if (-not $confirmed) {
             throw "Access Package role assignment consistency with Entra not achieved"

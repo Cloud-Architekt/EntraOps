@@ -14,17 +14,20 @@
        If a request doesn't complete, a removal or an access package deletion fails, the cmdlet stops
        with an error and keeps the catalog, the groups and the Azure resource group, so a re-run can
        finish the removal.
-    4. Deletes the catalog itself.
-    5. Deletes the Entra groups registered as catalog resources that were created by the landing zone
+    4. Deletes the Entra groups registered as catalog resources that were created by the landing zone
        (mailNickname "<ServiceName>.*", ServiceName = catalog name without
        "Catalog-"). Other catalog resources, e.g. shared groups added manually, are kept, as well as any
-       group whose Object ID appears in ExcludeGroupIds.
+       group whose Object ID appears in ExcludeGroupIds. A failed group deletion doesn't stop the removal
+       of the other groups.
+    5. Deletes the catalog itself, only if all groups were deleted; otherwise the catalog is kept so a
+       re-run can find it and finish the removal.
     6. Only with -RemoveAzureResourceGroup: deletes the Azure resource group created
        for the service in -SubscriptionId if it exists: RG-<ServiceName> with a
        leading "Rg-" removed (e.g. Catalog-Rg-MyApp -> RG-MyApp), only if it has the tag
        EntraOpsServiceEM = <ServiceName> set by New-EntraOpsServiceAZContainer. Subscription scope
        catalogs (Catalog-Sub-*) never delete a resource group; their Azure role
        assignments on the subscription must be removed manually.
+    Failures of steps 4 and 5 are collected and reported in one error at the end.
 
     Asks for confirmation unless -Force or -Confirm:$false is passed; supports -WhatIf.
     Intended for decommissioning services provisioned by New-EntraOpsServiceBootstrap.
@@ -229,39 +232,57 @@ function Remove-EntraOpsServiceCatalog {
             throw "$logPrefix Removal of '$ServiceCatalogName' is incomplete; the catalog, its groups and the Azure resource group were kept. Resolve the following and run the cmdlet again: $($failures -join '; ')"
         }
 
-        # Step 5: Delete the catalog.
-        Write-Verbose "$logPrefix Deleting Catalog"
-        Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$($catalog.Id)" -ThrowOnFailure | Out-Null
-
-        # Step 6: Delete the Entra groups created by the landing zone (identified by their mailNickname).
+        # Step 5: Delete the Entra groups created by the landing zone (identified by their mailNickname).
+        # The catalog is deleted afterwards, so a re-run can still find it when a group deletion fails.
         $serviceName = $ServiceCatalogName -replace '^Catalog-'
         Write-Verbose "$logPrefix Deleting associated Entra groups from catalog resources"
         $deletedGroupIds = [System.Collections.Generic.List[string]]::new()
+        $removalFailures = [System.Collections.Generic.List[string]]::new()
         foreach ($resource in $catalog.Resources | Where-Object { $_.OriginSystem -eq "AadGroup" }) {
             if ($resource.OriginId -in $ExcludeGroupIds) {
                 Write-Verbose "$logPrefix Skipping excluded group: $($resource.DisplayName) [$($resource.OriginId)]"
                 continue
             }
             try {
-                $group = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$($resource.OriginId)?`$select=id,displayName,mailNickname" -OutputType PSObject -DisableCache
-                if (-not $group) {
-                    Write-Verbose "$logPrefix Group $($resource.DisplayName) [$($resource.OriginId)] not found, skipping"
+                $group = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$($resource.OriginId)?`$select=id,displayName,mailNickname" -OutputType PSObject -DisableCache -ThrowOnFailure -SuppressNotFoundWarning
+            } catch {
+                if ($_.Exception.Data['StatusCode'] -ne 404) {
+                    $removalFailures.Add("lookup of group $($resource.DisplayName) [$($resource.OriginId)] failed: $($_.Exception.Message)")
                     continue
                 }
-                if ($group.MailNickname -notlike "$serviceName.*") {
-                    Write-Warning "$logPrefix Keeping group $($resource.DisplayName) [$($resource.OriginId)]: it wasn't created by this landing zone (mailNickname '$($group.MailNickname)')"
-                    continue
-                }
+                $group = $null
+            }
+            if (-not $group) {
+                Write-Verbose "$logPrefix Group $($resource.DisplayName) [$($resource.OriginId)] not found, skipping"
+                continue
+            }
+            if ($group.MailNickname -notlike "$serviceName.*") {
+                Write-Warning "$logPrefix Keeping group $($resource.DisplayName) [$($resource.OriginId)]: it wasn't created by this landing zone (mailNickname '$($group.MailNickname)')"
+                continue
+            }
+            try {
                 Write-Verbose "$logPrefix Deleting group: $($resource.DisplayName) [$($resource.OriginId)]"
                 Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/groups/$($resource.OriginId)" -ThrowOnFailure | Out-Null
                 $deletedGroupIds.Add($resource.OriginId)
             } catch {
                 Write-Verbose "$logPrefix Failed to delete group $($resource.DisplayName) [$($resource.OriginId)]"
-                Write-Error $_
+                $removalFailures.Add("deleting group $($resource.DisplayName) [$($resource.OriginId)] failed: $($_.Exception.Message)")
             }
         }
         if ($deletedGroupIds.Count -gt 0 -and (Get-EntraOpsServiceEMConfigValue -Path 'UpdateObjectClassificationFile') -eq $true) {
             Update-EntraOpsServiceEMObjectClassificationFile -RemoveObjectIds $deletedGroupIds -logPrefix $logPrefix | Out-Null
+        }
+
+        # Step 6: Delete the catalog, unless a group is left that a re-run has to find through it.
+        if ($removalFailures.Count -gt 0) {
+            Write-Warning "$logPrefix Keeping catalog '$ServiceCatalogName': $($removalFailures.Count) group(s) could not be removed"
+        } else {
+            try {
+                Write-Verbose "$logPrefix Deleting Catalog"
+                Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$($catalog.Id)" -ThrowOnFailure | Out-Null
+            } catch {
+                $removalFailures.Add("deleting catalog $ServiceCatalogName [$($catalog.Id)] failed: $($_.Exception.Message)")
+            }
         }
 
         # Step 7: Delete Azure resource group (opt-in).
@@ -310,6 +331,10 @@ function Remove-EntraOpsServiceCatalog {
             }
         } else {
             Write-Warning "$logPrefix Azure Resource Group '$rgName' is kept (use -RemoveAzureResourceGroup to delete it). Role assignments of the deleted groups on it remain as orphaned assignments."
+        }
+
+        if ($removalFailures.Count -gt 0) {
+            throw "$logPrefix Removal of '$ServiceCatalogName' is incomplete; resolve the following and run the cmdlet again: $($removalFailures -join '; ')"
         }
     }
 

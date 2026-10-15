@@ -747,6 +747,32 @@ information". Both default to (nearly) every supported RBAC system, so most envi
 to change them - narrow them only if you want to limit the update to specific RBAC systems (e.g.
 only regenerate the Azure classification file without touching Entra ID's).
 
+### Intune device scope by designated tier
+
+When `ClassificationParameterScope` contains `DeviceManagement`, the Control Plane scope update
+replaces the scope group placeholders in `Classification_DeviceManagement.Param.json` with groups that
+contain privileged devices or users. It selects users by their **designated tier**
+(`ObjectAdminTierLevelName` from [Custom Security Attributes, Alternate Tier Level Attributes or the
+Object Classification File](../core/index.html#classification-sources)) in the EAM export of the
+`EntraOpsScopes`, not by the tier of their role assignments. Their owned devices and associated PAW
+devices are resolved to the groups they are members of.
+
+`DeviceMgmtPrivilegedTierScope` (parameter of `Update-EntraOpsClassificationControlPlaneScope`, or
+property of `AutomatedControlPlaneScopeUpdate` in `EntraOpsConfig.json`) selects the tiers:
+
+| Value                                     | Selected users and groups                                                                                                                                                                                     |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ControlPlaneAndManagementPlane` (default) | Devices of users designated `ControlPlane` (Tier 0) and `ManagementPlane` (Tier 1), plus the transitive group memberships of these users. A device of both tiers counts as Tier 0.                          |
+| `ControlPlaneDevicesOnly`                 | Only devices of users designated `ControlPlane`; Tier 1 users and user group memberships are skipped.                                                                                                       |
+
+A user with Control Plane access whose designated tier is missing or lower doesn't contribute their
+devices. EntraOps compares the owned and PAW devices of all Control Plane users of the home tenant
+with the selected devices and reports every user with unselected devices as an
+**`IntuneDeviceScopeSelectionGap`** warning (with the user's object ID and whether the user was
+selected as `ControlPlane` or `ManagementPlane` source). Review and set the designated tier of these
+users, or choose the mode that includes them. A selected device is only covered when it is a member
+of a group with an Intune scope tag assignment.
+
 ## Automated protection of privileged assets
 
 Beyond classification, EntraOps can automatically apply Zero Trust protections to the privileged
