@@ -22,9 +22,9 @@ Describe 'New-EntraOpsReportingData content preflight' {
         }
         $script:Parameters = @{
             SkipClassificationExplorer = $true
-            SkipPrivilegeHistory = $true
-            SkipConfigurationAnalyzer = $true
-            SkipAccessPackageFlow = $true
+            SkipPrivilegeHistory       = $true
+            SkipConfigurationAnalyzer  = $true
+            SkipAccessPackageFlow      = $true
         }
         Mock -ModuleName EntraOps New-EntraOpsTierBreachAnalyzerData {}
         Mock -ModuleName EntraOps New-EntraOpsPrivilegedEamDashboardData {}
@@ -49,7 +49,7 @@ Describe 'New-EntraOpsReportingData content preflight' {
         New-EntraOpsReportingData @script:Parameters -InstallMissingReportingFolder
 
         Test-Path -LiteralPath "$script:Workspace/Reports/PrivilegedAssets/index.html" | Should -BeTrue
-        Should -Invoke -ModuleName EntraOps Install-EntraOpsReportingFolder -Times 1 -Exactly -ParameterFilter { $Force -and $DestinationPath -eq "$script:Workspace/Reports" }
+        Should -Invoke -ModuleName EntraOps Install-EntraOpsReportingFolder -Times 1 -Exactly -ParameterFilter { $Force -and [System.IO.Path]::GetFullPath($DestinationPath) -eq [System.IO.Path]::GetFullPath((Join-Path $script:Workspace 'Reports')) }
         Should -Invoke -ModuleName EntraOps New-EntraOpsPrivilegedAssetsData -Times 1 -Exactly
     }
 

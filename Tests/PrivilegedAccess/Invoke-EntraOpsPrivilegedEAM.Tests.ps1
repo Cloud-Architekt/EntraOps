@@ -18,9 +18,20 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
         $script:ImportFolder = Join-Path $TestDrive 'import-folder'
         $env:ENTRAOPS_ROOT = $script:ImportFolder
         Import-Module (Join-Path $script:TestRepositoryRoot 'EntraOps/EntraOps.psd1') -Force -WarningAction SilentlyContinue
+
+        # Mock needs an existing command; CI runners do not always have the Az/Microsoft Graph modules installed.
+        $script:CommandStubs = @(foreach ($CommandName in 'Get-AzContext', 'Get-AzTenant', 'Get-MgContext') {
+                if (-not (Get-Command -Name $CommandName -ErrorAction SilentlyContinue)) {
+                    Set-Item -Path "Function:\global:$CommandName" -Value { throw "$($MyInvocation.MyCommand.Name) must be mocked" }
+                    $CommandName
+                }
+            })
     }
 
     AfterAll {
+        foreach ($CommandName in $script:CommandStubs) {
+            Remove-Item -Path "Function:\$CommandName" -ErrorAction SilentlyContinue
+        }
         $env:ENTRAOPS_ROOT = $script:OriginalEntraOpsRoot
         foreach ($Name in $script:SessionVariableNames) {
             if ($script:OriginalVariables.ContainsKey($Name)) {

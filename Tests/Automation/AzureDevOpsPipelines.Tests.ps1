@@ -6,9 +6,15 @@ BeforeDiscovery {
     $script:HasAdoPipelines = Test-Path -LiteralPath (Join-Path $script:TestRepositoryRoot '.azure-pipelines') -PathType Container
     # Deployments keep their own (possibly older) pipelines while Tests are updated, so only assert template content upstream.
     $script:IsConfiguredDeployment = Test-Path -LiteralPath (Join-Path $script:TestRepositoryRoot 'EntraOpsConfig.json')
+    # Deployments of pre-release versions can keep pipelines with former file names (azure-pipelines-*.yml).
+    $script:HasOutdatedDeploymentPipelines = $script:IsConfiguredDeployment -and @(
+        'entraops-pull.yml', 'entraops-push.yml', 'entraops-push-reporting.yml',
+        'entraops-pull-tenant-governance.yml', 'entraops-update.yml', 'entraops-test.yml' |
+        Where-Object { -not (Test-Path -LiteralPath (Join-Path $script:TestRepositoryRoot ".azure-pipelines/$_") -PathType Leaf) }
+    ).Count -gt 0
 }
 
-Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not [bool](Get-Module -ListAvailable -Name powershell-yaml)) {
+Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $HasOutdatedDeploymentPipelines -or -not [bool](Get-Module -ListAvailable -Name powershell-yaml)) {
     BeforeAll {
         $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         Import-Module powershell-yaml -ErrorAction Stop

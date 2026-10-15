@@ -986,7 +986,7 @@
       },
       {
         "Category": "Microsoft.AzureAD",
-        "Service": "Custom Security Attributes (Reader)",
+        "Service": "ABAC (Reader)",
         "RoleAssignmentScopeName": [
           "/*"
         ],

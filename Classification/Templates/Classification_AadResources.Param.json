@@ -1330,7 +1330,7 @@
       },
       {
         "Category": "Microsoft.AzureAD",
-        "Service": "ABAC",
+        "Service": "ABAC (Reader)",
         "RoleAssignmentScopeName": [
           "/*"
         ],
