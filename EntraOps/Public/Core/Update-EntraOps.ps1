@@ -361,7 +361,7 @@ function Update-EntraOps {
         if ($RefreshGitHubWorkflows -or $RefreshAzureDevOpsPipelines) {
             Write-Host 'Re-applying workflow and pipeline configuration in a clean process...'
             Invoke-EntraOpsUpdateConfigurationRefresh -SourceRoot $TemporaryUpdateFolder -RepositoryRoot $EntraOpsBaseFolder `
-                -ConfigFile $ConfigFilePath -UpdateGitHubWorkflows:$RefreshGitHubWorkflows -UpdateAzureDevOpsPipelines:$RefreshAzureDevOpsPipelines
+                -ConfigFile $ConfigFile -UpdateGitHubWorkflows:$RefreshGitHubWorkflows -UpdateAzureDevOpsPipelines:$RefreshAzureDevOpsPipelines
         }
 
         $UpdateManifest = [ordered]@{

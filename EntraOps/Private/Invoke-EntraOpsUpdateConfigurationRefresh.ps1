@@ -25,10 +25,11 @@ function Invoke-EntraOpsUpdateConfigurationRefresh {
     )
 
     $Settings = @{
-        SourceRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SourceRoot)
-        RepositoryRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($RepositoryRoot)
-        ConfigFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ConfigFile)
-        UpdateGitHubWorkflows = [bool]$UpdateGitHubWorkflows
+        SourceRoot                 = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SourceRoot)
+        RepositoryRoot             = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($RepositoryRoot)
+        # Kept as passed: the workflows store this value, so it must stay repository-relative.
+        ConfigFile                 = $ConfigFile
+        UpdateGitHubWorkflows      = [bool]$UpdateGitHubWorkflows
         UpdateAzureDevOpsPipelines = [bool]$UpdateAzureDevOpsPipelines
     }
     # Encode the data separately so paths and configuration names cannot become executable text.
@@ -38,6 +39,7 @@ $ErrorActionPreference = 'Stop'
 $Settings = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__SETTINGS__')) | ConvertFrom-Json
 Set-Location -LiteralPath $Settings.RepositoryRoot
 if ($Settings.UpdateGitHubWorkflows) {
+    . (Join-Path $Settings.SourceRoot 'EntraOps/Public/Core/Install-EntraOpsRequiredModule.ps1')
     . (Join-Path $Settings.SourceRoot 'EntraOps/Public/Configuration/Update-EntraOpsRequiredWorkflowParameters.ps1')
     Update-EntraOpsRequiredWorkflowParameters -ConfigFile $Settings.ConfigFile
 }
@@ -53,7 +55,9 @@ if ($Settings.UpdateAzureDevOpsPipelines) {
         'PATH', 'PSModulePath', 'LANG', 'LC_ALL', 'TMPDIR', 'TEMP', 'TMP', 'CI',
         'HOME', 'USER', 'USERNAME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA',
         'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'SystemRoot', 'SystemDrive', 'windir',
-        'COMSPEC', 'PATHEXT', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'POWERSHELL_TELEMETRY_OPTOUT'
+        'COMSPEC', 'PATHEXT', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'POWERSHELL_TELEMETRY_OPTOUT',
+        # Framework-dependent pwsh builds (for example Homebrew) need this to locate the .NET runtime.
+        'DOTNET_ROOT'
     )
     $SavedEnvironment = @{}
     foreach ($Entry in Get-ChildItem Env:) { $SavedEnvironment[$Entry.Name] = $Entry.Value }
@@ -62,7 +66,7 @@ if ($Settings.UpdateAzureDevOpsPipelines) {
         foreach ($Name in $AllowedEnvironmentNames) {
             if ($SavedEnvironment.ContainsKey($Name)) { Set-Item -LiteralPath "Env:$Name" -Value $SavedEnvironment[$Name] }
         }
-        & (Get-Process -Id $PID).Path -NoLogo -NoProfile -NonInteractive -EncodedCommand $EncodedCommand
+        & (Get-Process -Id $PID).Path -NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand $EncodedCommand
         if ($LASTEXITCODE -ne 0) {
             throw "Configuration refresh child process failed with exit code $LASTEXITCODE. The update files were copied, but configuration refresh is incomplete."
         }

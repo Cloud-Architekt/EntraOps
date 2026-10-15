@@ -9,6 +9,7 @@ BeforeAll {
     $script:EntraOpsBaseFolder = $script:TestRepositoryRoot
     . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsRepositoryCheckout.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsRepositoryRoot.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Invoke-EntraOpsUpdateConfigurationRefresh.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Resolve-EntraOpsUpdateSource.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Test-EntraOpsUpdateContract.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Get-EntraOpsUpdateCandidate.ps1"
@@ -94,9 +95,12 @@ Describe 'Update-EntraOps update scope' {
         $Source | Should -Match 'SourceCommit'
         $Source.IndexOf('Test-EntraOpsUpdateContract') | Should -BeLessThan $ReplacementIndex
         $Source | Should -Match "TargetUpdateFolders -contains './\.github/workflows'"
-        $Source | Should -Match 'Update-EntraOpsRequiredWorkflowParameters -ConfigFile \$ConfigFile'
         $Source | Should -Match "TargetUpdateFolders -contains './\.azure-pipelines'"
-        $Source | Should -Match 'Update-EntraOpsAzureDevOpsSchedules -ConfigFile \$ConfigFile'
+        $Source.IndexOf('Invoke-EntraOpsUpdateConfigurationRefresh') | Should -BeGreaterThan $ReplacementIndex
+        $Source | Should -Match '-ConfigFile \$ConfigFile -UpdateGitHubWorkflows'
+        $Refresh = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot 'EntraOps/Private/Invoke-EntraOpsUpdateConfigurationRefresh.ps1') -Raw
+        $Refresh | Should -Match 'Update-EntraOpsRequiredWorkflowParameters -ConfigFile \$Settings\.ConfigFile'
+        $Refresh | Should -Match 'Update-EntraOpsAzureDevOpsSchedules -ConfigFile \$Settings\.ConfigFile'
     }
 
     It 'requires workflow dependencies and prevents validation bypass' {
@@ -322,39 +326,49 @@ Describe 'Update-EntraOps prepared candidate apply path' {
         Set-Content -LiteralPath (Join-Path $Candidate '.azure-pipelines/entraops-pull.yml') -Value 'pipeline'
         Set-Content -LiteralPath (Join-Path $Deployment 'EntraOpsConfig.json') -Value '{}'
         Set-Content -LiteralPath (Join-Path $Elsewhere 'Samples/unrelated.txt') -Value 'keep'
-        $StubbedScheduleCommand = -not (Get-Command Update-EntraOpsAzureDevOpsSchedules -ErrorAction SilentlyContinue)
-        if ($StubbedScheduleCommand) { Set-Item -Path Function:\global:Update-EntraOpsAzureDevOpsSchedules -Value { param($ConfigFile, $PipelineFolder) } }
-        $script:ScheduleCall = $null
+        # The schedule refresh runs the candidate's helper in a child process, so record its call to a file.
+        $ScheduleRecord = Join-Path $TestDrive 'schedule-call.json'
+        $CandidateHelperFolder = Join-Path $Candidate 'EntraOps/Public/Configuration'
+        New-Item -ItemType Directory -Path $CandidateHelperFolder -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $CandidateHelperFolder 'Update-EntraOpsAzureDevOpsSchedules.ps1') -Value @"
+function Update-EntraOpsAzureDevOpsSchedules {
+    param(`$ConfigFile, `$PipelineFolder)
+    @{ Location = (Get-Location).ProviderPath; ConfigFile = `$ConfigFile; PipelineFolder = `$PipelineFolder; HasToken = [bool]`$env:SYSTEM_ACCESSTOKEN } |
+        ConvertTo-Json | Set-Content -LiteralPath '$ScheduleRecord'
+}
+"@
 
         $PreviousBaseFolder = $script:EntraOpsBaseFolder
         $PreviousPat = $env:ENTRAOPS_PAT
+        $PreviousAccessToken = $env:SYSTEM_ACCESSTOKEN
         $script:EntraOpsBaseFolder = $Deployment
         Push-Location $Elsewhere
         try {
             Remove-Item Env:ENTRAOPS_PAT -ErrorAction SilentlyContinue
+            $env:SYSTEM_ACCESSTOKEN = 'must-not-reach-candidate-code'
             Mock git {
                 if ($args -contains 'rev-parse') { $global:LASTEXITCODE = 0; return ('a' * 40) }
                 throw "git must not clone or fetch for a prepared candidate (called with: $($args -join ' '))"
             }
-            Mock Update-EntraOpsAzureDevOpsSchedules {
-                $script:ScheduleCall = @{ Location = (Get-Location).ProviderPath; ConfigFile = $ConfigFile; PipelineFolder = $PipelineFolder }
-            }
             Update-EntraOps -ConfigFile 'EntraOpsConfig.json' -Repository 'EntraOps' -PreparedCandidatePath $Candidate `
                 -TargetUpdateFolders @('./Samples', './.azure-pipelines') -ValidatedSourceCommit ('a' * 40) -WarningAction SilentlyContinue | Out-Null
             (Get-Location).ProviderPath | Should -Be (Get-Item -LiteralPath $Elsewhere).FullName
+            $env:SYSTEM_ACCESSTOKEN | Should -Be 'must-not-reach-candidate-code'
         } finally {
             Pop-Location
             $script:EntraOpsBaseFolder = $PreviousBaseFolder
             if ($null -eq $PreviousPat) { Remove-Item Env:ENTRAOPS_PAT -ErrorAction SilentlyContinue } else { $env:ENTRAOPS_PAT = $PreviousPat }
-            if ($StubbedScheduleCommand) { Remove-Item -Path Function:\global:Update-EntraOpsAzureDevOpsSchedules -ErrorAction SilentlyContinue }
+            if ($null -eq $PreviousAccessToken) { Remove-Item Env:SYSTEM_ACCESSTOKEN -ErrorAction SilentlyContinue } else { $env:SYSTEM_ACCESSTOKEN = $PreviousAccessToken }
         }
 
         Test-Path -LiteralPath (Join-Path $Deployment 'Samples/new.txt') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $Deployment 'Samples/old.txt') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $Deployment '.azure-pipelines/entraops-pull.yml') | Should -BeTrue
-        $script:ScheduleCall.Location | Should -Be (Get-Item -LiteralPath $Deployment).FullName
-        $script:ScheduleCall.ConfigFile | Should -Be 'EntraOpsConfig.json'
-        $script:ScheduleCall.PipelineFolder | Should -Be './.azure-pipelines'
+        $ScheduleCall = Get-Content -LiteralPath $ScheduleRecord -Raw | ConvertFrom-Json
+        $ScheduleCall.Location | Should -Be (Get-Item -LiteralPath $Deployment).FullName
+        $ScheduleCall.ConfigFile | Should -Be 'EntraOpsConfig.json'
+        $ScheduleCall.PipelineFolder | Should -Be './.azure-pipelines'
+        $ScheduleCall.HasToken | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $Elsewhere '.azure-pipelines') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $Elsewhere 'Samples/unrelated.txt') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $Elsewhere 'Samples/new.txt') | Should -BeFalse
