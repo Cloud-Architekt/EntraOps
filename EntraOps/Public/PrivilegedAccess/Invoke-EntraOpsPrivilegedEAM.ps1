@@ -276,9 +276,10 @@ function Invoke-EntraOpsPrivilegedEAM {
         # Reuse configured session folders; standalone runs use the single-tenant layout.
         New-Variable -Name TenantIdContext            -Value $TenantId   -Scope Global -Force
         New-Variable -Name TenantNameContext          -Value $TenantName -Scope Global -Force
+        # Same "<base>/Classification/" form as Connect-EntraOps; Join-Path would emit '\' on Windows.
         $ClassificationRoot = if ($UseSessionConfig -and -not [string]::IsNullOrWhiteSpace($DefaultFolderClassification)) {
             $DefaultFolderClassification
-        } else { Join-Path $EntraOpsBaseFolder 'Classification' }
+        } else { "$EntraOpsBaseFolder/Classification/" }
         New-Variable -Name DefaultFolderClassification -Value $ClassificationRoot -Scope Global -Force
         New-Variable -Name XdrAvdHuntingAccess         -Value (($MgContext.Scopes) -contains "ThreatHunting.Read.All") -Scope Global -Force
         # Default the query mode only when Connect-EntraOps has not set it yet, so a previously
