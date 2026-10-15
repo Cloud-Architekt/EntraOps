@@ -16,13 +16,20 @@ BeforeDiscovery {
 
 Describe '.gitignore' -Skip:(-not $script:GitAvailable) {
     BeforeAll {
-        $script:RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        # Evaluate the .gitignore in a scratch repository: update candidates are validated from an
+        # extracted archive without .git, and this also excludes the developer's .git/info/exclude.
+        $script:IgnoreRepository = Join-Path $TestDrive 'gitignore-check'
+        New-Item -ItemType Directory -Path $script:IgnoreRepository -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $RepositoryRoot '.gitignore') -Destination $script:IgnoreRepository
+        & git -C $script:IgnoreRepository init --quiet
+        if ($LASTEXITCODE -ne 0) { throw "git init failed with exit code $LASTEXITCODE." }
         # Isolate from the developer's global excludes file so only the repository .gitignore is evaluated.
         $script:NoGlobalExcludes = Join-Path $TestDrive 'no-global-excludes'
     }
 
     It 'does not ignore deployment path <_>' -ForEach $script:CommittedPaths {
-        & git -C $script:RepositoryRoot -c "core.excludesFile=$script:NoGlobalExcludes" check-ignore --quiet --no-index -- $_
+        & git -C $script:IgnoreRepository -c "core.excludesFile=$script:NoGlobalExcludes" check-ignore --quiet --no-index -- $_
         $LASTEXITCODE | Should -Be 1 -Because "'$_' must be committable by deployments and publishing workflows"
     }
 }
