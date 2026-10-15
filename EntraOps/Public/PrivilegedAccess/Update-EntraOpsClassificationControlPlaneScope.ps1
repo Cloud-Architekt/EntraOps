@@ -132,8 +132,9 @@
     "ControlPlaneAndManagementPlane" (default): Tier0 (ControlPlane) and Tier1 (ManagementPlane) devices and users are both included.
     "ControlPlaneDevicesOnly": Only devices owned by Tier0 (ControlPlane) users are included; Tier1 and user group memberships are skipped.
     Tier0/Tier1 users are selected by their designated tier (ObjectAdminTierLevelName from Custom Security Attributes or
-    AlternateObjectTierLevelAttributes), not by role-derived Control Plane membership. Role-derived Control Plane users with
-    devices that are not designated are reported as IntuneDeviceScopeDesignatedTierGap warnings.
+    AlternateObjectTierLevelAttributes), not by role-derived Control Plane membership. Owned or PAW devices of Control Plane
+    users that are not selected for scope generation in the active mode are reported as IntuneDeviceScopeSelectionGap warnings.
+    Selected devices still require groups with Intune scope tag assignments to be covered.
 
 .PARAMETER IncludeObjectDetails
     Include object display names, UPNs, classification reasons, and related descriptive metadata in console
@@ -924,20 +925,15 @@ function Update-EntraOpsClassificationControlPlaneScope {
             $Tier1DeviceIds = @()
         }
 
-        # Intune device scope uses the designated tier (ObjectAdminTierLevelName from Custom Security Attributes or
-        # AlternateObjectTierLevelAttributes), not role-derived Control Plane membership. Surface role-derived
-        # Control Plane users with devices that are therefore not covered, instead of producing an empty scope silently.
-        $Tier0UserIds = @($Tier0Users | ForEach-Object { "$($_.ObjectId)".ToLowerInvariant() })
-        $UndesignatedControlPlaneDeviceUsers = @($PrivilegedObjects | Where-Object {
-                $_.ObjectType -eq "user" -and
-                ([string]::IsNullOrWhiteSpace($HomeTenantId) -or [string]::IsNullOrEmpty($_.ObjectTenantId) -or $_.ObjectTenantId -eq $HomeTenantId) -and
-                (@($_.OwnedDevices | Where-Object { $_ }).Count -gt 0 -or @($_.AssociatedPawDevice | Where-Object { $_ }).Count -gt 0) -and
-                "$($_.ObjectId)".ToLowerInvariant() -notin $Tier0UserIds
-            } | Sort-Object ObjectId -Unique)
-        if ($UndesignatedControlPlaneDeviceUsers.Count -gt 0) {
-            Write-Warning "  $($UndesignatedControlPlaneDeviceUsers.Count) Control Plane user(s) with owned or PAW devices are not designated ControlPlane by ObjectAdminTierLevelName - their devices are not included in the Intune device scope."
-            foreach ($UndesignatedUser in $UndesignatedControlPlaneDeviceUsers) {
-                $WarningMessages.Add([PSCustomObject]@{ Type = "IntuneDeviceScopeDesignatedTierGap"; Message = "Control Plane user $($UndesignatedUser.ObjectId) with owned or PAW devices is not designated ControlPlane by ObjectAdminTierLevelName and is not used for the Intune device scope" })
+        # Device selection uses designated users only. Report devices of role-derived Control Plane users that no selected
+        # user contributes, so a missing designation does not silently shrink the scope.
+        $SelectedDeviceIds = @($Tier0DeviceIds) + @($Tier1DeviceIds)
+        $DeviceSelectionGaps = @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects $PrivilegedObjects -Tier0Users $Tier0Users -Tier1Users $Tier1Users -SelectedDeviceIds $SelectedDeviceIds -HomeTenantId $HomeTenantId)
+        if ($DeviceSelectionGaps.Count -gt 0) {
+            $UnselectedDeviceCount = @($DeviceSelectionGaps | ForEach-Object { $_.UnselectedDeviceIds }).Count
+            Write-Warning "  $($DeviceSelectionGaps.Count) Control Plane user(s) have $UnselectedDeviceCount owned or PAW device(s) not selected for privileged Intune scope generation in mode $DeviceMgmtPrivilegedTierScope. Review the designated tier (ObjectAdminTierLevelName) of these users."
+            foreach ($DeviceSelectionGap in $DeviceSelectionGaps) {
+                $WarningMessages.Add([PSCustomObject]@{ Type = $DeviceSelectionGap.Type; Message = $DeviceSelectionGap.Message })
             }
         }
 

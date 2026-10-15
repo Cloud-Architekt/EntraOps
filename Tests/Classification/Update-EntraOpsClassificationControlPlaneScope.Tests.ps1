@@ -15,7 +15,7 @@ Describe 'Update-EntraOpsClassificationControlPlaneScope empty scopes' {
     }
 
     BeforeAll {
-    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         $ScriptPath = Join-Path $script:TestRepositoryRoot 'EntraOps/Public/PrivilegedAccess/Update-EntraOpsClassificationControlPlaneScope.ps1'
         $ScriptContent = [System.IO.File]::ReadAllText($ScriptPath)
         $ScopeVariables = @(
@@ -50,12 +50,18 @@ Describe 'Update-EntraOpsClassificationControlPlaneScope empty scopes' {
         # One assignment plus at least two reads (foreign-tenant detection and the owner filter).
         $HasHomeTenantIdUsage.Count | Should -BeGreaterOrEqual 3
     }
+
+
+    It 'checks Intune device selection gaps against the devices selected in the active mode' {
+        $ScriptContent | Should -Match ([regex]::Escape('$SelectedDeviceIds = @($Tier0DeviceIds) + @($Tier1DeviceIds)'))
+        $ScriptContent | Should -Match ([regex]::Escape('Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects $PrivilegedObjects -Tier0Users $Tier0Users -Tier1Users $Tier1Users -SelectedDeviceIds $SelectedDeviceIds -HomeTenantId $HomeTenantId'))
+    }
 }
 
-Describe 'Intune device scope designated tier gaps' {
+Describe 'Intune device scope selection gaps' {
     BeforeAll {
         $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-        . (Join-Path $script:TestRepositoryRoot 'EntraOps/Private/Get-EntraOpsIntuneDeviceScopeDesignatedTierGap.ps1')
+        . (Join-Path $script:TestRepositoryRoot 'EntraOps/Private/Get-EntraOpsIntuneDeviceScopeSelectionGap.ps1')
         . (Join-Path $script:TestRepositoryRoot 'EntraOps/Private/Show-EntraOpsWarningSummary.ps1')
 
         function New-DeviceScopeUser {
@@ -69,59 +75,93 @@ Describe 'Intune device scope designated tier gaps' {
                 AssociatedPawDevice = $PawDevices
             }
         }
+
+        # Mirrors the caller: selected devices are the owned and PAW devices of the selected users.
+        function Get-SelectedDeviceIds {
+            param([object[]]$Users)
+            @($Users | ForEach-Object { @($_.OwnedDevices) + @($_.AssociatedPawDevice) } | Where-Object { $_ } | Select-Object -Unique)
+        }
     }
 
-    It 'reports Tier 1 instead of Tier 0 for a ManagementPlane user selected by the active mode' {
-        $User = New-DeviceScopeUser
-        $Result = @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @($User) -HomeTenantId 'home-tenant')
+    It 'reports only the unselected devices of a user with partial selection' {
+        $User = New-DeviceScopeUser -OwnedDevices @('device-selected', 'device-missing')
+        $Result = @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @('device-selected') -HomeTenantId 'home-tenant')
 
         $Result.Count | Should -Be 1
-        $Result[0].Type | Should -Be 'IntuneDeviceScopeDesignatedTierGap.ManagementPlane'
+        $Result[0].Type | Should -Be 'IntuneDeviceScopeSelectionGap'
         $Result[0].ObjectId | Should -Be 'user-one'
-        $Result[0].DeviceScopeTier | Should -Be 'ManagementPlane'
-        $Result[0].Message | Should -Match 'classified as Tier 1 \(ManagementPlane\) instead of Tier 0'
-        $Result[0].Message | Should -Not -Match 'not in the privileged'
+        $Result[0].SourceSelection | Should -Be 'None'
+        @($Result[0].UnselectedDeviceIds) | Should -Be @('device-missing')
+        $Result[0].Message | Should -Match 'has 1 owned or PAW device\(s\) not selected for privileged Intune scope generation in the active mode \(user not selected as source\)'
     }
 
-    It 'reports exclusion for an Unclassified user' {
-        $User = New-DeviceScopeUser
-        $Result = @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @() -HomeTenantId 'home-tenant')
+    It 'does not report a PAW shared with a selected ControlPlane user' {
+        $User = New-DeviceScopeUser -OwnedDevices @() -PawDevices @('shared-paw')
+        $Tier0User = New-DeviceScopeUser -Id 'tier0-user' -OwnedDevices @() -PawDevices @('shared-paw')
+        @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($User, $Tier0User) -Tier0Users @($Tier0User) -Tier1Users @() -SelectedDeviceIds (Get-SelectedDeviceIds @($Tier0User)) -HomeTenantId 'home-tenant').Count | Should -Be 0
+    }
+
+    It 'does not report a ManagementPlane user whose devices are selected in the default mode' {
+        $User = New-DeviceScopeUser -PawDevices @('paw-one')
+        @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @($User) -SelectedDeviceIds (Get-SelectedDeviceIds @($User)) -HomeTenantId 'home-tenant').Count | Should -Be 0
+    }
+
+    It 'reports the same ManagementPlane user in ControlPlaneDevicesOnly mode' {
+        $User = New-DeviceScopeUser -PawDevices @('paw-one')
+        $Result = @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @() -HomeTenantId 'home-tenant')
 
         $Result.Count | Should -Be 1
-        $Result[0].Type | Should -Be 'IntuneDeviceScopeDesignatedTierGap.Excluded'
-        $Result[0].DeviceScopeTier | Should -Be 'None'
-        $Result[0].Message | Should -Match 'not in the privileged Intune device scope'
+        $Result[0].SourceSelection | Should -Be 'None'
+        @($Result[0].UnselectedDeviceIds) | Should -Be @('device-one', 'paw-one')
     }
 
-    It 'distinguishes Tier 1 and excluded gaps in the summary when object details are disabled' {
-        $Tier1User = New-DeviceScopeUser -Id '11111111-1111-1111-1111-111111111111'
-        $ExcludedUser = New-DeviceScopeUser -Id '22222222-2222-2222-2222-222222222222'
-        $Gaps = @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($Tier1User, $ExcludedUser) -Tier0Users @() -Tier1Users @($Tier1User) -HomeTenantId 'home-tenant')
-        $Warnings = [System.Collections.Generic.List[psobject]]::new()
-        foreach ($Gap in $Gaps) { $Warnings.Add($Gap) }
+    It 'reports devices missing from selection for a selected user as context, not as a designation gap' {
+        # Live resolution can add devices that the export used for selection does not contain.
+        $Tier0User = New-DeviceScopeUser -Id 'tier0-user' -OwnedDevices @('export-device', 'live-device')
+        $ExportTier0User = New-DeviceScopeUser -Id 'tier0-user' -OwnedDevices @('export-device')
+        $Tier1User = New-DeviceScopeUser -Id 'tier1-user' -OwnedDevices @('tier1-live-device')
+        $Result = @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($Tier0User, $Tier1User) -Tier0Users @($ExportTier0User) -Tier1Users @($Tier1User) -SelectedDeviceIds @('export-device') -HomeTenantId 'home-tenant')
 
-        $Summary = @(Show-EntraOpsWarningSummary -WarningMessages $Warnings -IncludeObjectDetails $false 6>&1) -join "`n"
-
-        $Summary | Should -Match 'IntuneDeviceScopeDesignatedTierGap\.ManagementPlane:'
-        $Summary | Should -Match 'IntuneDeviceScopeDesignatedTierGap\.Excluded:'
-        $Summary | Should -Match 'Object ID\(s\): 11111111-1111-1111-1111-111111111111'
-        $Summary | Should -Match 'Object ID\(s\): 22222222-2222-2222-2222-222222222222'
-        $Summary | Should -Not -Match 'Private Admin Name|Control Plane user'
+        $Result.Count | Should -Be 2
+        ($Result | Where-Object ObjectId -eq 'tier0-user').SourceSelection | Should -Be 'ControlPlane'
+        @(($Result | Where-Object ObjectId -eq 'tier0-user').UnselectedDeviceIds) | Should -Be @('live-device')
+        ($Result | Where-Object ObjectId -eq 'tier0-user').Message | Should -Match '\(user selected as ControlPlane source\)'
+        ($Result | Where-Object ObjectId -eq 'tier1-user').SourceSelection | Should -Be 'ManagementPlane'
     }
 
-    It 'does not report a designated ControlPlane user' {
+    It 'does not assert effective coverage, RBAC tier or the cause in the message' {
         $User = New-DeviceScopeUser
-        @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($User) -Tier0Users @($User) -Tier1Users @() -HomeTenantId 'home-tenant').Count | Should -Be 0
+        $Result = @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @() -HomeTenantId 'home-tenant')
+
+        $Result[0].Message | Should -Not -Match 'not in the privileged Intune device scope|classified as Tier|because'
+    }
+
+    It 'compares device and user IDs without regard to casing and whitespace' {
+        $User = New-DeviceScopeUser -Id 'USER-ONE' -OwnedDevices @('DEVICE-ONE ') -PawDevices @('Device-One')
+        @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @('device-one') -HomeTenantId 'home-tenant').Count | Should -Be 0
+
+        $Result = @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @([pscustomobject]@{ ObjectId = 'user-one' }) -SelectedDeviceIds @() -HomeTenantId 'home-tenant')
+        $Result[0].SourceSelection | Should -Be 'ManagementPlane'
+        @($Result[0].UnselectedDeviceIds) | Should -Be @('DEVICE-ONE')
+    }
+
+    It 'merges duplicate user entries and reports each unselected device once' {
+        $Entry1 = New-DeviceScopeUser -OwnedDevices @('device-one', 'device-two')
+        $Entry2 = New-DeviceScopeUser -Id 'User-One' -OwnedDevices @('device-two') -PawDevices @('paw-one')
+        $Result = @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($Entry1, $Entry2) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @('device-one') -HomeTenantId 'home-tenant')
+
+        $Result.Count | Should -Be 1
+        @($Result[0].UnselectedDeviceIds) | Should -Be @('device-two', 'paw-one')
     }
 
     It 'does not report users without owned or PAW devices' {
         $User = New-DeviceScopeUser -OwnedDevices @() -PawDevices @($null, '')
-        @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @() -HomeTenantId 'home-tenant').Count | Should -Be 0
+        @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @() -HomeTenantId 'home-tenant').Count | Should -Be 0
     }
 
     It 'includes PAW-only users and keeps display names out of gap messages' {
         $User = New-DeviceScopeUser -OwnedDevices @() -PawDevices @('paw-one')
-        $Result = @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @() -HomeTenantId 'home-tenant')
+        $Result = @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($User) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @() -HomeTenantId 'home-tenant')
 
         $Result.Count | Should -Be 1
         $Result[0].Message | Should -Not -Match 'Private Admin Name'
@@ -131,29 +171,36 @@ Describe 'Intune device scope designated tier gaps' {
         $ForeignUser = New-DeviceScopeUser -Id 'foreign-user' -TenantId 'other-tenant'
         $Group = New-DeviceScopeUser -Id 'group-one'
         $Group.ObjectType = 'group'
-        @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($ForeignUser, $Group) -Tier0Users @() -Tier1Users @() -HomeTenantId 'home-tenant').Count | Should -Be 0
+        @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($ForeignUser, $Group) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @() -HomeTenantId 'home-tenant').Count | Should -Be 0
     }
 
     It 'includes users when the home tenant or the user tenant is unknown' {
         $ForeignUser = New-DeviceScopeUser -TenantId 'other-tenant'
         $UnknownTenantUser = New-DeviceScopeUser -TenantId ''
 
-        @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($ForeignUser) -Tier0Users @() -Tier1Users @() -HomeTenantId '').Count | Should -Be 1
-        @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($UnknownTenantUser) -Tier0Users @() -Tier1Users @() -HomeTenantId 'home-tenant').Count | Should -Be 1
+        @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($ForeignUser) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @() -HomeTenantId '').Count | Should -Be 1
+        @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($UnknownTenantUser) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @() -HomeTenantId 'home-tenant').Count | Should -Be 1
     }
 
-    It 'deduplicates users and matches designated tiers without regard to ID casing' {
-        $User = New-DeviceScopeUser -Id 'USER-ONE'
-        $Tier1User = New-DeviceScopeUser -Id 'user-one'
-        $Result = @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($User, $User) -Tier0Users @() -Tier1Users @($Tier1User) -HomeTenantId 'home-tenant')
+    It 'shows user IDs without display names in the summary when object details are disabled' {
+        $UserA = New-DeviceScopeUser -Id '11111111-1111-1111-1111-111111111111'
+        $UserB = New-DeviceScopeUser -Id '22222222-2222-2222-2222-222222222222'
+        $Gaps = @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($UserA, $UserB) -Tier0Users @() -Tier1Users @($UserA) -SelectedDeviceIds @() -HomeTenantId 'home-tenant')
+        $Warnings = [System.Collections.Generic.List[psobject]]::new()
+        foreach ($Gap in $Gaps) { $Warnings.Add([pscustomobject]@{ Type = $Gap.Type; Message = $Gap.Message }) }
 
-        $Result.Count | Should -Be 1
-        $Result[0].DeviceScopeTier | Should -Be 'ManagementPlane'
-        @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects @($User) -Tier0Users @($Tier1User) -Tier1Users @() -HomeTenantId 'home-tenant').Count | Should -Be 0
+        $Summary = @(Show-EntraOpsWarningSummary -WarningMessages $Warnings -IncludeObjectDetails $false 6>&1) -join "`n"
+
+        $Summary | Should -Match 'IntuneDeviceScopeSelectionGap:'
+        $Summary | Should -Match '11111111-1111-1111-1111-111111111111'
+        $Summary | Should -Match '22222222-2222-2222-2222-222222222222'
+        $Summary | Should -Not -Match 'Private Admin Name|Control Plane user'
     }
 
-    It 'handles null collections under strict mode' {
+    It 'handles null collections and missing optional properties under strict mode' {
         Set-StrictMode -Version Latest
-        @(Get-EntraOpsIntuneDeviceScopeDesignatedTierGap -PrivilegedObjects $null -Tier0Users $null -Tier1Users $null -HomeTenantId $null).Count | Should -Be 0
+        @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects $null -Tier0Users $null -Tier1Users $null -SelectedDeviceIds $null -HomeTenantId $null).Count | Should -Be 0
+        $SparseUser = [pscustomobject]@{ ObjectId = 'sparse-user'; ObjectType = 'user'; OwnedDevices = @('device-one') }
+        @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($SparseUser) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @() -HomeTenantId 'home-tenant').Count | Should -Be 1
     }
 }
