@@ -142,8 +142,8 @@ function Update-EntraOpsAzureDevOpsSchedules {
         )
     }
 
-    Set-EntraOpsPipelineSchedules -PipelineName 'azure-pipelines-pull.yml' -Schedules $PullSchedules
-    Set-EntraOpsPipelineSchedules -PipelineName 'azure-pipelines-push-reporting.yml' -Schedules $ReportingSchedules
-    Set-EntraOpsPipelineSchedules -PipelineName 'azure-pipelines-update.yml' -Schedules $UpdateSchedules
-    Set-EntraOpsPipelineSchedules -PipelineName 'azure-pipelines-pull-tenant-governance.yml' -Schedules $TenantGovernanceSchedules
+    Set-EntraOpsPipelineSchedules -PipelineName 'entraops-pull.yml' -Schedules $PullSchedules
+    Set-EntraOpsPipelineSchedules -PipelineName 'entraops-push-reporting.yml' -Schedules $ReportingSchedules
+    Set-EntraOpsPipelineSchedules -PipelineName 'entraops-update.yml' -Schedules $UpdateSchedules
+    Set-EntraOpsPipelineSchedules -PipelineName 'entraops-pull-tenant-governance.yml' -Schedules $TenantGovernanceSchedules
 }

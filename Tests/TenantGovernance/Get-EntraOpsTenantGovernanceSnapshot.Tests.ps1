@@ -1093,5 +1093,35 @@ Describe 'Get-EntraOpsTenantGovernanceSnapshotReport last-attempt diagnostics' {
         @($Report.LastAttemptDiagnostics).Count | Should -Be 0
         Should -Invoke Show-EntraOpsWarningSummary -Times 1 -Exactly -ParameterFilter { @($WarningMessages).Count -eq 1 }
     }
+
+    It 'does not double-prefix a diagnostic message that already starts with its bracketed error code' {
+        $SnapshotFolder = Join-Path $TestDrive 'report-prefix/TenantGovernance/Snapshots'
+        New-Item -ItemType Directory -Path $SnapshotFolder -Force | Out-Null
+        $Manifest = [ordered]@{
+            SnapshotId = 'job-prefix'; SnapshotJobStatus = 'partiallySuccessful'; CapturedDateTime = '2026-09-01T10:00:00Z'
+            ResourcesToInclude = @('microsoft.entra.namedlocation'); CapturedResourceCount = 0; PublishedResourceTypeCounts = [ordered]@{}
+            PublishedResourceTypes = @(); StaleResourceTypes = @('microsoft.entra.namedlocation'); ResourceTypeStates = @()
+            Diagnostics = @(
+                [ordered]@{ ResourceType = 'microsoft.entra.namedlocation'; ErrorCategory = 'ExportError'; ErrorCode = 'Request_ResourceNotFound'; Occurrences = 2; Message = "[Request_ResourceNotFound] : Resource '<id>' does not exist."; RemediationHint = 'retry' }
+                [ordered]@{ ResourceType = 'microsoft.entra.namedlocation'; ErrorCategory = 'ConnectionError'; ErrorCode = 'Timeout'; Occurrences = 1; Message = 'timeout'; RemediationHint = 'retry' }
+            )
+            ErrorDetailsUnavailable = $false; IsComplete = $false
+        }
+        $Manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $SnapshotFolder '.SnapshotManifest.json') -Encoding utf8
+        $Manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $SnapshotFolder '.LastAttemptManifest.json') -Encoding utf8
+        $ConfigPath = Join-Path $TestDrive 'report-prefix/EntraOpsConfig.json'
+        @{ TenantGovernanceSnapshot = @{ ResourcesToInclude = @('microsoft.entra.namedlocation') } } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ConfigPath -Encoding utf8
+        Mock Show-EntraOpsWarningSummary {}
+
+        Get-EntraOpsTenantGovernanceSnapshotReport -SnapshotFolder $SnapshotFolder -ConfigFilePath $ConfigPath -SkipGraphJobDetails -WarningAction SilentlyContinue | Out-Null
+
+        Should -Invoke Show-EntraOpsWarningSummary -Times 1 -Exactly -ParameterFilter {
+            $Messages = @($WarningMessages.Message)
+            $Messages.Count -eq 2 -and
+            @($Messages | Where-Object { $_.StartsWith("[Request_ResourceNotFound] : Resource") }).Count -eq 1 -and
+            @($Messages | Where-Object { $_.Contains('[Request_ResourceNotFound] [Request_ResourceNotFound]') }).Count -eq 0 -and
+            @($Messages | Where-Object { $_.StartsWith('[Timeout] timeout') }).Count -eq 1
+        }
+    }
 }
 

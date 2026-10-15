@@ -3,7 +3,7 @@
 BeforeAll {
     $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
     Import-Module (Join-Path $script:TestRepositoryRoot 'EntraOps') -Force
-    $script:PreviousBaseFolder = & (Get-Module EntraOps) { $script:EntraOpsBasefolder }
+    $script:PreviousBaseFolder = $Global:EntraOpsBaseFolder
 
     function Invoke-TestConnect {
         param([hashtable]$Parameters = @{})
@@ -13,7 +13,7 @@ BeforeAll {
 }
 
 AfterAll {
-    & (Get-Module EntraOps) { param($Path) $script:EntraOpsBasefolder = $Path } $script:PreviousBaseFolder
+    $Global:EntraOpsBaseFolder = $script:PreviousBaseFolder
     Remove-Variable -Name EntraOpsConfig, TenantIdContext, TenantNameContext, ManagingTenantIdContext, ManagingTenantNameContext, EntraOpsIncludeObjectDetails, XdrAvdHuntingAccess, DefaultFolderClassification, DefaultFolderClassifiedEam -Scope Global -ErrorAction SilentlyContinue
 }
 
@@ -52,7 +52,7 @@ Describe 'Connect-EntraOps configuration file detection' {
         $script:WorkFolder = Join-Path $TestDrive ([guid]::NewGuid())
         $script:BaseFolder = Join-Path $TestDrive ([guid]::NewGuid())
         New-Item -ItemType Directory -Path $script:WorkFolder, $script:BaseFolder | Out-Null
-        & (Get-Module EntraOps) { param($Path) $script:EntraOpsBasefolder = $Path } $script:BaseFolder
+        $Global:EntraOpsBaseFolder = $script:BaseFolder
         Push-Location $script:WorkFolder
 
         Mock Install-EntraOpsRequiredModule -ModuleName EntraOps {}
@@ -87,6 +87,14 @@ Describe 'Connect-EntraOps configuration file detection' {
         Invoke-TestConnect | Out-Null
 
         $Global:EntraOpsConfig.ServiceEM.GroupPrefix | Should -Be 'BASE'
+    }
+
+    It 'uses the session working folder for the connection summary and default paths' {
+        $Output = Invoke-TestConnect
+
+        $Output | Should -Match "Working Folder\s+: $([regex]::Escape($script:BaseFolder)) \(set in this session\)"
+        $Global:DefaultFolderClassification | Should -Be "$script:BaseFolder/Classification/"
+        $Global:DefaultFolderClassifiedEam | Should -Be "$script:BaseFolder/PrivilegedEAM/"
     }
 
     It 'does not use a configuration of another tenant' {

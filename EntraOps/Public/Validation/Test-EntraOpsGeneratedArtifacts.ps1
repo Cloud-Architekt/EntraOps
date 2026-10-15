@@ -102,6 +102,9 @@ if ($ResolvedPrivilegedEamPath) {
                 $ClassificationHasSupportedShape = $null -eq $Classification -or $Classification -is [array] -or $Classification -is [System.Collections.IDictionary] -or $Classification -is [pscustomobject]
                 if (-not $ClassificationHasSupportedShape) {
                     $Violations.Add("$($AggregateFile.Name): assignment '$InstanceId' has unsupported Classification shape '$($Classification.GetType().FullName)'.")
+                } elseif ($null -ne $Classification -and $Classification -isnot [array]) {
+                    # Still readable, but consumers indexing Classification[0] (KQL/workbooks, report apps) expect an array.
+                    $DataQualityWarnings.Add("$($AggregateFile.Name): assignment '$InstanceId' for object '$ObjectId' stores Classification as a single object instead of an array.")
                 }
                 if ($RoleAssignment.RoleIsPrivileged -eq $true -and $ClassificationIsEmpty) {
                     $Message = "$($AggregateFile.Name): privileged assignment '$InstanceId' ('$($RoleAssignment.RoleDefinitionName)') for object '$ObjectId' has no classification result."

@@ -24,17 +24,23 @@ BeforeAll {
 
             [switch]$MissingObjectId,
 
-            [switch]$DuplicateObject
+            [switch]$DuplicateObject,
+
+            [switch]$SingleObjectClassification
         )
 
         $SystemPath = Join-Path $Root 'EntraID'
         New-Item -Path $SystemPath -ItemType Directory -Force | Out-Null
+        # Assigned outside of an if-expression: statement output would unwrap a one-element array.
+        $AssignmentClassification = @([pscustomobject]@{ AdminTierLevel = '0'; AdminTierLevelName = 'ControlPlane' })
+        if ($PrivilegedWithoutClassification) { $AssignmentClassification = @() }
+        if ($SingleObjectClassification) { $AssignmentClassification = [pscustomobject]@{ AdminTierLevel = '0'; AdminTierLevelName = 'ControlPlane' } }
         $Assignment = [pscustomobject]@{
             RoleAssignmentInstanceId       = 'EO_RA_test'
             RoleDefinitionName             = 'Global Administrator'
             TransitiveByNestingObjectIds   = @('group-a')
             RoleIsPrivileged               = [bool]$PrivilegedWithoutClassification
-            Classification                 = if ($PrivilegedWithoutClassification) { @() } else { @([pscustomobject]@{ AdminTierLevel = '0'; AdminTierLevelName = 'ControlPlane' }) }
+            Classification                 = $AssignmentClassification
         }
         $Assignments = @($Assignment)
         if ($DuplicateAssignment) {
@@ -126,6 +132,24 @@ Describe 'Test-EntraOpsGeneratedArtifacts' {
         & $ValidatorPath -PrivilegedEamPath $ArtifactRoot -WarningVariable +Warnings | Should -Match 'Validated 1 object'
         $Warnings.Message | Should -Match 'has no classification result'
         { & $ValidatorPath -PrivilegedEamPath $ArtifactRoot -FailOnPrivilegedAssignmentWithoutClassification } | Should -Throw '*has no classification result*'
+    }
+
+    It 'warns but accepts an assignment classification stored as a single object instead of an array' {
+        $ArtifactRoot = Join-Path $TestDrive 'single-object-classification'
+        New-TestEamArtifact -Root $ArtifactRoot -SingleObjectClassification
+
+        $Warnings = @()
+        & $ValidatorPath -PrivilegedEamPath $ArtifactRoot -WarningVariable +Warnings | Should -Match 'Validated 1 object'
+        $Warnings.Message | Should -Match 'single object instead of an array'
+    }
+
+    It 'does not warn about an assignment classification array with one entry' {
+        $ArtifactRoot = Join-Path $TestDrive 'single-entry-array-classification'
+        New-TestEamArtifact -Root $ArtifactRoot
+
+        $Warnings = @()
+        & $ValidatorPath -PrivilegedEamPath $ArtifactRoot -WarningVariable +Warnings | Out-Null
+        $Warnings.Message | Should -Not -Match 'single object instead of an array'
     }
 
     It 'rejects an EAM object without an object id' {

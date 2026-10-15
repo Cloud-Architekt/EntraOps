@@ -167,7 +167,8 @@
     from the public EntraOps repository, main branch, when they are missing in the EntraOps working
     folder, e.g. for a module-only installation from the PowerShell Gallery. Prefer
     Initialize-EntraOpsWorkspace -Ref <release tag> beforehand, so the content matches the module version.
-    Without this switch, a missing Reports folder stops with an error and missing templates skip the
+    Also repairs an incomplete Reports folder when a selected app is missing.
+    Without this switch, missing reporting apps stop with an error and missing templates skip the
     Classification Explorer (error with -FailureAction Stop).
 
 .EXAMPLE
@@ -320,39 +321,6 @@ function New-EntraOpsReportingData {
     $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
     if ([string]::IsNullOrWhiteSpace($EntraOpsRoot)) { $EntraOpsRoot = $RepositoryRoot }
 
-    # Module-only installations (e.g. PowerShell Gallery) ship neither the reporting apps nor the classification templates.
-    $ReportingFolder = Join-Path $RepositoryRoot 'Reports'
-    $ClassificationTemplatesFolder = Join-Path $EntraOpsRoot 'Classification/Templates'
-    $HasCustomAppRoot = @($PSBoundParameters.Keys | Where-Object { $_ -like '*AppRoot' }).Count -gt 0
-    $MissingReports = -not $HasCustomAppRoot -and -not (Test-Path -LiteralPath (Join-Path $ReportingFolder 'index.html') -PathType Leaf)
-    $MissingTemplates = -not $SkipClassificationExplorer -and -not (Test-Path -LiteralPath $ClassificationTemplatesFolder -PathType Container)
-
-    if ($MissingReports -or $MissingTemplates) {
-        $MissingItems = @(
-            if ($MissingReports) { "reporting apps folder '$ReportingFolder'" }
-            if ($MissingTemplates) { "classification templates folder '$ClassificationTemplatesFolder'" }
-        ) -join ' and '
-        $ModuleVersion = $MyInvocation.MyCommand.Module.Version
-        $MissingContentMessage = "The $MissingItems $(if ($MissingReports -and $MissingTemplates) { 'are' } else { 'is' }) missing (e.g. module-only installation). Run Initialize-EntraOpsWorkspace -Ref <release tag of EntraOps $ModuleVersion> to install the content that matches your module$(if ($MissingTemplates -and -not $MissingReports) { ', or run Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles to keep the classification files used for the export' }). -InstallMissingReportingFolder downloads it from the main branch instead."
-
-        if ($InstallMissingReportingFolder) {
-            if ($MissingReports) {
-                Install-EntraOpsReportingFolder -DestinationPath $ReportingFolder -Force:(Test-Path -LiteralPath $ReportingFolder) | Out-Null
-            }
-            if ($MissingTemplates) {
-                Initialize-EntraOpsWorkspace -Path $EntraOpsRoot -Content Classification -KeepWorkingFolder | Out-Null
-            }
-        } elseif ($WhatIfPreference) {
-            Write-Warning $MissingContentMessage
-            return
-        } elseif ($MissingReports -or $FailureAction -eq 'Stop') {
-            throw $MissingContentMessage
-        } else {
-            Write-Warning "$MissingContentMessage Skipping Classification Explorer data."
-            $SkipClassificationExplorer = [switch]$true
-        }
-    }
-
     Write-Verbose "Using EntraOps repository root: $EntraOpsRoot"
 
     # Privilege History defaults come from EntraOpsConfig.json ("PrivilegeHistory": { "EnablePrivilegeHistory":
@@ -390,6 +358,65 @@ function New-EntraOpsReportingData {
     }
     if (-not $PSBoundParameters.ContainsKey('PrivilegeHistorySnapshotInterval')) {
         $PrivilegeHistorySnapshotInterval = $ConfigPrivilegeHistorySnapshotInterval
+    }
+
+    # Module-only installations (e.g. PowerShell Gallery) ship neither the reporting apps nor the classification templates.
+    $ReportingFolder = Join-Path $RepositoryRoot 'Reports'
+    $ClassificationTemplatesFolder = Join-Path $EntraOpsRoot 'Classification/Templates'
+    $HasCustomAppRoot = @($PSBoundParameters.Keys | Where-Object { $_ -like '*AppRoot' }).Count -gt 0
+    # Check each selected app, even when Reports/index.html exists or another app uses a custom path.
+    $TgSnapshotFolder = if (-not [string]::IsNullOrWhiteSpace($ConfigurationAnalyzerImportPath)) { $ConfigurationAnalyzerImportPath } else { Join-Path $EntraOpsRoot 'TenantGovernance/Snapshots' }
+    $HasTenantGovernance = (Test-Path -LiteralPath $TgSnapshotFolder -PathType Container) -or $EntraOpsConfig.TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot -eq $true
+    $ReportApps = @(
+        @{ Name = 'TierBreachAnalyzer'; Root = $TierBreachAnalyzerAppRoot; Skip = $SkipTierBreachAnalyzer }
+        @{ Name = 'EamDashboard'; Root = $EamDashboardAppRoot; Skip = $SkipEamDashboard }
+        @{ Name = 'PrivilegedAssets'; Root = $PrivilegedAssetsAppRoot; Skip = $SkipPrivilegedAssets }
+        @{ Name = 'AccessPathMap'; Root = $AccessPathMapAppRoot; Skip = $SkipAccessPathMap }
+        @{ Name = 'ClassificationExplorer'; Root = $ClassificationExplorerAppRoot; Skip = $SkipClassificationExplorer }
+        @{ Name = 'PrivilegeHistory'; Root = $PrivilegeHistoryAppRoot; Skip = ($SkipPrivilegeHistory -or -not $EnablePrivilegeHistory) }
+        @{ Name = 'ConfigurationAnalyzer'; Root = $ConfigurationAnalyzerAppRoot; Skip = ($SkipConfigurationAnalyzer -or -not $HasTenantGovernance) }
+        @{ Name = 'AccessPackageFlow'; Root = $(Join-Path $EntraOpsRoot 'Reports/AccessPackageFlow'); Skip = ($SkipAccessPackageFlow -or -not $HasTenantGovernance) }
+    )
+    $MissingAppPaths = @(
+        foreach ($App in $ReportApps) {
+            if ($App.Skip) { continue }
+            $AppPath = if ([string]::IsNullOrWhiteSpace($App.Root)) { Join-Path $ReportingFolder $App.Name } else { $App.Root }
+            if (-not (Test-Path -LiteralPath (Join-Path $AppPath 'index.html') -PathType Leaf)) { $AppPath }
+        }
+    )
+    $MissingReports = $MissingAppPaths.Count -gt 0 -or (-not $HasCustomAppRoot -and -not (Test-Path -LiteralPath (Join-Path $ReportingFolder 'index.html') -PathType Leaf))
+    $MissingTemplates = -not $SkipClassificationExplorer -and -not (Test-Path -LiteralPath $ClassificationTemplatesFolder -PathType Container)
+
+    if ($MissingReports -or $MissingTemplates) {
+        $MissingItems = @(
+            if ($MissingReports) { "reporting apps in '$ReportingFolder'$(if ($MissingAppPaths.Count) { " (missing: $($MissingAppPaths -join ', '))" })" }
+            if ($MissingTemplates) { "classification templates folder '$ClassificationTemplatesFolder'" }
+        ) -join ' and '
+        $ModuleVersion = $MyInvocation.MyCommand.Module.Version
+        $MissingContentMessage = "Missing EntraOps content: $MissingItems. Run Initialize-EntraOpsWorkspace -Ref <release tag of EntraOps $ModuleVersion> to install the content that matches your module$(if ($MissingTemplates -and -not $MissingReports) { ', or run Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles to keep the classification files used for the export' }). To repair an existing Reports folder, run Initialize-EntraOpsWorkspace -Content Reports -Force or Install-EntraOpsReportingFolder -Force. These installers preserve generated report data. -InstallMissingReportingFolder downloads missing content from the main branch instead."
+
+        if ($InstallMissingReportingFolder) {
+            if ($MissingReports) {
+                Install-EntraOpsReportingFolder -DestinationPath $ReportingFolder -Force:(Test-Path -LiteralPath $ReportingFolder) | Out-Null
+                if (-not $WhatIfPreference) {
+                    $StillMissing = @($MissingAppPaths | Where-Object { -not (Test-Path -LiteralPath (Join-Path $_ 'index.html') -PathType Leaf) })
+                    if ($StillMissing.Count) {
+                        throw "Reporting apps are still missing after installation: $($StillMissing -join ', '). Check custom AppRoot paths or install a repository/ref that contains these apps."
+                    }
+                }
+            }
+            if ($MissingTemplates) {
+                Initialize-EntraOpsWorkspace -Path $EntraOpsRoot -Content Classification -KeepWorkingFolder | Out-Null
+            }
+        } elseif ($WhatIfPreference) {
+            Write-Warning $MissingContentMessage
+            return
+        } elseif ($MissingReports -or $FailureAction -eq 'Stop') {
+            throw $MissingContentMessage
+        } else {
+            Write-Warning "$MissingContentMessage Skipping Classification Explorer data."
+            $SkipClassificationExplorer = [switch]$true
+        }
     }
 
     $results = [System.Collections.Generic.List[object]]::new()

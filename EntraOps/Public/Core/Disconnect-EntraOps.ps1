@@ -99,12 +99,37 @@ function Disconnect-EntraOps {
     $MgContext = if (Get-Command -Name Get-MgContext -ErrorAction SilentlyContinue) { Get-MgContext -ErrorAction SilentlyContinue } else { $null }
     if ($null -ne $MgContext) {
         Write-Verbose "Disconnecting from Microsoft Graph..."
+        $MgCallbackWarnings = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
+        $MgOutputWriter = Get-EntraOpsGraphOutputWriter
+        $MgWarningWriter = if ($null -ne $MgOutputWriter) { $MgOutputWriter.WriteWarning } else { $null }
         try {
-            Disconnect-MgGraph -ErrorAction Stop | Out-Null
+            # The SDK logs cache failures through the output callback saved by Connect-MgGraph,
+            # bypassing Disconnect-MgGraph's WarningAction/WarningVariable. Capture that path too.
+            # A .NET delegate is safe on SDK worker threads; a PowerShell scriptblock is not.
+            if ($null -ne $MgOutputWriter) {
+                $MgOutputWriter.WriteWarning = [Action[string]]$MgCallbackWarnings.Enqueue
+            }
+            Disconnect-MgGraph -ErrorAction Stop -WarningAction Continue 3>&1 | ForEach-Object {
+                if ($_ -is [System.Management.Automation.WarningRecord]) {
+                    $MgCallbackWarnings.Enqueue($_.Message)
+                }
+            }
         } catch {
             # Suppress SessionNotInitialized errors as the session may have already been cleared
             if ($_.Exception.Message -notmatch "SessionNotInitialized") {
                 Write-Warning "Failed to disconnect from Microsoft Graph: $_"
+            }
+        } finally {
+            if ($null -ne $MgOutputWriter) {
+                $MgOutputWriter.WriteWarning = $MgWarningWriter
+            }
+            foreach ($MgDisconnectWarning in $MgCallbackWarnings.ToArray()) {
+                $WarningMessage = "$MgDisconnectWarning"
+                if ($WarningMessage -match '^Failed to clear the persisted MSAL token cache during Disconnect-MgGraph: The authority \(including the tenant ID\) must be in a well-formed URI format\.') {
+                    Write-Verbose $WarningMessage
+                } else {
+                    Write-Warning $WarningMessage
+                }
             }
         }
         

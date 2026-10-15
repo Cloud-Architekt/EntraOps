@@ -751,13 +751,11 @@ function Get-EntraOpsPrivilegedEamEntraId {
                 # Process parallel results and build cache
                 $SuccessCount = 0
                 $FailureCount = 0
-                $UsedThreads = @()
 
                 foreach ($Result in $ParallelResults) {
                     if ($Result.Success) {
                         $ObjectDetailsCache[$Result.ObjectId] = $Result.Details
                         $SuccessCount++
-                        if ($Result.ThreadId -notin $UsedThreads) { $UsedThreads += $Result.ThreadId }
                     } else {
                         $WarningMessages.Add([PSCustomObject]@{Type = "Stage5-ObjectDetails"; Message = "Failed to get details for object $($Result.ObjectId): $($Result.Error)"; Target = $Result.ObjectId })
                         $ObjectDetailsCache[$Result.ObjectId] = $null
@@ -765,7 +763,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
                     }
                 }
 
-                Write-Host "Parallel processing completed: $SuccessCount successful, $FailureCount failed (used $($UsedThreads.Count) threads)"
+                Write-Host "Parallel processing completed: $SuccessCount successful, $FailureCount failed (throttle limit $EffectiveThrottleLimit)"
 
                 if ($ParallelResults.Count -ne $TotalObjects) {
                     $WarningMessages.Add([PSCustomObject]@{Type = "Stage5-Parallel"; Message = "Parallel processing returns mismatch count of objects. Expected: $TotalObjects, Actual: $($ParallelResults.Count)" })
@@ -782,7 +780,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
 
         if ($UseParallel) {
             $Stage5Duration = ((Get-Date) - $Stage5Start).TotalSeconds
-            Write-Host "✓ Stage 5 completed in $([Math]::Round($Stage5Duration, 2)) seconds (parallel: $SuccessCount successful, $FailureCount failed, $($UsedThreads.Count) threads)" -ForegroundColor Green
+            Write-Host "✓ Stage 5 completed in $([Math]::Round($Stage5Duration, 2)) seconds (parallel: $SuccessCount successful, $FailureCount failed, throttle limit $EffectiveThrottleLimit)" -ForegroundColor Green
         }
     }
 

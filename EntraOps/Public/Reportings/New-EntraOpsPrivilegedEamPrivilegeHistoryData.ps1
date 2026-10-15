@@ -364,6 +364,7 @@ function New-EntraOpsPrivilegedEamPrivilegeHistoryData {
             # snapshots) - not the full live-dashboard schema, to keep repository size
             # bounded across potentially many historic commits.
             $snapshotObjects = @($objects | ForEach-Object {
+                    $snapshotObject = $_
                     [ordered]@{
                         objectId                 = $_.objectId
                         objectType               = $_.objectType
@@ -375,7 +376,8 @@ function New-EntraOpsPrivilegedEamPrivilegeHistoryData {
                                     roleAssignmentInstanceId = $_.roleAssignmentInstanceId
                                     roleAssignmentId   = $_.roleAssignmentId
                                     roleDefinitionName = $_.roleDefinitionName
-                                    roleSystem         = $_.roleSystem
+                                    # Dashboard role assignments carry no roleSystem of their own - it belongs to the parent object.
+                                    roleSystem         = $snapshotObject.roleSystem
                                     roleAssignmentType = $_.roleAssignmentType
                                     pimAssignmentType  = $_.pimAssignmentType
                                     classification     = @(@($_.classification) | ForEach-Object {

@@ -131,6 +131,10 @@
     Controls which privileged tiers and object types are included when building Device Management (Intune) scope tag assignments.
     "ControlPlaneAndManagementPlane" (default): Tier0 (ControlPlane) and Tier1 (ManagementPlane) devices and users are both included.
     "ControlPlaneDevicesOnly": Only devices owned by Tier0 (ControlPlane) users are included; Tier1 and user group memberships are skipped.
+    Tier0/Tier1 users are selected by their designated tier (ObjectAdminTierLevelName from Custom Security Attributes or
+    AlternateObjectTierLevelAttributes), not by role-derived Control Plane membership. Owned or PAW devices of Control Plane
+    users that are not selected for scope generation in the active mode are reported as IntuneDeviceScopeSelectionGap warnings.
+    Selected devices still require groups with Intune scope tag assignments to be covered.
 
 .PARAMETER IncludeObjectDetails
     Include object display names, UPNs, classification reasons, and related descriptive metadata in console
@@ -561,8 +565,8 @@ function Update-EntraOpsClassificationControlPlaneScope {
         }
         if ($HasHomeTenantId) {
             $PrivilegedDeviceOwners = @($PrivilegedDeviceOwners | Where-Object {
-                [string]::IsNullOrEmpty($_.ObjectTenantId) -or $_.ObjectTenantId -eq $HomeTenantId
-            })
+                    [string]::IsNullOrEmpty($_.ObjectTenantId) -or $_.ObjectTenantId -eq $HomeTenantId
+                })
         }
         $PrivilegedUsersOwnedDevices = @($PrivilegedDeviceOwners | Where-Object { $null -ne $_.OwnedDevices } | Select-Object -ExpandProperty OwnedDevices)
         $PrivilegedUsersPawDevices = @($PrivilegedDeviceOwners | Where-Object { $null -ne $_.AssociatedPawDevice } | Select-Object -ExpandProperty AssociatedPawDevice)
@@ -704,7 +708,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
         $PrivilegedServicePrincipals = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "servicePrincipal" })
         $PrivilegedApplicationObjects = @($PrivilegedObjects | Where-Object { $_.ObjectType -eq "application" })
         Write-Host "  Service Principals : $($PrivilegedServicePrincipals.Count)" -ForegroundColor Gray
-        Write-Host "  Application objects: $($PrivilegedApplicationObjects.Count)" -ForegroundColor Gray
+        Write-Host "  Direct application objects: $($PrivilegedApplicationObjects.Count) (application objects of single-tenant service principals are resolved below)" -ForegroundColor Gray
         # Initialized here (not just inside the branch below) so the "@(...).Count -gt 0"
         # guard further down stays false - not $null, whose @($null).Count is 1 - when no
         # privileged service principals/applications were found.
@@ -919,6 +923,18 @@ function Update-EntraOpsClassificationControlPlaneScope {
         } else {
             $Tier1Users = @()
             $Tier1DeviceIds = @()
+        }
+
+        # Device selection uses designated users only. Report devices of role-derived Control Plane users that no selected
+        # user contributes, so a missing designation does not silently shrink the scope.
+        $SelectedDeviceIds = @($Tier0DeviceIds) + @($Tier1DeviceIds)
+        $DeviceSelectionGaps = @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects $PrivilegedObjects -Tier0Users $Tier0Users -Tier1Users $Tier1Users -SelectedDeviceIds $SelectedDeviceIds -HomeTenantId $HomeTenantId)
+        if ($DeviceSelectionGaps.Count -gt 0) {
+            $UnselectedDeviceCount = @($DeviceSelectionGaps | ForEach-Object { $_.UnselectedDeviceIds }).Count
+            Write-Warning "  $($DeviceSelectionGaps.Count) Control Plane user(s) have $UnselectedDeviceCount owned or PAW device(s) not selected for privileged Intune scope generation in mode $DeviceMgmtPrivilegedTierScope. Review the designated tier (ObjectAdminTierLevelName) of these users."
+            foreach ($DeviceSelectionGap in $DeviceSelectionGaps) {
+                $WarningMessages.Add([PSCustomObject]@{ Type = $DeviceSelectionGap.Type; Message = $DeviceSelectionGap.Message })
+            }
         }
 
         Write-Host "  Scope mode               : $DeviceMgmtPrivilegedTierScope" -ForegroundColor Cyan

@@ -6,20 +6,26 @@ BeforeDiscovery {
     $script:HasAdoPipelines = Test-Path -LiteralPath (Join-Path $script:TestRepositoryRoot '.azure-pipelines') -PathType Container
     # Deployments keep their own (possibly older) pipelines while Tests are updated, so only assert template content upstream.
     $script:IsConfiguredDeployment = Test-Path -LiteralPath (Join-Path $script:TestRepositoryRoot 'EntraOpsConfig.json')
+    # Deployments of pre-release versions can keep pipelines with former file names (azure-pipelines-*.yml).
+    $script:HasOutdatedDeploymentPipelines = $script:IsConfiguredDeployment -and @(
+        'entraops-pull.yml', 'entraops-push.yml', 'entraops-push-reporting.yml',
+        'entraops-pull-tenant-governance.yml', 'entraops-update.yml', 'entraops-test.yml' |
+        Where-Object { -not (Test-Path -LiteralPath (Join-Path $script:TestRepositoryRoot ".azure-pipelines/$_") -PathType Leaf) }
+    ).Count -gt 0
 }
 
-Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not [bool](Get-Module -ListAvailable -Name powershell-yaml)) {
+Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $HasOutdatedDeploymentPipelines -or -not [bool](Get-Module -ListAvailable -Name powershell-yaml)) {
     BeforeAll {
         $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         Import-Module powershell-yaml -ErrorAction Stop
         $script:PipelineRoot = Join-Path $script:TestRepositoryRoot '.azure-pipelines'
         $script:PipelineNames = @(
-            'azure-pipelines-pull.yml'
-            'azure-pipelines-push.yml'
-            'azure-pipelines-push-reporting.yml'
-            'azure-pipelines-pull-tenant-governance.yml'
-            'azure-pipelines-update.yml'
-            'azure-pipelines-test.yml'
+            'entraops-pull.yml'
+            'entraops-push.yml'
+            'entraops-push-reporting.yml'
+            'entraops-pull-tenant-governance.yml'
+            'entraops-update.yml'
+            'entraops-test.yml'
         )
     }
 
@@ -55,7 +61,7 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not
     }
 
     It 'uses the repository-local git helper from every writing pipeline' -Skip:$IsConfiguredDeployment {
-        foreach ($PipelineName in @('azure-pipelines-pull.yml', 'azure-pipelines-pull-tenant-governance.yml', 'azure-pipelines-update.yml')) {
+        foreach ($PipelineName in @('entraops-pull.yml', 'entraops-pull-tenant-governance.yml', 'entraops-update.yml')) {
             $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw
             $Content | Should -Match ([regex]::Escape('./.azure-pipelines/scripts/Ado-GitPush.ps1'))
             $Content | Should -Not -Match ([regex]::Escape('./scripts/ado/Ado-GitPush.ps1'))
@@ -94,7 +100,7 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not
     }
 
     It 'splats the config sections loaded by Connect-EntraOps in the push pipeline' -Skip:$IsConfiguredDeployment {
-        $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-push.yml') -Raw
+        $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-push.yml') -Raw
         foreach ($Section in 'LogAnalytics', 'SentinelWatchLists', 'AutomatedAdministrativeUnitManagement', 'AutomatedRmauAssignmentsForUnprotectedObjects', 'AutomatedConditionalAccessTargetGroups', 'AutomatedElmCatalogProtection') {
             $Content | Should -Match ('Params = \$EntraOpsConfig\.' + $Section + '\r?\n')
             $Content | Should -Not -Match ('Params = \$Config\.' + $Section + '\r?\n')
@@ -102,14 +108,14 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not
     }
 
     It 'uses the documented service connection by default and allows an override' -Skip:$IsConfiguredDeployment {
-        foreach ($PipelineName in @('azure-pipelines-pull.yml', 'azure-pipelines-push.yml', 'azure-pipelines-push-reporting.yml', 'azure-pipelines-pull-tenant-governance.yml', 'azure-pipelines-update.yml')) {
+        foreach ($PipelineName in @('entraops-pull.yml', 'entraops-push.yml', 'entraops-push-reporting.yml', 'entraops-pull-tenant-governance.yml', 'entraops-update.yml')) {
             $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw
             $Content | Should -Match "AzureServiceConnection: \$\[ coalesce\(variables\['EntraOpsAzureServiceConnection'\], 'EntraOps-ServiceConnection'\) \]"
         }
     }
 
     It 'passes the configured tenant explicitly to EntraOps connections' -Skip:$IsConfiguredDeployment {
-        foreach ($PipelineName in @('azure-pipelines-pull.yml', 'azure-pipelines-push.yml')) {
+        foreach ($PipelineName in @('entraops-pull.yml', 'entraops-push.yml')) {
             $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw
             $Content | Should -Match 'Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName \$Config\.TenantName -ConfigFilePath'
         }
@@ -125,7 +131,7 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not
     }
 
     It 'covers GitHub push operations and Tenant Governance snapshots' -Skip:$IsConfiguredDeployment {
-        $PushContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-push.yml') -Raw
+        $PushContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-push.yml') -Raw
         foreach ($Command in @(
                 'Save-EntraOpsPrivilegedEAMInsightsCustomTable'
                 'Save-EntraOpsPrivilegedEAMWatchLists'
@@ -136,13 +142,13 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not
             $PushContent | Should -Match $Command
         }
 
-        $TenantGovernanceContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-pull-tenant-governance.yml') -Raw
+        $TenantGovernanceContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-pull-tenant-governance.yml') -Raw
         $TenantGovernanceContent | Should -Match 'Invoke-EntraOpsTenantGovernanceSnapshot'
         $TenantGovernanceContent | Should -Match 'BUILD_CRONSCHEDULE_DISPLAYNAME'
     }
 
     It 'keeps pull collection operations separate and validates generated artifacts' -Skip:$IsConfiguredDeployment {
-        $PullPipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-pull.yml') -Raw | ConvertFrom-Yaml
+        $PullPipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-pull.yml') -Raw | ConvertFrom-Yaml
         $DisplayNames = @($PullPipeline.steps | ForEach-Object { $_.displayName })
         $ExpectedSteps = @(
             'Get updated definition files for classification'
@@ -173,13 +179,13 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not
         [string]$CollectionStep.inputs.Inline | Should -Match 'Save-EntraOpsPrivilegedEAMJson'
         [string]$CollectionStep.inputs.Inline | Should -Not -Match 'Update-EntraOpsClassificationFiles|Update-EntraOpsClassificationControlPlaneScope'
 
-        $PullContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-pull.yml') -Raw
+        $PullContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-pull.yml') -Raw
         $PullContent | Should -Match 'Test-EntraOpsGeneratedArtifacts[^\r\n]*-FailOnContradictoryTierPair:\$Strict'
         $PullContent | Should -Match '-FailOnPrivilegedAssignmentWithoutClassification:\$StrictEmptyClassification'
     }
 
     It 'tests reports and gates artifacts on private project visibility' -Skip:$IsConfiguredDeployment {
-        $ReportingContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-push-reporting.yml') -Raw
+        $ReportingContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-push-reporting.yml') -Raw
         $ReportingContent | Should -Match 'task: UseNode@1'
         # UseNode@1 ignores versionSpec (NodeTool@0 input) and falls back to Node 10.x
         $ReportingContent | Should -Match 'task: UseNode@1[\s\S]*?inputs:\s*\r?\n\s*version: "22\.x"'
@@ -193,7 +199,7 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or -not
     }
 
     It 'runs repository, cross-platform Pester, and browser validation in ADO' -Skip:$IsConfiguredDeployment {
-        $TestContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'azure-pipelines-test.yml') -Raw
+        $TestContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-test.yml') -Raw
         $TestContent | Should -Match 'Test-ModuleManifest'
         $TestContent | Should -Match 'Pester -RequiredVersion 5\.7\.1'
         $TestContent | Should -Match 'ubuntu-latest'

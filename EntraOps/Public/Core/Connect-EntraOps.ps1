@@ -695,7 +695,7 @@ function Connect-EntraOps {
                     $ScopeDisplay = if ($Scopes.Count -le 5) {
                         $Scopes -join ", "
                     } else {
-                        ($Scopes | Select-Object -First 5) -join ", " + " (+$($Scopes.Count - 5) more)"
+                        (($Scopes | Select-Object -First 5) -join ", ") + " (+$($Scopes.Count - 5) more)"
                     }
                     Write-Host "  Graph Scopes        : $ScopeDisplay" -ForegroundColor White
                 }

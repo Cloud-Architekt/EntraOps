@@ -11,11 +11,14 @@ ingestion, automated protection, and full rollout.
 > # Repository clone
 > Import-Module ./EntraOps
 > # or PowerShell Gallery (downloads classification templates, samples and reporting apps once)
-> Install-PSResource EntraOps; Import-Module EntraOps; Initialize-EntraOpsWorkspace
+> Install-PSResource EntraOps; Initialize-EntraOpsWorkspace
 >
 > Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
 > Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles
+> # The collection disconnects; reconnect for report enrichment.
+> Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
 > New-EntraOpsReportingData
+> Disconnect-EntraOps
 > ```
 > See [1. Try it with zero configuration](#try-it-with-zero-configuration) below for details, or keep reading for prerequisites and the full adoption roadmap.
 
@@ -61,7 +64,6 @@ scheduled, automated setup, create your own repository from the template instead
 
 ```powershell
 Install-PSResource EntraOps -Scope CurrentUser
-Import-Module EntraOps
 Initialize-EntraOpsWorkspace
 ```
 
@@ -100,13 +102,13 @@ the content into the folder and uses it for the session. Create `EntraOpsConfig.
 (`New-EntraOpsConfigFile -ConfigFilePath ./EntraOpsConfig.json`), so later sessions started from this folder use it
 automatically, or set `ENTRAOPS_ROOT`.
 
-| Output                       | Location                              | Shown by                                                                         | `Remove-EntraOpsData -Content` |
-| ---------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------ |
-| Privileged EAM export        | `PrivilegedEAM/<RbacSystem>/`         | `Save-EntraOpsPrivilegedEAMJson`, `Invoke-EntraOpsPrivilegedEAM` (summary)        | `PrivilegedEAM`                |
-| Reporting app data           | `Reports/<App>/data/`                 | `New-EntraOpsReportingData` (`Wrote ...`, `Open the reporting apps: ...`)        | `Reports`                      |
-| Tenant classification files  | `Classification/<TenantName>/`        | `Update-EntraOpsClassificationControlPlaneScope`, `Invoke-EntraOpsPrivilegedEAM` | `Classification`               |
-| Tenant Governance snapshots  | `TenantGovernance/Snapshots/`         | `Save-EntraOpsTenantGovernanceSnapshotJson`                                      | `TenantGovernance`             |
-| Graph and ARM response cache | `<user cache folder>/EntraOps`        | `Get-EntraOpsCacheStatistics`                                                    | `Cache`                        |
+| Output                       | Location                       | Shown by                                                                         | `Remove-EntraOpsData -Content` |
+| ---------------------------- | ------------------------------ | -------------------------------------------------------------------------------- | ------------------------------ |
+| Privileged EAM export        | `PrivilegedEAM/<RbacSystem>/`  | `Save-EntraOpsPrivilegedEAMJson`, `Invoke-EntraOpsPrivilegedEAM` (summary)       | `PrivilegedEAM`                |
+| Reporting app data           | `Reports/<App>/data/`          | `New-EntraOpsReportingData` (`Wrote ...`, `Open the reporting apps: ...`)        | `Reports`                      |
+| Tenant classification files  | `Classification/<TenantName>/` | `Update-EntraOpsClassificationControlPlaneScope`, `Invoke-EntraOpsPrivilegedEAM` | `Classification`               |
+| Tenant Governance snapshots  | `TenantGovernance/Snapshots/`  | `Save-EntraOpsTenantGovernanceSnapshotJson`                                      | `TenantGovernance`             |
+| Graph and ARM response cache | `<user cache folder>/EntraOps` | `Get-EntraOpsCacheStatistics`                                                    | `Cache`                        |
 
 `Remove-EntraOpsData` removes this output from the working folder, all content types by default. It prompts for
 confirmation (`-WhatIf` lists what would be removed), keeps the manually maintained
@@ -210,15 +212,21 @@ Before automating collection, review the PrivilegedEAM export from
 [1. Try it with zero configuration](#try-it-with-zero-configuration) (or a manual
 `Save-EntraOpsPrivilegedEAMJson` run) to confirm the classification and Control Plane scope match
 your expectations. Generate the
-[reporting apps](../reportings/index.html#entraops-reporting-apps) against the local export -
-Classification Explorer and EAM Dashboard are built entirely from it, no Log Analytics workspace or
+[reporting apps](../reportings/index.html#entraops-reporting-apps) against the local export.
+The apps use the export, with optional Microsoft Graph enrichment; no Log Analytics workspace or
 Azure subscription required:
 
 ```powershell
 Initialize-EntraOpsWorkspace -Ref '<release tag of your module version>' # module-only installations
 Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles
+Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
 New-EntraOpsReportingData
+Disconnect-EntraOps
 ```
+
+The collection disconnects during teardown, so reconnect before generating reports to resolve
+linked identities and related objects through Microsoft Graph. For generation without Graph
+lookups, see [Reporting apps](../reportings/index.html#entraops-reporting-apps).
 
 Azure Monitor workbooks are also available, but only once data has been ingested into Log
 Analytics/Sentinel - see [4. Ingest to Sentinel](#phase-4-ingest-to-sentinel) below.
@@ -308,8 +316,8 @@ Connect-EntraOps -AuthenticationType "UserInteractive" `
   -ConfigFilePath "./EntraOpsConfig.json"
 
 Save-EntraOpsPrivilegedEAMJson -RbacSystems $EntraOpsConfig.RbacSystems
-Disconnect-EntraOps
 New-EntraOpsReportingData
+Disconnect-EntraOps
 ```
 
 For `UserAssignedMSI`, add `-AccountId <managed-identity-client-id>`. For
@@ -528,7 +536,7 @@ Administrator when Azure role assignments are configured.
 2. Generate the configuration with `New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -DevOpsPlatform AzureDevOps`, or select Azure DevOps in the guided setup above.
 3. Run `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps-ADO" -ConfigFile "./EntraOpsConfig.json"` to create the app registration and configured permissions.
 4. Create an **Azure Resource Manager -> Workload Identity Federation (manual)** service connection. Add the exact issuer and subject shown by Azure DevOps as a federated credential on the app registration; use `api://AzureADTokenExchange` as the audience.
-5. Import the five production YAML pipelines from `.azure-pipelines/`: pull, push, reporting, Tenant Governance, and update. Name the pull pipeline `azure-pipelines-pull` so its completion triggers resolve without modification. Optionally import `azure-pipelines-test.yml` for repository, cross-platform Pester, and browser validation; configure it as a build-validation policy for Azure Repos pull requests.
+5. Import the five production YAML pipelines from `.azure-pipelines/`: pull, push, reporting, Tenant Governance, and update. Name the pull pipeline `entraops-pull` so its completion triggers resolve without modification. Optionally import `entraops-test.yml` for repository, cross-platform Pester, and browser validation; configure it as a build-validation policy for Azure Repos pull requests.
 6. Name the service connection `EntraOps-ServiceConnection` to use the shipped default. Define `EntraOpsAzureServiceConnection` only when you use a different name. Add the secret `EntraOpsUpdatePat` only for a private update source.
 7. Grant `<Project> Build Service (<Organization>)` **Contribute** permission on the repository, and authorize the service connection for the imported pipelines. The build service also needs **View project-level information** (granted by default) so the push step can verify that the project is private.
 8. Apply config-driven schedules and commit the result:
@@ -593,14 +601,14 @@ open the service connection's **Pipeline permissions** and add each imported Ent
 
 ### Pipeline reference and permissions {#azure-devops-pipeline-reference}
 
-| File                                         | Purpose                                                                                    | Trigger                                                           |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `azure-pipelines-pull.yml`                   | Updates definitions and Control Plane scope, collects data, validates it, and commits JSON | Configured schedule or manual                                     |
-| `azure-pipelines-push.yml`                   | Runs enabled ingestion and protection operations                                           | Successful `azure-pipelines-pull` completion or manual            |
-| `azure-pipelines-push-reporting.yml`         | Generates and tests reports, then publishes a private-project artifact                     | Pull completion, configured schedule, or manual                   |
-| `azure-pipelines-pull-tenant-governance.yml` | Starts or collects Tenant Governance snapshots and commits them                            | Configured start/collection schedules or manual                   |
-| `azure-pipelines-update.yml`                 | Updates EntraOps from the configured upstream                                              | Configured schedule or manual                                     |
-| `azure-pipelines-test.yml`                   | Validates the repository on Linux, Windows, and macOS and runs browser tests               | Pushes to `main`; pull requests through a build-validation policy |
+| File                                  | Purpose                                                                                    | Trigger                                                           |
+| ------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `entraops-pull.yml`                   | Updates definitions and Control Plane scope, collects data, validates it, and commits JSON | Configured schedule or manual                                     |
+| `entraops-push.yml`                   | Runs enabled ingestion and protection operations                                           | Successful `entraops-pull` completion or manual                   |
+| `entraops-push-reporting.yml`         | Generates and tests reports, then publishes a private-project artifact                     | Pull completion, configured schedule, or manual                   |
+| `entraops-pull-tenant-governance.yml` | Starts or collects Tenant Governance snapshots and commits them                            | Configured start/collection schedules or manual                   |
+| `entraops-update.yml`                 | Updates EntraOps from the configured upstream                                              | Configured schedule or manual                                     |
+| `entraops-test.yml`                   | Validates the repository on Linux, Windows, and macOS and runs browser tests               | Pushes to `main`; pull requests through a build-validation policy |
 
 The production pipelines default to the service connection name `EntraOps-ServiceConnection`. Set
 `EntraOpsAzureServiceConnection` on the pipeline, or through a linked Variable Group, only when the
@@ -628,7 +636,7 @@ that reporting guide.
 - **Federated sign-in fails:** compare the exact issuer, case-sensitive subject, and `api://AzureADTokenExchange` audience shown by Azure DevOps with the app registration credential.
 - **Git push returns HTTP 403:** grant `<Project> Build Service (<Organization>)` **Contribute** and any required branch-policy bypass.
 - **Schedule is missing:** run `Update-EntraOpsAzureDevOpsSchedules`, commit the YAML changes, and verify `BranchName` matches the pipeline branch.
-- **Push or reporting does not follow pull:** keep the pull pipeline name `azure-pipelines-pull`, or update the dependent pipelines' `resources.pipelines.source`.
+- **Push or reporting does not follow pull:** keep the pull pipeline name `entraops-pull`, or update the dependent pipelines' `resources.pipelines.source`.
 - **Reporting has no artifact:** enable reporting and confirm the project is private; artifact publication fails closed when visibility cannot be verified.
 
 ### GitHub and Azure DevOps differences {#devops-platform-differences}
@@ -638,14 +646,14 @@ automation plumbing differs:
 
 | Area                         | GitHub Actions                                                                           | Azure DevOps                                                                                                                    |
 | ---------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Definitions                  | `.github/workflows/*.yaml`                                                               | `.azure-pipelines/azure-pipelines-*.yml`                                                                                        |
+| Definitions                  | `.github/workflows/*.yaml`                                                               | `.azure-pipelines/entraops-*.yml`                                                                                               |
 | Workload federation          | GitHub OIDC; subject `repo:<org>/<repo>:ref:refs/heads/<branch>`                         | Azure Resource Manager WIF service connection; subject `sc://<org>/<project>/<service-connection>`                              |
 | Runtime configuration        | `Update-EntraOpsRequiredWorkflowParameters` embeds values and schedules in workflow YAML | Pipelines read operational values from `EntraOpsConfig.json`; `Update-EntraOpsAzureDevOpsSchedules` materializes YAML schedules |
 | Repository writes            | Built-in `GITHUB_TOKEN`; workflow permissions are declared in YAML                       | `$(System.AccessToken)`; the Build Service needs repository **Contribute** permission                                           |
-| Pull/update linkage          | Native `workflow_run` triggers                                                           | Pipeline completion resources; keep the pull pipeline name `azure-pipelines-pull` or update each `source`                       |
+| Pull/update linkage          | Native `workflow_run` triggers                                                           | Pipeline completion resources; keep the pull pipeline name `entraops-pull` or update each `source`                              |
 | Automated update publication | `PullRequest` by default, with optional `DirectPush`                                     | `DirectPush`                                                                                                                    |
 | Reporting                    | 30-day Actions artifact; optional releases in a private repository                       | Pipeline artifact only after ADO confirms the project is private                                                                |
-| CI and pull requests         | `Test-EntraOps` runs on pushes and pull requests; it can be a required status check      | `azure-pipelines-test.yml` runs on pushes; configure it as an Azure Repos build-validation policy for pull requests             |
+| CI and pull requests         | `Test-EntraOps` runs on pushes and pull requests; it can be a required status check      | `entraops-test.yml` runs on pushes; configure it as an Azure Repos build-validation policy for pull requests                    |
 | Tenant Governance            | One workflow with manual and materialized start/collection schedules                     | One parameterized pipeline with `Start`, `Collect`, and `RunAndWait`, plus materialized schedules                               |
 
 ## 4. Ingest to Sentinel {#phase-4-ingest-to-sentinel}

@@ -21,6 +21,8 @@
     can be authored/maintained outside of this cmdlet (e.g. via the ClassificationExplorer
     "Customize Overwrites" view, or manually) and are always preserved if present. Use
     -KeepClassificationFiles to keep all classification files for the reporting apps.
+    This cmdlet disconnects from Azure and Microsoft Graph during teardown. Reconnect before
+    generating reports with live Microsoft Graph enrichment, or disable the reporting object lookups.
 
 .PARAMETER RbacSystems
     RBAC systems to classify. Defaults to Azure, EntraID, IdentityGovernance,
@@ -51,7 +53,10 @@
 
 .EXAMPLE
     Run EntraOps and generate the reporting apps from the export and its classification files.
-    Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles; New-EntraOpsReportingData
+    Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles
+    Connect-EntraOps -AuthenticationType UserInteractive -TenantName 'contoso.onmicrosoft.com'
+    New-EntraOpsReportingData
+    Disconnect-EntraOps
 
 .EXAMPLE
     Run for EntraID and Azure only, sourcing Control Plane objects from Azure Resource Graph.
@@ -122,12 +127,12 @@ function Invoke-EntraOpsPrivilegedEAM {
 
         $AzContext = Get-AzContext -ErrorAction SilentlyContinue
         if (-not $AzContext -or [string]::IsNullOrEmpty($AzContext.Tenant.Id)) {
-            throw "No active Azure context found. Run Connect-AzAccount before invoking this cmdlet."
+            throw "No active Azure context found. Establish an Azure context by running Connect-AzAccount or run Connect-EntraOps before invoking this cmdlet."
         }
 
         $MgContext = Get-MgContext -ErrorAction SilentlyContinue
         if (-not $MgContext -or [string]::IsNullOrEmpty($MgContext.TenantId)) {
-            throw "No active Microsoft Graph context found. Run Connect-MgGraph before invoking this cmdlet."
+            throw "No active Microsoft Graph context found. Establish an Microsoft Graph context by running Connect-MgGraph or run Connect-EntraOps before invoking this cmdlet."
         }
 
         Write-Host "       Azure  : $($AzContext.Account.Id) @ tenant $($AzContext.Tenant.Id)" -ForegroundColor Gray

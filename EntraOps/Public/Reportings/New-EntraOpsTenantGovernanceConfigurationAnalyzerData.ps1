@@ -85,8 +85,13 @@ overrides are intentionally required.
 
 .PARAMETER AllowPartialSnapshot
 Allow the current mixed snapshot tree to be analyzed when the latest attempt was partially
-successful. Preserved resource types remain marked stale in snapshotManifest. Historical partial
-commits are still excluded because their trees can combine files from multiple capture times.
+successful. Preserved resource types remain marked stale in snapshotManifest.
+This switch only gates the current snapshot. Historical partially successful commits are part of
+the timeline regardless of this switch whenever they published resource files: their published
+resource types contain freshly captured files, while stale resource types keep their previous,
+unchanged files. Historical commits that published no resource type (manifest-only) are excluded,
+because they would present an older tree at the partial job time. Changes to stale or retained
+resources therefore become visible only in a later snapshot.
 
 .PARAMETER SkipWorkingTree
     Do not append the "(working tree)" snapshot for uncommitted on-disk changes.
@@ -110,7 +115,8 @@ commits are still excluded because their trees can combine files from multiple c
     New-EntraOpsTenantGovernanceConfigurationAnalyzerData -AllowPartialSnapshot
 
     Includes the current mixed snapshot tree after a partially successful capture. Historical
-    partial commits remain excluded from the timeline.
+    partial commits that published resource files are included with or without this switch;
+    manifest-only commits remain excluded from the timeline.
 #>
 
 function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
