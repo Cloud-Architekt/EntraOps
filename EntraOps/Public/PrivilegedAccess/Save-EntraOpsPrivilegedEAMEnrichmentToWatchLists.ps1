@@ -29,7 +29,7 @@
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to WatchList in Microsoft Sentinel Workspace for correlation between work and privileged accounts.
-    Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists WatchListTemplates "IdentityCorrelation" -SentinelSubscriptionId "3f72a077-c32a-423c-8503-41b93d3b0737" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
+    Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists WatchListTemplates "IdentityCorrelation" -SentinelSubscriptionId "11111111-1111-1111-1111-111111111111" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
 #>
 function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
 

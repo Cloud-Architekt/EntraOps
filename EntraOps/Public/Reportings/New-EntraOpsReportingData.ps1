@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Convenience wrapper around the Classification Explorer, Tier Breach Analyzer, EAM Dashboard,
-    Privilege History, Configuration Analyzer, Access Package Flow, and Access Path Map generators. It runs all
+    Privileged Assets, Privilege History, Configuration Analyzer, Access Package Flow, and Access Path Map generators. It runs all
     applicable generators in one call, so the whole
     EntraOps Reporting portal (Reports/index.html + all sub-apps) can be refreshed with a
     single cmdlet. Use Remove-EntraOpsReportingData to clear the generated data again.
@@ -47,6 +47,23 @@
     Forwarded to New-EntraOpsPrivilegedEamDashboardData. Resolves linked identity
     IDs outside the Privileged EAM export through Microsoft Graph when enabled.
     When omitted, the EAM Dashboard generator defaults this option to `$true`.
+
+.PARAMETER PrivilegedAssetsAppRoot
+    Path to the Privileged Assets app folder. Defaults to Reports/PrivilegedAssets
+    under EntraOpsRoot. The Privileged EAM export is read from the EAM Dashboard import path.
+
+.PARAMETER PrivilegedAssetsResolveRelatedObjectIds
+    Forwarded as -ResolveRelatedObjectIds to New-EntraOpsPrivilegedAssetsData. When omitted,
+    the generator falls back to `PrivilegedAssets.ResolveRelatedObjectIds` in
+    EntraOpsConfig.json, or $true.
+
+.PARAMETER PrivilegedAssetsMaesterTestResultPath
+    Forwarded as -MaesterTestResultPath to New-EntraOpsPrivilegedAssetsData: Maester result JSON,
+    path without extension, or folder (latest TestResults JSON). Optional; the Maester integration is
+    skipped when omitted or when no result file is found.
+
+.PARAMETER SkipPrivilegedAssets
+    Do not generate Privileged Assets data.
 
 .PARAMETER AccessPathMapTenantId
     Tenant id forwarded to New-EntraOpsAccessPathMapData (used to build role node ids
@@ -144,10 +161,25 @@
 .PARAMETER AllowPartialTenantGovernanceSnapshot
     Allow Configuration Analyzer generation from a partial snapshot with preserved stale resource types.
 
+.PARAMETER InstallMissingReportingFolder
+    Download the reporting apps (Install-EntraOpsReportingFolder) and the classification templates
+    required by the Classification Explorer (Initialize-EntraOpsWorkspace -Content Classification)
+    from the public EntraOps repository, main branch, when they are missing in the EntraOps working
+    folder, e.g. for a module-only installation from the PowerShell Gallery. Prefer
+    Initialize-EntraOpsWorkspace -Ref <release tag> beforehand, so the content matches the module version.
+    Also repairs an incomplete Reports folder when a selected app is missing.
+    Without this switch, missing reporting apps stop with an error and missing templates skip the
+    Classification Explorer (error with -FailureAction Stop).
+
 .EXAMPLE
     New-EntraOpsReportingData
 
     Regenerates the data for all reporting apps in this repository checkout.
+
+.EXAMPLE
+    New-EntraOpsReportingData -InstallMissingReportingFolder
+
+    Downloads the Reports folder first if only the EntraOps module folder exists, then regenerates the data.
 
 .EXAMPLE
     New-EntraOpsReportingData -ClassificationExplorerRepoRoot "C:\Repos\AzurePrivilegedIAM" -WhatIf
@@ -190,6 +222,20 @@ function New-EntraOpsReportingData {
 
         [Parameter(Mandatory = $false)]
         [System.Nullable[bool]]$EamDashboardResolveLinkedIdentityObjectIds,
+
+        [Parameter(Mandatory = $false)]
+        [System.String]$PrivilegedAssetsAppRoot,
+
+        [Parameter(Mandatory = $false)]
+        [System.Nullable[bool]]$PrivilegedAssetsResolveRelatedObjectIds,
+
+        [Parameter(Mandatory = $false)]
+        [Alias('MaesterTestResultPath')]
+        [AllowEmptyString()]
+        [System.String]$PrivilegedAssetsMaesterTestResultPath,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipPrivilegedAssets,
 
         [Parameter(Mandatory = $false)]
         [System.String]$AccessPathMapTenantId,
@@ -256,7 +302,10 @@ function New-EntraOpsReportingData {
         [switch]$AllowStaleTenantGovernanceSnapshot,
 
         [Parameter(Mandatory = $false)]
-        [switch]$AllowPartialTenantGovernanceSnapshot
+        [switch]$AllowPartialTenantGovernanceSnapshot,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$InstallMissingReportingFolder
     )
 
     # Resolve the repository root relative to the module location. Prefer the module's
@@ -269,7 +318,7 @@ function New-EntraOpsReportingData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
     if ([string]::IsNullOrWhiteSpace($EntraOpsRoot)) { $EntraOpsRoot = $RepositoryRoot }
 
     Write-Verbose "Using EntraOps repository root: $EntraOpsRoot"
@@ -311,9 +360,68 @@ function New-EntraOpsReportingData {
         $PrivilegeHistorySnapshotInterval = $ConfigPrivilegeHistorySnapshotInterval
     }
 
+    # Module-only installations (e.g. PowerShell Gallery) ship neither the reporting apps nor the classification templates.
+    $ReportingFolder = Join-Path $RepositoryRoot 'Reports'
+    $ClassificationTemplatesFolder = Join-Path $EntraOpsRoot 'Classification/Templates'
+    $HasCustomAppRoot = @($PSBoundParameters.Keys | Where-Object { $_ -like '*AppRoot' }).Count -gt 0
+    # Check each selected app, even when Reports/index.html exists or another app uses a custom path.
+    $TgSnapshotFolder = if (-not [string]::IsNullOrWhiteSpace($ConfigurationAnalyzerImportPath)) { $ConfigurationAnalyzerImportPath } else { Join-Path $EntraOpsRoot 'TenantGovernance/Snapshots' }
+    $HasTenantGovernance = (Test-Path -LiteralPath $TgSnapshotFolder -PathType Container) -or $EntraOpsConfig.TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot -eq $true
+    $ReportApps = @(
+        @{ Name = 'TierBreachAnalyzer'; Root = $TierBreachAnalyzerAppRoot; Skip = $SkipTierBreachAnalyzer }
+        @{ Name = 'EamDashboard'; Root = $EamDashboardAppRoot; Skip = $SkipEamDashboard }
+        @{ Name = 'PrivilegedAssets'; Root = $PrivilegedAssetsAppRoot; Skip = $SkipPrivilegedAssets }
+        @{ Name = 'AccessPathMap'; Root = $AccessPathMapAppRoot; Skip = $SkipAccessPathMap }
+        @{ Name = 'ClassificationExplorer'; Root = $ClassificationExplorerAppRoot; Skip = $SkipClassificationExplorer }
+        @{ Name = 'PrivilegeHistory'; Root = $PrivilegeHistoryAppRoot; Skip = ($SkipPrivilegeHistory -or -not $EnablePrivilegeHistory) }
+        @{ Name = 'ConfigurationAnalyzer'; Root = $ConfigurationAnalyzerAppRoot; Skip = ($SkipConfigurationAnalyzer -or -not $HasTenantGovernance) }
+        @{ Name = 'AccessPackageFlow'; Root = $(Join-Path $EntraOpsRoot 'Reports/AccessPackageFlow'); Skip = ($SkipAccessPackageFlow -or -not $HasTenantGovernance) }
+    )
+    $MissingAppPaths = @(
+        foreach ($App in $ReportApps) {
+            if ($App.Skip) { continue }
+            $AppPath = if ([string]::IsNullOrWhiteSpace($App.Root)) { Join-Path $ReportingFolder $App.Name } else { $App.Root }
+            if (-not (Test-Path -LiteralPath (Join-Path $AppPath 'index.html') -PathType Leaf)) { $AppPath }
+        }
+    )
+    $MissingReports = $MissingAppPaths.Count -gt 0 -or (-not $HasCustomAppRoot -and -not (Test-Path -LiteralPath (Join-Path $ReportingFolder 'index.html') -PathType Leaf))
+    $MissingTemplates = -not $SkipClassificationExplorer -and -not (Test-Path -LiteralPath $ClassificationTemplatesFolder -PathType Container)
+
+    if ($MissingReports -or $MissingTemplates) {
+        $MissingItems = @(
+            if ($MissingReports) { "reporting apps in '$ReportingFolder'$(if ($MissingAppPaths.Count) { " (missing: $($MissingAppPaths -join ', '))" })" }
+            if ($MissingTemplates) { "classification templates folder '$ClassificationTemplatesFolder'" }
+        ) -join ' and '
+        $ModuleVersion = $MyInvocation.MyCommand.Module.Version
+        $MissingContentMessage = "Missing EntraOps content: $MissingItems. Run Initialize-EntraOpsWorkspace -Ref <release tag of EntraOps $ModuleVersion> to install the content that matches your module$(if ($MissingTemplates -and -not $MissingReports) { ', or run Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles to keep the classification files used for the export' }). To repair an existing Reports folder, run Initialize-EntraOpsWorkspace -Content Reports -Force or Install-EntraOpsReportingFolder -Force. These installers preserve generated report data. -InstallMissingReportingFolder downloads missing content from the main branch instead."
+
+        if ($InstallMissingReportingFolder) {
+            if ($MissingReports) {
+                Install-EntraOpsReportingFolder -DestinationPath $ReportingFolder -Force:(Test-Path -LiteralPath $ReportingFolder) | Out-Null
+                if (-not $WhatIfPreference) {
+                    $StillMissing = @($MissingAppPaths | Where-Object { -not (Test-Path -LiteralPath (Join-Path $_ 'index.html') -PathType Leaf) })
+                    if ($StillMissing.Count) {
+                        throw "Reporting apps are still missing after installation: $($StillMissing -join ', '). Check custom AppRoot paths or install a repository/ref that contains these apps."
+                    }
+                }
+            }
+            if ($MissingTemplates) {
+                Initialize-EntraOpsWorkspace -Path $EntraOpsRoot -Content Classification -KeepWorkingFolder | Out-Null
+            }
+        } elseif ($WhatIfPreference) {
+            Write-Warning $MissingContentMessage
+            return
+        } elseif ($MissingReports -or $FailureAction -eq 'Stop') {
+            throw $MissingContentMessage
+        } else {
+            Write-Warning "$MissingContentMessage Skipping Classification Explorer data."
+            $SkipClassificationExplorer = [switch]$true
+        }
+    }
+
     $results = [System.Collections.Generic.List[object]]::new()
 
-    Write-Verbose "Starting reporting data generation. Skipped apps: TierBreachAnalyzer=$SkipTierBreachAnalyzer; EamDashboard=$SkipEamDashboard; PrivilegeHistory=$SkipPrivilegeHistory; ConfigurationAnalyzer=$SkipConfigurationAnalyzer; AccessPackageFlow=$SkipAccessPackageFlow; AccessPathMap=$SkipAccessPathMap; ClassificationExplorer=$SkipClassificationExplorer."
+    Write-Verbose "Starting reporting data generation. Skipped apps: TierBreachAnalyzer=$SkipTierBreachAnalyzer; EamDashboard=$SkipEamDashboard; PrivilegedAssets=$SkipPrivilegedAssets; PrivilegeHistory=$SkipPrivilegeHistory; ConfigurationAnalyzer=$SkipConfigurationAnalyzer; AccessPackageFlow=$SkipAccessPackageFlow; AccessPathMap=$SkipAccessPathMap; ClassificationExplorer=$SkipClassificationExplorer."
 
     if (-not $SkipTierBreachAnalyzer) {
         $TierBreachParams = @{
@@ -348,6 +456,26 @@ function New-EntraOpsReportingData {
         $EamDashboardResult = New-EntraOpsPrivilegedEamDashboardData @EamDashboardParams
         $results.Add([pscustomobject]@{ App = 'EamDashboard'; Result = $EamDashboardResult })
         Write-Verbose "Completed EAM Dashboard data generation."
+    }
+
+    if (-not $SkipPrivilegedAssets) {
+        $PrivilegedAssetsParams = @{
+            RepoRoot       = $EntraOpsRoot
+            ConfigFilePath = $ConfigFilePath
+            Verbose        = $VerbosePreference -eq 'Continue'
+            WhatIf         = $WhatIfPreference
+            Confirm        = $false
+        }
+        if (-not [string]::IsNullOrWhiteSpace($EamDashboardImportPath)) { $PrivilegedAssetsParams.ImportPath = $EamDashboardImportPath }
+        if (-not [string]::IsNullOrWhiteSpace($PrivilegedAssetsAppRoot)) { $PrivilegedAssetsParams.AppRoot = $PrivilegedAssetsAppRoot }
+        if ($null -ne $PrivilegedAssetsResolveRelatedObjectIds) { $PrivilegedAssetsParams.ResolveRelatedObjectIds = $PrivilegedAssetsResolveRelatedObjectIds }
+        if ($PSBoundParameters.ContainsKey('PrivilegedAssetsMaesterTestResultPath')) { $PrivilegedAssetsParams.MaesterTestResultPath = $PrivilegedAssetsMaesterTestResultPath }
+        if ($PassThru) { $PrivilegedAssetsParams.PassThru = $true }
+
+        Write-Verbose "Generating Privileged Assets data..."
+        $PrivilegedAssetsResult = New-EntraOpsPrivilegedAssetsData @PrivilegedAssetsParams
+        $results.Add([pscustomobject]@{ App = 'PrivilegedAssets'; Result = $PrivilegedAssetsResult })
+        Write-Verbose "Completed Privileged Assets data generation."
     }
 
     if (-not $SkipPrivilegeHistory -and $EnablePrivilegeHistory) {
@@ -474,6 +602,8 @@ function New-EntraOpsReportingData {
         Write-Host "No EntraOps Reporting data was generated (all apps skipped)."
     } else {
         Write-Host "Generated EntraOps Reporting data for: $(($results.App) -join ', ')."
+        $ReportingPortal = Join-Path $EntraOpsRoot 'Reports/index.html'
+        if (Test-Path -LiteralPath $ReportingPortal -PathType Leaf) { Write-Host "Open the reporting apps: $ReportingPortal" }
     }
 
     if ($PassThru) { $results }

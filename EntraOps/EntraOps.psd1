@@ -10,7 +10,7 @@
     RootModule           = 'EntraOps.psm1'
 
     # Version number of this module.
-    ModuleVersion        = '1.0.0'
+    ModuleVersion        = '1.1.0'
 
     # Supported PSEditions
     CompatiblePSEditions = 'Core'
@@ -28,7 +28,7 @@
     Copyright            = '(c) 2024-2026 Thomas Naunheim. All rights reserved.'
 
     # Description of the functionality provided by this module
-    Description          = 'PowerShell module for EntraOps'
+    Description          = 'EntraOps classifies and reports privileged access in Microsoft Entra ID, Azure RBAC, Identity Governance, Intune, Defender and Microsoft Graph app roles against the Enterprise Access Model (EAM). It exports privileged assets as JSON, Microsoft Sentinel watchlists and BloodHound data, provides Tenant Governance snapshots and offline reports, and provisions service-scoped landing zones (Service EM). Requires PowerShell 7.4+.'
 
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion    = '7.4'
@@ -49,23 +49,10 @@
     # ProcessorArchitecture = ''
 
     # Modules that must be imported into the global environment prior to importing this module
-
-    <# Required modules will be installed by loading the module
-    RequiredModules      = @(
-        @{
-            ModuleName    = 'Az.Accounts'
-            ModuleVersion = '2.19.0'
-        }
-        @{
-            ModuleName    = 'Az.Resources'
-            ModuleVersion = '6.16.2'
-        }
-        @{
-            ModuleName    = 'Microsoft.Graph.Authentication'
-            ModuleVersion = '2.18.0'
-        }
-    )
-    #>
+    # Intentionally unset for repository clones and PowerShell Gallery installs: Connect-EntraOps installs
+    # Az.Accounts, Az.Resources and (unless UseInvokeRestMethodOnly) Microsoft.Graph.Authentication on
+    # demand, so Import-Module works without them and Az/Graph aren't loaded at import.
+    # RequiredModules = @()
 
     # Assemblies that must be loaded prior to importing this module
     # RequiredAssemblies = @()
@@ -97,6 +84,7 @@
         'Export-EntraOpsClassificationIdentityGovernanceRoles'
         'Export-EntraOpsClassificationScopes'
         'Export-EntraOpsPrivilegedEAMBloodHound'
+        'Get-EntraOpsAgentObject'
         'Get-EntraOpsCacheStatistics'
         'Get-EntraOpsClassificationControlPlaneObjects'
         'Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs'
@@ -125,7 +113,9 @@
         'Get-EntraOpsWorkloadIdentityAttackPaths'
         'Get-EntraOpsWorkloadIdentityInfo'
         'Get-EntraOpsWorkloadIdentityRecommendations'
+        'Initialize-EntraOpsWorkspace'
         'Install-EntraOpsAllRequiredModules'
+        'Install-EntraOpsReportingFolder'
         'Install-EntraOpsRequiredModule'
         'Invoke-EntraOpsAzGraphQuery'
         'Invoke-EntraOpsAzQuery'
@@ -140,6 +130,7 @@
         'New-EntraOpsClassificationExplorerData'
         'New-EntraOpsConfigFile'
         'New-EntraOpsPrivilegedAdministrativeUnit'
+        'New-EntraOpsPrivilegedAssetsData'
         'New-EntraOpsPrivilegedConditionalAccessGroup'
         'New-EntraOpsPrivilegedEamDashboardData'
         'New-EntraOpsPrivilegedEamPrivilegeHistoryData'
@@ -152,6 +143,7 @@
         'Push-EntraOpsLogsIngestionAPI'
         'Register-EntraOpsTenantGovernanceServicePrincipal'
         'Resolve-EntraOpsUpdateSource'
+        'Remove-EntraOpsData'
         'Remove-EntraOpsReportingData'
         'Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists'
         'Save-EntraOpsPrivilegedEAMInsightsCustomTable'
@@ -172,7 +164,24 @@
         'Update-EntraOpsPrivilegedConditionalAccessGroup'
         'Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
         'Update-EntraOpsPrivilegedUnprotectedElmCatalog'
+        'Update-EntraOpsAzureDevOpsSchedules'
         'Update-EntraOpsRequiredWorkflowParameters'
+        # ServiceEM Functions
+        'Get-EntraOpsServiceEMReport'
+        'New-EntraOpsServiceAZContainer'
+        'New-EntraOpsServiceBootstrap'
+        'New-EntraOpsServiceEMAccessPackage'
+        'New-EntraOpsServiceEMAccessPackageResourceAssignment'
+        'New-EntraOpsServiceEMAssignment'
+        'New-EntraOpsServiceEMAssignmentPolicy'
+        'New-EntraOpsServiceEMCatalog'
+        'New-EntraOpsServiceEMCatalogResource'
+        'New-EntraOpsServiceEMCatalogResourceRole'
+        'New-EntraOpsServiceEntraGroup'
+        'New-EntraOpsServicePIMAssignment'
+        'New-EntraOpsServicePIMPolicy'
+        'New-EntraOpsSubscriptionLandingZone'
+        'Remove-EntraOpsServiceCatalog'
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
@@ -196,6 +205,7 @@
     # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
     PrivateData          = @{
         PSData = @{
+            Prerelease = 'rc1'
             # Tags applied to this module. These help with module discovery in online galleries.
             Tags         = @(
                 'AzureAD',
@@ -209,7 +219,8 @@
                 'RBAC',
                 'IdentityGovernance',
                 'Intune',
-                'Defender'
+                'Defender',
+                'EntraOps'
             )
 
 
@@ -217,13 +228,13 @@
             ProjectUri   = 'https://github.com/cloud-architekt/EntraOps'
 
             # A URL to the license for this project.
-            LicenseUri   = 'https://github.com/Cloud-Architekt/EntraOps/blob/main/LICENSE'
+            LicenseUri   = 'https://github.com/cloud-Architekt/EntraOps/blob/main/LICENSE'
 
             # A URL to an icon representing this module.
-            # IconUri = ''
+            IconUri      = 'https://www.entraops.com/entraops_icon.png'
 
             # ReleaseNotes of this module
-            ReleaseNotes = 'First stable release. Classifies and exports privileged access across Entra ID, Azure RBAC, Identity Governance, Intune, Defender and Microsoft Graph app roles against the Enterprise Access Model, including Azure ABAC constrained delegation, Tenant Governance snapshots, offline reporting apps and a browser-based configuration wizard. Full changelog: https://github.com/Cloud-Architekt/EntraOps/blob/main/CHANGELOG.md'
+            ReleaseNotes = 'Adds Service EM: service-scoped landing zones aligned with the Enterprise Access Model (Azure resource group, Entra groups, Identity Governance access packages, PIM and Azure RBAC with ABAC constrained delegation), Azure DevOps pipelines, module-only use from the PowerShell Gallery (Initialize-EntraOpsWorkspace, Remove-EntraOpsData), the Object Classification File, agent identity collection and the Privileged Assets report with Maester findings. Full changelog: https://github.com/Cloud-Architekt/EntraOps/blob/main/CHANGELOG.md'
 
         } # End of PSData hashtable
 

@@ -21,6 +21,45 @@
     var UPDATE_REPOSITORIES = ["EntraOps", "EntraOps-Insiders"];
     var UPDATE_TARGETS = ["./.github/actions", "./.github/agents", "./.github/scripts", "./.github/workflows", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"];
     var DOW_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    var SERVICEEM_GOVERNANCE_MODELS = ["Centralized", "PerService"];
+    var SERVICEEM_REQUESTOR_SCOPES = ["AllMemberUsers", "CatalogPlaneMembers"];
+    var SERVICEEM_REVIEWER_TYPES = ["Group", "SelfReview", "SpecificReviewers", "Manager"];
+    // Keys of ServiceEM.AccessReviews.Policies with the default reviewer group emitted by New-EntraOpsConfigFile.
+    var SERVICEEM_REVIEW_POLICIES = [
+        { key: "BaselinePolicy", label: "Baseline Policy", reviewers: "ManagementPlane-Admins" },
+        { key: "WorkloadPlaneUsers", label: "Workload Plane Users Policy", reviewers: "WorkloadPlane-Admins" },
+        { key: "WorkloadPlaneAdmins", label: "Workload Plane Policy", reviewers: "ManagementPlane-Admins" },
+        { key: "ManagementPlaneAdmins", label: "Management Plane Policy", reviewers: "ControlPlane-Admins" },
+        { key: "InitialWorkloadMembership", label: "Initial Workload Membership Policy", reviewers: "ManagementPlane-Admins" },
+        { key: "InitialManagementAdmins", label: "Initial Management Admin Policy", reviewers: "ControlPlane-Admins" },
+        { key: "InitialWorkloadUsers", label: "Initial Workload Users Policy", reviewers: "WorkloadPlane-Admins" },
+        { key: "InitialWorkloadAdmins", label: "Initial Workload Admin Policy", reviewers: "ManagementPlane-Admins" },
+        { key: "InitialCatalogMembers", label: "Initial Catalog Members Policy", reviewers: "ManagementPlane-Admins" }
+    ];
+    // Azure role definition ids emitted by New-EntraOpsConfigFile for ServiceEM.ConstrainedDelegation.
+    var SERVICEEM_EXCLUDED_ROLE_IDS = [
+        "8e3af657-a8ff-443c-a75c-2fe8c4bcb635", // Owner
+        "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9", // User Access Administrator
+        "f58310d9-a9f6-439a-9e8d-f62e7b41a168" // Role Based Access Control Administrator
+    ];
+    var SERVICEEM_ALLOWED_ROLE_IDS = [
+        "00482a5a-887f-4fb3-b363-3b7fe8e74483", // Key Vault Administrator
+        "a4417e6f-fecd-4de8-b567-7b0420556985", // Key Vault Certificates Officer
+        "14b46e9e-c2b7-41b4-b07b-48a6ebf60603", // Key Vault Crypto Officer
+        "12338af0-0e69-4776-bea7-57ae8d297424", // Key Vault Crypto User
+        "21090545-7ca7-4776-b22c-e363652d74d2", // Key Vault Reader
+        "b86a8fe4-44ce-4948-aee5-eccb2c155cd7", // Key Vault Secrets Officer
+        "4633458b-17de-408a-b874-0445c86b69e6", // Key Vault Secrets User
+        "ba92f5b4-2d11-453d-a403-e96b0029c9fe", // Storage Blob Data Contributor
+        "b7e6dc6d-f1e8-4753-8033-0f276bb0955b", // Storage Blob Data Owner
+        "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1", // Storage Blob Data Reader
+        "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3", // Storage Table Data Contributor
+        "76199698-9eea-4c19-bc75-cec21354c6b6", // Storage Table Data Reader
+        "974c5e8b-45b9-4653-ba55-5f855dd0fb88", // Storage Queue Data Contributor
+        "19e7f393-937e-4f77-808e-94535e297925", // Storage Queue Data Reader
+        "8a0f0c08-91a1-4084-bc3d-661d67233fed", // Storage Queue Data Message Processor
+        "c6a89b2d-59bc-44d0-9896-0f6e12d7b80a" // Storage Queue Data Message Sender
+    ];
 
     // Tenant Governance Snapshot resource types, verified against
     // Get-EntraOpsTenantGovernanceResourceDefinition.ps1: TG_RESOURCES_ALL is every resource
@@ -160,7 +199,7 @@
     }
 
     function defaultState() {
-        return {
+        var s = {
             TenantId: "",
             TenantName: "",
             ManagingTenantName: "",
@@ -258,6 +297,7 @@
             GenerateConfigurationAnalyzer: true,
             GenerateAccessPackageFlow: true,
             GeneratePrivilegeHistory: true,
+            GeneratePrivilegedAssets: true,
             ClassificationExplorerRepository: "Cloud-Architekt/AzurePrivilegedIAM",
             ResolveGroupMembersForPrivilegedAssets: true,
             AllowPartialTenantGovernanceSnapshot: true,
@@ -272,6 +312,7 @@
 
             AccessPathMapResolveObjectIdsOutsidePrivilegedEAM: true,
             EamDashboardResolveLinkedIdentityObjectIds: true,
+            PrivilegedAssetsResolveRelatedObjectIds: true,
             ClassificationExplorerGenerateChangeHistory: false,
 
             EnableTenantGovernanceSnapshot: false,
@@ -291,6 +332,57 @@
             TgSnapshotScheduledCronCompleteRetry2: "0 8 * * *",
             TgSnapshotScheduledCronCompleteRetry2Mode: null,
 
+            SemGovernanceModel: "Centralized",
+            SemControlPlaneDelegationGroupId: "",
+            SemControlPlaneGroupName: "PRG-Tenant-ControlPlane-IdentityOps",
+            SemManagementPlaneDelegationGroupId: "",
+            SemManagementPlaneGroupName: "PRG-Tenant-ManagementPlane-PlatformOps",
+            SemAdministratorGroupId: "",
+            SemDefaultAzureRegion: "",
+            SemSkipCatalogOwnerAssignment: false,
+            SemCreateM365Group: false,
+            SemAddWorkloadPlaneAdminToUsers: false,
+            SemGroupPrefix: "SG",
+            SemRoleAssignableWorkloadPlaneAdmins: false,
+            SemAuWorkloadPlane: "",
+            SemAuUserAccess: "",
+            SemUpdateObjectClassificationFile: false,
+            SemMpExcludedRoleDefinitionIds: SERVICEEM_EXCLUDED_ROLE_IDS.join("\n"),
+            SemMpAllowedTargetGroupFilter: "WorkloadPlane-Admins",
+            SemWpAllowedRoleDefinitionIds: SERVICEEM_ALLOWED_ROLE_IDS.join("\n"),
+            SemWpAllowedTargetGroupFilter: "WorkloadPlane-Users",
+            SemEnableAuthenticationContext: false,
+            SemCpAuthContextId: "",
+            SemCpAuthContextDisplayName: "",
+            SemMpAuthContextId: "",
+            SemMpAuthContextDisplayName: "",
+            SemWpAuthContextId: "",
+            SemWpAuthContextDisplayName: "",
+            SemPimMaximumActivationDuration: "PT10H",
+            SemPimMaximumActiveAssignmentDuration: "P15D",
+            SemApBaselineExpiration: "P365D",
+            SemApBaselineApprovalTimeout: "P2D",
+            SemApWpUsersExpiration: "P365D",
+            SemApWpUsersApprovalTimeout: "P2D",
+            SemApWpUsersRequestorScope: "AllMemberUsers",
+            SemApWpAdminsExpiration: "P365D",
+            SemApWpAdminsApprovalTimeout: "P2D",
+            SemApMpAdminsExpiration: "P365D",
+            SemApMpAdminsApprovalTimeout: "P1D",
+            SemApBaselineAllowExtension: true,
+            SemApWpUsersAllowExtension: true,
+            SemApWpAdminsAllowExtension: true,
+            SemApMpAdminsAllowExtension: true,
+            SemApInitialWorkloadMembershipExpiration: "P365D",
+            SemApInitialManagementAdminsExpiration: "P365D",
+            SemApInitialWorkloadUsersExpiration: "P365D",
+            SemApInitialWorkloadAdminsExpiration: "P365D",
+            SemApInitialCatalogMembersExpiration: "P365D",
+            SemArEnableAccessReviews: true,
+            SemArRecurrenceIntervalInMonths: 3,
+            SemArStartAfterDays: 4,
+            SemArReviewDuration: "P25D",
+
             PrivilegedUserAttribute: "privilegedUser",
             PrivilegedUserPawAttribute: "associatedSecureAdminWorkstation",
             PrivilegedServicePrincipalAttribute: "privilegedWorkloadIdentity",
@@ -300,13 +392,24 @@
             PrivilegedServicePrincipalAdminTierLevelAttribute: "adminTierLevel",
             PrivilegedServicePrincipalAdminTierLevelNameAttribute: "adminTierLevelName",
 
-            ClassificationMethod: "csa",
-            AlternateEnabled: false,
+            CsaEnabled: true,
+            FileEnabled: false,
+            AlternateSelected: false,
+            AlternateUserEnabled: false,
+            AlternateServicePrincipalEnabled: false,
+            AlternateGroupEnabled: false,
+            ObjectClassificationFilePath: "./Classification/ObjectClassification.json",
             Alternate: {
                 User: { ControlPlane: emptyTier(), ManagementPlane: emptyTier(), UserAccess: emptyTier() },
-                ServicePrincipal: { ControlPlane: emptyTier(), ManagementPlane: emptyTier(), UserAccess: emptyTier() }
+                ServicePrincipal: { ControlPlane: emptyTier(), ManagementPlane: emptyTier(), UserAccess: emptyTier() },
+                Group: { ControlPlane: emptyTier(), ManagementPlane: emptyTier(), UserAccess: emptyTier() }
             }
         };
+        SERVICEEM_REVIEW_POLICIES.forEach(function (p) {
+            s["SemAr" + p.key + "ReviewerType"] = "Group";
+            s["SemAr" + p.key + "Reviewers"] = p.reviewers;
+        });
+        return s;
     }
 
     function emptyTier() { return { raw: false, text: "", conditions: [] }; }
@@ -315,7 +418,7 @@
     // ---------------------------------------------------------------------
     // Alternate Tier Level Attributes: the $Object properties actually built
     // by Get-EntraOpsPrivilegedEntraObject.ps1 (region "Alternate classification
-    // of User/ServicePrincipal objects") - this is the exhaustive, real list;
+    // of User/ServicePrincipal/Group objects") - this is the exhaustive, real list;
     // nothing else is available to a filter expression.
     // ---------------------------------------------------------------------
     var ATTRS = [
@@ -368,7 +471,7 @@
                     fields: [
                         { key: "AuthenticationType", label: "Authentication Type", type: "select", options: AUTH_TYPES, default: "FederatedCredentials", help: "Used by Connect-EntraOps to determine the sign-in method - see Get Started \u2192 Import module and sign-in options.", usedIn: "Connect-EntraOps" },
                         { key: "UseInvokeRestMethodOnly", label: "Use Invoke-RestMethod only", type: "checkbox", default: false, help: "Avoid any dependency on Invoke-MgGraphRequest (Microsoft Graph SDK) or other REST API wrappers and rely only on the native Invoke-RestMethod cmdlet for all Invoke-EntraOps*Query calls. The Graph SDK is neither required nor installed in this mode; tokens come from Connect-EntraOps -MsGraphAccessToken or the Az PowerShell context. An explicit Connect-EntraOps -UseInvokeRestMethodOnly parameter wins over this setting. REST-only parallel object resolution pre-warms a Graph token from the Az PowerShell context; it falls back to sequential processing only when that token cannot be prepared.", usedIn: "Connect-EntraOps, Invoke-EntraOps*Query cmdlets" },
-                        { key: "DevOpsPlatform", label: "DevOps Platform", type: "select", options: DEVOPS_PLATFORMS, default: "GitHub", help: "Automation for creating a pipeline currently only fully supports GitHub." },
+                        { key: "DevOpsPlatform", label: "DevOps Platform", type: "select", options: DEVOPS_PLATFORMS, default: "GitHub", help: "Select GitHub Actions, Azure Pipelines, or None for local and custom automation." },
                         { key: "ConfigFilePath", label: "Config File Path", type: "text", default: "./EntraOpsConfig.json" },
                         { key: "ClientId", label: "Client Id", type: "text", help: "Filled in automatically by New-EntraOpsWorkloadIdentity after you create the app registration." }
                     ]
@@ -409,7 +512,7 @@
                         { key: "UpdateScheduledCron", label: "Update scheduled cron", type: "cron", default: "0 9 * * 3" },
                         { key: "UpdateRepository", label: "Update source repository", type: "select", options: UPDATE_REPOSITORIES, default: "EntraOps", help: "Repository name below the Cloud-Architekt organization. \"EntraOps\" is the public release channel and needs no credentials. \"EntraOps-Insiders\" is the private preview channel and requires the EntraOpsUpdatePat repository secret. Both are declared centrally in EntraOpsUpdateContract.json; another source is accepted only when it publishes a matching contract. An imported custom value is preserved." },
                         { key: "UpdateBranch", label: "Update source ref", type: "text", default: "main", help: "Branch, release tag or full 40-character commit SHA that the update is taken from. Defaults to \"main\" for maintenance-free updates; use a release tag or full commit SHA when reproducibility is required." },
-                        { key: "UpdatePublicationMode", label: "Update publication mode", type: "select", options: ["PullRequest", "DirectPush"], default: "PullRequest", help: "PullRequest publishes a reviewed update branch and pull request. DirectPush commits directly to the branch that started the workflow.", warning: "PullRequest mode requires the repository (or organization) setting Settings \u2192 Actions \u2192 General \u2192 Workflow permissions \u2192 \"Allow GitHub Actions to create and approve pull requests\". Without it the Update-EntraOps workflow pushes the update branch but fails to open the pull request.", helpLink: { text: "GitHub Docs: Preventing GitHub Actions from creating or approving pull requests", href: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests" } },
+                        { key: "UpdatePublicationMode", label: "Update publication mode", type: "select", options: ["PullRequest", "DirectPush"], default: "PullRequest", help: "GitHub supports PullRequest or DirectPush. The shipped Azure DevOps update pipeline uses DirectPush.", warning: "GitHub PullRequest mode requires the repository (or organization) setting Settings \u2192 Actions \u2192 General \u2192 Workflow permissions \u2192 \"Allow GitHub Actions to create and approve pull requests\". Without it the Update-EntraOps workflow pushes the update branch but fails to open the pull request.", helpLink: { text: "GitHub Docs: Preventing GitHub Actions from creating or approving pull requests", href: "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests" } },
                         { key: "UpdateValidationFrequency", label: "Candidate validation frequency", type: "select", options: ["OnChange", "Always", "Never"], default: "OnChange", help: "OnChange validates when the source, target set, or required validation depth changes. Always validates every triggered run. Never skips the candidate test suite before applying updates; use it only for a fully trusted source." },
                         { key: "UpdateRunBrowserTests", label: "Run browser tests for update candidates", type: "checkbox", default: true, help: "Runs the Playwright documentation and report tests when candidate validation is required. Disable to keep the core PowerShell and policy validation while reducing update time." },
                         { key: "UpdateTargetFolders", label: "Update targets", type: "multiselect", options: UPDATE_TARGETS, default: ["./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"], help: "Repository-relative folders and root files staged, validated and replaced by Update-EntraOps. Workflow templates are excluded by default. Select ./.github/workflows only for a manual cmdlet update or after configuring the EntraOps update publisher GitHub App; ./.github/actions and ./.github/scripts must remain selected with it.", warning: "GITHUB_TOKEN cannot publish workflow-file changes. Automated workflow updates require EntraOpsUpdateAppClientId and EntraOpsUpdateAppPrivateKey for a repository-scoped GitHub App with Workflows write permission.", helpLink: { text: "GitHub Docs: Choosing permissions for a GitHub App", href: "https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app" } }
@@ -522,6 +625,7 @@
                         { key: "GenerateConfigurationAnalyzer", label: "Generate Configuration Analyzer", type: "checkbox", default: true },
                         { key: "GenerateAccessPackageFlow", label: "Generate Access Package Flow", type: "checkbox", default: true, help: "Uses Microsoft Graph to resolve current access-package resources and requestor/approver groups from the latest Tenant Governance snapshot." },
                         { key: "GeneratePrivilegeHistory", label: "Generate Privilege History", type: "checkbox", default: true },
+                        { key: "GeneratePrivilegedAssets", label: "Generate Privileged Assets", type: "checkbox", default: true },
                         { key: "ClassificationExplorerRepository", label: "Classification Explorer repository", type: "text", default: "Cloud-Architekt/AzurePrivilegedIAM" },
                         { key: "ClassificationExplorerGenerateChangeHistory", label: "Generate Classification Explorer change history", type: "checkbox", default: false, help: "Disabled by default. Generating the history requires a full git log over the classification sources in the AzurePrivilegedIAM repository, which is slow. Enable it to populate the Change History view and its notifications." },
                         { key: "ResolveGroupMembersForPrivilegedAssets", label: "Resolve included group targets for Configuration Analyzer", type: "checkbox", default: true, help: "Expands nested and PIM-managed group membership through Microsoft Graph. Excluded targets are not evaluated." },
@@ -544,7 +648,8 @@
                     title: "Graph object resolution",
                     fields: [
                         { key: "AccessPathMapResolveObjectIdsOutsidePrivilegedEAM", label: "Resolve object ids outside Privileged EAM for Access Path Map", type: "checkbox", default: true, help: "Uses best-effort Microsoft Graph resolution and keeps unresolved placeholders when an object cannot be returned." },
-                        { key: "EamDashboardResolveLinkedIdentityObjectIds", label: "Resolve linked identity object ids for EAM Dashboard", type: "checkbox", default: true, help: "Resolves only missing linked-identity GUIDs with batched Microsoft Graph requests when EAM Dashboard data is generated." }
+                        { key: "EamDashboardResolveLinkedIdentityObjectIds", label: "Resolve linked identity object ids for EAM Dashboard", type: "checkbox", default: true, help: "Resolves only missing linked-identity GUIDs with batched Microsoft Graph requests when EAM Dashboard data is generated." },
+                        { key: "PrivilegedAssetsResolveRelatedObjectIds", label: "Resolve related object ids for Privileged Assets", type: "checkbox", default: true, help: "Resolves owners, sponsors, owned objects and devices, identity parents and associated accounts outside the Privileged EAM export with batched Microsoft Graph requests." }
                     ]
                 },
                 {
@@ -594,6 +699,111 @@
                     ]
                 }
             ]
+        },
+        {
+            id: "serviceem", label: "Service EM", icon: "🏗",
+            groups: [
+                {
+                    title: "Governance model",
+                    fields: [
+                        { key: "SemGovernanceModel", label: "Governance model", type: "select", options: SERVICEEM_GOVERNANCE_MODELS, default: "Centralized", help: "\"Centralized\" shares tenant-wide ControlPlane-Admins and ManagementPlane-Admins delegation groups across all landing zones. \"PerService\" creates dedicated admin groups for each landing zone and needs no pre-existing groups. An explicit -GovernanceModel parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone" }
+                    ]
+                },
+                {
+                    title: "Delegation groups",
+                    fields: [
+                        { key: "SemControlPlaneDelegationGroupId", label: "Control Plane delegation group id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an existing role-assignable group used as ControlPlane-Admins. Leave empty to look up the group by name below; a resolved or newly created group id is written back to the config file." },
+                        { key: "SemControlPlaneGroupName", label: "Control Plane group name", type: "text", default: "PRG-Tenant-ControlPlane-IdentityOps", help: "Display name of the tenant-wide Control Plane delegation group looked up or created in the Centralized governance model." },
+                        { key: "SemManagementPlaneDelegationGroupId", label: "Management Plane delegation group id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an existing role-assignable group used as ManagementPlane-Admins. Leave empty to look up the group by name below; a resolved or newly created group id is written back to the config file." },
+                        { key: "SemManagementPlaneGroupName", label: "Management Plane group name", type: "text", default: "PRG-Tenant-ManagementPlane-PlatformOps", help: "Display name of the tenant-wide Management Plane delegation group looked up or created in the Centralized governance model." },
+                        { key: "SemAdministratorGroupId", label: "Administrator group id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an existing group used as CatalogPlane-Members. It controls who can request elevated access packages and who reviews expiring assignments.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" }
+                    ]
+                },
+                {
+                    title: "Landing zone defaults",
+                    fields: [
+                        { key: "SemDefaultAzureRegion", label: "Default Azure region", type: "text", placeholder: "westeurope", help: "Azure region of the landing zone resource group when -AzureRegion isn't passed. Leave empty to require the parameter.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemSkipCatalogOwnerAssignment", label: "Skip Catalog Owner assignment", type: "checkbox", default: false, help: "Recommended. Without it, ControlPlane-Admins get a permanent Catalog Owner assignment on every service catalog, which PIM can't protect. Use an eligible Identity Governance Administrator assignment instead. An explicit -SkipCatalogOwnerAssignment parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemCreateM365Group", label: "Create Microsoft 365 group", type: "checkbox", default: false, help: "Creates the Microsoft 365 group '<Scope>-<Prefix> Members' for the service team: group mailbox and calendar for email and ChatOps notifications and, with SharePoint Online or Microsoft Teams, a site or team as knowledge base. Intended for the people behind the personas WorkloadPlane users and admins, ManagementPlane members and, in the PerService model, the ManagementPlane and ControlPlane admins; ServiceEM adds no members. The group gets no PIM for Groups eligibilities or other access; the admin and user groups are only granted through access packages. An explicit -CreateM365Group parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemAddWorkloadPlaneAdminToUsers", label: "Add workload plane admin to WorkloadPlane-Users", type: "checkbox", default: false, help: "Also assigns the -WorkloadPlaneAdmin to the WorkloadPlane-Users access package (data-plane user access), in addition to the WorkloadPlane-Admins access package. Leave unchecked when admins use dedicated admin accounts. An explicit -AddWorkloadPlaneAdminToUsers parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemGroupPrefix", label: "Security group prefix", type: "text", default: "SG", help: "Prefix of the security group display names, e.g. SG-Rg-MyApp-WorkloadPlane-Users. Letters, digits, '_', '.' or '-'; a prefix ending with '-', '_' or '.' is used as is, e.g. SG_ for SG_Rg-MyApp-WorkloadPlane-Users. Mail nicknames, access package and catalog names don't use the prefix, so existing landing zones keep their groups (and display names) after a change; only new groups get the new prefix. An explicit -GroupPrefix parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemRoleAssignableWorkloadPlaneAdmins", label: "Role-assignable WorkloadPlane-Admins", type: "checkbox", default: false, help: "Creates WorkloadPlane-Admins as role-assignable group, so only Privileged Role Administrators and Global Administrators can manage its members and owners. ControlPlane-Admins, ManagementPlane-Admins and CatalogPlane-Members are always role-assignable, WorkloadPlane-Users never. Only applies when a group is created. An explicit -RoleAssignableWorkloadPlaneAdmins parameter wins over this setting.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" }
+                    ]
+                },
+                {
+                    title: "Workload group classification",
+                    fields: [
+                        { key: "SemAuWorkloadPlane", label: "WorkloadPlane administrative unit id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an administrative unit that ServiceEM adds the WorkloadPlane-Admins groups to. Classify them with an Alternate Tier Level Attributes filter for groups, e.g. WorkloadPlane: $Object.AssignedAdministrativeUnits.id -contains \"<id>\". Role-assignable and PIM-managed groups can't be added to a restricted management administrative unit (a warning is shown). Leave empty to skip.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemAuUserAccess", label: "UserAccess administrative unit id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an administrative unit that ServiceEM adds the WorkloadPlane-Users groups to, e.g. for an Alternate Tier Level Attributes filter on UserAccess. Leave empty to skip.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemUpdateObjectClassificationFile", label: "Write workload groups to the Object Classification File", type: "checkbox", default: false, help: "Adds WorkloadPlane-Admins (WorkloadPlane) and WorkloadPlane-Users (UserAccess) to the Object Classification File of the repository; Remove-EntraOpsServiceCatalog removes them again. Can be combined with the administrative units. Existing entries with another tier are kept. Commit the file and enable the Object Classification File to use it. ControlPlane, ManagementPlane and administrator groups aren't classified by ServiceEM.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap, Remove-EntraOpsServiceCatalog" }
+                    ]
+                },
+                {
+                    title: "Constrained delegation",
+                    fields: [
+                        { key: "SemMpExcludedRoleDefinitionIds", label: "Management Plane excluded role definition ids", type: "taglist", rows: 3, default: SERVICEEM_EXCLUDED_ROLE_IDS.join("\n"), defaultLabel: "Owner, User Access Administrator, Role Based Access Control Administrator", help: "Azure role definition ids that ManagementPlane-Admins cannot assign. Enter one id per line or a comma-separated list.", usedIn: "New-EntraOpsServiceAZContainer" },
+                        { key: "SemMpAllowedTargetGroupFilter", label: "Management Plane allowed target group filter", type: "text", default: "WorkloadPlane-Admins", help: "Group name suffix that ManagementPlane-Admins may assign roles to." },
+                        { key: "SemWpAllowedRoleDefinitionIds", label: "Workload Plane allowed role definition ids", type: "taglist", rows: 8, default: SERVICEEM_ALLOWED_ROLE_IDS.join("\n"), defaultLabel: "7 Key Vault and 9 Storage data-plane roles", help: "Azure role definition ids that WorkloadPlane-Admins may assign. The default covers the Key Vault Administrator, Certificates Officer, Crypto Officer, Crypto User, Reader, Secrets Officer and Secrets User roles and the Storage Blob, Table and Queue data roles. Enter one id per line or a comma-separated list.", usedIn: "New-EntraOpsServiceAZContainer" },
+                        { key: "SemWpAllowedTargetGroupFilter", label: "Workload Plane allowed target group filter", type: "text", default: "WorkloadPlane-Users", help: "Group name suffix that WorkloadPlane-Admins may assign roles to." }
+                    ]
+                },
+                {
+                    title: "PIM authentication context",
+                    fields: [
+                        { key: "SemEnableAuthenticationContext", label: "Enable authentication context", type: "checkbox", default: false, help: "Adds a Conditional Access authentication context requirement to PIM activation of the service admin groups for each access level with a configured id. Without it, activation requires MFA and justification only.", usedIn: "New-EntraOpsServicePIMPolicy" },
+                        { key: "SemCpAuthContextId", label: "Control Plane authentication context id", type: "text", placeholder: "c1", help: "Authentication context class reference id, for example c1. Leave empty to skip this access level." },
+                        { key: "SemCpAuthContextDisplayName", label: "Control Plane authentication context display name", type: "text" },
+                        { key: "SemMpAuthContextId", label: "Management Plane authentication context id", type: "text", placeholder: "c2" },
+                        { key: "SemMpAuthContextDisplayName", label: "Management Plane authentication context display name", type: "text" },
+                        { key: "SemWpAuthContextId", label: "Workload Plane authentication context id", type: "text", placeholder: "c3" },
+                        { key: "SemWpAuthContextDisplayName", label: "Workload Plane authentication context display name", type: "text" }
+                    ]
+                },
+                {
+                    title: "PIM for Groups",
+                    fields: [
+                        { key: "SemPimMaximumActivationDuration", label: "Maximum activation duration", type: "text", default: "PT10H", help: "ISO 8601 duration of a PIM for Groups activation of the service groups, e.g. PT8H = 8 hours.", usedIn: "New-EntraOpsServicePIMPolicy" },
+                        { key: "SemPimMaximumActiveAssignmentDuration", label: "Maximum active assignment duration", type: "text", default: "P15D", help: "ISO 8601 duration an administrator can assign active (permanent) group membership for, e.g. P15D = 15 days.", usedIn: "New-EntraOpsServicePIMPolicy" }
+                    ]
+                },
+                {
+                    title: "Assignment policies",
+                    fields: [
+                        { key: "SemApBaselineExpiration", label: "Baseline Policy expiration", type: "text", default: "P365D", help: "Assignments expire after: noExpiration or an ISO 8601 duration, e.g. P365D (365 days) or P90D. Applies to the CatalogPlane-Members access package. All values are applied when a policy is created; existing policies aren't updated.", usedIn: "New-EntraOpsServiceEMAssignmentPolicy" },
+                        { key: "SemApBaselineApprovalTimeout", label: "Baseline Policy approval timeout", type: "text", default: "P2D", help: "Days until a request that isn't approved is denied automatically, e.g. P2D." },
+                        { key: "SemApBaselineAllowExtension", label: "Baseline Policy: allow users to extend access", type: "checkbox", default: true, help: "Users can request an extension of an expiring assignment (reminder 14 days and 1 day before expiry). Extensions always require approval by the policy's approvers. Not applied with noExpiration." },
+                        { key: "SemApWpUsersExpiration", label: "Workload Plane Users Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for self-service requests of the WorkloadPlane-Users access package." },
+                        { key: "SemApWpUsersApprovalTimeout", label: "Workload Plane Users Policy approval timeout", type: "text", default: "P2D" },
+                        { key: "SemApWpUsersRequestorScope", label: "Workload Plane Users Policy requestors", type: "select", options: SERVICEEM_REQUESTOR_SCOPES, default: "AllMemberUsers", help: "\"AllMemberUsers\" lets every member user (no guests) request the WorkloadPlane-Users access package. \"CatalogPlaneMembers\" restricts requests to members of CatalogPlane-Members (the administrator group in the Centralized model)." },
+                        { key: "SemApWpUsersAllowExtension", label: "Workload Plane Users Policy: allow users to extend access", type: "checkbox", default: true, help: "Extension of expiring WorkloadPlane-Users assignments, with approval." },
+                        { key: "SemApWpAdminsExpiration", label: "Workload Plane Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for self-service requests of the WorkloadPlane-Admins access package." },
+                        { key: "SemApWpAdminsApprovalTimeout", label: "Workload Plane Policy approval timeout", type: "text", default: "P2D" },
+                        { key: "SemApWpAdminsAllowExtension", label: "Workload Plane Policy: allow users to extend access", type: "checkbox", default: true, help: "Extension of expiring WorkloadPlane-Admins assignments, with approval." },
+                        { key: "SemApMpAdminsExpiration", label: "Management Plane Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for self-service requests of the ManagementPlane-Admins access package." },
+                        { key: "SemApMpAdminsApprovalTimeout", label: "Management Plane Policy approval timeout", type: "text", default: "P1D" },
+                        { key: "SemApMpAdminsAllowExtension", label: "Management Plane Policy: allow users to extend access", type: "checkbox", default: true, help: "Extension of expiring ManagementPlane-Admins assignments, with approval." },
+                        { key: "SemApInitialWorkloadMembershipExpiration", label: "Initial Workload Membership Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the WorkloadPlane-Members access package (manager and CatalogPlane-Members approval)." },
+                        { key: "SemApInitialManagementAdminsExpiration", label: "Initial Management Admin Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the admin-only direct assignment of -WorkloadPlaneAdmin to the ManagementPlane-Admins access package (no approval)." },
+                        { key: "SemApInitialWorkloadUsersExpiration", label: "Initial Workload Users Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the admin-only direct assignment of -ServiceMembers to the WorkloadPlane-Users access package (no approval)." },
+                        { key: "SemApInitialWorkloadAdminsExpiration", label: "Initial Workload Admin Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the admin-only direct assignment of -WorkloadPlaneAdmin to the WorkloadPlane-Admins access package (no approval)." },
+                        { key: "SemApInitialCatalogMembersExpiration", label: "Initial Catalog Members Policy expiration", type: "text", default: "P365D", help: "Assignments expire after, for the admin-only direct assignment of -WorkloadPlaneAdmin and -CatalogPlaneMembers to the CatalogPlane-Members access package (no approval)." }
+                    ]
+                },
+                {
+                    title: "Access reviews",
+                    fields: [
+                        { key: "SemArEnableAccessReviews", label: "Enable access reviews", type: "checkbox", default: true, help: "Adds recurring access reviews to all assignment policies. Reviewers are configured per policy below (default WorkloadPlane-Admins for the WorkloadPlane-Users access package, ManagementPlane-Admins for all others; a missing group falls back to a higher tier only, never to CatalogPlane-Members); access is kept if a review isn't completed.", usedIn: "New-EntraOpsServiceEMAssignmentPolicy" },
+                        { key: "SemArRecurrenceIntervalInMonths", label: "Recurrence interval (months)", type: "number", default: 3, min: 1, max: 12, help: "Months between two reviews, e.g. 3 = quarterly." },
+                        { key: "SemArStartAfterDays", label: "First review after (days)", type: "number", default: 4, min: 0, help: "Days after the deployment when the first review starts." },
+                        { key: "SemArReviewDuration", label: "Review duration", type: "text", default: "P25D", help: "ISO 8601 duration in days a review stays open, e.g. P25D. Keep it shorter than the recurrence interval." }
+                    ].concat(SERVICEEM_REVIEW_POLICIES.reduce(function (fields, p) {
+                        return fields.concat([
+                            { key: "SemAr" + p.key + "ReviewerType", label: p.label + " reviewers", type: "select", options: SERVICEEM_REVIEWER_TYPES, default: "Group", help: "\"Group\" = members of the reviewer groups, \"SelfReview\" = users review their own access, \"SpecificReviewers\" = the users listed below, \"Manager\" = the user's manager with the reviewer groups as fallback reviewers." },
+                            { key: "SemAr" + p.key + "Reviewers", label: p.label + " reviewer list", type: "taglist", default: p.reviewers, help: "Group and Manager: service group name suffixes (e.g. WorkloadPlane-Admins) or group object ids. SpecificReviewers: user object ids or UPNs. Ignored for SelfReview." }
+                        ]);
+                    }, []))
+                }
+            ]
         }
     ];
 
@@ -629,7 +839,7 @@
 
     function fieldDefaultBadge(field) {
         if (field.default === undefined) return null;
-        var defaultValue = Array.isArray(field.default) ? field.default.join(", ") : String(field.default);
+        var defaultValue = field.defaultLabel || (Array.isArray(field.default) ? field.default.join(", ") : String(field.default));
         return createElement("span", "wiz-field-default", "Default: " + defaultValue);
     }
 
@@ -808,12 +1018,15 @@
             });
             container.appendChild(chips);
         } else if (field.type === "taglist") {
-            var tagInput = createElement("input", "wiz-input");
-            tagInput.type = "text";
+            var tagInput = createElement(field.rows ? "textarea" : "input", field.rows ? "wiz-textarea" : "wiz-input");
+            if (field.rows) {
+                tagInput.rows = field.rows;
+                tagInput.style.maxWidth = "480px";
+            } else tagInput.type = "text";
             tagInput.dataset.key = field.key;
             tagInput.dataset.type = "text";
             tagInput.value = val == null ? "" : String(val);
-            tagInput.placeholder = "comma-separated values";
+            tagInput.placeholder = field.rows ? "one value per line or comma-separated" : "comma-separated values";
             container.appendChild(tagInput);
         } else {
             var input = createElement("input", "wiz-input");
@@ -955,28 +1168,27 @@
     // Object Classification tab (custom widget)
     // ---------------------------------------------------------------------
     var activeObjectType = "User";
+    var METHOD_STATE = { csa: "CsaEnabled", alternate: "AlternateSelected", file: "FileEnabled" };
 
     function renderClassificationPanel() {
         var fragment = document.createDocumentFragment();
         var methodGroup = createElement("div", "wiz-group");
-        methodGroup.appendChild(createElement("h3", "wiz-group-title", "Classification method"));
-        var description = createElement("p", "wiz-group-desc");
-        appendText(description, "Choose how ");
-        description.appendChild(createElement("code", "", "User"));
-        appendText(description, " and ");
-        description.appendChild(createElement("code", "", "ServicePrincipal"));
-        appendText(description, " objects are classified onto an Enterprise Access Model tier. See Core → Classify by Custom Security Attributes / Classify by Alternate Tier Level Attributes for the full reference.");
-        methodGroup.appendChild(description);
+        methodGroup.appendChild(createElement("h3", "wiz-group-title", "Classification sources"));
+        methodGroup.appendChild(createElement("p", "wiz-group-desc", "Select one or more sources for the tier of privileged objects. They are used in the order shown: custom security attributes win; an object without a tier (empty or Unclassified) is classified by the Alternate Tier Level Attributes filters of its object type, then by the Object Classification File. Objects without a match stay Unclassified. See Core → Classification sources for the full reference."));
         var methodCards = createElement("div", "wiz-method-cards");
-        methodCards.appendChild(methodCard("csa", "Custom Security Attributes", "Read the tier from Microsoft Entra custom security attributes already set on the object by your provisioning process (default)."));
-        methodCards.appendChild(methodCard("alternate", "Alternate Tier Level Attributes", "Classify by evaluating a PowerShell filter expression against the object's own EntraOps details (e.g. administrative unit membership, naming convention) - no custom security attributes required."));
+        methodCards.appendChild(methodCard("csa", "Custom Security Attributes", "Read the tier of users, service principals and applications from Microsoft Entra custom security attributes set by your provisioning process (default). Wins over the other sources."));
+        methodCards.appendChild(methodCard("alternate", "Alternate Tier Level Attributes", "Classify users, service principals or groups without custom security attribute tier by PowerShell filter expressions against the object's own EntraOps details (e.g. administrative unit membership, naming convention)."));
+        methodCards.appendChild(methodCard("file", "Object Classification File", "Classify users, groups, service principals and applications that no other source classifies by a list of object IDs and tiers in the repository, maintained in the Privileged Assets reporting app."));
         methodGroup.appendChild(methodCards);
+        if (!state.CsaEnabled && !state.FileEnabled && !(state.AlternateSelected && (state.AlternateUserEnabled || state.AlternateServicePrincipalEnabled || state.AlternateGroupEnabled))) {
+            methodGroup.appendChild(createElement("p", "wiz-field-help wiz-field-warning", "No classification source is selected - all objects stay Unclassified."));
+        }
         fragment.appendChild(methodGroup);
 
-        if (state.ClassificationMethod === "csa") {
+        if (state.CsaEnabled) {
             var attributeGroup = createElement("div", "wiz-group");
             attributeGroup.appendChild(createElement("h3", "wiz-group-title", "Custom Security Attributes"));
-            attributeGroup.appendChild(createElement("p", "wiz-group-desc", "Attribute set/name read by Get-EntraOpsPrivilegedEntraObject. Permission to read these must be granted manually to the EntraOps service principal."));
+            attributeGroup.appendChild(createElement("p", "wiz-group-desc", "Attribute set/name read by Get-EntraOpsPrivilegedEntraObject. Permission to read these must be granted manually to the EntraOps service principal. The PowerShell script of Privileged Assets writes the tier attributes."));
             attributeGroup.appendChild(renderField({ key: "PrivilegedUserAttribute", label: "Privileged User Attribute", type: "text", default: "privilegedUser" }));
             attributeGroup.appendChild(renderField({ key: "PrivilegedUserPawAttribute", label: "Privileged User PAW Attribute", type: "text", default: "associatedSecureAdminWorkstation" }));
             attributeGroup.appendChild(renderField({ key: "PrivilegedServicePrincipalAttribute", label: "Privileged Service Principal Attribute", type: "text", default: "privilegedWorkloadIdentity", help: "Double-check this matches the attribute name you actually provisioned in Entra (older EntraOps versions emitted the misspelled default 'privilegedWorkloadIdentitiy')." }));
@@ -986,35 +1198,62 @@
             attributeGroup.appendChild(renderField({ key: "PrivilegedServicePrincipalAdminTierLevelAttribute", label: "Service principal tier level field", type: "text", default: "adminTierLevel" }));
             attributeGroup.appendChild(renderField({ key: "PrivilegedServicePrincipalAdminTierLevelNameAttribute", label: "Service principal tier name field", type: "text", default: "adminTierLevelName" }));
             fragment.appendChild(attributeGroup);
-        } else {
-            var alternateGroup = createElement("div", "wiz-group");
-            var objectTabs = createElement("div", "wiz-object-tabs");
-            OBJECT_TYPES_2.slice(0, 1); // no-op, keep linter happy about unused var patterns
-            ["User", "ServicePrincipal"].forEach(function (objectType) {
-                var objectTab = createButton("wiz-object-tab" + (objectType === activeObjectType ? " active" : ""), objectType);
-                objectTab.dataset.objtab = objectType;
-                objectTabs.appendChild(objectTab);
-            });
-            alternateGroup.appendChild(objectTabs);
-            ["ControlPlane", "ManagementPlane", "UserAccess"].forEach(function (tier) {
-                alternateGroup.appendChild(renderTierBlock(activeObjectType, tier));
-            });
-            fragment.appendChild(alternateGroup);
+        }
+
+        if (state.AlternateSelected) fragment.appendChild(renderAlternateGroup());
+
+        if (state.FileEnabled) {
+            var fileGroup = createElement("div", "wiz-group");
+            fileGroup.appendChild(createElement("h3", "wiz-group-title", "Object Classification File"));
+            fileGroup.appendChild(createElement("p", "wiz-group-desc", "JSON or CSV file with the columns ObjectId, ObjectType, ObjectDisplayName, AdminTierLevelName and Justification. Download it from Privileged Assets › Object Classification and commit it to this path. A file entry only applies to objects that the other selected sources don't classify."));
+            fileGroup.appendChild(renderField({ key: "ObjectClassificationFilePath", label: "File path", type: "text", default: "./Classification/ObjectClassification.json", help: "Relative to the EntraOps repository root. Must be a .json or .csv file inside the repository.", usedIn: "Get-EntraOpsPrivilegedEntraObject" }));
+            fragment.appendChild(fileGroup);
         }
         return fragment;
     }
 
+    function renderAlternateGroup() {
+        var alternateGroup = createElement("div", "wiz-group");
+        alternateGroup.appendChild(createElement("h3", "wiz-group-title", "Alternate Tier Level Attributes"));
+        alternateGroup.appendChild(createElement("p", "wiz-group-desc", "Select the object types to classify by filter expressions. The filters apply to objects without custom security attribute tier."));
+        var objectTabs = createElement("div", "wiz-object-tabs");
+        ["User", "ServicePrincipal", "Group"].forEach(function (objectType) {
+            var objectTab = createButton("wiz-object-tab" + (objectType === activeObjectType ? " active" : ""), objectType + (state["Alternate" + objectType + "Enabled"] ? " ✓" : ""));
+            objectTab.dataset.objtab = objectType;
+            objectTabs.appendChild(objectTab);
+        });
+        alternateGroup.appendChild(objectTabs);
+        alternateGroup.appendChild(renderField({
+            key: "Alternate" + activeObjectType + "Enabled",
+            label: "Classify " + activeObjectType + " objects by filter expressions",
+            type: "checkbox",
+            default: false,
+            help: ALTERNATE_TYPE_HELP[activeObjectType]
+        }));
+        if (state["Alternate" + activeObjectType + "Enabled"]) {
+            ["ControlPlane", "ManagementPlane", "UserAccess"].forEach(function (tier) {
+                alternateGroup.appendChild(renderTierBlock(activeObjectType, tier));
+            });
+        }
+        return alternateGroup;
+    }
+
+    var ALTERNATE_TYPE_HELP = {
+        User: "Applies to users without custom security attribute tier. A user that matches no filter falls back to the Object Classification File or stays Unclassified.",
+        ServicePrincipal: "Applies to service principals without custom security attribute tier. A service principal that matches no filter falls back to the Object Classification File or stays Unclassified. Applications are not classified by filters.",
+        Group: "Groups don't support custom security attributes. A group that matches no filter falls back to the Object Classification File or stays Unclassified."
+    };
+
     function methodCard(value, title, desc) {
-        var selected = state.ClassificationMethod === value;
+        var selected = state[METHOD_STATE[value]] === true;
         var card = createElement("label", "wiz-method-card" + (selected ? " selected" : ""));
         card.dataset.method = value;
         var heading = createElement("div", "title");
-        var radio = createElement("input");
-        radio.type = "radio";
-        radio.name = "wizMethod";
-        radio.value = value;
-        radio.checked = selected;
-        heading.appendChild(radio);
+        var checkbox = createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = value;
+        checkbox.checked = selected;
+        heading.appendChild(checkbox);
         appendText(heading, title);
         card.appendChild(heading);
         card.appendChild(createElement("p", "", desc));
@@ -1165,11 +1404,32 @@
         nav.replaceChildren(fragment);
     }
 
+    // Minimized panels, keyed by tab and headline, so they stay minimized when the tab re-renders.
+    var collapsedGroups = {};
+
+    function applyGroupCollapse(container) {
+        container.querySelectorAll(".wiz-group > .wiz-group-title").forEach(function (title) {
+            title.dataset.collapseKey = activeTab + "|" + title.textContent;
+            title.setAttribute("role", "button");
+            title.tabIndex = 0;
+            title.appendChild(createElement("span", "wiz-group-toggle")).setAttribute("aria-hidden", "true");
+            setGroupCollapsed(title, collapsedGroups[title.dataset.collapseKey] === true);
+        });
+    }
+
+    function setGroupCollapsed(title, collapsed) {
+        collapsedGroups[title.dataset.collapseKey] = collapsed;
+        title.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        title.title = collapsed ? "Expand" : "Minimize";
+        title.parentElement.classList.toggle("wiz-group-collapsed", collapsed);
+    }
+
     function renderActivePanel() {
         var container = document.getElementById("wizPanels");
         var tab = TABS.filter(function (t) { return t.id === activeTab; })[0];
         container.replaceChildren(tab.custom ? renderClassificationPanel() : renderStandardPanel(tab));
         syncTgResourcePicker(container);
+        applyGroupCollapse(container);
     }
 
     function renderPreview() {
@@ -1181,7 +1441,7 @@
     // Build the final EntraOpsConfig.json object from the wizard state.
     // ---------------------------------------------------------------------
     function commaListToArray(s) {
-        return String(s || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+        return String(s || "").split(/[,\n]/).map(function (x) { return x.trim(); }).filter(Boolean);
     }
 
     function tierExpr(objType, tier) {
@@ -1297,6 +1557,7 @@
                 GenerateConfigurationAnalyzer: state.GenerateConfigurationAnalyzer,
                 GenerateAccessPackageFlow: state.GenerateAccessPackageFlow,
                 GeneratePrivilegeHistory: state.GeneratePrivilegeHistory,
+                GeneratePrivilegedAssets: state.GeneratePrivilegedAssets,
                 ClassificationExplorerRepository: state.ClassificationExplorerRepository
             },
             AutomatedElmCatalogProtection: {
@@ -1313,6 +1574,7 @@
                 EidscaExcludedFindings: commaListToArray(state.EidscaExcludedFindings)
             },
             CustomSecurityAttributes: {
+                Enabled: state.CsaEnabled,
                 PrivilegedUserAttribute: state.PrivilegedUserAttribute,
                 PrivilegedUserPawAttribute: state.PrivilegedUserPawAttribute,
                 PrivilegedServicePrincipalAttribute: state.PrivilegedServicePrincipalAttribute,
@@ -1323,17 +1585,28 @@
                 PrivilegedServicePrincipalAdminTierLevelNameAttribute: state.PrivilegedServicePrincipalAdminTierLevelNameAttribute
             },
             AlternateObjectTierLevelAttributes: {
-                Enabled: state.ClassificationMethod === "alternate",
                 User: {
+                    Enabled: state.AlternateSelected && state.AlternateUserEnabled,
                     ControlPlane: tierExpr("User", "ControlPlane"),
                     ManagementPlane: tierExpr("User", "ManagementPlane"),
                     UserAccess: tierExpr("User", "UserAccess")
                 },
                 ServicePrincipal: {
+                    Enabled: state.AlternateSelected && state.AlternateServicePrincipalEnabled,
                     ControlPlane: tierExpr("ServicePrincipal", "ControlPlane"),
                     ManagementPlane: tierExpr("ServicePrincipal", "ManagementPlane"),
                     UserAccess: tierExpr("ServicePrincipal", "UserAccess")
+                },
+                Group: {
+                    Enabled: state.AlternateSelected && state.AlternateGroupEnabled,
+                    ControlPlane: tierExpr("Group", "ControlPlane"),
+                    ManagementPlane: tierExpr("Group", "ManagementPlane"),
+                    UserAccess: tierExpr("Group", "UserAccess")
                 }
+            },
+            ObjectClassificationFile: {
+                Enabled: state.FileEnabled,
+                FilePath: state.ObjectClassificationFilePath
             },
             PrivilegeHistory: {
                 EnablePrivilegeHistory: state.EnablePrivilegeHistory,
@@ -1345,6 +1618,9 @@
             },
             EamDashboard: {
                 ResolveLinkedIdentityObjectIds: state.EamDashboardResolveLinkedIdentityObjectIds
+            },
+            PrivilegedAssets: {
+                ResolveRelatedObjectIds: state.PrivilegedAssetsResolveRelatedObjectIds
             },
             ClassificationExplorer: {
                 GenerateChangeHistory: state.ClassificationExplorerGenerateChangeHistory
@@ -1359,9 +1635,87 @@
                 SnapshotScheduledCronComplete: state.TgSnapshotScheduledCronComplete,
                 SnapshotScheduledCronCompleteRetry1: state.TgSnapshotScheduledCronCompleteRetry1,
                 SnapshotScheduledCronCompleteRetry2: state.TgSnapshotScheduledCronCompleteRetry2
+            },
+            ServiceEM: {
+                GovernanceModel: state.SemGovernanceModel,
+                ControlPlaneDelegationGroupId: state.SemControlPlaneDelegationGroupId,
+                ControlPlaneGroupName: state.SemControlPlaneGroupName,
+                ManagementPlaneDelegationGroupId: state.SemManagementPlaneDelegationGroupId,
+                ManagementPlaneGroupName: state.SemManagementPlaneGroupName,
+                AdministratorGroupId: state.SemAdministratorGroupId,
+                DefaultAzureRegion: state.SemDefaultAzureRegion,
+                SkipCatalogOwnerAssignment: state.SemSkipCatalogOwnerAssignment,
+                CreateM365Group: state.SemCreateM365Group,
+                AddWorkloadPlaneAdminToUsers: state.SemAddWorkloadPlaneAdminToUsers,
+                GroupPrefix: state.SemGroupPrefix,
+                RoleAssignableWorkloadPlaneAdmins: state.SemRoleAssignableWorkloadPlaneAdmins,
+                AdministrativeUnits: {
+                    WorkloadPlane: state.SemAuWorkloadPlane,
+                    UserAccess: state.SemAuUserAccess
+                },
+                UpdateObjectClassificationFile: state.SemUpdateObjectClassificationFile,
+                ConstrainedDelegation: {
+                    ManagementPlane: {
+                        ExcludedRoleDefinitionIds: commaListToArray(state.SemMpExcludedRoleDefinitionIds),
+                        AllowedTargetGroupFilter: state.SemMpAllowedTargetGroupFilter
+                    },
+                    WorkloadPlane: {
+                        AllowedRoleDefinitionIds: commaListToArray(state.SemWpAllowedRoleDefinitionIds),
+                        AllowedTargetGroupFilter: state.SemWpAllowedTargetGroupFilter
+                    }
+                },
+                PIMAuthenticationContext: {
+                    EnableAuthenticationContext: state.SemEnableAuthenticationContext,
+                    ControlPlane: {
+                        AuthenticationContextClassReferenceId: state.SemCpAuthContextId,
+                        AuthenticationContextDisplayName: state.SemCpAuthContextDisplayName
+                    },
+                    ManagementPlane: {
+                        AuthenticationContextClassReferenceId: state.SemMpAuthContextId,
+                        AuthenticationContextDisplayName: state.SemMpAuthContextDisplayName
+                    },
+                    WorkloadPlane: {
+                        AuthenticationContextClassReferenceId: state.SemWpAuthContextId,
+                        AuthenticationContextDisplayName: state.SemWpAuthContextDisplayName
+                    }
+                },
+                PIMForGroups: {
+                    MaximumActivationDuration: state.SemPimMaximumActivationDuration,
+                    MaximumActiveAssignmentDuration: state.SemPimMaximumActiveAssignmentDuration
+                },
+                AssignmentPolicies: {
+                    BaselinePolicy: { Expiration: state.SemApBaselineExpiration, ApprovalTimeout: state.SemApBaselineApprovalTimeout, AllowExtension: state.SemApBaselineAllowExtension },
+                    WorkloadPlaneUsers: { Expiration: state.SemApWpUsersExpiration, ApprovalTimeout: state.SemApWpUsersApprovalTimeout, RequestorScope: state.SemApWpUsersRequestorScope, AllowExtension: state.SemApWpUsersAllowExtension },
+                    WorkloadPlaneAdmins: { Expiration: state.SemApWpAdminsExpiration, ApprovalTimeout: state.SemApWpAdminsApprovalTimeout, AllowExtension: state.SemApWpAdminsAllowExtension },
+                    ManagementPlaneAdmins: { Expiration: state.SemApMpAdminsExpiration, ApprovalTimeout: state.SemApMpAdminsApprovalTimeout, AllowExtension: state.SemApMpAdminsAllowExtension },
+                    InitialWorkloadMembership: { Expiration: state.SemApInitialWorkloadMembershipExpiration },
+                    InitialManagementAdmins: { Expiration: state.SemApInitialManagementAdminsExpiration },
+                    InitialWorkloadUsers: { Expiration: state.SemApInitialWorkloadUsersExpiration },
+                    InitialWorkloadAdmins: { Expiration: state.SemApInitialWorkloadAdminsExpiration },
+                    InitialCatalogMembers: { Expiration: state.SemApInitialCatalogMembersExpiration }
+                },
+                AccessReviews: {
+                    EnableAccessReviews: state.SemArEnableAccessReviews,
+                    RecurrenceIntervalInMonths: state.SemArRecurrenceIntervalInMonths === "" ? 3 : Math.round(Number(state.SemArRecurrenceIntervalInMonths)),
+                    StartAfterDays: state.SemArStartAfterDays === "" ? 4 : Math.round(Number(state.SemArStartAfterDays)),
+                    ReviewDuration: state.SemArReviewDuration,
+                    Policies: SERVICEEM_REVIEW_POLICIES.reduce(function (policies, p) {
+                        policies[p.key] = { ReviewerType: state["SemAr" + p.key + "ReviewerType"], Reviewers: commaListToArray(state["SemAr" + p.key + "Reviewers"]) };
+                        return policies;
+                    }, {})
+                }
             }
         };
-        return mergeConfig(deepClone(importedConfig || {}), cfg);
+        var merged = mergeConfig(deepClone(importedConfig || {}), cfg);
+        // Per-type Enabled flags replace the legacy top-level switch of older config files.
+        var alternate = merged.AlternateObjectTierLevelAttributes;
+        delete alternate.Enabled;
+        ["User", "ServicePrincipal", "Group"].forEach(function (objType) {
+            var enabled = alternate[objType].Enabled;
+            delete alternate[objType].Enabled;
+            alternate[objType] = Object.assign({ Enabled: enabled }, alternate[objType]);
+        });
+        return merged;
     }
 
     // ---------------------------------------------------------------------
@@ -1495,6 +1849,7 @@
         state.GenerateConfigurationAnalyzer = reporting.GenerateConfigurationAnalyzer !== undefined ? reporting.GenerateConfigurationAnalyzer : state.GenerateConfigurationAnalyzer;
         state.GenerateAccessPackageFlow = reporting.GenerateAccessPackageFlow !== undefined ? reporting.GenerateAccessPackageFlow : state.GenerateAccessPackageFlow;
         state.GeneratePrivilegeHistory = reporting.GeneratePrivilegeHistory !== undefined ? reporting.GeneratePrivilegeHistory : state.GeneratePrivilegeHistory;
+        state.GeneratePrivilegedAssets = reporting.GeneratePrivilegedAssets !== undefined ? reporting.GeneratePrivilegedAssets : state.GeneratePrivilegedAssets;
         state.ClassificationExplorerRepository = reporting.ClassificationExplorerRepository || state.ClassificationExplorerRepository;
         state.ResolveGroupMembersForPrivilegedAssets = pick(cfg, "ConfigurationAnalyzer.ResolveGroupMembersForPrivilegedAssets", state.ResolveGroupMembersForPrivilegedAssets);
         state.AllowPartialTenantGovernanceSnapshot = pick(cfg, "ConfigurationAnalyzer.AllowPartialTenantGovernanceSnapshot", state.AllowPartialTenantGovernanceSnapshot);
@@ -1514,13 +1869,22 @@
         state.PrivilegedServicePrincipalAdminTierLevelNameAttribute = pick(cfg, "CustomSecurityAttributes.PrivilegedServicePrincipalAdminTierLevelNameAttribute", state.PrivilegedServicePrincipalAdminTierLevelNameAttribute);
 
         var alt = cfg.AlternateObjectTierLevelAttributes || {};
-        state.ClassificationMethod = alt.Enabled === true ? "alternate" : "csa";
-        ["User", "ServicePrincipal"].forEach(function (objType) {
+        state.FileEnabled = pick(cfg, "ObjectClassificationFile.Enabled", false) === true;
+        // Older config files had one classification method: selecting the file or the alternate filters turned custom security attributes off.
+        var csaEnabled = pick(cfg, "CustomSecurityAttributes.Enabled", null);
+        state.CsaEnabled = typeof csaEnabled === "boolean" ? csaEnabled : !(alt.Enabled === true || (state.FileEnabled && String(pick(cfg, "ObjectClassificationFile.FilePath", "") || "").trim() !== ""));
+        ["User", "ServicePrincipal", "Group"].forEach(function (objType) {
             ["ControlPlane", "ManagementPlane", "UserAccess"].forEach(function (tier) {
                 var expr = pick(alt, objType + "." + tier, "");
                 state.Alternate[objType][tier] = parseExpression(expr);
             });
+            // Same fallback as Test-EntraOpsAlternateObjectTierLevelEnabled for configs without per-type Enabled.
+            var typeEnabled = pick(alt, objType + ".Enabled", null);
+            var hasFilter = ["ControlPlane", "ManagementPlane", "WorkloadPlane", "UserAccess"].some(function (tier) { return String(pick(alt, objType + "." + tier, "") || "").trim() !== ""; });
+            state["Alternate" + objType + "Enabled"] = typeof typeEnabled === "boolean" ? typeEnabled : (objType === "Group" ? hasFilter : alt.Enabled === true);
         });
+        state.AlternateSelected = state.AlternateUserEnabled || state.AlternateServicePrincipalEnabled || state.AlternateGroupEnabled;
+        state.ObjectClassificationFilePath = pick(cfg, "ObjectClassificationFile.FilePath", state.ObjectClassificationFilePath);
 
         state.EnablePrivilegeHistory = pick(cfg, "PrivilegeHistory.EnablePrivilegeHistory", state.EnablePrivilegeHistory);
         var timeRange = pick(cfg, "PrivilegeHistory.TimeRangeInDays", null);
@@ -1529,6 +1893,7 @@
 
         state.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM = pick(cfg, "AccessPathMap.ResolveObjectIdsOutsidePrivilegedEAM", state.AccessPathMapResolveObjectIdsOutsidePrivilegedEAM);
         state.EamDashboardResolveLinkedIdentityObjectIds = pick(cfg, "EamDashboard.ResolveLinkedIdentityObjectIds", state.EamDashboardResolveLinkedIdentityObjectIds);
+        state.PrivilegedAssetsResolveRelatedObjectIds = pick(cfg, "PrivilegedAssets.ResolveRelatedObjectIds", state.PrivilegedAssetsResolveRelatedObjectIds);
         state.ClassificationExplorerGenerateChangeHistory = pick(cfg, "ClassificationExplorer.GenerateChangeHistory", state.ClassificationExplorerGenerateChangeHistory);
 
         state.EnableTenantGovernanceSnapshot = pick(cfg, "TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot", state.EnableTenantGovernanceSnapshot);
@@ -1540,6 +1905,65 @@
         state.TgSnapshotScheduledCronComplete = pick(cfg, "TenantGovernanceSnapshot.SnapshotScheduledCronComplete", state.TgSnapshotScheduledCronComplete);
         state.TgSnapshotScheduledCronCompleteRetry1 = pick(cfg, "TenantGovernanceSnapshot.SnapshotScheduledCronCompleteRetry1", state.TgSnapshotScheduledCronCompleteRetry1);
         state.TgSnapshotScheduledCronCompleteRetry2 = pick(cfg, "TenantGovernanceSnapshot.SnapshotScheduledCronCompleteRetry2", state.TgSnapshotScheduledCronCompleteRetry2);
+
+        state.SemGovernanceModel = pick(cfg, "ServiceEM.GovernanceModel", state.SemGovernanceModel);
+        state.SemControlPlaneDelegationGroupId = pick(cfg, "ServiceEM.ControlPlaneDelegationGroupId", state.SemControlPlaneDelegationGroupId);
+        state.SemControlPlaneGroupName = pick(cfg, "ServiceEM.ControlPlaneGroupName", state.SemControlPlaneGroupName);
+        state.SemManagementPlaneDelegationGroupId = pick(cfg, "ServiceEM.ManagementPlaneDelegationGroupId", state.SemManagementPlaneDelegationGroupId);
+        state.SemManagementPlaneGroupName = pick(cfg, "ServiceEM.ManagementPlaneGroupName", state.SemManagementPlaneGroupName);
+        state.SemAdministratorGroupId = pick(cfg, "ServiceEM.AdministratorGroupId", state.SemAdministratorGroupId);
+        var excludedRoleIds = pick(cfg, "ServiceEM.ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds", null);
+        if (excludedRoleIds != null) state.SemMpExcludedRoleDefinitionIds = asList(excludedRoleIds).join("\n");
+        state.SemMpAllowedTargetGroupFilter = pick(cfg, "ServiceEM.ConstrainedDelegation.ManagementPlane.AllowedTargetGroupFilter", state.SemMpAllowedTargetGroupFilter);
+        var allowedRoleIds = pick(cfg, "ServiceEM.ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds", null);
+        if (allowedRoleIds != null) state.SemWpAllowedRoleDefinitionIds = asList(allowedRoleIds).join("\n");
+        state.SemWpAllowedTargetGroupFilter = pick(cfg, "ServiceEM.ConstrainedDelegation.WorkloadPlane.AllowedTargetGroupFilter", state.SemWpAllowedTargetGroupFilter);
+        state.SemEnableAuthenticationContext = pick(cfg, "ServiceEM.PIMAuthenticationContext.EnableAuthenticationContext", state.SemEnableAuthenticationContext);
+        state.SemCpAuthContextId = pick(cfg, "ServiceEM.PIMAuthenticationContext.ControlPlane.AuthenticationContextClassReferenceId", state.SemCpAuthContextId);
+        state.SemCpAuthContextDisplayName = pick(cfg, "ServiceEM.PIMAuthenticationContext.ControlPlane.AuthenticationContextDisplayName", state.SemCpAuthContextDisplayName);
+        state.SemMpAuthContextId = pick(cfg, "ServiceEM.PIMAuthenticationContext.ManagementPlane.AuthenticationContextClassReferenceId", state.SemMpAuthContextId);
+        state.SemMpAuthContextDisplayName = pick(cfg, "ServiceEM.PIMAuthenticationContext.ManagementPlane.AuthenticationContextDisplayName", state.SemMpAuthContextDisplayName);
+        state.SemWpAuthContextId = pick(cfg, "ServiceEM.PIMAuthenticationContext.WorkloadPlane.AuthenticationContextClassReferenceId", state.SemWpAuthContextId);
+        state.SemWpAuthContextDisplayName = pick(cfg, "ServiceEM.PIMAuthenticationContext.WorkloadPlane.AuthenticationContextDisplayName", state.SemWpAuthContextDisplayName);
+        state.SemDefaultAzureRegion = pick(cfg, "ServiceEM.DefaultAzureRegion", state.SemDefaultAzureRegion);
+        state.SemSkipCatalogOwnerAssignment = pick(cfg, "ServiceEM.SkipCatalogOwnerAssignment", state.SemSkipCatalogOwnerAssignment);
+        state.SemCreateM365Group = pick(cfg, "ServiceEM.CreateM365Group", state.SemCreateM365Group);
+        state.SemAddWorkloadPlaneAdminToUsers = pick(cfg, "ServiceEM.AddWorkloadPlaneAdminToUsers", state.SemAddWorkloadPlaneAdminToUsers);
+        state.SemGroupPrefix = pick(cfg, "ServiceEM.GroupPrefix", state.SemGroupPrefix);
+        state.SemRoleAssignableWorkloadPlaneAdmins = pick(cfg, "ServiceEM.RoleAssignableWorkloadPlaneAdmins", state.SemRoleAssignableWorkloadPlaneAdmins);
+        state.SemAuWorkloadPlane = pick(cfg, "ServiceEM.AdministrativeUnits.WorkloadPlane", state.SemAuWorkloadPlane);
+        state.SemAuUserAccess = pick(cfg, "ServiceEM.AdministrativeUnits.UserAccess", state.SemAuUserAccess);
+        state.SemUpdateObjectClassificationFile = pick(cfg, "ServiceEM.UpdateObjectClassificationFile", state.SemUpdateObjectClassificationFile);
+        state.SemPimMaximumActivationDuration = pick(cfg, "ServiceEM.PIMForGroups.MaximumActivationDuration", state.SemPimMaximumActivationDuration);
+        state.SemPimMaximumActiveAssignmentDuration = pick(cfg, "ServiceEM.PIMForGroups.MaximumActiveAssignmentDuration", state.SemPimMaximumActiveAssignmentDuration);
+        state.SemApBaselineExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.BaselinePolicy.Expiration", state.SemApBaselineExpiration);
+        state.SemApBaselineApprovalTimeout = pick(cfg, "ServiceEM.AssignmentPolicies.BaselinePolicy.ApprovalTimeout", state.SemApBaselineApprovalTimeout);
+        state.SemApWpUsersExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.WorkloadPlaneUsers.Expiration", state.SemApWpUsersExpiration);
+        state.SemApWpUsersApprovalTimeout = pick(cfg, "ServiceEM.AssignmentPolicies.WorkloadPlaneUsers.ApprovalTimeout", state.SemApWpUsersApprovalTimeout);
+        state.SemApWpUsersRequestorScope = pick(cfg, "ServiceEM.AssignmentPolicies.WorkloadPlaneUsers.RequestorScope", state.SemApWpUsersRequestorScope);
+        state.SemApWpAdminsExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.WorkloadPlaneAdmins.Expiration", state.SemApWpAdminsExpiration);
+        state.SemApWpAdminsApprovalTimeout = pick(cfg, "ServiceEM.AssignmentPolicies.WorkloadPlaneAdmins.ApprovalTimeout", state.SemApWpAdminsApprovalTimeout);
+        state.SemApMpAdminsExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.ManagementPlaneAdmins.Expiration", state.SemApMpAdminsExpiration);
+        state.SemApMpAdminsApprovalTimeout = pick(cfg, "ServiceEM.AssignmentPolicies.ManagementPlaneAdmins.ApprovalTimeout", state.SemApMpAdminsApprovalTimeout);
+        state.SemApBaselineAllowExtension = pick(cfg, "ServiceEM.AssignmentPolicies.BaselinePolicy.AllowExtension", state.SemApBaselineAllowExtension);
+        state.SemApWpUsersAllowExtension = pick(cfg, "ServiceEM.AssignmentPolicies.WorkloadPlaneUsers.AllowExtension", state.SemApWpUsersAllowExtension);
+        state.SemApWpAdminsAllowExtension = pick(cfg, "ServiceEM.AssignmentPolicies.WorkloadPlaneAdmins.AllowExtension", state.SemApWpAdminsAllowExtension);
+        state.SemApMpAdminsAllowExtension = pick(cfg, "ServiceEM.AssignmentPolicies.ManagementPlaneAdmins.AllowExtension", state.SemApMpAdminsAllowExtension);
+        state.SemApInitialWorkloadMembershipExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialWorkloadMembership.Expiration", state.SemApInitialWorkloadMembershipExpiration);
+        state.SemApInitialManagementAdminsExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialManagementAdmins.Expiration", state.SemApInitialManagementAdminsExpiration);
+        state.SemApInitialWorkloadUsersExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialWorkloadUsers.Expiration", state.SemApInitialWorkloadUsersExpiration);
+        state.SemApInitialWorkloadAdminsExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialWorkloadAdmins.Expiration", state.SemApInitialWorkloadAdminsExpiration);
+        state.SemApInitialCatalogMembersExpiration = pick(cfg, "ServiceEM.AssignmentPolicies.InitialCatalogMembers.Expiration", state.SemApInitialCatalogMembersExpiration);
+        state.SemArEnableAccessReviews = pick(cfg, "ServiceEM.AccessReviews.EnableAccessReviews", state.SemArEnableAccessReviews);
+        state.SemArRecurrenceIntervalInMonths = pick(cfg, "ServiceEM.AccessReviews.RecurrenceIntervalInMonths", state.SemArRecurrenceIntervalInMonths);
+        state.SemArStartAfterDays = pick(cfg, "ServiceEM.AccessReviews.StartAfterDays", state.SemArStartAfterDays);
+        state.SemArReviewDuration = pick(cfg, "ServiceEM.AccessReviews.ReviewDuration", state.SemArReviewDuration);
+        SERVICEEM_REVIEW_POLICIES.forEach(function (p) {
+            var typeKey = "SemAr" + p.key + "ReviewerType", reviewersKey = "SemAr" + p.key + "Reviewers";
+            state[typeKey] = pick(cfg, "ServiceEM.AccessReviews.Policies." + p.key + ".ReviewerType", state[typeKey]);
+            var reviewers = pick(cfg, "ServiceEM.AccessReviews.Policies." + p.key + ".Reviewers", null);
+            if (reviewers != null) state[reviewersKey] = asList(reviewers).join(", ");
+        });
     }
 
     // ---------------------------------------------------------------------
@@ -1613,8 +2037,10 @@
         var type = el.getAttribute("data-type") || (typeContainer && typeContainer.getAttribute("data-type"));
         if (!type) return;
         var key = el.closest("[data-key]").getAttribute("data-key");
-        if (type === "checkbox") setVal(key, el.checked);
-        else if (type === "multiselect") {
+        if (type === "checkbox") {
+            setVal(key, el.checked);
+            if (/^Alternate\w+Enabled$/.test(key)) renderActivePanel();
+        } else if (type === "multiselect") {
             var container = el.closest("[data-key]");
             var values = Array.prototype.slice.call(container.querySelectorAll("input:checked")).map(function (i) { return i.value; });
             applyMultiselectSelection(findFieldByKey(key), values, container);
@@ -1677,6 +2103,11 @@
     }
 
     function onPanelClick(ev) {
+        var groupTitle = ev.target.closest("[data-collapse-key]");
+        if (groupTitle) {
+            setGroupCollapsed(groupTitle, groupTitle.getAttribute("aria-expanded") === "true");
+            return;
+        }
         var providerBtn = ev.target.closest("[data-tg-provider]");
         if (providerBtn) {
             state.TgResourceProvider = providerBtn.getAttribute("data-tg-provider");
@@ -1715,7 +2146,9 @@
         }
         var methodCardEl = ev.target.closest("[data-method]");
         if (methodCardEl) {
-            state.ClassificationMethod = methodCardEl.getAttribute("data-method");
+            // A click on the card label is re-dispatched to its checkbox; handle only that one.
+            if (ev.target.tagName !== "INPUT") return;
+            state[METHOD_STATE[methodCardEl.getAttribute("data-method")]] = ev.target.checked;
             renderActivePanel();
             renderPreview();
             return;
@@ -1886,6 +2319,12 @@
 
         panelsEl.addEventListener("change", onFieldChange);
         panelsEl.addEventListener("click", onPanelClick);
+        panelsEl.addEventListener("keydown", function (ev) {
+            var groupTitle = ev.target.closest("[data-collapse-key]");
+            if (!groupTitle || (ev.key !== "Enter" && ev.key !== " ")) return;
+            ev.preventDefault();
+            setGroupCollapsed(groupTitle, groupTitle.getAttribute("aria-expanded") === "true");
+        });
         panelsEl.addEventListener("input", onPanelInput);
 
         var downloadBtn = document.getElementById("wizDownload");

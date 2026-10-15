@@ -313,19 +313,19 @@ function Get-EntraOpsClassificationControlPlaneObjects {
 
     #region Display summary of identified Control Plane objects
     Write-Host "`n=== Control Plane Classification Summary ===" -ForegroundColor Cyan
-    $UniqueTotalCount = ($PrivilegedObjects | Select-Object -Unique ObjectId).Count
+    $UniqueTotalCount = @($PrivilegedObjects | Select-Object -Unique ObjectId).Count
     Write-Host "Total unique privileged objects identified: $UniqueTotalCount`n" -ForegroundColor White
 
     $PrivilegedObjects | Group-Object ClassificationSource | ForEach-Object {
         $SourceGroup = $_
-        $UniqueSourceObjects = $SourceGroup.Group | Select-Object -Unique ObjectId, ObjectType, ObjectDisplayName
+        $UniqueSourceObjects = @($SourceGroup.Group | Select-Object -Unique ObjectId, ObjectType, ObjectDisplayName)
         Write-Host "  [Source: $($SourceGroup.Name)] - $($UniqueSourceObjects.Count) unique object(s)" -ForegroundColor Yellow
 
         switch ($SourceGroup.Name) {
             "EntraOps" {
                 Write-Host "    Analyzed EntraOps scopes: $($EntraOpsScopes -join ', ')" -ForegroundColor Gray
-                $ObjectLevelClassified = $SourceGroup.Group | Where-Object { $_.ClassificationReason -contains "ObjectAdminTierLevelName" } | Select-Object -Unique ObjectId
-                $RoleLevelClassified = $SourceGroup.Group | Where-Object { $_.ClassificationReason -notcontains "ObjectAdminTierLevelName" } | Select-Object -Unique ObjectId
+                $ObjectLevelClassified = @($SourceGroup.Group | Where-Object { $_.ClassificationReason -contains "ObjectAdminTierLevelName" } | Select-Object -Unique ObjectId)
+                $RoleLevelClassified = @($SourceGroup.Group | Where-Object { $_.ClassificationReason -notcontains "ObjectAdminTierLevelName" } | Select-Object -Unique ObjectId)
                 if ($ObjectLevelClassified.Count -gt 0) {
                     Write-Host "    Classified by object-level Control Plane tier (ObjectAdminTierLevelName): $($ObjectLevelClassified.Count) object(s)" -ForegroundColor Gray
                 }
@@ -368,14 +368,56 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     #endregion
 
     #region Summarize and return list of privileged objects
-    # Sort deterministically (ObjectId as final tiebreaker) so the output order is stable across runs -
-    # otherwise objects sharing the same ObjectType/ObjectDisplayName (e.g. same-named managed identities)
-    # can swap positions between runs purely due to upstream API pagination/enumeration order, producing
-    # spurious diff noise with no actual data change.
-    $PrivilegedObjects = $PrivilegedObjects | Sort-Object ObjectType, ObjectDisplayName, ObjectId
-    $PrivilegedObjects | Select-Object -Unique ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectSignInName, ObjectTenantId, RestrictedManagementByAadRole, RestrictedManagementByRAG, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice, AssignedAdministrativeUnits | ForEach-Object {
-        $PrivilegedObject = $_
-        $Classifications = $PrivilegedObjects | Where-Object { $_.ObjectId -eq $PrivilegedObject.ObjectId -and $_.ObjectType -eq $PrivilegedObject.ObjectType } | select-object ClassificationReason, ClassificationSource
+    # One entry per identity: Select-Object -Unique cannot be used here because it compares array/object
+    # properties (AssignedAdministrativeUnits, OwnedDevices, ...) by reference and keeps identities whose
+    # metadata differs between sources (previous EAM export vs live Graph resolution) - both produced duplicates.
+    # Protection flags are merged fail-safe ($true only if every source reports protected), matching the
+    # downstream "-ne $true = unprotected" evaluation; device and administrative unit references are unioned.
+    $PrivilegedObjectGroups = @($PrivilegedObjects | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace("$($_.ObjectId)") } |
+        Group-Object -Property { "$($_.ObjectId)".ToLowerInvariant() + '|' + "$($_.ObjectType)".ToLowerInvariant() })
+
+    $MergedPrivilegedObjects = foreach ($PrivilegedObjectGroup in $PrivilegedObjectGroups) {
+        $GroupEntries = @($PrivilegedObjectGroup.Group | Sort-Object { "$($_.ClassificationSource)" }, { $_ | Select-Object * -ExcludeProperty ClassificationReason, ClassificationSource | ConvertTo-Json -Compress -Depth 5 })
+
+        $GetOptionalValue = {
+            param($Entry, $PropertyName)
+            # Missing optional metadata (including protection flags) is null, even under strict mode.
+            $Property = $Entry.PSObject.Properties[$PropertyName]
+            if ($null -ne $Property) { $Property.Value } else { $null }
+        }
+        $FirstValue = {
+            param($PropertyName)
+            $GroupEntries | ForEach-Object { & $GetOptionalValue $_ $PropertyName } | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") } | Select-Object -First 1
+        }
+        $MergeProtectionFlag = {
+            param([object[]]$Values)
+            if (@($Values | Where-Object { $_ -ne $true }).Count -eq 0) {
+                $true
+            } elseif (@($Values | Where-Object { $_ -eq $false }).Count -gt 0) {
+                $false
+            } else {
+                $null
+            }
+        }
+        $UnionValues = {
+            param($PropertyName)
+            $Values = @($GroupEntries | ForEach-Object { & $GetOptionalValue $_ $PropertyName } | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") } | Sort-Object -Unique)
+            if ($Values.Count -gt 0) { , $Values } else { $null }
+        }
+
+        $AdministrativeUnits = @($GroupEntries | ForEach-Object { & $GetOptionalValue $_ 'AssignedAdministrativeUnits' } | Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace("$($_.id)") } |
+            Group-Object -Property { "$($_.id)".ToLowerInvariant() } | Sort-Object Name | ForEach-Object { $_.Group[0] })
+
+        $RestrictedManagementFlags = @{}
+        foreach ($FlagName in @('RestrictedManagementByAadRole', 'RestrictedManagementByRAG', 'RestrictedManagementByRMAU')) {
+            $FlagValues = @($GroupEntries | ForEach-Object { & $GetOptionalValue $_ $FlagName })
+            $RestrictedManagementFlags[$FlagName] = & $MergeProtectionFlag $FlagValues
+            if (@($FlagValues | Where-Object { $_ -eq $true }).Count -gt 0 -and @($FlagValues | Where-Object { $_ -ne $true }).Count -gt 0) {
+                Write-Warning "Conflicting $FlagName values for privileged object $($GroupEntries[0].ObjectId) across classification sources - treated as unprotected."
+            }
+        }
+
+        $Classifications = @($GroupEntries | Select-Object ClassificationReason, ClassificationSource)
         # An object can carry multiple classification-reason entries (one per originating source: EntraOps
         # per-RBAC-scope hits, Azure Resource Graph, XSPM edges, ...), collected here via a plain filter with no
         # inherent order. Since ClassificationReason/ClassificationSource mix scalars and differently-shaped
@@ -383,8 +425,28 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         # function of content only, so the order is stable across runs regardless of upstream arrival order
         # (notably the XSPM Kusto query, which gives no row-order guarantee).
         $Classifications = @($Classifications | Sort-Object { $_ | ConvertTo-Json -Compress -Depth 5 })
-        $PrivilegedObject | Add-Member -MemberType NoteProperty -Name Classification -Value $Classifications -Force | Out-Null
-        return $PrivilegedObject
+
+        [PSCustomObject][ordered]@{
+            ObjectId                      = $GroupEntries[0].ObjectId
+            ObjectType                    = "$($GroupEntries[0].ObjectType)".ToLowerInvariant()
+            ObjectSubType                 = & $FirstValue 'ObjectSubType'
+            ObjectDisplayName             = & $FirstValue 'ObjectDisplayName'
+            ObjectSignInName              = & $FirstValue 'ObjectSignInName'
+            ObjectTenantId                = & $FirstValue 'ObjectTenantId'
+            RestrictedManagementByAadRole = $RestrictedManagementFlags['RestrictedManagementByAadRole']
+            RestrictedManagementByRAG     = $RestrictedManagementFlags['RestrictedManagementByRAG']
+            RestrictedManagementByRMAU    = $RestrictedManagementFlags['RestrictedManagementByRMAU']
+            OwnedDevices                  = & $UnionValues 'OwnedDevices'
+            AssociatedPawDevice           = & $UnionValues 'AssociatedPawDevice'
+            AssignedAdministrativeUnits   = if ($AdministrativeUnits.Count -gt 0) { , $AdministrativeUnits } else { $null }
+            Classification                = $Classifications
+        }
     }
+
+    # Sort deterministically (ObjectId as final tiebreaker) so the output order is stable across runs -
+    # otherwise objects sharing the same ObjectType/ObjectDisplayName (e.g. same-named managed identities)
+    # can swap positions between runs purely due to upstream API pagination/enumeration order, producing
+    # spurious diff noise with no actual data change.
+    $MergedPrivilegedObjects | Sort-Object ObjectType, ObjectDisplayName, ObjectId
     #endregion
 }

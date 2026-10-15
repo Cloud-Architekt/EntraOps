@@ -83,6 +83,9 @@ if (-not (Test-Path -LiteralPath $__EntraOpsSession.PersistentCachePath)) {
     }
 }
 
-# Global variable
-$EntraOpsBasefolder = (Get-Item -Path $PSScriptRoot).Parent.FullName
-New-Variable -Name EntraOpsBaseFolder -Value $EntraOpsBasefolder -Scope Global -Force
+# Global variable: the working folder for configuration, classification, exports and reports.
+$EntraOpsBaseFolderResolution = Resolve-EntraOpsBaseFolder -ModuleRoot $PSScriptRoot
+# Keep one live working-folder value. A module-scoped copy would shadow session changes
+# made by Initialize-EntraOpsWorkspace or by setting $Global:EntraOpsBaseFolder directly.
+Write-Verbose "EntraOps working folder ($($EntraOpsBaseFolderResolution.Source)): $($EntraOpsBaseFolderResolution.Path)"
+New-Variable -Name EntraOpsBaseFolder -Value $EntraOpsBaseFolderResolution.Path -Scope Global -Force

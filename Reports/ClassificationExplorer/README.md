@@ -141,7 +141,7 @@ dotnet new console --output $playwrightRoot --framework net8.0
 dotnet add $playwrightRoot package Microsoft.Playwright --version 1.55.0
 dotnet build $playwrightRoot --configuration Release
 & (Join-Path $playwrightRoot 'bin/Release/net8.0/playwright.ps1') install chromium
-Invoke-Pester ./Tests/ClassificationExplorer.Tests.ps1 -CI -Output Detailed
+Invoke-Pester ./Tests/Reporting/New-EntraOpsClassificationExplorerData.Tests.ps1 -CI -Output Detailed
 ```
 
 The `Classification Explorer` GitHub Actions workflow runs strict generator validation,
@@ -195,3 +195,4 @@ keeps duplicate copies of the JSON.
 Plain HTML, CSS and JavaScript — **no build step, no dependencies**. Just static
 files. The classification data is the single source of truth and is never modified by
 the app.
+

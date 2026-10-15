@@ -560,8 +560,11 @@ function Get-EntraOpsPrivilegedEAMAzure {
         $AzureRbacAssignment = $AzureRbacAssignment | Select-Object -ExcludeProperty Classification
         $ClassificationKey = "$($AzureRbacAssignment.RoleDefinitionId)|$($AzureRbacAssignment.RoleAssignmentScopeId)"
         $Classification = @($ClassificationsByRoleAndScope[$ClassificationKey])
-        $Classification = $Classification | Select-Object -Unique AdminTierLevel, AdminTierLevelName, MatchedActions, ScopedObjects, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem |
-        Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        # @() keeps a single classification an array (consistent JSON shape across RBAC systems);
+        # no classification stays $null as before.
+        $Classification = @($Classification | Select-Object -Unique AdminTierLevel, AdminTierLevelName, MatchedActions, ScopedObjects, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem |
+            Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy)
+        if ($Classification.Count -eq 0) { $Classification = $null }
         $AzureRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
 
         $AssignedRoleDefinitionForCondition = $RoleDefinitionCache["$($AzureRbacAssignment.RoleDefinitionId)"]

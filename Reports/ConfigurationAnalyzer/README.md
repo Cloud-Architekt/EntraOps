@@ -61,8 +61,9 @@ or as part of refreshing all reporting apps with `New-EntraOpsReportingData`. Us
   property-level diffs and the Conditional Access views). Content blobs are de-duplicated by git
   blob hash, so unchanged resources are stored once regardless of the snapshot count.
 - `-AllowPartialSnapshot` - explicitly include the current mixed tree after a partially successful
-  Tenant Governance capture. Preserved resource types remain marked stale, and historical partial
-  commits are excluded from the timeline. The GitHub reporting workflow enables this by default
+  Tenant Governance capture. Preserved resource types remain marked stale. Historical partially
+  successful commits that published resource files are part of the timeline regardless of this
+  switch; manifest-only commits (no resource type published) are excluded. The GitHub reporting workflow enables this by default
   through `ConfigurationAnalyzer.AllowPartialTenantGovernanceSnapshot`; set it to `false` for a
   strict complete-snapshot-only report. Manual workflow dispatch can still override the setting.
 - `-AllowStaleSnapshot` - bypass only the snapshot age check. Combine it with

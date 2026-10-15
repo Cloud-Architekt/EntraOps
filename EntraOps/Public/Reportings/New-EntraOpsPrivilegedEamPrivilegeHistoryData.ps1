@@ -174,12 +174,12 @@ function New-EntraOpsPrivilegedEamPrivilegeHistoryData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
     if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/PrivilegeHistory' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
-        throw "Privilege History app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/PrivilegeHistory."
+        throw "Privilege History app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/PrivilegeHistory, or run Install-EntraOpsReportingFolder to download the Reports folder."
     }
     if ([string]::IsNullOrWhiteSpace($ImportPath)) { $ImportPath = Join-Path $RepoRoot 'PrivilegedEAM' }
     if ([string]::IsNullOrWhiteSpace($OutFile)) { $OutFile = Join-Path $AppRoot 'data/privilege-history-data.js' }
@@ -364,6 +364,7 @@ function New-EntraOpsPrivilegedEamPrivilegeHistoryData {
             # snapshots) - not the full live-dashboard schema, to keep repository size
             # bounded across potentially many historic commits.
             $snapshotObjects = @($objects | ForEach-Object {
+                    $snapshotObject = $_
                     [ordered]@{
                         objectId                 = $_.objectId
                         objectType               = $_.objectType
@@ -375,7 +376,8 @@ function New-EntraOpsPrivilegedEamPrivilegeHistoryData {
                                     roleAssignmentInstanceId = $_.roleAssignmentInstanceId
                                     roleAssignmentId   = $_.roleAssignmentId
                                     roleDefinitionName = $_.roleDefinitionName
-                                    roleSystem         = $_.roleSystem
+                                    # Dashboard role assignments carry no roleSystem of their own - it belongs to the parent object.
+                                    roleSystem         = $snapshotObject.roleSystem
                                     roleAssignmentType = $_.roleAssignmentType
                                     pimAssignmentType  = $_.pimAssignmentType
                                     classification     = @(@($_.classification) | ForEach-Object {

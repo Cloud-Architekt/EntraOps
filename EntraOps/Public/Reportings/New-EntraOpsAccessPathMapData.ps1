@@ -116,12 +116,12 @@ function New-EntraOpsAccessPathMapData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
     if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/AccessPathMap' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
-        throw "Access Path Map app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/AccessPathMap."
+        throw "Access Path Map app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/AccessPathMap, or run Install-EntraOpsReportingFolder to download the Reports folder."
     }
     if ([string]::IsNullOrWhiteSpace($ImportPath)) { $ImportPath = Join-Path $RepoRoot 'PrivilegedEAM' }
     if ([string]::IsNullOrWhiteSpace($OutFile)) { $OutFile = Join-Path $AppRoot 'data/access-path-map-data.js' }
@@ -208,6 +208,19 @@ function New-EntraOpsAccessPathMapData {
             @($catalogCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1)[0]
         }
     )
+    if (-not @($RoleCatalogFiles | Where-Object { $_ })) {
+        # Last resort: AzurePrivilegedIAM catalog files downloaded into the EntraOps cache folder.
+        $CatalogCacheRoot = Get-EntraOpsClassificationSourceCache -FileName @($RoleCatalogFileNames | ForEach-Object { Split-Path -Leaf $_ })
+        if ($CatalogCacheRoot) {
+            $RoleCatalogRoots += $CatalogCacheRoot
+            $RoleCatalogFiles = @(
+                foreach ($catalogFileName in $RoleCatalogFileNames) {
+                    $catalogPath = Join-Path $CatalogCacheRoot $catalogFileName
+                    if (Test-Path -LiteralPath $catalogPath -PathType Leaf) { $catalogPath }
+                }
+            )
+        }
+    }
     if (-not @($RoleCatalogFiles | Where-Object { $_ })) {
         Write-Warning "No role catalog classification files found; role node descriptions/categories stay empty. Paths tried: $(@($RoleCatalogRoots | ForEach-Object { $root = $_; $RoleCatalogFileNames | ForEach-Object { Join-Path $root $_ } }) -join ', ')"
     }

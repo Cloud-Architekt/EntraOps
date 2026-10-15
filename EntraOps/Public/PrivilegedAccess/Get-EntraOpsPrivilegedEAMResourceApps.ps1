@@ -103,84 +103,10 @@ function Get-EntraOpsPrivilegedEamResourceApps {
     $AppRoleByClassificationJSON = Expand-EntraOpsPrivilegedEAMJsonFile -FilePath $ResourceAppsClassificationFilePath
 
     # Role action overwrites are already baked into the classification file by Update-EntraOpsClassificationControlPlaneScope.
-    $AppRoleClassificationsByJSON = @()
-    $AppRoleClassificationsByJSON += foreach ($AppRoleAssignment in $AppRoleAssignments | Select-Object -Unique RoleDefinitionId, RoleAssignmentScopeId, RoleDefinitionName, RoleType, ResourceAppId) {
-        # Check if role action and scope exists in JSON classification, filtered by ResourceAppId and ResourceScope
-        $ClassifiedWithMatchedActions = @()
-        foreach ($RoleDefinitionName in $AppRoleAssignment.RoleDefinitionName) {
-            $ClassifiedWithMatchedActions += $AppRoleByClassificationJSON | Where-Object {
-                ($_.RoleDefinitionActions -eq $RoleDefinitionName -or $RoleDefinitionName -like $_.RoleDefinitionActions) -and
-                $_.ExcludedRoleDefinitionActions -ne $RoleDefinitionName -and
-                (-not $_.ResourceAppId -or $_.ResourceAppId -eq $AppRoleAssignment.ResourceAppId) -and
-                ($_.ResourceScope -eq "All" -or
-                ($AppRoleAssignment.RoleType -eq "Application" -and $_.ResourceScope -eq "Application") -or
-                ($AppRoleAssignment.RoleType -eq "Delegated" -and $_.ResourceScope -eq "Delegation"))
-            } | ForEach-Object {
-                [PSCustomObject]@{
-                    EAMTierLevelName     = $_.EAMTierLevelName
-                    EAMTierLevelTagValue = $_.EAMTierLevelTagValue
-                    Service              = $_.Service
-                    MatchedAction        = $RoleDefinitionName
-                }
-            }
-        }
-        $Classification = @()
-        if ($ClassifiedWithMatchedActions.Count -gt 0) {
-            $UniqueClassifications = $ClassifiedWithMatchedActions | Select-Object -Unique EAMTierLevelName, EAMTierLevelTagValue, Service
-            $Classification += $UniqueClassifications | ForEach-Object {
-                $UniqueClass = $_
-                $MatchedEntries = @($ClassifiedWithMatchedActions | Where-Object {
-                        $_.EAMTierLevelName -eq $UniqueClass.EAMTierLevelName -and
-                        $_.EAMTierLevelTagValue -eq $UniqueClass.EAMTierLevelTagValue -and
-                        $_.Service -eq $UniqueClass.Service
-                    })
-                [array]$MatchedActions = @($MatchedEntries | Select-Object -ExpandProperty MatchedAction | Select-Object -Unique)
-                [PSCustomObject]@{
-                    'AdminTierLevel'             = $UniqueClass.EAMTierLevelTagValue
-                    'AdminTierLevelName'         = $UniqueClass.EAMTierLevelName
-                    'Service'                    = $UniqueClass.Service
-                    'MatchedActions'             = if ($MatchedActions.Count -gt 0) { , @($MatchedActions) } else { $null }
-                    'ScopedObjects'              = $null
-                    'TaggedBy'                   = "JSONwithAction"
-                    'TaggedByObjectIds'          = $null
-                    'TaggedByObjectDisplayNames' = $null
-                    'TaggedByRoleSystem'         = "ResourceApps"
-                }
-            }
-        } else {
-            $Classification += [PSCustomObject]@{
-                'AdminTierLevel'             = "Unclassified"
-                'AdminTierLevelName'         = "Unclassified"
-                'Service'                    = "Unclassified"
-                'MatchedActions'             = $null
-                'ScopedObjects'              = $null
-                'TaggedBy'                   = "JSONwithAction"
-                'TaggedByObjectIds'          = $null
-                'TaggedByObjectDisplayNames' = $null
-                'TaggedByRoleSystem'         = "ResourceApps"
-            }
-        }
-
-        [PSCustomObject]@{
-            'RoleDefinitionId'      = $AppRoleAssignment.RoleDefinitionId
-            'RoleAssignmentScopeId' = $AppRoleAssignment.RoleAssignmentScopeId
-            'Classification'        = $Classification
-        }
-    }
-    $AppRoleClassificationsByJSON = $AppRoleClassificationsByJSON | sort-object -property @{e = { $_.Classification.AdminTierLevel } }
     #endregion
 
     #region Classify App Role Assignments for Service Principals
-    $AppRoleClassifications = foreach ($AppRoleAssignment in $AppRoleAssignments) {
-        $AppRoleAssignment = $AppRoleAssignment | Select-Object -ExcludeProperty Classification
-        $Classification = @()
-        $ClassificationCollection = ($AppRoleClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $AppRoleAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $AppRoleAssignment.RoleDefinitionId })
-        if ($ClassificationCollection.Classification.Count -gt 0) {
-            $Classification += $ClassificationCollection.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy | select-object -Unique AdminTierLevel, AdminTierLevelName, MatchedActions, ScopedObjects, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem, Justification
-        }
-        $AppRoleAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
-        $AppRoleAssignment
-    }
+    $AppRoleClassifications = @(Resolve-EntraOpsAppRoleAssignmentClassification -AppRoleAssignments $AppRoleAssignments -ClassificationDefinitions $AppRoleByClassificationJSON)
     #endregion
     $AppRoleClassifications = $AppRoleClassifications | sort-object -property @{e = { $_.Classification.AdminTierLevel } }, RoleDefinitionName
 

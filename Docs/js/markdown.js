@@ -179,6 +179,10 @@ var DocsMD = (function () {
                 i++;
                 while (i < lines.length && !closeRe.test(lines[i])) { body.push(lines[i]); i++; }
                 i++;
+                if (lang.toLowerCase() === "mermaid") {
+                    html += '<div class="mermaid">' + esc(body.join("\n")).replace(/\\n/g, "<br>") + "</div>\n";
+                    continue;
+                }
                 html += "<pre><code" + (lang ? ' class="language-' + esc(lang) + '"' : "") + ">" + esc(body.join("\n")) + "</code></pre>\n";
                 continue;
             }

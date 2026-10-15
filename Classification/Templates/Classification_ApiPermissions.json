@@ -93,6 +93,8 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "AppCertTrustConfiguration.ReadWrite.All",
+          "AppFederatedCredentialIssuers.ReadWrite.All",
           "Application-RemoteDesktopConfig.ReadWrite.All",
           "Application.ReadUpdate.All",
           "Application.ReadWrite.All",
@@ -106,7 +108,8 @@
           "Policy.ReadWrite.PermissionGrant",
           "ServicePrincipalEndpoint.ReadWrite.All",
           "SpiffeTrustDomain.ReadWrite.All",
-          "Synchronization.ReadWrite.All"
+          "Synchronization.ReadWrite.All",
+          "SynchronizationMetadata.ReadWrite.All"
         ]
       },
       {
@@ -118,7 +121,8 @@
           "/"
         ],
         "RoleDefinitionActions": [
-          "Application.ReadWrite.OwnedBy"
+          "Application.ReadWrite.OwnedBy",
+          "SynchronizationMetadata.ReadWrite.OwnedBy"
         ]
       },
       {
@@ -131,7 +135,6 @@
         ],
         "RoleDefinitionActions": [
           "AppCatalog.Submit",
-          "AppCertTrustConfiguration.ReadWrite.All",
           "ConsentRequest.Create",
           "ConsentRequest.ReadApprove.All"
         ]
@@ -146,6 +149,7 @@
         ],
         "RoleDefinitionActions": [
           "CustomAuthenticationExtension.ReadWrite.All",
+          "EventListener.ReadWrite.All",
           "Policy.ReadWrite.AuthenticationFlows",
           "Policy.ReadWrite.AuthenticationMethod",
           "Policy.ReadWrite.Authorization",
@@ -499,6 +503,7 @@
         "RoleDefinitionActions": [
           "AttackSimulation.ReadWrite.All",
           "AuditActivity.Write",
+          "CaseManagement.ConfigManage.All",
           "CaseManagement.ReadWrite.All",
           "ContentActivity.Write",
           "CustomDetection.ReadWrite.All",
@@ -513,6 +518,7 @@
           "SecurityIdentitiesMigration.ReadWrite.All",
           "SecurityIdentitiesSensors.Read.All",
           "SecurityIncident.ReadWrite.All",
+          "ThreatHunting.ReadWrite.All",
           "ThreatIndicators.ReadWrite.OwnedBy",
           "ThreatSubmission.ReadWrite.All",
           "ThreatSubmissionPolicy.ReadWrite.All"
@@ -595,6 +601,7 @@
         "RoleDefinitionActions": [
           "Group-NestingSupport.ReadWrite.All",
           "Group-OnPremisesSyncBehavior.ReadWrite.All",
+          "Group-PreferredDataLocation.ReadWrite.All",
           "Group.ReadWrite.All",
           "GroupMember.ReadWrite.All",
           "GroupSettings.ReadWrite.All",
@@ -695,11 +702,8 @@
           "/"
         ],
         "RoleDefinitionActions": [
-          "CustomSecAttributeAssignment.Read.All",
           "CustomSecAttributeAssignment.ReadWrite.All",
-          "CustomSecAttributeDefinition.Read.All",
           "CustomSecAttributeDefinition.ReadWrite.All",
-          "CustomSecAttributeProvisioning.Read.All",
           "CustomSecAttributeProvisioning.ReadWrite.All"
         ]
       },
@@ -780,6 +784,19 @@
       },
       {
         "Category": "Microsoft.Graph",
+        "Service": "Lockbox",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "LockboxRequest.ReadWrite.All",
+          "LockboxSettings.ReadWrite.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
         "Service": "Tenant Management",
         "ResourceAppId": "00000003-0000-0000-c000-000000000000",
         "ResourceScope": "All",
@@ -791,6 +808,8 @@
           "Agreement.ReadWrite.All",
           "BillingConfiguration.ReadWrite.All",
           "ConfigurationMonitoring.ReadWrite.All",
+          "CustomObject.ReadWrite.All",
+          "CustomObjectDefinition.ReadWrite.All",
           "DelegatedAdminRelationship.ReadWrite.All",
           "Directory.ReadWrite.All",
           "DirectoryRecommendations.ReadWrite.All",
@@ -1103,6 +1122,11 @@
         ],
         "RoleDefinitionActions": [
           "CopilotConversation.Delete",
+          "CopilotCostManagement-Assignment.Read.All",
+          "CopilotCostManagement-Assignment.ReadWrite.All",
+          "CopilotCostManagement-Policy.Read.All",
+          "CopilotCostManagement-Policy.ReadWrite.All",
+          "CopilotCostManagement-UserData.Read.All",
           "CopilotSettings-LimitedMode.Read",
           "CopilotSettings-LimitedMode.ReadWrite"
         ]
@@ -1751,6 +1775,12 @@
           "Content.Process.All",
           "Content.Process.User",
           "Group.ManageProtection.All",
+          "InfoProtectABACPolicy.Read.All",
+          "InfoProtectABACPolicy.ReadWrite.All",
+          "InfoProtectAttributeAssignment.Read.All",
+          "InfoProtectAttributeAssignment.ReadWrite.All",
+          "InfoProtectAttributeDefinition.Read.All",
+          "InfoProtectAttributeDefinition.ReadWrite.All",
           "ProtectionScopes.Compute.All",
           "ProtectionScopes.Compute.User",
           "RealTimeActivityFeed.Read.All",
@@ -1800,6 +1830,8 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "CrossTenantContentMigration.Read.All",
+          "CrossTenantContentMigration.ReadWrite.All",
           "Files.Read.All",
           "Files.ReadWrite.All",
           "Files.ReadWrite.AppFolder",
@@ -2280,6 +2312,9 @@
           "ChangeManagement.Read.All",
           "CloudApp-Discovery.Read.All",
           "ContentActivity.Read",
+          "ContentHub-Catalog.Read.All",
+          "ContentHub-Installed.Read.All",
+          "ContentHub-Installed.ReadWrite.All",
           "Contracts.Read.All",
           "CustomDetection.Read.All",
           "CustomSecAttributeAuditLogs.Read.All",
@@ -2317,7 +2352,9 @@
           "ThreatHunting.Read.All",
           "ThreatIndicators.Read.All",
           "ThreatIntelligence.Read.All",
-          "ThreatSubmission.Read.All"
+          "ThreatSubmission.Read.All",
+          "Workbooks.Read.All",
+          "Workbooks.ReadWrite.All"
         ]
       },
       {
@@ -2517,6 +2554,20 @@
         ]
       },
       {
+        "Category": "Microsoft.Graph",
+        "Service": "ABAC",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "All",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "CustomSecAttributeAssignment.Read.All",
+          "CustomSecAttributeDefinition.Read.All",
+          "CustomSecAttributeProvisioning.Read.All"
+        ]
+      },
+      {
         "Category": "Microsoft.AzureADGraph",
         "Service": "Tenant Configuration (Reader)",
         "ResourceAppId": "00000002-0000-0000-c000-000000000000",
@@ -2540,17 +2591,21 @@
           "Agreement.Read.All",
           "AgreementAcceptance.Read.All",
           "APIConnectors.Read.All",
+          "AppCertTrustConfiguration.Read.All",
+          "AppFederatedCredentialIssuers.Read.All",
           "ConfigurationMonitoring.Read.All",
           "ConsentRequest.Read.All",
           "CrossTenantInformation.ReadBasic.All",
           "CrossTenantUserProfileSharing.Read.All",
           "CustomAuthenticationExtension.Read.All",
+          "CustomObject.Read.All",
+          "CustomObjectDefinition.Read.All",
+          "CustomObjectDefinition.ReadBasic.All",
           "DelegatedAdminRelationship.Read.All",
           "DelegatedPermissionGrant.Read.All",
           "DirectoryRecommendations.Read.All",
           "EntitlementManagement.Read.All",
           "EventListener.Read.All",
-          "EventListener.ReadWrite.All",
           "ExternalUserProfile.Read.All",
           "Group-XTenantIdentitySync.Read.All",
           "IdentityUserFlow.Read.All",
@@ -2599,6 +2654,7 @@
           "RoleManagementPolicy.Read.EntraAppRole",
           "SignInIdentifier.Read.All",
           "Synchronization.Read.All",
+          "SynchronizationMetadata.Read.All",
           "TenantGovernance-Invitation.Read.All",
           "TenantGovernance-PolicyTemplate.Read.All",
           "TenantGovernance-RelatedTenant.Read.All",
@@ -2611,16 +2667,29 @@
         "Category": "Microsoft.Graph",
         "Service": "Tenant Configuration (Reader)",
         "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "SynchronizationMetadata.Read.OwnedBy"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
+        "Service": "Tenant Configuration (Reader)",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
         "ResourceScope": "Delegation",
         "RoleAssignmentScopeName": [
           "/"
         ],
         "RoleDefinitionActions": [
           "AgreementAcceptance.Read",
-          "AppCertTrustConfiguration.Read.All",
           "ConsentRequest.Read",
           "CrossTenantUserProfileSharing.Read",
           "LifecyclePolicies-Guests.Read.All",
+          "LockboxRequest.Read.All",
+          "LockboxSettings.Read.All",
           "ManagedTenants.Read.All",
           "Subscription.Read.All"
         ]
@@ -2995,7 +3064,9 @@
           "Domain-InternalFederation.Read.All",
           "Domain.Read.All",
           "Group.Read.All",
+          "Group.ReadBasic.All",
           "GroupMember.Read.All",
+          "GroupMember.ReadBasic.All",
           "GroupSettings.Read.All",
           "LicenseAssignment.Read.All",
           "Organization.Read.All",

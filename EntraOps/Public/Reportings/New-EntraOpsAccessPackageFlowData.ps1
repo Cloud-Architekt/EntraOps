@@ -38,7 +38,7 @@ function New-EntraOpsAccessPackageFlowData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
     if ([string]::IsNullOrWhiteSpace($SnapshotPath)) { $SnapshotPath = Join-Path $RepoRoot 'TenantGovernance/Snapshots' }
     if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepoRoot 'Reports/AccessPackageFlow' }
@@ -81,13 +81,13 @@ function New-EntraOpsAccessPackageFlowData {
     if ($ResolveRequestorApproverTiers) {
         $PrivilegedEamPath = Join-Path $RepoRoot 'PrivilegedEAM'
         if (Test-Path -LiteralPath $PrivilegedEamPath -PathType Container) {
-            $PrivilegedEamObjects = @(Get-EntraOpsPrivilegedEamDashboardObjects -ImportPath $PrivilegedEamPath)
+            $PrivilegedEamObjects = Get-EntraOpsPrivilegedEamDashboardObjects -ImportPath $PrivilegedEamPath
             foreach ($Object in $PrivilegedEamObjects) {
                 $ObjectId = "$($Object.objectId)"
                 if (-not $ObjectId) { continue }
                 $ObjectTierNames = @("$($Object.objectAdminTierLevelName)") +
-                    @($Object.classification | ForEach-Object { "$($_.adminTierLevelName)" }) +
-                    @($Object.roleAssignments | ForEach-Object { $_.classification } | ForEach-Object { "$($_.adminTierLevelName)" })
+                @($Object.classification | ForEach-Object { "$($_.adminTierLevelName)" }) +
+                @($Object.roleAssignments | ForEach-Object { $_.classification } | ForEach-Object { "$($_.adminTierLevelName)" })
                 foreach ($TierName in $ObjectTierNames | Where-Object { $TierRank.ContainsKey($_) }) {
                     if (-not $TierByObjectId.ContainsKey($ObjectId) -or $TierRank[$TierName] -lt $TierRank[$TierByObjectId[$ObjectId]]) {
                         $TierByObjectId[$ObjectId] = $TierName

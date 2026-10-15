@@ -29,6 +29,32 @@ by `Get-EntraOpsPrivilegedEAM`/`Save-EntraOpsPrivilegedEAMJson`: `Get-EntraOpsPr
 `Get-EntraOpsPrivilegedTransitiveGroupMember` to expand direct and nested group membership,
 including eligible/active PIM for Groups assignments.
 
+The classified, object-centric EAM data of a single RBAC system (the content of
+`PrivilegedEAM/<RbacSystem>/<RbacSystem>.json`) is returned by one cmdlet per system, which
+`Get-EntraOpsPrivilegedEAM` and `Save-EntraOpsPrivilegedEAMJson` combine. Call them directly to collect one
+system in memory, e.g. `$Eam = Get-EntraOpsPrivilegedEAMEntraId -IncludeObjectDetails $true`:
+
+| RBAC system          | EAM cmdlet                              | Notable parameters                                                                                                          |
+| -------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `EntraID`            | `Get-EntraOpsPrivilegedEAMEntraId`      | `-IncludeActivatedPIMAssignments`                                                                                           |
+| `IdentityGovernance` | `Get-EntraOpsPrivilegedEAMIdGov`        | `-FilterClassifiedRbacs`, `-ExcludeInvalidOrDeletedScopes`, `-HideTaggedBy`                                                 |
+| `DeviceManagement`   | `Get-EntraOpsPrivilegedEAMIntune`       |                                                                                                                             |
+| `ResourceApps`       | `Get-EntraOpsPrivilegedEAMResourceApps` |                                                                                                                             |
+| `Defender`           | `Get-EntraOpsPrivilegedEAMDefender`     |                                                                                                                             |
+| `Azure`              | `Get-EntraOpsPrivilegedEAMAzure`        | `-ControlPlaneScopeOnly`, `-ClassifyConstrainedDelegationAlwaysAsControlPlane`, `-UnresolvedRoleDefinitionFallbackTier`, `-DeletedPrincipalAssignmentHandling` |
+
+All of them accept `-TenantId`, `-FolderClassification`, `-SampleMode`, `-GlobalExclusion`,
+`-EnableParallelProcessing`/`-ParallelThrottleLimit`, `-IncludeJustification` and `-IncludeObjectDetails`.
+
+Two related helpers:
+
+- `Get-EntraOpsPrivilegedEAMResourceAppsFirstParty` lists privileged Microsoft first-party apps with their
+  classification. `-Source` selects the evidence: `MsGraphActivity` (default, Microsoft Graph activity logs),
+  `AuditLogActivity` or `UnknownIdentityType`; `-SentinelWorkspaceId` and `-SentinelWorkspaceSubscriptionId`
+  point to the Log Analytics workspace with the logs.
+- `Expand-EntraOpsPrivilegedEAMJsonFile -FilePath <Classification_*.json>` expands a classification file into one
+  object per role action with its tier, e.g. to review which actions of a role definition are Control Plane.
+
 ### Azure RBAC: management-plane actions vs. data-plane actions
 
 Azure RBAC classification matches management-plane `actions`/`notActions` and data-plane
@@ -248,6 +274,34 @@ $EntraOpsData | select-Object -ExpandProperty RoleAssignments `
  | Where-Object {$_.ObjectType -ne "serviceprincipal" -and $_.PIMAssignmentType -ne "Eligible"}
 ```
 
+### All agent objects (privileged or not)
+
+`Get-EntraOpsAgentObject` returns agent identities, agent identity blueprints (applications), blueprint
+principals (service principals) and agent users in the object schema of `Get-EntraOpsPrivilegedEntraObject`
+(`ObjectType`, `ObjectSubType`, owners, sponsors, `IdentityParent`, protection status, admin tier level).
+Unlike the Privileged EAM data, it also includes agents without privileged role assignments.
+
+```powershell
+# All agent objects
+$AgentObjects = Get-EntraOpsAgentObject -All
+
+# Only agent identities and agent users
+Get-EntraOpsAgentObject -All -AgentObjectType AgentIdentity, AgentUser
+
+# Agent identities that are not part of the Privileged EAM data
+$AgentObjects | Where-Object { $_.ObjectSubType -eq "AgentIdentity" -and $_.ObjectId -notin $EntraOpsData.ObjectId }
+
+# Single objects by id (objects that aren't agents are skipped with a warning)
+Get-EntraOpsAgentObject -ObjectId "<object-id>"
+```
+
+| `ObjectSubType`                   | Object                                                                |
+| --------------------------------- | --------------------------------------------------------------------- |
+| `AgentIdentity`                   | Agent identity (service principal), `IdentityParent` is the blueprint app id |
+| `AgentIdentityBlueprint`          | Agent identity blueprint (application, only in the owning tenant)    |
+| `AgentIdentityBlueprintPrincipal` | Service principal of the blueprint in this tenant                    |
+| `AgentUser`                       | Agent user, `IdentityParent` is the agent identity                   |
+
 ## Customize classification by overwrites
 
 EntraOps allows down- or upgrading the classification of individual role actions or entire role
@@ -462,8 +516,8 @@ and the assigned objects:
 ```json
 "RoleAssignments": [
       {
-        "RoleAssignmentId": "58c673ff-dc05-4038-9a59-826e777289c2",
-        "RoleAssignmentScopeId": "/AccessPackageCatalog/5279fb65-7ccf-460b-8893-75087b855588",
+        "RoleAssignmentId": "aaaaaaaa-0000-0000-0000-000000000001",
+        "RoleAssignmentScopeId": "/AccessPackageCatalog/aaaaaaaa-0000-0000-0000-000000000002",
         "RoleAssignmentScopeName": "Privileged Access - Helpdesk Delegation to change passwords of admins",
         "RoleAssignmentType": "Direct",
         "RoleAssignmentSubType": "",
@@ -473,7 +527,7 @@ and the assigned objects:
         "RoleDefinitionId": "ae79f266-94d4-4dab-b730-feca7e132178",
         "RoleType": "BuiltIn",
         "RoleIsPrivileged": null,
-        "ObjectId": "f742b7a6-d2b6-497d-9443-215505d5998a",
+        "ObjectId": "aaaaaaaa-0000-0000-0000-000000000003",
         "ObjectType": "user",
         "TransitiveByObjectId": "",
         "TransitiveByObjectDisplayName": "",

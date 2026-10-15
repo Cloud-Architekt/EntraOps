@@ -50,12 +50,14 @@
     Folder where the per-resource snapshot files are stored. Default is <EntraOpsBaseFolder>/TenantGovernance/Snapshots.
 
 .PARAMETER ResourcesToInclude
-    Array of Microsoft Entra resource types to include in the snapshot. Defaults to the recommended
+    Array of Microsoft Entra resource types to include in the snapshot. Defaults to
+    TenantGovernanceSnapshot.ResourcesToInclude of the loaded EntraOpsConfig, otherwise to the recommended
     tenant governance resource set.
 
 .PARAMETER SnapshotDisplayNamePrefix
     Prefix used for the snapshot's display name on the Microsoft Graph side (visible in the admin
-    center / when listing snapshot jobs via Graph). Default is "EntraOps TG". The Microsoft Graph
+    center / when listing snapshot jobs via Graph). Defaults to TenantGovernanceSnapshot.SnapshotDisplayNamePrefix
+    of the loaded EntraOpsConfig, otherwise "EntraOps TG". The Microsoft Graph
     UTCM API only allows alphabets, numbers, and spaces in the resulting display name (any other
     characters, e.g. hyphens, are stripped automatically) and enforces a length between 8 and 32
     characters (longer names are truncated automatically). Purely cosmetic - it has no effect on
@@ -83,8 +85,10 @@
 
 .PARAMETER SnapshotResourceFileNaming
     Controls the file name used for each persisted resource file (the folder structure - resourceType
-    then the first displayName segment - is unaffected). Possible values:
-    - "DisplayName" (default): the file is named after the remainder of the resource's displayName
+    then the first displayName segment - is unaffected). Defaults to
+    TenantGovernanceSnapshot.SnapshotResourceFileNaming of the loaded EntraOpsConfig, otherwise
+    "DisplayName". Possible values:
+    - "DisplayName" (default without configuration): the file is named after the remainder of the resource's displayName
       (everything after its first "-"), e.g. "Legacy 1 - Block legacy auth.json". Human-readable, but
       the file is effectively renamed/re-created if the resource's displayName changes.
     - "ResourceId": the file is named after the resource's underlying Id (typically a GUID), e.g.
@@ -142,6 +146,25 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
 
     $ErrorActionPreference = "Stop"
 
+    # Settings not passed as parameters fall back to the configuration loaded by Connect-EntraOps -ConfigFilePath
+    $TenantGovernanceConfig = if ($null -ne $Global:EntraOpsConfig) { $Global:EntraOpsConfig.TenantGovernanceSnapshot }
+    if ($null -ne $TenantGovernanceConfig) {
+        if (-not $PSBoundParameters.ContainsKey('ResourcesToInclude') -and @($TenantGovernanceConfig.ResourcesToInclude | Where-Object { $_ }).Count -gt 0) {
+            $ResourcesToInclude = @($TenantGovernanceConfig.ResourcesToInclude | Where-Object { $_ })
+            Write-Verbose "Using ResourcesToInclude from EntraOpsConfig ($($ResourcesToInclude.Count) resource types)"
+        }
+        if (-not $PSBoundParameters.ContainsKey('SnapshotDisplayNamePrefix') -and -not [string]::IsNullOrWhiteSpace([string]$TenantGovernanceConfig.SnapshotDisplayNamePrefix)) {
+            $SnapshotDisplayNamePrefix = [string]$TenantGovernanceConfig.SnapshotDisplayNamePrefix
+            Write-Verbose "Using SnapshotDisplayNamePrefix '$SnapshotDisplayNamePrefix' from EntraOpsConfig"
+        }
+        if (-not $PSBoundParameters.ContainsKey('SnapshotResourceFileNaming') -and -not [string]::IsNullOrWhiteSpace([string]$TenantGovernanceConfig.SnapshotResourceFileNaming)) {
+            if ([string]$TenantGovernanceConfig.SnapshotResourceFileNaming -notin @('DisplayName', 'ResourceId')) {
+                throw "Invalid TenantGovernanceSnapshot.SnapshotResourceFileNaming '$($TenantGovernanceConfig.SnapshotResourceFileNaming)' in EntraOpsConfig. Use 'DisplayName' or 'ResourceId'."
+            }
+            $SnapshotResourceFileNaming = [string]$TenantGovernanceConfig.SnapshotResourceFileNaming
+            Write-Verbose "Using SnapshotResourceFileNaming '$SnapshotResourceFileNaming' from EntraOpsConfig"
+        }
+    }
     # --- Path safety: ensure ExportFolder is under the expected base directory ---
     $ResolvedExportFolder = [System.IO.Path]::GetFullPath($ExportFolder)
     $ResolvedBaseFolder = [System.IO.Path]::GetFullPath($EntraOpsBaseFolder)

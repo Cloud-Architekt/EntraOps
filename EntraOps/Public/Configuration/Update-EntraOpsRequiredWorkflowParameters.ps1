@@ -193,6 +193,9 @@ function Update-EntraOpsRequiredWorkflowParameters {
             $ReportingWorkflowObject.env.GenerateEamDashboard = $Config.AutomatedReportingGeneration.GenerateEamDashboard
         }
 
+        $ReportingWorkflowObject.env.GeneratePrivilegedAssets = $Config.AutomatedReportingGeneration.GeneratePrivilegedAssets -ne $false
+        $ReportingWorkflowObject.env.PrivilegedAssetsResolveRelatedObjectIds = $Config.PrivilegedAssets.ResolveRelatedObjectIds -ne $false
+
         if ($null -ne $Config.AutomatedReportingGeneration.GenerateAccessPathMap) {
             # Set GenerateAccessPathMap Parameter
             $ReportingWorkflowObject.env.GenerateAccessPathMap = $Config.AutomatedReportingGeneration.GenerateAccessPathMap

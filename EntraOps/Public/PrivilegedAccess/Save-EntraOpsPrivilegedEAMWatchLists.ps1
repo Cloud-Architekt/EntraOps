@@ -38,7 +38,7 @@
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to WatchList in Microsoft Sentinel Workspace defined in parameter.
-    Save-EntraOpsPrivilegedEAMWatchLists -SentinelSubscriptionId "3f72a077-c32a-423c-8503-41b93d3b0737" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
+    Save-EntraOpsPrivilegedEAMWatchLists -SentinelSubscriptionId "11111111-1111-1111-1111-111111111111" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to WatchList in Microsoft Sentinel Workspace defined in config file and available in global variable.

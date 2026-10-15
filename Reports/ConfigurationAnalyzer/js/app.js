@@ -1384,7 +1384,7 @@
         }
         document.querySelectorAll(".nav-item.section-item").forEach(function (item) {
             item.addEventListener("click", function () {
-                var target = $(item.getAttribute("data-target"));
+                var target = document.getElementById(item.getAttribute("data-target"));
                 if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
                 if (nav) nav.classList.remove("open");
             });
@@ -1398,12 +1398,12 @@
         // Snapshot health is independent of the analyzer's data views. Render it before the
         // empty-state return so partial-capture diagnostics are never hidden with caContent.
         renderSnapshotHealth();
+        applyConfigurationView();
 
         if (!DATA || !snapshots.length) return; // empty state stays visible
 
         $("caEmptyState").classList.add("hidden");
         $("caContent").classList.remove("hidden");
-        applyConfigurationView();
 
         renderStats();
         renderTypeFilter();

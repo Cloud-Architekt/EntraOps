@@ -162,6 +162,14 @@ function Save-EntraOpsPrivilegedEAMJson {
         }
         #endregion
 
+        $ResolvedExportFolder = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ExportFolder)
+        Write-Host ""
+        Write-Host "PrivilegedEAM export written to $ResolvedExportFolder" -ForegroundColor Green
+        foreach ($RbacSystem in @($RbacSystems)) {
+            $AggregateFile = Join-Path (Join-Path $ResolvedExportFolder $RbacSystem) "$RbacSystem.json"
+            if (Test-Path -LiteralPath $AggregateFile -PathType Leaf) { Write-Host "  $($RbacSystem.PadRight(18)): $AggregateFile" -ForegroundColor Gray }
+        }
+
         # Display Throttle Statistics Summary
         if ($__EntraOpsSession.ContainsKey('RetryStatistics') -and ($__EntraOpsSession.RetryStatistics.TotalRetries -gt 0 -or $__EntraOpsSession.RetryStatistics.FailedRequests -gt 0 -or $__EntraOpsSession.RetryStatistics.NonRetryableRequests -gt 0)) {
             Write-Host ""

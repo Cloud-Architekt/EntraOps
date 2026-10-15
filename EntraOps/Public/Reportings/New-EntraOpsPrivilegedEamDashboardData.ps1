@@ -122,12 +122,12 @@ function New-EntraOpsPrivilegedEamDashboardData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
     if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/EamDashboard' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
-        throw "EAM Dashboard app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/EamDashboard."
+        throw "EAM Dashboard app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/EamDashboard, or run Install-EntraOpsReportingFolder to download the Reports folder."
     }
     if ([string]::IsNullOrWhiteSpace($ImportPath)) { $ImportPath = Join-Path $RepoRoot 'PrivilegedEAM' }
     if ([string]::IsNullOrWhiteSpace($OutFile)) { $OutFile = Join-Path $AppRoot 'data/eam-dashboard-data.js' }
@@ -177,6 +177,14 @@ function New-EntraOpsPrivilegedEamDashboardData {
         (Join-Path (Join-Path $RepoRoot '.reporting/AzurePrivilegedIAM') 'Classification/Classification_EntraIdDirectoryRoles.json')
     )
     $directoryRoleClassificationPath = @($directoryRoleClassificationCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1)[0]
+    if (-not $directoryRoleClassificationPath) {
+        # Last resort: the AzurePrivilegedIAM file downloaded into the EntraOps cache folder.
+        $catalogCacheRoot = Get-EntraOpsClassificationSourceCache -FileName 'Classification_EntraIdDirectoryRoles.json'
+        if ($catalogCacheRoot) {
+            $directoryRoleClassificationPath = Join-Path $catalogCacheRoot 'Classification/Classification_EntraIdDirectoryRoles.json'
+            Write-Verbose "Using the cached directory role classification $directoryRoleClassificationPath"
+        }
+    }
     if ($directoryRoleClassificationPath) {
         try {
             foreach ($role in @([System.IO.File]::ReadAllText($directoryRoleClassificationPath) | ConvertFrom-Json)) {

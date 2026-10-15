@@ -40,6 +40,9 @@ function Update-EntraOps {
         ,
         [Parameter(Mandatory = $False)]
         [System.String]$Repository = "EntraOps"
+        ,
+        [Parameter(Mandatory = $False)]
+        [System.String]$UpstreamUrl
         ,        
         [Parameter(Mandatory = $False)]
         [System.String]$PersonalAccessToken
@@ -48,7 +51,7 @@ function Update-EntraOps {
         [System.String]$ConfigFile = "./EntraOpsConfig.json"
         ,
         [Parameter(Mandatory = $False)]
-        [ValidateSet("./.github/actions", "./.github/agents", "./.github/scripts", "./.github/workflows", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")]
+        [ValidateSet("./.azure-pipelines", "./.github/actions", "./.github/agents", "./.github/scripts", "./.github/workflows", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")]
         [Object]$TargetUpdateFolders = @("./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
         ,
         [Parameter(Mandatory = $False)]
@@ -73,6 +76,9 @@ function Update-EntraOps {
 
     $ErrorActionPreference = "Stop"
 
+    if ([string]::IsNullOrWhiteSpace((Get-EntraOpsRepositoryRoot))) {
+        throw "Update-EntraOps updates a repository checkout of EntraOps (GitHub, Azure DevOps or local clone). This module is installed without a repository (e.g. from the PowerShell Gallery): use Update-PSResource EntraOps (or Update-Module EntraOps if installed with Install-Module), then Initialize-EntraOpsWorkspace -Force to refresh classification templates and reporting apps."
+    }
     # Allow the config file's "AutomatedEntraOpsUpdate" section to override the default
     # Repository/Branch/TargetUpdateFolders used for self-update, unless the caller explicitly
     # passed -Repository, -Branch or -TargetUpdateFolders.
@@ -99,7 +105,7 @@ function Update-EntraOps {
     # Validate config-derived targets explicitly. ValidateSet protects command-line arguments, but
     # values read from JSON bypass parameter binding and must not escape the intended repository
     # update boundary.
-    $AllowedUpdateTargets = @('./.github/actions', './.github/agents', './.github/scripts', './.github/workflows', './Docs', './EntraOps', './Parsers', './Queries', './Reports', './Samples', './Tests', './Workbooks', './package.json', './package-lock.json', './playwright.config.mjs', './CHANGELOG.md', './EntraOpsUpdateContract.json')
+    $AllowedUpdateTargets = @('./.azure-pipelines', './.github/actions', './.github/agents', './.github/scripts', './.github/workflows', './Docs', './EntraOps', './Parsers', './Queries', './Reports', './Samples', './Tests', './Workbooks', './package.json', './package-lock.json', './playwright.config.mjs', './CHANGELOG.md', './EntraOpsUpdateContract.json')
     $TargetUpdateFolders = @($TargetUpdateFolders | ForEach-Object { [string]$_ } | Select-Object -Unique)
     if ($TargetUpdateFolders.Count -eq 0) {
         throw 'At least one TargetUpdateFolders entry is required.'
@@ -117,11 +123,6 @@ function Update-EntraOps {
             throw "Candidate validation cannot be skipped when './.github/workflows' is updated."
         }
     }
-    # The local contract is the single source of truth for which Cloud-Architekt repositories
-    # distribute EntraOps and whether they need a Personal Access Token. Resolving it here, before
-    # any clone, keeps the credential decision independent of the downloaded candidate.
-    $Source = Resolve-EntraOpsUpdateSource -Repository $Repository -ContractPath (Join-Path $EntraOpsBaseFolder 'EntraOpsUpdateContract.json')
-    $SourceRepository = $Source.Repository
     if ([string]::IsNullOrWhiteSpace($Branch) -or $Branch.StartsWith('-') -or $Branch -match '\s') {
         throw "Unsupported automated-update ref '$Branch'. Use a branch, release tag, or full commit SHA without whitespace or a leading dash."
     }
@@ -133,16 +134,27 @@ function Update-EntraOps {
         $PersonalAccessToken = $env:ENTRAOPS_PAT
     }
     $UsePersonalAccessToken = $false
-    if ($Source.RequiresPersonalAccessToken) {
-        if ([string]::IsNullOrWhiteSpace($PersonalAccessToken) -and [string]::IsNullOrWhiteSpace($PreparedCandidatePath)) {
-            throw "Update source '$SourceRepository' is a private distribution repository and requires a Personal Access Token. Pass -PersonalAccessToken, set ENTRAOPS_PAT (the EntraOpsUpdatePat secret), or use the public 'EntraOps' release repository. No local folder was changed."
-        }
+
+    if (-not [string]::IsNullOrWhiteSpace($UpstreamUrl)) {
+        $SourceRepository = $UpstreamUrl
         $UsePersonalAccessToken = -not [string]::IsNullOrWhiteSpace($PersonalAccessToken)
-    } elseif (-not [string]::IsNullOrWhiteSpace($PersonalAccessToken)) {
-        if ($Source.IsKnownDistributionRepository) {
-            Write-Verbose "Update source '$SourceRepository' is public. The provided Personal Access Token is not used."
-        } else {
-            $UsePersonalAccessToken = $true
+    } else {
+        # The local contract is the single source of truth for which Cloud-Architekt repositories
+        # distribute EntraOps and whether they need a Personal Access Token. Resolving it here, before
+        # any clone, keeps the credential decision independent of the downloaded candidate.
+        $Source = Resolve-EntraOpsUpdateSource -Repository $Repository -ContractPath (Join-Path $EntraOpsBaseFolder 'EntraOpsUpdateContract.json')
+        $SourceRepository = $Source.Repository
+        if ($Source.RequiresPersonalAccessToken) {
+            if ([string]::IsNullOrWhiteSpace($PersonalAccessToken) -and [string]::IsNullOrWhiteSpace($PreparedCandidatePath)) {
+                throw "Update source '$SourceRepository' is a private distribution repository and requires a Personal Access Token. Pass -PersonalAccessToken, set ENTRAOPS_PAT (the EntraOpsUpdatePat secret), or use the public 'EntraOps' release repository. No local folder was changed."
+            }
+            $UsePersonalAccessToken = -not [string]::IsNullOrWhiteSpace($PersonalAccessToken)
+        } elseif (-not [string]::IsNullOrWhiteSpace($PersonalAccessToken)) {
+            if ($Source.IsKnownDistributionRepository) {
+                Write-Verbose "Update source '$SourceRepository' is public. The provided Personal Access Token is not used."
+            } else {
+                $UsePersonalAccessToken = $true
+            }
         }
     }
 
@@ -167,7 +179,11 @@ function Update-EntraOps {
             throw "git checkout failed for requested ref '$Branch' with exit code $LASTEXITCODE."
         }
     }
-    $RepositoryUrl = $Source.RepositoryUrl
+    if (-not [string]::IsNullOrWhiteSpace($UpstreamUrl)) {
+        $RepositoryUrl = $UpstreamUrl
+    } else {
+        $RepositoryUrl = $Source.RepositoryUrl
+    }
 
     # Resolve relative paths against the PowerShell location. Set-Location does not move
     # [Environment]::CurrentDirectory, so [System.IO.Path]::GetFullPath would otherwise point at the
@@ -186,14 +202,16 @@ function Update-EntraOps {
             }
             Write-Output "Using prepared update candidate at '$TemporaryUpdateFolder'."
         } elseif ($UsePersonalAccessToken) {
-            Write-Output "Cloning repository '$SourceRepository' ($($Source.Channel) channel, ref: $Branch) using Personal Access Token..."
+            $ChannelLabel = if ($null -ne $Source) { "$($Source.Channel) channel" } else { "custom upstream" }
+            Write-Output "Cloning repository '$SourceRepository' ($ChannelLabel, ref: $Branch) using Personal Access Token..."
             # Pass credentials via environment-based HTTP header to avoid exposing the PAT in process listings, logs, or error messages
             $PreviousConfigCount = $env:GIT_CONFIG_COUNT
             $PreviousConfigKey0 = $env:GIT_CONFIG_KEY_0
             $PreviousConfigValue0 = $env:GIT_CONFIG_VALUE_0
+            $UpstreamHost = if (-not [string]::IsNullOrWhiteSpace($UpstreamUrl)) { ([System.Uri]$UpstreamUrl).Host } else { "github.com" }
             try {
                 $env:GIT_CONFIG_COUNT = "1"
-                $env:GIT_CONFIG_KEY_0 = "http.https://github.com/.extraheader"
+                $env:GIT_CONFIG_KEY_0 = "http.https://$UpstreamHost/.extraheader"
                 $env:GIT_CONFIG_VALUE_0 = "AUTHORIZATION: basic $([Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$PersonalAccessToken")))"
                 & $CloneUpdateCandidate $RepositoryUrl
             } finally {
@@ -203,7 +221,8 @@ function Update-EntraOps {
                 if ($null -eq $PreviousConfigValue0) { Remove-Item env:GIT_CONFIG_VALUE_0 -ErrorAction SilentlyContinue } else { $env:GIT_CONFIG_VALUE_0 = $PreviousConfigValue0 }
             }
         } else {
-            Write-Output "Cloning repository '$SourceRepository' ($($Source.Channel) channel, ref: $Branch) without authentication..."
+            $ChannelLabel = if ($null -ne $Source) { "$($Source.Channel) channel" } else { "custom upstream" }
+            Write-Output "Cloning repository '$SourceRepository' ($ChannelLabel, ref: $Branch) without authentication..."
             & $CloneUpdateCandidate $RepositoryUrl
         }
 
@@ -290,17 +309,27 @@ function Update-EntraOps {
             }
         }
 
+        # The upstream pipeline templates ship with default schedules; re-apply the ones from the configuration
+        if ($TargetUpdateFolders -contains './.azure-pipelines') {
+            Write-Host "Re-applying the configured schedules in Azure DevOps pipelines after update..."
+            try {
+                Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile -PipelineFolder './.azure-pipelines'
+            } catch {
+                throw "Failed to update the Azure DevOps pipeline schedules. Error: $_"
+            }
+        }
+
         $UpdateManifest = [ordered]@{
-            SchemaVersion       = 1
-            Repository          = $SourceRepository
-            Channel             = $Source.Channel
-            RequestedRef        = $Branch
-            SourceCommit        = $SourceCommit
+            SchemaVersion        = 1
+            Repository           = $SourceRepository
+            Channel              = $Source.Channel
+            RequestedRef         = $Branch
+            SourceCommit         = $SourceCommit
             ValidatedBeforeApply = [bool]($ValidatedSourceCommit -or -not $SkipCandidateValidation)
             ValidationIsolation  = if ($ValidatedSourceCommit) { 'SeparateJob' } elseif ($SkipCandidateValidation) { 'Skipped' } else { 'SanitizedChildProcess' }
-            BrowserTestsRun     = [bool]($RunBrowserTests -or $BrowserTestsValidated)
-            AppliedDateTime     = (Get-Date).ToUniversalTime().ToString('o')
-            TargetUpdateFolders = @($TargetUpdateFolders)
+            BrowserTestsRun      = [bool]($RunBrowserTests -or $BrowserTestsValidated)
+            AppliedDateTime      = (Get-Date).ToUniversalTime().ToString('o')
+            TargetUpdateFolders  = @($TargetUpdateFolders)
         }
         $UpdateManifestPath = Join-Path $EntraOpsBaseFolder '.EntraOpsUpdateManifest.json'
         $UpdateManifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $UpdateManifestPath -Encoding utf8
