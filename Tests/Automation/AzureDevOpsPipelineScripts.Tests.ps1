@@ -192,12 +192,14 @@ Describe 'Azure DevOps update entry scripts' -Skip:(-not $HasAdoScripts) {
         @{ ValidationRequired = $true; BrowserTestsValidated = $false }
         @{ ValidationRequired = $false; BrowserTestsValidated = $false }
     ) {
+        $State.ExpectedValidationRequired = $ValidationRequired
+        $State.ExpectedBrowserTestsValidated = $BrowserTestsValidated
         & (Join-Path $EntryRoot 'Install-EntraOpsAdoUpdate.ps1') -ConfigFile './custom.json' -SourceCommit ('c' * 40) `
             -ValidationRequired:$ValidationRequired -BrowserTestsValidated:$BrowserTestsValidated
 
         Should -Invoke Install-EntraOpsUpdateCandidate -Times 1 -Exactly -ParameterFilter {
             $ConfigFile -eq './custom.json' -and $SourceCommit -eq ('c' * 40) -and
-            $ValidationRequired -eq $_.ValidationRequired -and $BrowserTestsValidated -eq $_.BrowserTestsValidated
+            $ValidationRequired -eq $State.ExpectedValidationRequired -and $BrowserTestsValidated -eq $State.ExpectedBrowserTestsValidated
         }
     }
 }
