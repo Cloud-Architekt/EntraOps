@@ -53,9 +53,10 @@ test("builds a zero-configuration express quickstart", async ({ page }) => {
     await expect(commands.filter({ hasText: "Install-PSResource -Name EntraOps" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "Initialize-EntraOpsWorkspace" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "Import-Module EntraOps" })).toHaveCount(1);
-    await expect(commands.filter({ hasText: "Connect-EntraOps -AuthenticationType 'UserInteractive' -TenantName 'contoso.onmicrosoft.com'" })).toHaveCount(1);
+    await expect(commands.filter({ hasText: "Connect-EntraOps -AuthenticationType 'UserInteractive' -TenantName 'contoso.onmicrosoft.com'" })).toHaveCount(2);
     await expect(commands.filter({ hasText: "Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "New-EntraOpsReportingData" })).toHaveCount(1);
+    await expect(commands.filter({ hasText: "New-EntraOpsReportingData" }).locator('code')).toHaveText("Connect-EntraOps -AuthenticationType 'UserInteractive' -TenantName 'contoso.onmicrosoft.com'\nNew-EntraOpsReportingData\nDisconnect-EntraOps");
 });
 
 test("collects integration details and carries them into the expert config", async ({ page }) => {
@@ -216,7 +217,7 @@ test("builds an Azure DevOps deployment with managed schedules and all pipelines
     await expect(steps).toContainText("Workload Identity Federation (manual)");
     await expect(steps).toContainText("EntraOps-WIF");
     await expect(steps).toContainText("Update-EntraOpsAzureDevOpsSchedules");
-    await expect(steps).toContainText("azure-pipelines-pull-tenant-governance");
+    await expect(steps).toContainText("entraops-pull-tenant-governance");
     await expect(steps).toContainText("reporting");
     await expect(page.getByRole("link", { name: "Open Azure Pipelines" })).toHaveAttribute("href", "https://dev.azure.com/contoso/Identity%20Operations/_build");
 });
@@ -237,6 +238,8 @@ test("lists selected local integrations only after the read-only review step", a
 
     const steps = page.locator(".setup-run-list");
     await expect(steps).toContainText("Open and review the reports");
+    await expect(steps.locator('.setup-command').filter({ hasText: 'Save-EntraOpsPrivilegedEAMJson' })).not.toContainText('Disconnect-EntraOps');
+    await expect(steps.locator('.setup-command').filter({ hasText: 'New-EntraOpsReportingData' }).locator('code')).toHaveText('New-EntraOpsReportingData\nDisconnect-EntraOps');
     await expect(steps).toContainText("Prepare and run selected integrations");
     const integrationCommand = steps.locator(".setup-command").filter({ hasText: "Save-EntraOpsPrivilegedEAMWatchLists" });
     await expect(integrationCommand).toContainText("Connect-EntraOps");

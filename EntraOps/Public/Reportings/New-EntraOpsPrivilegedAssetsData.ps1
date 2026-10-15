@@ -104,7 +104,7 @@ function New-EntraOpsPrivilegedAssetsData {
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
     if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/PrivilegedAssets' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
-        throw "Privileged Assets app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/PrivilegedAssets, or run Install-EntraOpsReportingFolder to download the Reports folder."
+        throw "Privileged Assets app folder not found: $AppRoot. Run Initialize-EntraOpsWorkspace -Content Reports -Force or Install-EntraOpsReportingFolder -Force to install or repair the reporting apps in the working folder (use -Ref to match the module version). Generated report data is preserved. If you passed -AppRoot, check that path instead."
     }
     if ([string]::IsNullOrWhiteSpace($ImportPath)) { $ImportPath = Join-Path $RepoRoot 'PrivilegedEAM' }
     if ([string]::IsNullOrWhiteSpace($OutFile)) { $OutFile = Join-Path $AppRoot 'data/privileged-assets-data.js' }

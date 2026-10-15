@@ -38,6 +38,29 @@ classification templates (e.g. after `Invoke-EntraOpsPrivilegedEAM` without
 `-KeepClassificationFiles`), the Classification Explorer is skipped with a warning. Generated report data in an existing
 `Reports` folder is never overwritten; updating an existing folder requires `-Force`.
 
+An older or incomplete `Reports` folder can contain the portal but lack a newer app such as
+Privileged Assets. Repair it with `Initialize-EntraOpsWorkspace -Content Reports -Force` or
+`Install-EntraOpsReportingFolder -Force` (use `-Ref` to match the module version). These installers
+preserve existing generated report data. `-InstallMissingReportingFolder` also repairs missing apps
+before generation starts.
+
+Report generation resolves linked identities and related objects outside the export through
+Microsoft Graph by default. Keep the connection active until reporting finishes.
+`Invoke-EntraOpsPrivilegedEAM` disconnects during teardown, including with `-KeepClassificationFiles`,
+so run `Connect-EntraOps` again before `New-EntraOpsReportingData` if you want this enrichment.
+To generate from saved data without Graph lookups, use:
+
+```powershell
+New-EntraOpsReportingData `
+  -EamDashboardResolveLinkedIdentityObjectIds $false `
+  -PrivilegedAssetsResolveRelatedObjectIds $false `
+  -AccessPathMapResolveObjectIdsOutsidePrivilegedEAM $false `
+  -SkipAccessPackageFlow
+```
+
+Objects outside the export remain unresolved, and live Access Package Flow enrichment is skipped.
+The generated apps can still be opened offline.
+
 For configuration-driven automation on any CI platform, use the higher-level command:
 
 ```powershell

@@ -151,7 +151,6 @@ From the PowerShell Gallery (updated with `Update-PSResource EntraOps`, or `Upda
 
 ```powershell
 Install-PSResource EntraOps -Scope CurrentUser
-Import-Module EntraOps
 Initialize-EntraOpsWorkspace
 ```
 
@@ -527,7 +526,7 @@ After updating the config, run `New-EntraOpsWorkloadIdentity` (if not already do
 - **Chunking:** Data is automatically split into chunks of approximately 950 KB to stay under the 1 MB per-request limit enforced by the Logs Ingestion API.
 - **Batching:** JSON files are processed in batches of 50 to avoid exceeding DCR file size limits.
 - **Transformation:** If you need to transform or filter data before ingestion, configure a [transformation rule](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/data-collection-transformations) on the DCR.
-- **No Microsoft Graph access required for push:** The `azure-pipelines-push.yml` pipeline (and the equivalent GitHub `Push-EntraOpsPrivilegedEAM` workflow) only requires Azure PowerShell context to read local JSON and send it to the DCE. It does not call Microsoft Graph.
+- **No Microsoft Graph access required for push:** The `entraops-push.yml` pipeline (and the equivalent GitHub `Push-EntraOpsPrivilegedEAM` workflow) only requires Azure PowerShell context to read local JSON and send it to the DCE. It does not call Microsoft Graph.
 
 ## EntraOps Integration in Microsoft Sentinel
 
@@ -923,7 +922,7 @@ _Enter the role definition name in the "used by Roles" and choose the desired ti
 EntraOps can be updated without losing classification definition and files by using the cmdlet `Update-EntraOps`.
 The cmdlet can be executed interactively, and changes must be pushed to your repository. This command updates the PowerShell module, workflow files, repository resources (incl. workbooks and parsers) and parameters in workflows based on "EntraOps.config" file.
 
-The GitHub `Update-EntraOps` workflow and Azure DevOps `azure-pipelines-update` pipeline can run on
+The GitHub `Update-EntraOps` workflow and Azure DevOps `entraops-update` pipeline can run on
 demand or on the schedule defined in `EntraOpsConfig.json`. GitHub defaults to publishing updates
 through a pull request; Azure DevOps uses direct push. Updating GitHub workflow definitions requires
 the separately configured publisher GitHub App, while Azure DevOps pipeline definitions are included

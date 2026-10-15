@@ -100,7 +100,14 @@ function Disconnect-EntraOps {
     if ($null -ne $MgContext) {
         Write-Verbose "Disconnecting from Microsoft Graph..."
         try {
-            Disconnect-MgGraph -ErrorAction Stop | Out-Null
+            Disconnect-MgGraph -ErrorAction Stop -WarningAction SilentlyContinue -WarningVariable MgDisconnectWarnings | Out-Null
+            # Graph SDK >= 2.38 tries to clear the persisted MSAL cache on disconnect, which fails for
+            # -AccessToken/-Identity sessions (no authority/tenant); nothing was persisted, so it is benign.
+            foreach ($MgDisconnectWarning in $MgDisconnectWarnings) {
+                if ("$MgDisconnectWarning" -notmatch 'persisted MSAL token cache') {
+                    Write-Warning "$MgDisconnectWarning"
+                }
+            }
         } catch {
             # Suppress SessionNotInitialized errors as the session may have already been cleared
             if ($_.Exception.Message -notmatch "SessionNotInitialized") {

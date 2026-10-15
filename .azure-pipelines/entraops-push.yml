@@ -11,7 +11,7 @@
 #   4. The pull pipeline must have run and committed JSON to ado/main.
 #
 # Trigger modes:
-#   A) Automatic: after azure-pipelines-pull completes (configure build completion
+#   A) Automatic: after entraops-pull completes (configure build completion
 #      in ADO UI, or match the pipeline resource name below).
 #   B) Manual: run on-demand from the Pipelines UI.
 #   C) Scheduled: add a schedules block if desired.
@@ -23,8 +23,8 @@ pr: none
 # The source name must match the pull pipeline's name as configured in ADO.
 resources:
   pipelines:
-    - pipeline: azure-pipelines-pull
-      source: azure-pipelines-pull
+    - pipeline: entraops-pull
+      source: entraops-pull
       trigger: true
 
 variables:

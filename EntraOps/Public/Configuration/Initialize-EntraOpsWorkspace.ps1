@@ -168,7 +168,7 @@ function Initialize-EntraOpsWorkspace {
             }
         }
         if (-not (Test-Path -LiteralPath (Join-Path $Path 'EntraOpsConfig.json') -PathType Leaf)) {
-            Write-Host "Next: create EntraOpsConfig.json in this folder with New-EntraOpsConfigFile, or run Invoke-EntraOpsPrivilegedEAM without configuration."
+            Write-Host "Next: create EntraOpsConfig.json in this folder with New-EntraOpsConfigFile or Configuration Wizard in EntraOps Docs, or run Invoke-EntraOpsPrivilegedEAM without configuration."
         }
     }
 }

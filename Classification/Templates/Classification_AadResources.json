@@ -34,7 +34,6 @@
           "microsoft.directory/agentIdentityBlueprints/authentication/update",
           "microsoft.directory/agentIdentityBlueprints/basic/update",
           "microsoft.directory/agentIdentityBlueprints/create",
-          "microsoft.directory/agentIdentityBlueprints/createAsOwner",
           "microsoft.directory/agentIdentityBlueprints/credentials/update",
           "microsoft.directory/agentIdentityBlueprints/delete",
           "microsoft.directory/agentIdentityBlueprints/owners/update",
@@ -116,9 +115,7 @@
           "microsoft.directory/servicePrincipals/authentication/update",
           "microsoft.directory/servicePrincipals/create",
           "microsoft.directory/servicePrincipals/credentials/update",
-          "microsoft.directory/servicePrincipals/customSecurityAttributes/read",
           "microsoft.directory/servicePrincipals/customSecurityAttributes/update",
-          "microsoft.directory/servicePrincipals/synchronization.customSecurityAttributes/schema/read",
           "microsoft.directory/servicePrincipals/synchronization.customSecurityAttributes/schema/update",
           "microsoft.directory/servicePrincipals/delete",
           "microsoft.directory/servicePrincipals/enable",
@@ -311,7 +308,6 @@
           "microsoft.directory/devices/allProperties/allTasks",
           "microsoft.directory/devices/basic/update",
           "microsoft.directory/devices/create",
-          "microsoft.directory/devices/customSecurityAttributes/read",
           "microsoft.directory/devices/delete",
           "microsoft.directory/devices/disable",
           "microsoft.directory/devices/enable",
@@ -399,7 +395,6 @@
           "microsoft.directory/users/basic/update",
           "microsoft.directory/users/convertExternalToInternalMemberUser",
           "microsoft.directory/users/create",
-          "microsoft.directory/users/customSecurityAttributes/read",
           "microsoft.directory/users/customSecurityAttributes/update",
           "microsoft.directory/users/delete",
           "microsoft.directory/users/disable",
@@ -528,10 +523,8 @@
         ],
         "RoleDefinitionActions": [
           "microsoft.directory/attributeSets/allProperties/allTasks",
-          "microsoft.directory/attributeSets/allProperties/read",
           "microsoft.directory/azureManagedIdentities/customSecurityAttributes/update",
           "microsoft.directory/customSecurityAttributeDefinitions/allProperties/allTasks",
-          "microsoft.directory/customSecurityAttributeDefinitions/allProperties/read",
           "microsoft.directory/devices/customSecurityAttributes/update"
         ]
       },
@@ -587,6 +580,7 @@
         ],
         "RoleDefinitionActions": [
           "microsoft.directory/applications/policies/update",
+          "microsoft.directory/policies/basic/update",
           "microsoft.directory/policies/create",
           "microsoft.directory/policies/delete",
           "microsoft.directory/policies/owners/update",
@@ -642,6 +636,7 @@
           "/*"
         ],
         "RoleDefinitionActions": [
+          "microsoft.directory/agentIdentityBlueprints/createAsOwner",
           "microsoft.directory/applications/allProperties/read",
           "microsoft.directory/applications/basic/update",
           "microsoft.directory/oAuth2PermissionGrants/createAsOwner",
@@ -983,7 +978,25 @@
           "microsoft.teams/devices/standard/read",
           "microsoft.teams/meetings/allProperties/allTasks",
           "microsoft.teams/policies/externalAccessPolicy/allTasks",
-          "microsoft.teams/voice/allProperties/allTasks"
+          "microsoft.teams/voice/allProperties/allTasks",
+          "microsoft.directory/pendingExternalUserProfiles/basic/update",
+          "microsoft.directory/pendingExternalUserProfiles/create",
+          "microsoft.directory/pendingExternalUserProfiles/delete"
+        ]
+      },
+      {
+        "Category": "Microsoft.AzureAD",
+        "Service": "Custom Security Attributes (Reader)",
+        "RoleAssignmentScopeName": [
+          "/*"
+        ],
+        "RoleDefinitionActions": [
+          "microsoft.directory/attributeSets/allProperties/read",
+          "microsoft.directory/customSecurityAttributeDefinitions/allProperties/read",
+          "microsoft.directory/devices/customSecurityAttributes/read",
+          "microsoft.directory/servicePrincipals/customSecurityAttributes/read",
+          "microsoft.directory/servicePrincipals/synchronization.customSecurityAttributes/schema/read",
+          "microsoft.directory/users/customSecurityAttributes/read"
         ]
       },
       {
@@ -1049,14 +1062,10 @@
           "microsoft.directory/organization/allProperties/read",
           "microsoft.directory/organization/strongAuthentication/read",
           "microsoft.directory/organization/trustedCAsForPasswordlessAuth/read",
-          "microsoft.directory/pendingExternalUserProfiles/basic/update",
-          "microsoft.directory/pendingExternalUserProfiles/create",
-          "microsoft.directory/pendingExternalUserProfiles/delete",
           "microsoft.directory/pendingExternalUserProfiles/standard/read",
           "microsoft.directory/permissionGrantPolicies/allProperties/read",
           "microsoft.directory/permissionGrantPolicies/standard/read",
           "microsoft.directory/policies/allProperties/read",
-          "microsoft.directory/policies/basic/update",
           "microsoft.directory/privilegedIdentityManagement/allProperties/read",
           "microsoft.directory/roleAssignments/allProperties/read",
           "microsoft.directory/roleDefinitions/allProperties/read",

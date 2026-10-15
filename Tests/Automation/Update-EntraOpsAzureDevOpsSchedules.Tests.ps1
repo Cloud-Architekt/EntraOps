@@ -53,10 +53,10 @@ Describe 'Update-EntraOpsAzureDevOpsSchedules' {
 
         Update-EntraOpsAzureDevOpsSchedules -ConfigFile $Fixture.ConfigPath -PipelineFolder $Fixture.PipelineFolder -BranchName 'production'
 
-        $Pull = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'azure-pipelines-pull.yml') -Raw
-        $Reporting = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'azure-pipelines-push-reporting.yml') -Raw
-        $Update = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'azure-pipelines-update.yml') -Raw
-        $TenantGovernance = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'azure-pipelines-pull-tenant-governance.yml') -Raw
+        $Pull = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'entraops-pull.yml') -Raw
+        $Reporting = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'entraops-push-reporting.yml') -Raw
+        $Update = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'entraops-update.yml') -Raw
+        $TenantGovernance = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'entraops-pull-tenant-governance.yml') -Raw
 
         $Pull | Should -Match "cron: '15 4 \* \* \*'"
         $Reporting | Should -Match "cron: '45 5 \* \* 1'"
@@ -94,7 +94,7 @@ Describe 'Update-EntraOpsAzureDevOpsSchedules' {
 
     It 'rejects a malformed cron before changing its pipeline' -Skip:(-not $HasAdoPipelines) {
         $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'invalid')
-        $PullPath = Join-Path $Fixture.PipelineFolder 'azure-pipelines-pull.yml'
+        $PullPath = Join-Path $Fixture.PipelineFolder 'entraops-pull.yml'
         $Before = Get-Content -LiteralPath $PullPath -Raw
         $Config = Get-Content -LiteralPath $Fixture.ConfigPath -Raw | ConvertFrom-Json
         $Config.WorkflowTrigger.PullScheduledCron = 'not-a-cron'

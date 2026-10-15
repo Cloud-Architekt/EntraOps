@@ -15,8 +15,8 @@ parameters:
 
 resources:
   pipelines:
-    - pipeline: azure-pipelines-pull
-      source: azure-pipelines-pull
+    - pipeline: entraops-pull
+      source: entraops-pull
       trigger: true
 
 # BEGIN EntraOps managed schedules

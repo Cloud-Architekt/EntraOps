@@ -302,6 +302,43 @@ mark {
     color: var(--neutral-fg-secondary);
 }
 
+.eo-notification-section-title,
+.eo-notification-group-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--neutral-stroke);
+}
+
+.eo-notification-section-title {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--neutral-surface);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.eo-notification-group-title {
+    background: var(--brand-bg);
+    color: var(--neutral-fg-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.eo-notification-section-title span,
+.eo-notification-group-title span {
+    min-width: 22px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--neutral-stroke);
+    font-size: 11px;
+    text-align: center;
+}
+
 /* Classification source selector (built-in template vs. tenant-specific, entraops mode only) */
 .appbar .variant-picker {
     display: inline-flex;
