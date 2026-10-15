@@ -101,21 +101,20 @@ jobs:
       - task: PowerShell@2
         displayName: "Install candidate validation dependencies"
         inputs:
-          targetType: inline
-          script: |
-            Install-Module Pester -MinimumVersion 5.7.1 -Scope CurrentUser -Force -Repository PSGallery
-            Install-Module powershell-yaml -RequiredVersion 0.4.12 -Scope CurrentUser -Force -Repository PSGallery
+          targetType: filePath
+          filePath: "$(Pipeline.Workspace)/EntraOps-trusted-validators/Install-EntraOpsUpdateValidationDependencies.ps1"
           pwsh: true
 
       - task: PowerShell@2
         displayName: "Validate candidate"
         inputs:
-          targetType: inline
-          script: |
-            & '$(Pipeline.Workspace)/EntraOps-trusted-validators/Test-EntraOpsUpdateCandidate.ps1' -CandidateRoot '$(Agent.TempDirectory)/TmpUpdate' `
-              -ArchivePath '$(Pipeline.Workspace)/EntraOps-update-candidate/EntraOps-update-candidate.tar' `
-              -ExpectedArchiveSha256 '$(CandidateDigest)' `
-              -RunBrowserTests:('$(RunBrowserTests)' -eq 'true')
+          targetType: filePath
+          filePath: "$(Pipeline.Workspace)/EntraOps-trusted-validators/Test-EntraOpsUpdateCandidate.ps1"
+          arguments: >-
+            -CandidateRoot "$(Agent.TempDirectory)/TmpUpdate"
+            -ArchivePath "$(Pipeline.Workspace)/EntraOps-update-candidate/EntraOps-update-candidate.tar"
+            -ExpectedArchiveSha256 "$(CandidateDigest)"
+            -RunBrowserTests:$$(RunBrowserTests)
           pwsh: true
 
   - job: Apply
@@ -138,26 +137,14 @@ jobs:
       # Update-EntraOps can replace ./.azure-pipelines. Freeze the reviewed publisher before applying
       # the candidate so the job access token never reaches candidate code.
       - task: PowerShell@2
-        displayName: "Stage trusted publisher"
+        displayName: "Stage trusted publisher and prepare candidate"
         inputs:
-          targetType: inline
-          script: |
-            $Publisher = Join-Path '$(Agent.TempDirectory)' 'EntraOpsPublisher'
-            New-Item -ItemType Directory -Path $Publisher -Force | Out-Null
-            Copy-Item -LiteralPath './.azure-pipelines/scripts/Publish-EntraOpsAdoUpdate.ps1', './.azure-pipelines/scripts/Ado-GitAuth.ps1' -Destination $Publisher -Force
-          pwsh: true
-
-      - task: PowerShell@2
-        displayName: "Resolve the validated commit without executing candidate code"
-        inputs:
-          targetType: inline
-          script: |
-            # An undefined EntraOpsUpdatePat variable arrives as the literal macro and must not be sent as a token
-            if ([string]::IsNullOrWhiteSpace($env:ENTRAOPS_PAT) -or $env:ENTRAOPS_PAT -match '^\$\([^)]*\)$') {
-              Remove-Item -LiteralPath Env:ENTRAOPS_PAT -ErrorAction SilentlyContinue
-            }
-            Import-Module ./EntraOps
-            Get-EntraOpsUpdateCandidate -ConfigFile '$(ConfigFile)' -DestinationPath ./TmpUpdate -ExpectedSourceCommit '$(SourceSha)' | Out-Host
+          targetType: filePath
+          filePath: "./.azure-pipelines/scripts/Prepare-EntraOpsAdoUpdate.ps1"
+          arguments: >-
+            -ConfigFile "$(ConfigFile)"
+            -SourceCommit "$(SourceSha)"
+            -PublisherPath "$(Agent.TempDirectory)/EntraOpsPublisher"
           pwsh: true
         env:
           ENTRAOPS_PAT: $(EntraOpsUpdatePat)
@@ -165,22 +152,24 @@ jobs:
       - task: PowerShell@2
         displayName: "Apply candidate without credentials"
         inputs:
-          targetType: inline
-          script: |
-            Import-Module ./EntraOps
-            Install-EntraOpsUpdateCandidate -ConfigFile '$(ConfigFile)' -SourceCommit '$(SourceSha)' `
-              -ValidationRequired:('$(ValidationRequired)' -eq 'true') `
-              -BrowserTestsValidated:('$(RunBrowserTests)' -eq 'true')
+          targetType: filePath
+          filePath: "./.azure-pipelines/scripts/Install-EntraOpsAdoUpdate.ps1"
+          arguments: >-
+            -ConfigFile "$(ConfigFile)"
+            -SourceCommit "$(SourceSha)"
+            -ValidationRequired:$$(ValidationRequired)
+            -BrowserTestsValidated:$$(RunBrowserTests)
           pwsh: true
 
       - task: PowerShell@2
         displayName: "Publish pull request"
         inputs:
-          targetType: inline
-          script: |
-            & (Join-Path '$(Agent.TempDirectory)' 'EntraOpsPublisher/Publish-EntraOpsAdoUpdate.ps1') -SourceCommit '$(SourceSha)' `
-              -ValidationRequired:('$(ValidationRequired)' -eq 'true') `
-              -BrowserTests:('$(RunBrowserTests)' -eq 'true')
+          targetType: filePath
+          filePath: "$(Agent.TempDirectory)/EntraOpsPublisher/Publish-EntraOpsAdoUpdate.ps1"
+          arguments: >-
+            -SourceCommit "$(SourceSha)"
+            -ValidationRequired:$$(ValidationRequired)
+            -BrowserTests:$$(RunBrowserTests)
           pwsh: true
         env:
           SYSTEM_ACCESSTOKEN: $(System.AccessToken)

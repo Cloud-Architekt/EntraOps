@@ -10,6 +10,7 @@ BeforeDiscovery {
         Where-Object { -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot "../../.azure-pipelines/$_") -PathType Leaf) }
     ).Count -gt 0
     $SkipScheduleTests = -not $HasAdoPipelines -or $HasOutdatedDeploymentPipelines
+    $YamlModuleAvailable = [bool](Get-Module -ListAvailable -Name powershell-yaml)
 }
 
 BeforeAll {
@@ -107,12 +108,29 @@ Describe 'Update-EntraOpsAzureDevOpsSchedules' {
 
         Update-EntraOpsAzureDevOpsSchedules -ConfigFile $Fixture.ConfigPath -PipelineFolder $Fixture.PipelineFolder
 
+        # Existing update pipelines may not have powershell-yaml installed yet. Keep checking the
+        # generated value and its escaping without making that optional test dependency mandatory.
+        foreach ($PipelineName in 'entraops-pull.yml', 'entraops-push.yml', 'entraops-push-reporting.yml', 'entraops-pull-tenant-governance.yml') {
+            $Content = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder $PipelineName) -Raw
+            $Region = [regex]::Match($Content, '(?ms)^[ \t]*# BEGIN EntraOps managed service connection\r?\n(?<Region>.*?)^[ \t]*# END EntraOps managed service connection').Groups['Region'].Value
+            $Region | Should -Match "(?m)^\s+default: 'Contoso''s EntraOps'\r?$" -Because $PipelineName
+        }
+        Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'entraops-update.yml') -Raw | Should -Not -Match 'serviceConnection'
+    }
+
+    It 'keeps the configured service connection valid YAML' -Skip:($SkipScheduleTests -or -not $YamlModuleAvailable) {
+        $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'service-connection-yaml')
+        $Config = Get-Content -LiteralPath $Fixture.ConfigPath -Raw | ConvertFrom-Json
+        $Config | Add-Member -NotePropertyName AzureDevOpsServiceConnection -NotePropertyValue "Contoso's EntraOps"
+        $Config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Fixture.ConfigPath -Encoding UTF8
+
+        Update-EntraOpsAzureDevOpsSchedules -ConfigFile $Fixture.ConfigPath -PipelineFolder $Fixture.PipelineFolder
+
         Import-Module powershell-yaml -ErrorAction Stop
         foreach ($PipelineName in 'entraops-pull.yml', 'entraops-push.yml', 'entraops-push-reporting.yml', 'entraops-pull-tenant-governance.yml') {
             $Pipeline = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder $PipelineName) -Raw | ConvertFrom-Yaml
             ($Pipeline.parameters | Where-Object name -EQ 'serviceConnection').default | Should -BeExactly "Contoso's EntraOps" -Because $PipelineName
         }
-        Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder 'entraops-update.yml') -Raw | Should -Not -Match 'serviceConnection'
     }
 
     It 'uses the default service connection when the configuration does not define one' -Skip:$SkipScheduleTests {

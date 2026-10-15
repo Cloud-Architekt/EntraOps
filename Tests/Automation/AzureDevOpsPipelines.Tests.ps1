@@ -164,20 +164,33 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
         $ValidatorArtifact = $Resolve.steps | Where-Object { $_.inputs.artifact -eq 'EntraOps-trusted-validators' }
         $ValidatorArtifact.inputs.targetPath | Should -Be '$(Build.SourcesDirectory)/.github/scripts'
         ($Validate.steps | ConvertTo-Json -Depth 10) | Should -Not -Match 'AccessToken|ENTRAOPS_PAT'
-        ($Validate.steps | Where-Object displayName -EQ 'Validate candidate').inputs.script | Should -Match 'Pipeline\.Workspace\)/EntraOps-trusted-validators/Test-EntraOpsUpdateCandidate\.ps1[\s\S]*-ExpectedArchiveSha256'
+        $DependenciesStep = $Validate.steps | Where-Object displayName -EQ 'Install candidate validation dependencies'
+        $DependenciesStep.inputs.filePath | Should -Be '$(Pipeline.Workspace)/EntraOps-trusted-validators/Install-EntraOpsUpdateValidationDependencies.ps1'
+        $ValidationStep = $Validate.steps | Where-Object displayName -EQ 'Validate candidate'
+        $ValidationStep.inputs.filePath | Should -Be '$(Pipeline.Workspace)/EntraOps-trusted-validators/Test-EntraOpsUpdateCandidate.ps1'
+        $ValidationStep.inputs.arguments | Should -Match '\-ExpectedArchiveSha256 "\$\(CandidateDigest\)"'
+        $ValidationStep.inputs.arguments | Should -Match ([regex]::Escape('-RunBrowserTests:$$(RunBrowserTests)'))
 
         $Apply.condition | Should -Match "eq\(dependencies\.Validate\.result, 'Succeeded'\)"
         $ApplySteps = @($Apply.steps | Where-Object { $_.displayName })
-        $StageIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.displayName -eq 'Stage trusted publisher' })
-        $InstallIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.inputs.script -match 'Install-EntraOpsUpdateCandidate' })
+        $StageIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.inputs.filePath -eq './.azure-pipelines/scripts/Prepare-EntraOpsAdoUpdate.ps1' })
+        $InstallIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.inputs.filePath -eq './.azure-pipelines/scripts/Install-EntraOpsAdoUpdate.ps1' })
         $PublishIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.displayName -eq 'Publish pull request' })
+        $StageIndex | Should -BeGreaterThan -1
         $StageIndex | Should -BeLessThan $InstallIndex
         $InstallIndex | Should -BeLessThan $PublishIndex
-        $ApplySteps[$PublishIndex].inputs.script | Should -Match 'Agent\.TempDirectory.*EntraOpsPublisher/Publish-EntraOpsAdoUpdate\.ps1'
+        $ApplySteps[$StageIndex].inputs.arguments | Should -Match ([regex]::Escape('-PublisherPath "$(Agent.TempDirectory)/EntraOpsPublisher"'))
+        $ApplySteps[$PublishIndex].inputs.filePath | Should -Be '$(Agent.TempDirectory)/EntraOpsPublisher/Publish-EntraOpsAdoUpdate.ps1'
         @($ApplySteps | Where-Object { $_.env.SYSTEM_ACCESSTOKEN }).Count | Should -Be 1
         $ApplySteps[$PublishIndex].env.SYSTEM_ACCESSTOKEN | Should -Be '$(System.AccessToken)'
         $ApplySteps[$InstallIndex].env | Should -BeNullOrEmpty
-        ($ApplySteps | Where-Object { $_.env.ENTRAOPS_PAT }).inputs.script | Should -Match "ENTRAOPS_PAT -match '\^\\\$\\\(\[\^\)\]\*\\\)\$'"
+        ($ApplySteps | Where-Object { $_.env.ENTRAOPS_PAT }).inputs.filePath | Should -Be './.azure-pipelines/scripts/Prepare-EntraOpsAdoUpdate.ps1'
+        # The template contains orchestration only; every PowerShell task delegates to a script.
+        foreach ($Step in $Pipeline.jobs.steps | Where-Object task -EQ 'PowerShell@2') {
+            $Step.inputs.targetType | Should -Be 'filePath'
+            $Step.inputs.script | Should -BeNullOrEmpty
+            $Step.inputs.filePath | Should -Not -BeNullOrEmpty
+        }
     }
 
     It 'passes the configured tenant explicitly to EntraOps connections' -Skip:$IsConfiguredDeployment {
