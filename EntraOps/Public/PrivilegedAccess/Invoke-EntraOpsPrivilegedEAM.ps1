@@ -1,13 +1,17 @@
 <#
 .SYNOPSIS
-    Run EntraOps Privileged EAM classification without any pre-configuration.
+    Run EntraOps Privileged EAM classification with an optional configuration file.
 
 .DESCRIPTION
-    Zero-config entry point that resolves tenant identity from an already-authenticated
+    Entry point that resolves tenant identity from an already-authenticated
     AzContext and MgGraph context, sets up all required global variables, downloads the
     latest classification templates from the AzurePrivilegedIAM repository, computes the
     Control Plane scope, runs Save-EntraOpsPrivilegedEAMJson, and cleans up every
     intermediate file so that only the PrivilegedEAM JSON output remains.
+
+    Reuses the configuration loaded by Connect-EntraOps. Otherwise, looks for EntraOpsConfig.json
+    in the current folder, then the EntraOps working folder. Use -ConfigFilePath to select a file
+    explicitly. Command parameters override configuration values. Without a configuration, defaults apply.
 
     Prerequisites:
     - PowerShell 7+ with the EntraOps module loaded.
@@ -26,26 +30,39 @@
 
 .PARAMETER RbacSystems
     RBAC systems to classify. Defaults to Azure, EntraID, IdentityGovernance,
-    DeviceManagement, and ResourceApps.
+    DeviceManagement, and ResourceApps when no configuration supplies RbacSystems.
 
 .PARAMETER PrivilegedObjectClassificationSource
     Source for Control Plane scope determination passed to
-    Update-EntraOpsClassificationControlPlaneScope. Default is "All", combining any existing
+    Update-EntraOpsClassificationControlPlaneScope. Uses the configuration value when present.
+    Otherwise defaults to "All", combining any existing
     EntraOps EAM export with live Azure Resource Graph and Exposure Management sources.
 
 .PARAMETER ClassificationParameterScope
     Which RBAC systems receive a parameterised classification file before the run.
     Filtered automatically to the intersection with $RbacSystems. Default is
-    EntraID, DeviceManagement, and Azure.
+    EntraID, DeviceManagement, and Azure when no configuration supplies ClassificationParameterScope.
 
 .PARAMETER ExportFolder
     Destination folder for PrivilegedEAM JSON output. Defaults to
-    <EntraOpsBaseFolder>/PrivilegedEAM/.
+    the session output folder when reusing a loaded configuration, otherwise <EntraOpsBaseFolder>/PrivilegedEAM/.
+
+.PARAMETER ConfigFilePath
+    Path to an EntraOps configuration file. Takes precedence over the configuration loaded by Connect-EntraOps.
 
 .PARAMETER KeepClassificationFiles
     Keep the downloaded classification templates and the generated tenant-specific classification
     files instead of removing them after the run, e.g. so New-EntraOpsReportingData can show the
     classification that was used for the export in the Classification Explorer.
+    Controls cleanup only, independently of the choice to reuse or refresh templates.
+
+.PARAMETER ExistingClassificationAction
+    When tenant classification files exist, Prompt (default) asks whether to Reuse local templates
+    (default choice) or Regenerate using refreshed templates. This prompt is independent of -KeepClassificationFiles.
+    Reuse preserves existing templates and downloads only missing templates. Regenerate refreshes templates.
+    Both choices rebuild tenant classifications and Control Plane scope reasoning for the selected scope
+    through Update-EntraOpsClassificationControlPlaneScope, using the preserved tenant overwrite files.
+    Pass Reuse or Regenerate explicitly for unattended runs to avoid prompting.
 
 .EXAMPLE
     Run EntraOps with all defaults from an already-authenticated session.
@@ -53,7 +70,7 @@
 
 .EXAMPLE
     Run EntraOps and generate the reporting apps from the export and its classification files.
-    Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles
+    Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse
     Connect-EntraOps -AuthenticationType UserInteractive -TenantName 'contoso.onmicrosoft.com'
     New-EntraOpsReportingData
     Disconnect-EntraOps
@@ -65,6 +82,11 @@
 .EXAMPLE
     Save output to a custom folder.
     Invoke-EntraOpsPrivilegedEAM -ExportFolder "C:\Output\PrivilegedEAM"
+
+.EXAMPLE
+    Use the configuration loaded by Connect-EntraOps and rebuild tenant classifications from existing templates.
+    Connect-EntraOps -TenantName 'contoso.onmicrosoft.com' -ConfigFilePath './EntraOpsConfig.json'
+    Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse
 #>
 function Invoke-EntraOpsPrivilegedEAM {
 
@@ -76,10 +98,10 @@ function Invoke-EntraOpsPrivilegedEAM {
         ,
         [Parameter(Mandatory = $false)]
         [ValidateSet("All", "EntraOps", "PrivilegedObjectIds", "PrivilegedRolesFromAzGraph", "PrivilegedEdgesFromExposureManagement")]
-        [string]$PrivilegedObjectClassificationSource = "All"
+        [string[]]$PrivilegedObjectClassificationSource = "All"
         ,
         [Parameter(Mandatory = $false)]
-        [ValidateSet("EntraID", "DeviceManagement", "Azure")]
+        [ValidateSet("EntraID", "DeviceManagement", "Azure", "Defender", "IdentityGovernance", "ResourceApps")]
         [Array]$ClassificationParameterScope = @("EntraID", "DeviceManagement", "Azure")
         ,
         [Parameter(Mandatory = $false)]
@@ -87,6 +109,13 @@ function Invoke-EntraOpsPrivilegedEAM {
         ,
         [Parameter(Mandatory = $false)]
         [switch]$KeepClassificationFiles
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$ConfigFilePath
+        ,
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Prompt', 'Reuse', 'Regenerate')]
+        [string]$ExistingClassificationAction = 'Prompt'
     )
 
     $ErrorActionPreference = "Stop"
@@ -111,12 +140,52 @@ function Invoke-EntraOpsPrivilegedEAM {
     }
 
     try {
+        $SessionConfig = Get-Variable -Name EntraOpsConfig -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+        $UseSessionConfig = -not $ConfigFilePath -and $null -ne $SessionConfig
+        $RunConfig = $null
+        $ResolvedConfigPath = $null
+        if ($UseSessionConfig) {
+            $RunConfig = $SessionConfig
+            $ResolvedConfigPath = $__EntraOpsSession['ConfigFilePath']
+        } else {
+            if (-not $ConfigFilePath) {
+                $ConfigFilePath = @(
+                    Join-Path (Get-Location -PSProvider FileSystem).ProviderPath 'EntraOpsConfig.json'
+                    if (-not [string]::IsNullOrWhiteSpace($EntraOpsBaseFolder)) { Join-Path $EntraOpsBaseFolder 'EntraOpsConfig.json' }
+                ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+            }
+            if ($ConfigFilePath) {
+                $ResolvedConfigPath = (Resolve-Path -LiteralPath $ConfigFilePath -ErrorAction Stop).ProviderPath
+                $RunConfig = Get-Content -LiteralPath $ResolvedConfigPath -Raw | ConvertFrom-Json -Depth 100 -AsHashtable -NoEnumerate
+                if ($RunConfig -isnot [System.Collections.IDictionary]) {
+                    throw "Configuration file '$ResolvedConfigPath' must contain a JSON object."
+                }
+            }
+        }
+        $HasConfiguration = $null -ne $RunConfig
+        if ($HasConfiguration) {
+            if (-not $PSBoundParameters.ContainsKey('RbacSystems') -and $RunConfig.RbacSystems) {
+                $RbacSystems = $RunConfig.RbacSystems
+            }
+            if (-not $PSBoundParameters.ContainsKey('PrivilegedObjectClassificationSource') -and $RunConfig.AutomatedControlPlaneScopeUpdate.PrivilegedObjectClassificationSource) {
+                $PrivilegedObjectClassificationSource = $RunConfig.AutomatedControlPlaneScopeUpdate.PrivilegedObjectClassificationSource
+            }
+            if (-not $PSBoundParameters.ContainsKey('ClassificationParameterScope') -and $null -ne $RunConfig.AutomatedControlPlaneScopeUpdate.ClassificationParameterScope) {
+                $ClassificationParameterScope = $RunConfig.AutomatedControlPlaneScopeUpdate.ClassificationParameterScope
+            }
+        }
+
         # ── Banner ────────────────────────────────────────────────────────────────
         Write-Host ""
         Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
-        Write-Host "  Invoke-EntraOpsPrivilegedEAM  —  Zero-Config Run" -ForegroundColor Cyan
+        $RunMode = if ($HasConfiguration) { 'Configured Run' } else { 'Zero-Config Run' }
+        Write-Host "  Invoke-EntraOpsPrivilegedEAM  —  $RunMode" -ForegroundColor Cyan
+        if ($HasConfiguration) {
+            $ConfigSource = if ($ResolvedConfigPath) { $ResolvedConfigPath } else { 'In-memory session configuration (source file path unavailable)' }
+            Write-Host "  Config File  : $ConfigSource" -ForegroundColor Yellow
+        }
         Write-Host "  RBAC Systems : $($RbacSystems -join ', ')" -ForegroundColor Cyan
-        Write-Host "  CP Source    : $PrivilegedObjectClassificationSource" -ForegroundColor Cyan
+        Write-Host "  CP Source    : $($PrivilegedObjectClassificationSource -join ', ')" -ForegroundColor Cyan
         Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
         Write-Host ""
 
@@ -149,14 +218,29 @@ function Invoke-EntraOpsPrivilegedEAM {
         if ([string]::IsNullOrEmpty($TenantId)) {
             $TenantId = $MgContext.TenantId
         }
+        if ($HasConfiguration -and $RunConfig.TenantId -and $RunConfig.TenantId -ne $TenantId) {
+            throw "Configuration tenant '$($RunConfig.TenantId)' does not match the active Azure tenant '$TenantId'. Connect-EntraOps to the configured tenant before running."
+        }
+        if ($HasConfiguration -and $MgContext.TenantId -ne $TenantId) {
+            throw "Microsoft Graph tenant '$($MgContext.TenantId)' does not match the active Azure tenant '$TenantId'. Reconnect to the configured tenant before running."
+        }
 
-        # Primary: Get-AzTenant (same method used by New-EntraOpsConfigFile)
-        $TenantName = $null
-        try {
+        # Keep the configured tenant name so an alternate verified domain does not select a different
+        # classification folder. Configurations without an ID must match a verified tenant domain.
+        $TenantName = if ($HasConfiguration) { $RunConfig.TenantName }
+        if ($TenantName -and -not $RunConfig.TenantId) {
             $TenantDetails = Get-AzTenant -TenantId $TenantId -ErrorAction Stop
-            $TenantName = $TenantDetails.Domains[0]
-        } catch {
-            Write-Warning "Get-AzTenant failed ($($_.Exception.Message)). Falling back to Microsoft Graph organization endpoint..."
+            if ($TenantName -notin $TenantDetails.Domains) {
+                throw "Configuration TenantName '$TenantName' does not match the active Azure tenant '$TenantId'."
+            }
+        }
+        if ([string]::IsNullOrEmpty($TenantName)) {
+            try {
+                $TenantDetails = Get-AzTenant -TenantId $TenantId -ErrorAction Stop
+                $TenantName = $TenantDetails.Domains[0]
+            } catch {
+                Write-Warning "Get-AzTenant failed ($($_.Exception.Message)). Falling back to Microsoft Graph organization endpoint..."
+            }
         }
 
         # Fallback: Microsoft Graph /organization
@@ -189,21 +273,28 @@ function Invoke-EntraOpsPrivilegedEAM {
             throw "EntraOpsBaseFolder is not set. Ensure the EntraOps module is properly imported."
         }
 
-        # Set global variables mirroring Connect-EntraOps (single-tenant layout)
+        # Reuse configured session folders; standalone runs use the single-tenant layout.
         New-Variable -Name TenantIdContext            -Value $TenantId   -Scope Global -Force
         New-Variable -Name TenantNameContext          -Value $TenantName -Scope Global -Force
-        New-Variable -Name DefaultFolderClassification -Value "$EntraOpsBaseFolder/Classification/" -Scope Global -Force
+        $ClassificationRoot = if ($UseSessionConfig -and -not [string]::IsNullOrWhiteSpace($DefaultFolderClassification)) {
+            $DefaultFolderClassification
+        } else { Join-Path $EntraOpsBaseFolder 'Classification' }
+        New-Variable -Name DefaultFolderClassification -Value $ClassificationRoot -Scope Global -Force
         New-Variable -Name XdrAvdHuntingAccess         -Value (($MgContext.Scopes) -contains "ThreatHunting.Read.All") -Scope Global -Force
         # Default the query mode only when Connect-EntraOps has not set it yet, so a previously
         # chosen -UseInvokeRestMethodOnly session setting is preserved
         if (-not $__EntraOpsSession.ContainsKey('UseInvokeRestMethodOnly')) {
-            $__EntraOpsSession['UseInvokeRestMethodOnly'] = $false
+            $__EntraOpsSession['UseInvokeRestMethodOnly'] = [bool]$RunConfig.UseInvokeRestMethodOnly
         }
-        New-Variable -Name ManagingTenantIdContext      -Value "" -Scope Global -Force
-        New-Variable -Name ManagingTenantNameContext    -Value "" -Scope Global -Force
+        $ManagingTenantId = if ($HasConfiguration) { [string]$RunConfig.ManagingTenantId } else { '' }
+        $ManagingTenantName = if ($HasConfiguration) { [string]$RunConfig.ManagingTenantName } else { '' }
+        New-Variable -Name ManagingTenantIdContext      -Value $ManagingTenantId -Scope Global -Force
+        New-Variable -Name ManagingTenantNameContext    -Value $ManagingTenantName -Scope Global -Force
 
         $ResolvedExportFolder = if ($PSBoundParameters.ContainsKey('ExportFolder') -and -not [string]::IsNullOrEmpty($ExportFolder)) {
             $ExportFolder
+        } elseif ($UseSessionConfig -and -not [string]::IsNullOrWhiteSpace($DefaultFolderClassifiedEam)) {
+            $DefaultFolderClassifiedEam
         } else {
             "$EntraOpsBaseFolder/PrivilegedEAM/"
         }
@@ -253,12 +344,34 @@ function Invoke-EntraOpsPrivilegedEAM {
                 UserWorkAccountAttribute            = "associatedWorkAccount"
             }
         }
-        New-Variable -Name EntraOpsConfig -Value $DefaultEntraOpsConfig -Scope Global -Force
+        if (-not $HasConfiguration) { $RunConfig = $DefaultEntraOpsConfig }
+        New-Variable -Name EntraOpsConfig -Value $RunConfig -Scope Global -Force
+        if ($ResolvedConfigPath) { $__EntraOpsSession['ConfigFilePath'] = $ResolvedConfigPath }
+        New-Variable -Name EntraOpsIncludeObjectDetails -Value ([bool]$RunConfig.ConsoleOutput.IncludeObjectDetails) -Scope Global -Force
 
         # Construct canonical paths used throughout this run
-        $ClassificationRoot = Join-Path $EntraOpsBaseFolder "Classification"
         $ClassificationTemplates = Join-Path $ClassificationRoot "Templates"
         $ClassificationTenant = Join-Path $ClassificationRoot $TenantName
+
+        $ExistingTenantFiles = @(if (Test-Path -LiteralPath $ClassificationTenant -PathType Container) {
+            Get-ChildItem -LiteralPath $ClassificationTenant -Filter 'Classification_*.json' -File
+        })
+        $ReuseExistingTemplates = $ExistingClassificationAction -eq 'Reuse'
+        if ($ExistingClassificationAction -eq 'Prompt' -and $ExistingTenantFiles.Count -gt 0) {
+            Write-Host "       Found $($ExistingTenantFiles.Count) classification file(s) for '$TenantName' in $ClassificationTenant" -ForegroundColor Yellow
+            Write-Host "       Reuse keeps local templates. Regenerate downloads the latest templates. Both choices refresh tenant classifications and Control Plane scopes using the preserved tenant overwrite files." -ForegroundColor Yellow
+            do {
+                try {
+                    $Answer = Read-Host 'Reuse local classification templates or regenerate using the latest templates? [R] Reuse (default) / [G] Regenerate'
+                } catch {
+                    throw "Unable to prompt for existing classification files. Pass -ExistingClassificationAction Reuse or Regenerate for unattended runs. $($_.Exception.Message)"
+                }
+                $Answer = ([string]$Answer).Trim()
+                $ValidAnswer = $Answer -in @('', 'R', 'Reuse', 'G', 'Regenerate')
+                if (-not $ValidAnswer) { Write-Host '       Enter R to reuse or G to regenerate.' -ForegroundColor Yellow }
+            } until ($ValidAnswer)
+            $ReuseExistingTemplates = $Answer -in @('', 'R', 'Reuse')
+        }
 
         # Ensure required directories exist; track newly created ones for cleanup
         New-EntraOpsDirectory -Path $ClassificationRoot      -Track $CreatedPaths
@@ -273,10 +386,11 @@ function Invoke-EntraOpsPrivilegedEAM {
         Write-Host "       Status            : OK" -ForegroundColor Green
 
         # ── Phase 4: Download latest classification files ─────────────────────────
-        Write-Progress -Activity $Activity -Status "Phase 4/7: Downloading latest classification templates..." -PercentComplete 22
+        Write-Progress -Activity $Activity -Status "Phase 4/7: Preparing classification templates..." -PercentComplete 22
 
         Write-Host ""
-        Write-Host "  [4/7] Downloading latest classification templates from AzurePrivilegedIAM..." -ForegroundColor Cyan
+        $TemplateStatus = if ($ReuseExistingTemplates) { 'Reusing existing classification templates and downloading missing files' } else { 'Downloading latest classification templates' }
+        Write-Host "  [4/7] $TemplateStatus from AzurePrivilegedIAM..." -ForegroundColor Cyan
 
         # Snapshot pre-existing templates so teardown can delete only what THIS run downloaded. The previous
         # "Classification_*.json" wildcard removed templates the user had downloaded or authored earlier.
@@ -285,15 +399,13 @@ function Invoke-EntraOpsPrivilegedEAM {
             $PreExistingTemplates = @(Get-ChildItem -LiteralPath $ClassificationTemplates -Filter "Classification_*.json" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
         }
 
+        $Classifications = if ($RunConfig.AutomatedClassificationUpdate.Classifications) {
+            $RunConfig.AutomatedClassificationUpdate.Classifications
+        } else { $DefaultEntraOpsConfig.AutomatedClassificationUpdate.Classifications }
         Update-EntraOpsClassificationFiles `
             -FolderClassification $ClassificationTemplates `
-            -Classifications @(
-            "AadResources", "AadResources.Param", "ApiPermissions",
-            "Azure", "Azure.Param",
-            "Defender",
-            "DeviceManagement", "DeviceManagement.Param",
-            "IdentityGovernance"
-        )
+            -Classifications $Classifications `
+            -SkipExisting:$ReuseExistingTemplates
 
         # Record only the templates that did not exist before this run, so teardown removes exactly those.
         if (Test-Path -LiteralPath $ClassificationTemplates -ErrorAction SilentlyContinue) {
@@ -310,21 +422,25 @@ function Invoke-EntraOpsPrivilegedEAM {
         Write-Host ""
         Write-Host "  [5/7] Updating Control Plane scope classification..." -ForegroundColor Cyan
 
-        # Limit classification parameter scope to systems that are actually being collected
-        $EffectiveClassificationScope = $ClassificationParameterScope | Where-Object {
-            ($_ -eq "EntraID" -and $RbacSystems -contains "EntraID") -or
-            ($_ -eq "DeviceManagement" -and $RbacSystems -contains "DeviceManagement") -or
-            ($_ -eq "Azure" -and $RbacSystems -contains "Azure")
+        # Always refresh tenant classifications and scope reasoning for selected systems, even when
+        # local templates are reused. This also reapplies current tenant role action overwrites.
+        $EffectiveClassificationScope = @($ClassificationParameterScope | Where-Object { $_ -in $RbacSystems })
+        $ScopeUpdateParameters = @{}
+        if ($HasConfiguration) {
+            foreach ($Name in @('AzureHighPrivilegedRoles', 'AzureHighPrivilegedScopes', 'ExposureCriticalityLevel', 'PrivilegedObjectIds', 'DeviceMgmtPrivilegedTierScope', 'EntraOpsScopes')) {
+                $Value = $RunConfig.AutomatedControlPlaneScopeUpdate.$Name
+                if ($null -ne $Value) { $ScopeUpdateParameters[$Name] = $Value }
+            }
         }
+        if (-not $ScopeUpdateParameters.ContainsKey('EntraOpsScopes')) { $ScopeUpdateParameters.EntraOpsScopes = $RbacSystems }
+        $ScopeUpdateParameters.PrivilegedObjectClassificationSource = $PrivilegedObjectClassificationSource
+        $ScopeUpdateParameters.ClassificationParameterScope = $EffectiveClassificationScope
 
         if ($EffectiveClassificationScope.Count -eq 0) {
-            Write-Warning "No ClassificationParameterScope entries intersect with the selected RbacSystems. Skipping Update-EntraOpsClassificationControlPlaneScope."
+            Write-Host "       No classification files require generation for the selected scope." -ForegroundColor Gray
         } else {
             Write-Host "       Effective scope : $($EffectiveClassificationScope -join ', ')" -ForegroundColor Gray
-            Update-EntraOpsClassificationControlPlaneScope `
-                -PrivilegedObjectClassificationSource $PrivilegedObjectClassificationSource `
-                -ClassificationParameterScope         $EffectiveClassificationScope `
-                -EntraOpsScopes                       $RbacSystems
+            Update-EntraOpsClassificationControlPlaneScope @ScopeUpdateParameters
         }
 
         Write-Host "       Status : Control Plane scope updated." -ForegroundColor Green
@@ -346,10 +462,7 @@ function Invoke-EntraOpsPrivilegedEAM {
             Write-Host "       First-run bootstrap: refreshing Control Plane scope from the fresh EAM export..." -ForegroundColor Yellow
             # Same source as the first pass: narrowing to 'EntraOps' here would drop live-source-only
             # objects (e.g. XSPM-critical assets without classified roles) from the Control Plane scope.
-            Update-EntraOpsClassificationControlPlaneScope `
-                -PrivilegedObjectClassificationSource $PrivilegedObjectClassificationSource `
-                -ClassificationParameterScope         $EffectiveClassificationScope `
-                -EntraOpsScopes                       $RbacSystems
+            Update-EntraOpsClassificationControlPlaneScope @ScopeUpdateParameters
             # The Graph cache was populated moments ago by the first pass - only the classification
             # files changed, so the re-export can reuse it instead of re-collecting everything.
             Save-EntraOpsPrivilegedEAMJson -ExportFolder $ResolvedExportFolder -RbacSystems $RbacSystems -UseCache $true

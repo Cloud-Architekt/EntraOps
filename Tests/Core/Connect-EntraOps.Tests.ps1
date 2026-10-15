@@ -77,6 +77,7 @@ Describe 'Connect-EntraOps configuration file detection' {
         $Output = Invoke-TestConnect
 
         $Global:EntraOpsConfig.ServiceEM.GroupPrefix | Should -Be 'GRP'
+        (& (Get-Module EntraOps) { $__EntraOpsSession['ConfigFilePath'] }) | Should -Be (Join-Path $script:WorkFolder 'EntraOpsConfig.json')
         $Output | Should -Match 'Config File\s+: .*EntraOpsConfig\.json \(found automatically\)'
         $Output | Should -Match 'EntraOps Scope\s+: Report'
     }
@@ -109,10 +110,12 @@ Describe 'Connect-EntraOps configuration file detection' {
 
     It 'reports when no configuration file exists and drops a configuration of a previous connection' {
         $Global:EntraOpsConfig = @{ TenantName = 'contoso.onmicrosoft.com' }
+        & (Get-Module EntraOps) { $__EntraOpsSession['ConfigFilePath'] = 'previous-config.json' }
 
         $Output = Invoke-TestConnect
 
         Get-Variable -Name EntraOpsConfig -Scope Global -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+        (& (Get-Module EntraOps) { $__EntraOpsSession.ContainsKey('ConfigFilePath') }) | Should -BeFalse
         $Output | Should -Match 'Config File\s+: Not used - no EntraOpsConfig\.json found'
     }
 
@@ -124,6 +127,7 @@ Describe 'Connect-EntraOps configuration file detection' {
         $Output = Invoke-TestConnect -Parameters @{ ConfigFilePath = $ExplicitPath }
 
         $Global:EntraOpsConfig.ServiceEM.GroupPrefix | Should -Be 'EXPLICIT'
+        (& (Get-Module EntraOps) { $__EntraOpsSession['ConfigFilePath'] }) | Should -Be $ExplicitPath
         $Output | Should -Match "Config File\s+: $([regex]::Escape($ExplicitPath))"
     }
 }

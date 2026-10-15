@@ -57,6 +57,7 @@ function Disconnect-EntraOps {
     # Reset session state set by Connect-EntraOps
     $__EntraOpsSession['AuthenticationType'] = $null
     $__EntraOpsSession.Remove('UseInvokeRestMethodOnly')
+    $__EntraOpsSession.Remove('ConfigFilePath')
     if ($__EntraOpsSession.NonPimGroupIds) { $__EntraOpsSession.NonPimGroupIds.Clear() }
     if ($__EntraOpsSession.RetryStatistics) {
         $__EntraOpsSession.RetryStatistics.TotalRetries = 0

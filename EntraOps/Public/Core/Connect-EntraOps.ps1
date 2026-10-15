@@ -611,10 +611,12 @@ function Connect-EntraOps {
             }
 
             New-Variable -Name EntraOpsConfig -Value $EntraOpsConfig -Scope Global -Force
+            $__EntraOpsSession['ConfigFilePath'] = (Resolve-Path -LiteralPath $ConfigFilePath -ErrorAction Stop).ProviderPath
             Write-Verbose -Message "Config file $($ConfigFilePath) imported"
         } else {
             # A configuration from a previous connection may belong to another tenant
             Remove-Variable -Name EntraOpsConfig -Scope Global -Force -ErrorAction SilentlyContinue
+            $__EntraOpsSession.Remove('ConfigFilePath')
         }
         $ConfigFileSummary = switch ($ConfigFileStatus) {
             'Parameter' { "$ConfigFilePath" }

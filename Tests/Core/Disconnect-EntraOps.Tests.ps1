@@ -62,6 +62,7 @@ Describe 'Disconnect-EntraOps session cleanup' {
         }
         $Session['AuthenticationType'] = 'ServicePrincipal'
         $Session['UseInvokeRestMethodOnly'] = $true
+        $Session['ConfigFilePath'] = 'previous-config.json'
         $Session.MsGraphTokenCache['tenant-a'] = 'token-a'
         $Session.ArmTokenCache['tenant-a'] = 'token-a'
         $Session.NonPimGroupIds['group-a'] = $true
@@ -70,6 +71,8 @@ Describe 'Disconnect-EntraOps session cleanup' {
 
     It 'removes every tenant context variable' {
         Disconnect-EntraOps *> $null
+
+        $Session.ContainsKey('ConfigFilePath') | Should -BeFalse
 
         foreach ($Name in $TenantContextVariables) {
             Get-Variable -Name $Name -Scope Global -ErrorAction SilentlyContinue | Should -BeNullOrEmpty

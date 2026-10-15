@@ -21,6 +21,10 @@
     If set, also downloads the classification overwrite template "Classification_RoleDefinitionOverwrites.json" from the repository.
     Role action overwrites (Classification_RoleActionOverwrites.json) are tenant-specific only and intentionally not downloaded to Templates.
 
+.PARAMETER SkipExisting
+    Reuse existing local templates and download only missing files. Defaults to false: existing files
+    are overwritten with validated downloads unless -SkipExisting is explicitly enabled.
+
 .EXAMPLE
     Update all classification files in default location (./EntraOps_Classification/Templates) with classifications from the public repository AzurePrivilegedIAM
     Update-EntraOpsClassificationFiles
@@ -51,6 +55,9 @@ function Update-EntraOpsClassificationFiles {
         ,
         [Parameter(Mandatory = $false)]
         [Switch]$IncludeOverwrites = $true
+        ,
+        [Parameter(Mandatory = $false)]
+        [Switch]$SkipExisting = $false
     )
 
     $ClassificationTemplates = Invoke-RestMethod -Method GET -Uri "https://api.github.com/repos/Cloud-Architekt/AzurePrivilegedIAM/contents/EntraOps_Classification?ref=$($Branch)"
@@ -99,6 +106,10 @@ function Update-EntraOpsClassificationFiles {
 
 
             $LocalFilePath = "$($FolderClassification)/$($ClassificationTemplate.name)"
+            if ($SkipExisting -and (Test-Path -LiteralPath $LocalFilePath -PathType Leaf)) {
+                Write-Host "[$($ClassificationTemplate.name)] Using existing file: $LocalFilePath" -ForegroundColor Gray
+                continue
+            }
             $FileExisted = Test-Path $LocalFilePath
             $OldHash = if ($FileExisted) { (Get-FileHash $LocalFilePath -Algorithm SHA256).Hash } else { $null }
             $OldLastWriteTime = if ($FileExisted) { (Get-Item $LocalFilePath).LastWriteTime } else { $null }
