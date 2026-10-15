@@ -354,30 +354,14 @@ function Update-EntraOps {
         # process/session after reviewing the applied diff.
         Write-Output 'Updated module import deferred until a subsequent clean process or session.'
 
-        # Run from the repository root: both commands default to repository-relative folders, and the
-        # workflows keep the repository-relative ConfigFile value.
-        Push-Location -LiteralPath $EntraOpsBaseFolder
-        try {
-            if ($TargetUpdateFolders -contains './.github/workflows') {
-                Write-Host "Re-adding workflow parameters in GitHub workflows after update..."
-                try {
-                    Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigFile
-                } catch {
-                    throw "Failed to update required workflow parameters. Error: $_"
-                }
-            }
-
-            # The upstream pipeline templates ship with default schedules; re-apply the ones from the configuration
-            if ($TargetUpdateFolders -contains './.azure-pipelines') {
-                Write-Host "Re-applying the configured schedules in Azure DevOps pipelines after update..."
-                try {
-                    Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile -PipelineFolder './.azure-pipelines'
-                } catch {
-                    throw "Failed to update the Azure DevOps pipeline schedules. Error: $_"
-                }
-            }
-        } finally {
-            Pop-Location
+        # Loaded helpers belong to the old version and may expect obsolete template names. Reapply
+        # configuration with the candidate's matching helpers, without loading them into this process.
+        $RefreshGitHubWorkflows = $TargetUpdateFolders -contains './.github/workflows'
+        $RefreshAzureDevOpsPipelines = $TargetUpdateFolders -contains './.azure-pipelines'
+        if ($RefreshGitHubWorkflows -or $RefreshAzureDevOpsPipelines) {
+            Write-Host 'Re-applying workflow and pipeline configuration in a clean process...'
+            Invoke-EntraOpsUpdateConfigurationRefresh -SourceRoot $TemporaryUpdateFolder -RepositoryRoot $EntraOpsBaseFolder `
+                -ConfigFile $ConfigFilePath -UpdateGitHubWorkflows:$RefreshGitHubWorkflows -UpdateAzureDevOpsPipelines:$RefreshAzureDevOpsPipelines
         }
 
         $UpdateManifest = [ordered]@{

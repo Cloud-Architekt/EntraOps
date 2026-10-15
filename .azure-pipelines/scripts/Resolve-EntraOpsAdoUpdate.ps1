@@ -8,7 +8,8 @@
     validation job and sets the output variables of the update pipeline (source_sha, candidate_digest,
     update_required, validation_required, run_browser_tests). Validation frequency and browser tests
     are read from AutomatedEntraOpsUpdate in the configuration file. Azure DevOps always publishes an
-    applied update as a pull request.
+    applied update as a pull request. When validation is required, stages the trusted deployment
+    validators and the pipeline dependency installer for transfer to the validation job.
 #>
 [CmdletBinding()]
 param (
@@ -20,6 +21,9 @@ param (
 
     [Parameter(Mandatory = $false)]
     [string]$ArchivePath = (Join-Path ([string]$env:BUILD_ARTIFACTSTAGINGDIRECTORY) 'EntraOps-update-candidate.tar'),
+
+    [Parameter(Mandatory = $false)]
+    [string]$TrustedValidatorPath = (Join-Path ([string]$env:BUILD_ARTIFACTSTAGINGDIRECTORY) 'EntraOps-trusted-validators'),
 
     [Parameter(Mandatory = $false)]
     [switch]$Force
@@ -68,9 +72,24 @@ if ($Candidate.TargetUpdateFolders -contains './.azure-pipelines' -and $Decision
     $Decision.ValidationRequired = $true
     $Decision.Reason = "$($Decision.Reason) Candidate validation is mandatory when Azure DevOps pipeline definitions are updated."
 }
-$Validator = Join-Path $PSScriptRoot '../../.github/scripts/Test-EntraOpsUpdateCandidate.ps1'
-if ($Decision.ValidationRequired -and -not (Test-Path -LiteralPath $Validator -PathType Leaf)) {
-    throw "The trusted candidate validator '.github/scripts/Test-EntraOpsUpdateCandidate.ps1' is missing in this repository. Restore it and add './.github/scripts' to AutomatedEntraOpsUpdate.TargetUpdateFolders."
+if ($Decision.ValidationRequired) {
+    $TrustedScripts = Join-Path $PSScriptRoot '../../.github/scripts'
+    $DependencyInstaller = Join-Path $PSScriptRoot 'Install-EntraOpsUpdateValidationDependencies.ps1'
+    foreach ($RequiredScript in @(
+            (Join-Path $TrustedScripts 'Test-EntraOpsUpdateCandidate.ps1')
+            (Join-Path $TrustedScripts 'Test-GitHubActionReferences.ps1')
+            $DependencyInstaller
+        )) {
+        if (-not (Test-Path -LiteralPath $RequiredScript -PathType Leaf)) {
+            throw "Required trusted validation script '$RequiredScript' is missing. Restore it from the reviewed pipeline release before running the update. Keep './.github/scripts' and './.azure-pipelines' in AutomatedEntraOpsUpdate.TargetUpdateFolders."
+        }
+    }
+
+    # The installer ships with the pipeline scripts, so older .github/scripts can still bootstrap validation.
+    # Stage only trusted checkout files; candidate scripts must never replace the validation entry points.
+    New-Item -ItemType Directory -Path $TrustedValidatorPath -Force | Out-Null
+    Copy-Item -Path (Join-Path $TrustedScripts '*') -Destination $TrustedValidatorPath -Recurse -Force
+    Copy-Item -LiteralPath $DependencyInstaller -Destination $TrustedValidatorPath -Force
 }
 
 Set-EntraOpsAdoOutput -Name 'source_sha' -Value $Candidate.SourceCommit

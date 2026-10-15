@@ -162,7 +162,7 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
         @($Validate.steps.download | Where-Object { $_ }) | Should -Be @('current', 'current')
         @($Validate.steps.artifact | Where-Object { $_ }) | Should -Be @('EntraOps-trusted-validators', 'EntraOps-update-candidate')
         $ValidatorArtifact = $Resolve.steps | Where-Object { $_.inputs.artifact -eq 'EntraOps-trusted-validators' }
-        $ValidatorArtifact.inputs.targetPath | Should -Be '$(Build.SourcesDirectory)/.github/scripts'
+        $ValidatorArtifact.inputs.targetPath | Should -Be '$(Build.ArtifactStagingDirectory)/EntraOps-trusted-validators'
         ($Validate.steps | ConvertTo-Json -Depth 10) | Should -Not -Match 'AccessToken|ENTRAOPS_PAT'
         $DependenciesStep = $Validate.steps | Where-Object displayName -EQ 'Install candidate validation dependencies'
         $DependenciesStep.inputs.filePath | Should -Be '$(Pipeline.Workspace)/EntraOps-trusted-validators/Install-EntraOpsUpdateValidationDependencies.ps1'

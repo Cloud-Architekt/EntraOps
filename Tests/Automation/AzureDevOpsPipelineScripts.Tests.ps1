@@ -204,6 +204,101 @@ Describe 'Azure DevOps update entry scripts' -Skip:(-not $HasAdoScripts) {
     }
 }
 
+Describe 'Azure DevOps trusted validation artifact' -Skip:(-not $HasAdoScripts) {
+    BeforeAll {
+        function Get-EntraOpsUpdateCandidate { param($ConfigFile, $DestinationPath, $ArchivePath) }
+        function Get-EntraOpsUpdatePlan { param($Repository, $SourceCommit, $TargetUpdateFolders, $ValidationFrequency, [switch]$RunBrowserTests, [switch]$Force) }
+    }
+
+    BeforeEach {
+        $Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $PipelineScripts = Join-Path $Root '.azure-pipelines/scripts'
+        $Validators = Join-Path $Root '.github/scripts'
+        $Artifact = Join-Path $Root 'artifact'
+        New-Item -ItemType Directory -Path $PipelineScripts, $Validators -Force | Out-Null
+        foreach ($Name in 'Resolve-EntraOpsAdoUpdate.ps1', 'Ado-GitAuth.ps1', 'Install-EntraOpsUpdateValidationDependencies.ps1') {
+            Copy-Item -LiteralPath (Join-Path $script:ScriptRoot $Name) -Destination $PipelineScripts
+        }
+        foreach ($Name in 'Test-EntraOpsUpdateCandidate.ps1', 'Test-GitHubActionReferences.ps1') {
+            Set-Content -LiteralPath (Join-Path $Validators $Name) -Value "# trusted $Name"
+        }
+        $ConfigPath = Join-Path $Root 'config.json'
+        Set-Content -LiteralPath $ConfigPath -Value '{"AutomatedEntraOpsUpdate":{"ApplyAutomatedEntraOpsUpdate":true}}'
+        $State = @{ ValidationRequired = $true }
+        Mock Import-Module {} -ParameterFilter { $Name -like '*EntraOps.psd1' }
+        Mock Get-EntraOpsUpdateCandidate {
+            [pscustomobject]@{ Repository = 'Cloud-Architekt/EntraOps'; SourceCommit = ('a' * 40); ArchiveSha256 = ('b' * 64); TargetUpdateFolders = @('./EntraOps') }
+        }
+        Mock Get-EntraOpsUpdatePlan {
+            [pscustomobject]@{ UpdateRequired = $true; ValidationRequired = $State.ValidationRequired; RunBrowserTests = $true; Reason = 'Test update' }
+        }
+        $Resolve = {
+            & (Join-Path $PipelineScripts 'Resolve-EntraOpsAdoUpdate.ps1') -ConfigFile $ConfigPath `
+                -ArchivePath (Join-Path $Root 'candidate.tar') -TrustedValidatorPath $Artifact 6>$null
+        }
+    }
+
+    AfterEach {
+        [Environment]::SetEnvironmentVariable('ENTRAOPS_PAT', $script:SavedEnvironment['ENTRAOPS_PAT'])
+    }
+
+    It 'packages the pipeline installer with older deployment validators' {
+        Test-Path -LiteralPath (Join-Path $Validators 'Install-EntraOpsUpdateValidationDependencies.ps1') | Should -BeFalse
+
+        & $Resolve
+
+        foreach ($Name in 'Test-EntraOpsUpdateCandidate.ps1', 'Test-GitHubActionReferences.ps1') {
+            Get-Content -LiteralPath (Join-Path $Artifact $Name) -Raw | Should -BeExactly (Get-Content -LiteralPath (Join-Path $Validators $Name) -Raw)
+        }
+        Get-Content -LiteralPath (Join-Path $Artifact 'Install-EntraOpsUpdateValidationDependencies.ps1') -Raw |
+            Should -BeExactly (Get-Content -LiteralPath (Join-Path $PipelineScripts 'Install-EntraOpsUpdateValidationDependencies.ps1') -Raw)
+    }
+
+    It 'uses the pipeline installer even when the deployment has an older copy' {
+        Set-Content -LiteralPath (Join-Path $Validators 'Install-EntraOpsUpdateValidationDependencies.ps1') -Value '# old installer'
+
+        & $Resolve
+
+        Get-Content -LiteralPath (Join-Path $Artifact 'Install-EntraOpsUpdateValidationDependencies.ps1') -Raw |
+            Should -BeExactly (Get-Content -LiteralPath (Join-Path $PipelineScripts 'Install-EntraOpsUpdateValidationDependencies.ps1') -Raw)
+    }
+
+    It 'reports a missing trusted script before publishing validation outputs' -ForEach @(
+        @{ Missing = '.github/scripts/Test-EntraOpsUpdateCandidate.ps1' }
+        @{ Missing = '.github/scripts/Test-GitHubActionReferences.ps1' }
+        @{ Missing = '.azure-pipelines/scripts/Install-EntraOpsUpdateValidationDependencies.ps1' }
+    ) {
+        Remove-Item -LiteralPath (Join-Path $Root $Missing)
+
+        { & $Resolve } | Should -Throw '*Required trusted validation script*is missing*'
+        Test-Path -LiteralPath $Artifact | Should -BeFalse
+    }
+
+    It 'does not require validation scripts when validation is disabled' {
+        $State.ValidationRequired = $false
+        Remove-Item -LiteralPath $Validators -Recurse
+
+        { & $Resolve } | Should -Not -Throw
+        Test-Path -LiteralPath $Artifact | Should -BeFalse
+    }
+}
+
+Describe 'Azure DevOps validation dependencies' -Skip:(-not $HasAdoScripts) {
+    It 'installs the latest available modules without version constraints' {
+        Mock Install-Module {}
+
+        & (Join-Path $script:ScriptRoot 'Install-EntraOpsUpdateValidationDependencies.ps1')
+
+        Should -Invoke Install-Module -Times 2 -Exactly
+        foreach ($ModuleName in 'Pester', 'powershell-yaml') {
+            Should -Invoke Install-Module -Times 1 -Exactly -ParameterFilter {
+                $Name -eq $ModuleName -and $Scope -eq 'CurrentUser' -and $Force -and $Repository -eq 'PSGallery' -and
+                -not $MinimumVersion -and -not $MaximumVersion -and -not $RequiredVersion
+            }
+        }
+    }
+}
+
 Describe 'Publish-EntraOpsAdoUpdate' -Skip:(-not $HasAdoScripts -or -not $HasGit) {
     BeforeAll {
         $script:SourceCommit = 'a' * 40
@@ -308,7 +403,9 @@ Describe 'Resolve-EntraOpsAdoUpdate' -Skip:(-not $HasAdoScripts) {
         $script:Resolve = {
             param ([string]$Pat)
             $env:ENTRAOPS_PAT = $Pat
-            (& (Join-Path $script:ScriptRoot 'Resolve-EntraOpsAdoUpdate.ps1') -ConfigFile $script:ConfigPath -DestinationPath (Join-Path $TestDrive 'TmpUpdate') -ArchivePath (Join-Path $TestDrive 'candidate.tar') 6>&1 3>$null) |
+            (& (Join-Path $script:ScriptRoot 'Resolve-EntraOpsAdoUpdate.ps1') -ConfigFile $script:ConfigPath `
+                -DestinationPath (Join-Path $TestDrive 'TmpUpdate') -ArchivePath (Join-Path $TestDrive 'candidate.tar') `
+                -TrustedValidatorPath (Join-Path $TestDrive 'trusted-validators') 6>&1 3>$null) |
             ForEach-Object { "$_" }
         }
     }

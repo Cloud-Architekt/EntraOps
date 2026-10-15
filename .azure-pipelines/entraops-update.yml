@@ -65,7 +65,7 @@ jobs:
         displayName: "Transfer trusted validators to the validation job"
         condition: and(succeeded(), eq(variables['resolve.validation_required'], 'true'))
         inputs:
-          targetPath: "$(Build.SourcesDirectory)/.github/scripts"
+          targetPath: "$(Build.ArtifactStagingDirectory)/EntraOps-trusted-validators"
           artifact: EntraOps-trusted-validators
           publishLocation: pipeline
 
