@@ -136,6 +136,72 @@ Describe 'Ado-CheckoutLatest' -Skip:(-not $HasAdoScripts -or -not $HasGit) {
     }
 }
 
+Describe 'Azure DevOps update entry scripts' -Skip:(-not $HasAdoScripts) {
+    BeforeAll {
+        function Get-EntraOpsUpdateCandidate { param($ConfigFile, $DestinationPath, $ExpectedSourceCommit) }
+        function Install-EntraOpsUpdateCandidate { param($ConfigFile, $SourceCommit, [bool]$ValidationRequired, [bool]$BrowserTestsValidated) }
+    }
+
+    BeforeEach {
+        $EntryRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $EntryRoot -Force | Out-Null
+        Copy-Item -Path (Join-Path $script:ScriptRoot '*.ps1') -Destination $EntryRoot
+        $State = @{ PublisherPath = Join-Path $TestDrive 'trusted-publisher'; TokenAtDownload = $null }
+        Mock Import-Module {} -ParameterFilter { $Name -like '*EntraOps.psd1' }
+        Mock Get-EntraOpsUpdateCandidate {
+            # Preparation must freeze both files before it even downloads the candidate.
+            Test-Path -LiteralPath (Join-Path $State.PublisherPath 'Publish-EntraOpsAdoUpdate.ps1') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $State.PublisherPath 'Ado-GitAuth.ps1') | Should -BeTrue
+            $State.TokenAtDownload = $env:ENTRAOPS_PAT
+        }
+        Mock Install-EntraOpsUpdateCandidate {}
+    }
+
+    AfterEach {
+        [Environment]::SetEnvironmentVariable('ENTRAOPS_PAT', $script:SavedEnvironment['ENTRAOPS_PAT'])
+    }
+
+    It 'freezes the trusted publisher and removes an unresolved PAT before downloading the exact commit' {
+        $env:ENTRAOPS_PAT = '$(EntraOpsUpdatePat)'
+        $Publisher = Get-Content -LiteralPath (Join-Path $EntryRoot 'Publish-EntraOpsAdoUpdate.ps1') -Raw
+        $Auth = Get-Content -LiteralPath (Join-Path $EntryRoot 'Ado-GitAuth.ps1') -Raw
+
+        & (Join-Path $EntryRoot 'Prepare-EntraOpsAdoUpdate.ps1') -ConfigFile './custom.json' -SourceCommit ('a' * 40) -PublisherPath $State.PublisherPath
+
+        $State.TokenAtDownload | Should -BeNullOrEmpty
+        Should -Invoke Get-EntraOpsUpdateCandidate -Times 1 -Exactly -ParameterFilter {
+            $ConfigFile -eq './custom.json' -and $DestinationPath -eq './TmpUpdate' -and $ExpectedSourceCommit -eq ('a' * 40)
+        }
+        # Simulate the update replacing the source scripts; publication must still use the frozen copies.
+        Set-Content -LiteralPath (Join-Path $EntryRoot 'Publish-EntraOpsAdoUpdate.ps1') -Value '# candidate publisher'
+        Set-Content -LiteralPath (Join-Path $EntryRoot 'Ado-GitAuth.ps1') -Value '# candidate authentication helper'
+        Get-Content -LiteralPath (Join-Path $State.PublisherPath 'Publish-EntraOpsAdoUpdate.ps1') -Raw | Should -BeExactly $Publisher
+        Get-Content -LiteralPath (Join-Path $State.PublisherPath 'Ado-GitAuth.ps1') -Raw | Should -BeExactly $Auth
+    }
+
+    It 'keeps a configured upstream PAT for the download step' {
+        $env:ENTRAOPS_PAT = 'test-pat'
+
+        & (Join-Path $EntryRoot 'Prepare-EntraOpsAdoUpdate.ps1') -SourceCommit ('b' * 40) -PublisherPath $State.PublisherPath
+
+        $State.TokenAtDownload | Should -BeExactly 'test-pat'
+    }
+
+    It 'passes true and false validation results to the module unchanged' -ForEach @(
+        @{ ValidationRequired = $true; BrowserTestsValidated = $true }
+        @{ ValidationRequired = $true; BrowserTestsValidated = $false }
+        @{ ValidationRequired = $false; BrowserTestsValidated = $false }
+    ) {
+        & (Join-Path $EntryRoot 'Install-EntraOpsAdoUpdate.ps1') -ConfigFile './custom.json' -SourceCommit ('c' * 40) `
+            -ValidationRequired:$ValidationRequired -BrowserTestsValidated:$BrowserTestsValidated
+
+        Should -Invoke Install-EntraOpsUpdateCandidate -Times 1 -Exactly -ParameterFilter {
+            $ConfigFile -eq './custom.json' -and $SourceCommit -eq ('c' * 40) -and
+            $ValidationRequired -eq $_.ValidationRequired -and $BrowserTestsValidated -eq $_.BrowserTestsValidated
+        }
+    }
+}
+
 Describe 'Publish-EntraOpsAdoUpdate' -Skip:(-not $HasAdoScripts -or -not $HasGit) {
     BeforeAll {
         $script:SourceCommit = 'a' * 40
