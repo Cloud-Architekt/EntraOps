@@ -7,5 +7,6 @@
 param ()
 
 $ErrorActionPreference = 'Stop'
-Install-Module Pester -Scope CurrentUser -Force -Repository PSGallery
-Install-Module powershell-yaml -Scope CurrentUser -Force -Repository PSGallery
+# Same versions as the GitHub Update-EntraOps workflow and entraops-test.yml; this job is the trust boundary of the update.
+Install-Module Pester -MinimumVersion 5.7.1 -Scope CurrentUser -Force -Repository PSGallery
+Install-Module powershell-yaml -RequiredVersion 0.4.12 -Scope CurrentUser -Force -Repository PSGallery
