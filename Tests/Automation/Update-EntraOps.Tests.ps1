@@ -642,7 +642,7 @@ Describe 'Automated update defaults' {
         $ConfigGenerator | Should -Match "\[ValidateSet\('PullRequest', 'DirectPush'\)\]"
         $ConfigGenerator | Should -Match '\[string\]\$UpdatePublicationMode\s*=\s*''PullRequest'''
         $ConfigGenerator | Should -Match 'PublicationMode\s*=\s*\$DefaultUpdatePublicationMode'
-        $ConfigGenerator | Should -Match '(?s)\$DefaultUpdatePublicationMode = if \(\$DevOpsPlatform -eq ''AzureDevOps''\).*?''PullRequest'''
+        $ConfigGenerator | Should -Match '\$DefaultUpdatePublicationMode = \$UpdatePublicationMode'
         $ConfigGenerator | Should -Match "\[ValidateSet\('OnChange', 'Always', 'Never'\)\]"
         $ConfigGenerator | Should -Match '\[string\]\$ValidationFrequency\s*=\s*''OnChange'''
         $ConfigGenerator | Should -Match '\[boolean\]\$RunBrowserTests\s*=\s*\$true'

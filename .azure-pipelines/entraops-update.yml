@@ -6,10 +6,13 @@
 #   2. Validate: runs the candidate validation (Pester and optional browser tests) without repository or Azure credentials
 #                and without a repository checkout, so candidate code can't read the generated tenant data
 #   3. Apply:    applies the validated candidate and publishes it as a pull request (branch entraops/update-<commit>)
+#                or, with AutomatedEntraOpsUpdate.PublicationMode DirectPush, pushes it to the pipeline branch
 # No job signs in to Azure; the pipeline doesn't use a service connection.
 #
 # Prerequisites:
 #   1. Grant the project Build Service "Contribute", "Create branch" and "Contribute to pull requests" on the repository
+#      ("Force push" isn't needed: a branch left from a closed pull request is kept, not overwritten).
+#      DirectPush needs only "Contribute", plus "Bypass policies when pushing" for a branch protected by policies.
 #   2. If updating from a private upstream, set EntraOpsUpdatePat as a secret pipeline variable
 #   3. Keep './.github/scripts' in AutomatedEntraOpsUpdate.TargetUpdateFolders; it contains the trusted candidate validator
 #
@@ -24,6 +27,14 @@ parameters:
     displayName: Validate and apply even when this source commit is already installed
     type: boolean
     default: false
+  - name: publicationMode
+    displayName: Publication mode for this run
+    type: string
+    default: Configured
+    values:
+      - Configured
+      - PullRequest
+      - DirectPush
 
 # BEGIN EntraOps managed schedules
 # END EntraOps managed schedules
@@ -46,7 +57,7 @@ jobs:
         inputs:
           targetType: filePath
           filePath: "./.azure-pipelines/scripts/Resolve-EntraOpsAdoUpdate.ps1"
-          arguments: "-ConfigFile '$(ConfigFile)' -Force:$${{ parameters.force }}"
+          arguments: "-ConfigFile '$(ConfigFile)' -Force:$${{ parameters.force }} -PublicationModeOverride '${{ parameters.publicationMode }}'"
           pwsh: true
         env:
           # Optional: Personal Access Token for private upstream repos
@@ -118,7 +129,7 @@ jobs:
           pwsh: true
 
   - job: Apply
-    displayName: "Apply candidate and open pull request"
+    displayName: "Apply candidate and publish update"
     dependsOn:
       - Resolve
       - Validate
@@ -130,6 +141,7 @@ jobs:
       SourceSha: $[ dependencies.Resolve.outputs['resolve.source_sha'] ]
       ValidationRequired: $[ dependencies.Resolve.outputs['resolve.validation_required'] ]
       RunBrowserTests: $[ dependencies.Resolve.outputs['resolve.run_browser_tests'] ]
+      PublicationMode: $[ dependencies.Resolve.outputs['resolve.publication_mode'] ]
     steps:
       - checkout: self
         displayName: "Checkout repository"
@@ -162,7 +174,7 @@ jobs:
           pwsh: true
 
       - task: PowerShell@2
-        displayName: "Publish pull request"
+        displayName: "Publish update"
         inputs:
           targetType: filePath
           filePath: "$(Agent.TempDirectory)/EntraOpsPublisher/Publish-EntraOpsAdoUpdate.ps1"
@@ -170,6 +182,7 @@ jobs:
             -SourceCommit "$(SourceSha)"
             -ValidationRequired:$$(ValidationRequired)
             -BrowserTests:$$(RunBrowserTests)
+            -PublicationMode "$(PublicationMode)"
           pwsh: true
         env:
           SYSTEM_ACCESSTOKEN: $(System.AccessToken)

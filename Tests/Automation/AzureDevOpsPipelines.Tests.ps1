@@ -175,12 +175,16 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
         $ApplySteps = @($Apply.steps | Where-Object { $_.displayName })
         $StageIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.inputs.filePath -eq './.azure-pipelines/scripts/Prepare-EntraOpsAdoUpdate.ps1' })
         $InstallIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.inputs.filePath -eq './.azure-pipelines/scripts/Install-EntraOpsAdoUpdate.ps1' })
-        $PublishIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.displayName -eq 'Publish pull request' })
+        $PublishIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.displayName -eq 'Publish update' })
         $StageIndex | Should -BeGreaterThan -1
         $StageIndex | Should -BeLessThan $InstallIndex
         $InstallIndex | Should -BeLessThan $PublishIndex
         $ApplySteps[$StageIndex].inputs.arguments | Should -Match ([regex]::Escape('-PublisherPath "$(Agent.TempDirectory)/EntraOpsPublisher"'))
         $ApplySteps[$PublishIndex].inputs.filePath | Should -Be '$(Agent.TempDirectory)/EntraOpsPublisher/Publish-EntraOpsAdoUpdate.ps1'
+        $ApplySteps[$PublishIndex].inputs.arguments | Should -Match ([regex]::Escape('-PublicationMode "$(PublicationMode)"'))
+        $Apply.variables.PublicationMode | Should -Be "`$[ dependencies.Resolve.outputs['resolve.publication_mode'] ]"
+        $ResolveStep = $Resolve.steps | Where-Object { $_.name -eq 'resolve' }
+        $ResolveStep.inputs.arguments | Should -Match ([regex]::Escape("-PublicationModeOverride '`${{ parameters.publicationMode }}'"))
         @($ApplySteps | Where-Object { $_.env.SYSTEM_ACCESSTOKEN }).Count | Should -Be 1
         $ApplySteps[$PublishIndex].env.SYSTEM_ACCESSTOKEN | Should -Be '$(System.AccessToken)'
         $ApplySteps[$InstallIndex].env | Should -BeNullOrEmpty

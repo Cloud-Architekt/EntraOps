@@ -251,7 +251,7 @@ Describe 'Azure DevOps trusted validation artifact' -Skip:(-not $HasAdoScripts) 
             Get-Content -LiteralPath (Join-Path $Artifact $Name) -Raw | Should -BeExactly (Get-Content -LiteralPath (Join-Path $Validators $Name) -Raw)
         }
         Get-Content -LiteralPath (Join-Path $Artifact 'Install-EntraOpsUpdateValidationDependencies.ps1') -Raw |
-            Should -BeExactly (Get-Content -LiteralPath (Join-Path $PipelineScripts 'Install-EntraOpsUpdateValidationDependencies.ps1') -Raw)
+        Should -BeExactly (Get-Content -LiteralPath (Join-Path $PipelineScripts 'Install-EntraOpsUpdateValidationDependencies.ps1') -Raw)
     }
 
     It 'uses the pipeline installer even when the deployment has an older copy' {
@@ -260,7 +260,7 @@ Describe 'Azure DevOps trusted validation artifact' -Skip:(-not $HasAdoScripts) 
         & $Resolve
 
         Get-Content -LiteralPath (Join-Path $Artifact 'Install-EntraOpsUpdateValidationDependencies.ps1') -Raw |
-            Should -BeExactly (Get-Content -LiteralPath (Join-Path $PipelineScripts 'Install-EntraOpsUpdateValidationDependencies.ps1') -Raw)
+        Should -BeExactly (Get-Content -LiteralPath (Join-Path $PipelineScripts 'Install-EntraOpsUpdateValidationDependencies.ps1') -Raw)
     }
 
     It 'reports a missing trusted script before publishing validation outputs' -ForEach @(
@@ -347,7 +347,7 @@ Describe 'Publish-EntraOpsAdoUpdate' -Skip:(-not $HasAdoScripts -or -not $HasGit
     It 'leaves the branch of an active pull request unchanged so review commits are kept' {
         $ReviewCommit = Add-RemoteCommit -Remote $script:Repository.Remote -Root $TestDrive
         Invoke-TestBareGit -Path $script:Repository.Remote update-ref $script:UpdateRef $ReviewCommit | Out-Null
-        $State.ActivePullRequests = @([pscustomobject]@{ pullRequestId = 7 })
+        $State.ActivePullRequests = @([pscustomobject]@{ pullRequestId = 7; sourceRefName = $script:UpdateRef })
 
         & $script:Publish
 
@@ -356,17 +356,46 @@ Describe 'Publish-EntraOpsAdoUpdate' -Skip:(-not $HasAdoScripts -or -not $HasGit
         Should -Invoke Invoke-RestMethod -Times 0 -Exactly -ParameterFilter { $Method -eq 'Post' }
     }
 
-    It 'replaces a branch left from a closed pull request' {
+    It 'detects an active pull request from a numbered update branch' {
+        $State.ActivePullRequests = @([pscustomobject]@{ pullRequestId = 8; sourceRefName = "$script:UpdateRef-2" })
+
+        & $script:Publish
+
+        & git --git-dir $script:Repository.Remote rev-parse --verify --quiet $script:UpdateRef | Out-Null
+        $LASTEXITCODE | Should -Not -Be 0
+        $State.CreatedPullRequests.Count | Should -Be 0
+    }
+
+    It 'is not blocked by an active pull request for another source commit' {
+        $State.ActivePullRequests = @([pscustomobject]@{ pullRequestId = 9; sourceRefName = "refs/heads/entraops/update-$('b' * 12)" })
+
+        & $script:Publish
+
+        $State.CreatedPullRequests.Count | Should -Be 1
+        $State.CreatedPullRequests[0].sourceRefName | Should -Be $script:UpdateRef
+    }
+
+    It 'keeps a branch left from a closed pull request and publishes to the next free numbered branch' {
         $OldCommit = Add-RemoteCommit -Remote $script:Repository.Remote -Root $TestDrive
         Invoke-TestBareGit -Path $script:Repository.Remote update-ref $script:UpdateRef $OldCommit | Out-Null
+        Invoke-TestBareGit -Path $script:Repository.Remote update-ref "$script:UpdateRef-2" $OldCommit | Out-Null
         Invoke-TestBareGit -Path $script:Repository.Remote update-ref refs/heads/main "$OldCommit^" | Out-Null
 
         & $script:Publish
 
-        $BranchCommit = ([string](Invoke-TestBareGit -Path $script:Repository.Remote rev-parse $script:UpdateRef)).Trim()
-        $BranchCommit | Should -Not -Be $OldCommit
+        # Replacing the leftover branch would need the 'Force push' permission.
+        ([string](Invoke-TestBareGit -Path $script:Repository.Remote rev-parse $script:UpdateRef)).Trim() | Should -Be $OldCommit
+        ([string](Invoke-TestBareGit -Path $script:Repository.Remote rev-parse "$script:UpdateRef-2")).Trim() | Should -Be $OldCommit
+        $BranchCommit = ([string](Invoke-TestBareGit -Path $script:Repository.Remote rev-parse "$script:UpdateRef-3")).Trim()
         ([string](Invoke-TestBareGit -Path $script:Repository.Remote show "$($BranchCommit):README.md")).Trim() | Should -Be 'applied update'
         $State.CreatedPullRequests.Count | Should -Be 1
+        $State.CreatedPullRequests[0].sourceRefName | Should -Be "$script:UpdateRef-3"
+    }
+
+    It 'never force-pushes the update branch' {
+        $Publisher = Get-Content -LiteralPath (Join-Path $script:ScriptRoot 'Publish-EntraOpsAdoUpdate.ps1') -Raw
+        $Publisher | Should -Not -Match '--force|\+HEAD:'
+        $Publisher | Should -Not -Match "'Force push' on"
     }
 
     It 'refuses to publish from a project that is not private' {

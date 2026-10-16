@@ -97,8 +97,8 @@
 
 .PARAMETER UpdatePublicationMode
     Controls how the Update-EntraOps workflow publishes an applied candidate. PullRequest (default)
-    creates or updates a review branch and pull request; DirectPush commits to the current branch.
-    The Azure DevOps update pipeline always creates a pull request.
+    creates or updates a review branch and pull request; DirectPush commits to the current branch
+    without review. Applies to the GitHub workflow and the Azure DevOps update pipeline.
 
 .PARAMETER ApplyConditionalAccessTargetGroups
     Defines if security groups per tier for targeting Conditional Access policies should be created and updated
@@ -505,15 +505,8 @@ function New-EntraOpsConfigFile {
     if (-not $PSBoundParameters.ContainsKey('EnableCustomSecurityAttributeClassification')) {
         $EnableCustomSecurityAttributeClassification = -not $EnableObjectClassificationFile
     }
-    # The Azure DevOps update pipeline publishes every update as a pull request
-    $DefaultUpdatePublicationMode = if ($DevOpsPlatform -eq 'AzureDevOps') {
-        if ($UpdatePublicationMode -eq 'DirectPush') {
-            Write-Warning "UpdatePublicationMode DirectPush isn't supported by the Azure DevOps update pipeline; PullRequest is written to the configuration."
-        }
-        'PullRequest'
-    } else {
-        $UpdatePublicationMode
-    }
+    # GitHub Actions and the Azure DevOps update pipeline both support PullRequest and DirectPush
+    $DefaultUpdatePublicationMode = $UpdatePublicationMode
 
     $EnvConfigSchema = [ordered]@{
         TenantId                                      = $($TenantId)
@@ -711,24 +704,24 @@ function New-EntraOpsConfigFile {
             SnapshotScheduledCronCompleteRetry2 = $TenantGovernanceSnapshotScheduledCronCompleteRetry2
         }
         ServiceEM                                     = [ordered]@{
-            GovernanceModel                  = "Centralized"
-            ControlPlaneDelegationGroupId    = ""
-            ControlPlaneGroupName            = "PRG-Tenant-ControlPlane-IdentityOps"
-            ManagementPlaneDelegationGroupId = ""
-            ManagementPlaneGroupName         = "PRG-Tenant-ManagementPlane-PlatformOps"
-            AdministratorGroupId             = ""
-            DefaultAzureRegion               = ""
-            SkipCatalogOwnerAssignment       = $false
-            CreateM365Group                  = $false
-            AddWorkloadPlaneAdminToUsers     = $false
-            GroupPrefix                      = "SG"
+            GovernanceModel                   = "Centralized"
+            ControlPlaneDelegationGroupId     = ""
+            ControlPlaneGroupName             = "PRG-Tenant-ControlPlane-IdentityOps"
+            ManagementPlaneDelegationGroupId  = ""
+            ManagementPlaneGroupName          = "PRG-Tenant-ManagementPlane-PlatformOps"
+            AdministratorGroupId              = ""
+            DefaultAzureRegion                = ""
+            SkipCatalogOwnerAssignment        = $false
+            CreateM365Group                   = $false
+            AddWorkloadPlaneAdminToUsers      = $false
+            GroupPrefix                       = "SG"
             RoleAssignableWorkloadPlaneAdmins = $false
-            AdministrativeUnits              = [ordered]@{
+            AdministrativeUnits               = [ordered]@{
                 WorkloadPlane = ""
                 UserAccess    = ""
             }
-            UpdateObjectClassificationFile   = $false
-            ConstrainedDelegation            = [ordered]@{
+            UpdateObjectClassificationFile    = $false
+            ConstrainedDelegation             = [ordered]@{
                 ManagementPlane = [ordered]@{
                     ExcludedRoleDefinitionIds = @(
                         "8e3af657-a8ff-443c-a75c-2fe8c4bcb635"  # Owner
@@ -761,7 +754,7 @@ function New-EntraOpsConfigFile {
                     AllowedTargetGroupFilter = "WorkloadPlane-Users"
                 }
             }
-            PIMAuthenticationContext         = [ordered]@{
+            PIMAuthenticationContext          = [ordered]@{
                 EnableAuthenticationContext = $false
                 ControlPlane                = [ordered]@{
                     AuthenticationContextClassReferenceId = ""
@@ -776,36 +769,36 @@ function New-EntraOpsConfigFile {
                     AuthenticationContextDisplayName      = ""
                 }
             }
-            PIMForGroups                     = [ordered]@{
+            PIMForGroups                      = [ordered]@{
                 MaximumActivationDuration       = "PT10H"
                 MaximumActiveAssignmentDuration = "P15D"
             }
-            AssignmentPolicies               = [ordered]@{
-                BaselinePolicy              = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
-                WorkloadPlaneUsers          = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; RequestorScope = "AllMemberUsers"; AllowExtension = $true }
-                WorkloadPlaneAdmins         = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
-                ManagementPlaneAdmins       = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P1D"; AllowExtension = $true }
-                InitialWorkloadMembership   = [ordered]@{ Expiration = "P365D" }
-                InitialManagementAdmins     = [ordered]@{ Expiration = "P365D" }
-                InitialWorkloadUsers        = [ordered]@{ Expiration = "P365D" }
-                InitialWorkloadAdmins       = [ordered]@{ Expiration = "P365D" }
-                InitialCatalogMembers       = [ordered]@{ Expiration = "P365D" }
+            AssignmentPolicies                = [ordered]@{
+                BaselinePolicy            = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
+                WorkloadPlaneUsers        = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; RequestorScope = "AllMemberUsers"; AllowExtension = $true }
+                WorkloadPlaneAdmins       = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
+                ManagementPlaneAdmins     = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P1D"; AllowExtension = $true }
+                InitialWorkloadMembership = [ordered]@{ Expiration = "P365D" }
+                InitialManagementAdmins   = [ordered]@{ Expiration = "P365D" }
+                InitialWorkloadUsers      = [ordered]@{ Expiration = "P365D" }
+                InitialWorkloadAdmins     = [ordered]@{ Expiration = "P365D" }
+                InitialCatalogMembers     = [ordered]@{ Expiration = "P365D" }
             }
-            AccessReviews                    = [ordered]@{
+            AccessReviews                     = [ordered]@{
                 EnableAccessReviews        = $true
                 RecurrenceIntervalInMonths = 3
                 StartAfterDays             = 4
                 ReviewDuration             = "P25D"
                 Policies                   = [ordered]@{
-                    BaselinePolicy              = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
-                    WorkloadPlaneUsers          = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
-                    WorkloadPlaneAdmins         = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
-                    ManagementPlaneAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ControlPlane-Admins") }
-                    InitialWorkloadMembership   = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
-                    InitialManagementAdmins     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ControlPlane-Admins") }
-                    InitialWorkloadUsers        = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
-                    InitialWorkloadAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
-                    InitialCatalogMembers       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    BaselinePolicy            = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    WorkloadPlaneUsers        = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
+                    WorkloadPlaneAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    ManagementPlaneAdmins     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ControlPlane-Admins") }
+                    InitialWorkloadMembership = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialManagementAdmins   = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ControlPlane-Admins") }
+                    InitialWorkloadUsers      = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
+                    InitialWorkloadAdmins     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialCatalogMembers     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
                 }
             }
         }

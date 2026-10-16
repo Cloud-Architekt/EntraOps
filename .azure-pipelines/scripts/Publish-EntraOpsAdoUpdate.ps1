@@ -1,15 +1,23 @@
 #Requires -Version 7.4
 <#
 .SYNOPSIS
-    Publishes an applied EntraOps update as an Azure Repos pull request.
+    Publishes an applied EntraOps update to Azure Repos as a pull request or by a direct push.
 
 .DESCRIPTION
-    Commits the applied update, rebases it onto the current head of the base branch, pushes it to
-    the review branch entraops/update-<commit> and creates a pull request. While a pull request for
-    this branch is active, the branch is left unchanged so commits added during the review are kept;
-    otherwise an existing branch is only replaced when it is still at the fetched commit. The update
-    pipeline copies this script and Ado-GitAuth.ps1 before the candidate is applied, so the job access
-    token never reaches candidate code.
+    Commits the applied update and rebases it onto the current head of the base branch.
+
+    PullRequest (default) pushes the commit to the review branch entraops/update-<commit> and creates
+    a pull request. While a pull request for this branch is active, the branch is left unchanged so
+    commits added during the review are kept. A branch left from a completed or abandoned pull request
+    is never overwritten; the update is then pushed to entraops/update-<commit>-<n>, so the Build
+    Service needs no 'Force push' permission.
+
+    DirectPush pushes the commit to the base branch without review; the updated pipeline definitions
+    apply to the next runs. It needs only 'Contribute' (plus 'Bypass policies when pushing' for a
+    branch protected by policies).
+
+    The update pipeline copies this script and Ado-GitAuth.ps1 before the candidate is applied, so the
+    job access token never reaches candidate code.
 #>
 [CmdletBinding()]
 param (
@@ -22,6 +30,10 @@ param (
 
     [Parameter(Mandatory = $true)]
     [bool]$BrowserTests,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('PullRequest', 'DirectPush')]
+    [string]$PublicationMode = 'PullRequest',
 
     [Parameter(Mandatory = $false)]
     [string]$SourceBranch = $env:BUILD_SOURCEBRANCH,
@@ -53,13 +65,18 @@ Assert-EntraOpsAdoProjectIsPrivate -AccessToken $AccessToken -CollectionUri $Col
 $UpdateBranch = "entraops/update-$($SourceCommit.Substring(0, 12))"
 $Headers = @{ Authorization = "Bearer $AccessToken" }
 $PullRequestApi = "$CollectionUri/$ProjectId/_apis/git/repositories/$RepositoryId/pullrequests"
-$SourceRef = "refs/heads/$UpdateBranch"
 $TargetRef = "refs/heads/$BaseBranch"
-$Query = "searchCriteria.sourceRefName=$([uri]::EscapeDataString($SourceRef))&searchCriteria.targetRefName=$([uri]::EscapeDataString($TargetRef))&searchCriteria.status=active&api-version=7.1"
-$Existing = @((Invoke-RestMethod -Method Get -Uri "$($PullRequestApi)?$Query" -Headers $Headers).value | Where-Object { $_ })
-if ($Existing.Count -gt 0) {
-    Write-Host "Pull request $($Existing[0].pullRequestId) for '$UpdateBranch' is still active; its branch is left unchanged."
-    return
+# A leftover branch is never overwritten (that would need 'Force push'); the update then uses a
+# numbered branch entraops/update-<commit>-<n>, so an active pull request can use any of these names.
+$UpdateRefPattern = '^' + [regex]::Escape("refs/heads/$UpdateBranch") + '(-\d+)?$'
+if ($PublicationMode -eq 'PullRequest') {
+    $Query = "searchCriteria.targetRefName=$([uri]::EscapeDataString($TargetRef))&searchCriteria.status=active&`$top=1000&api-version=7.1"
+    $Existing = @((Invoke-RestMethod -Method Get -Uri "$($PullRequestApi)?$Query" -Headers $Headers).value |
+        Where-Object { $_ -and [string]$_.sourceRefName -match $UpdateRefPattern })
+    if ($Existing.Count -gt 0) {
+        Write-Host "Pull request $($Existing[0].pullRequestId) for '$($Existing[0].sourceRefName -replace '^refs/heads/', '')' is still active; its branch is left unchanged."
+        return
+    }
 }
 
 & git config user.email 'entraops-ado@contoso.com'
@@ -80,6 +97,8 @@ if ($DiffExitCode -eq 0) {
 & git commit -m "Update EntraOps to $SourceCommit"
 if ($LASTEXITCODE -ne 0) { throw "git commit failed with exit code $LASTEXITCODE." }
 
+# The script block runs in a child scope; the selected branch is returned through this hashtable.
+$Publication = @{ Branch = $null }
 Invoke-EntraOpsAdoAuthenticatedGit -AccessToken $AccessToken -CollectionUri $CollectionUri -ScriptBlock {
     # Another pipeline may have committed since checkout; base the review branch on the current head
     & git fetch --no-tags origin "refs/heads/$BaseBranch"
@@ -89,21 +108,40 @@ Invoke-EntraOpsAdoAuthenticatedGit -AccessToken $AccessToken -CollectionUri $Col
         & git rebase --abort 2>$null
         throw "git rebase onto the current '$BaseBranch' failed."
     }
-    # git ls-remote --exit-code: 0 = branch exists, 2 = no matching ref, anything else = git/auth/network error.
-    # A missing branch produces no output; casting no output to [string] would yield $null
-    $RemoteBranch = (@(& git ls-remote --exit-code --heads origin $SourceRef) -join "`n").Trim()
-    $LsRemoteExitCode = $LASTEXITCODE
-    if ($LsRemoteExitCode -eq 0) {
-        # A branch left from a completed or abandoned pull request is replaced, unless it changed since this lookup
-        $RemoteUpdateSha = ($RemoteBranch -split '\s+')[0]
-        & git push "--force-with-lease=$($SourceRef):$RemoteUpdateSha" origin "HEAD:$SourceRef"
-    } elseif ($LsRemoteExitCode -eq 2) {
-        & git push origin "HEAD:$SourceRef"
-    } else {
-        throw "Could not query the remote for the update branch '$UpdateBranch' (git ls-remote exit code $LsRemoteExitCode)."
+    if ($PublicationMode -eq 'DirectPush') {
+        & git push origin "HEAD:$TargetRef"
+        if ($LASTEXITCODE -ne 0) { throw "Could not push the update to '$BaseBranch' (exit code $LASTEXITCODE). Grant the project Build Service 'Contribute' on the repository and 'Bypass policies when pushing' if the branch is protected by policies, or check whether the branch was changed concurrently." }
+        return
     }
-    if ($LASTEXITCODE -ne 0) { throw "Could not push the update branch '$UpdateBranch' (exit code $LASTEXITCODE). Grant the project Build Service 'Contribute', 'Create branch' and 'Force push' on the repository, or check whether the branch was changed concurrently." }
+    # Branches left from completed or abandoned pull requests are kept; use the first free name.
+    $MaximumBranchNumber = 50
+    for ($Number = 1; $Number -le $MaximumBranchNumber -and -not $Publication.Branch; $Number++) {
+        $Candidate = if ($Number -eq 1) { $UpdateBranch } else { "$UpdateBranch-$Number" }
+        # git ls-remote --exit-code: 0 = branch exists, 2 = no matching ref, anything else = git/auth/network error.
+        & git ls-remote --exit-code --heads origin "refs/heads/$Candidate" | Out-Null
+        $LsRemoteExitCode = $LASTEXITCODE
+        if ($LsRemoteExitCode -eq 2) {
+            $Publication.Branch = $Candidate
+        } elseif ($LsRemoteExitCode -ne 0) {
+            throw "Could not query the remote for the update branch '$Candidate' (git ls-remote exit code $LsRemoteExitCode)."
+        }
+    }
+    if (-not $Publication.Branch) {
+        throw "The update branches '$UpdateBranch' to '$UpdateBranch-$MaximumBranchNumber' already exist. Delete the branches of completed or abandoned EntraOps update pull requests."
+    }
+    if ($Publication.Branch -ne $UpdateBranch) {
+        Write-Host "Branch '$UpdateBranch' is left from a closed pull request and is kept; publishing to '$($Publication.Branch)'."
+    }
+    # A plain push never overwrites a branch created concurrently by another run.
+    & git push origin "HEAD:refs/heads/$($Publication.Branch)"
+    if ($LASTEXITCODE -ne 0) { throw "Could not push the new update branch '$($Publication.Branch)' (exit code $LASTEXITCODE). Grant the project Build Service 'Contribute' and 'Create branch' on the repository, or check whether the branch was created concurrently." }
 }
+if ($PublicationMode -eq 'DirectPush') {
+    Write-Host "Pushed the update directly to '$BaseBranch' (PublicationMode DirectPush); no pull request is created."
+    return
+}
+$UpdateBranch = $Publication.Branch
+$SourceRef = "refs/heads/$UpdateBranch"
 
 $Validation = if ($ValidationRequired) {
     'The candidate passed the isolated validation job (Pester' + $(if ($BrowserTests) { ' and browser tests' } else { '' }) + ') without repository or Azure credentials.'

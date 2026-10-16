@@ -6,9 +6,10 @@
 .DESCRIPTION
     Clones the configured upstream ref, archives the immutable candidate for the credential-free
     validation job and sets the output variables of the update pipeline (source_sha, candidate_digest,
-    update_required, validation_required, run_browser_tests). Validation frequency and browser tests
-    are read from AutomatedEntraOpsUpdate in the configuration file. Azure DevOps always publishes an
-    applied update as a pull request. When validation is required, stages the trusted deployment
+    update_required, validation_required, run_browser_tests, publication_mode). Validation frequency,
+    browser tests and the publication mode (PullRequest or DirectPush) are read from
+    AutomatedEntraOpsUpdate in the configuration file; -PublicationModeOverride replaces the configured
+    publication mode for a single run. When validation is required, stages the trusted deployment
     validators and the pipeline dependency installer for transfer to the validation job.
 #>
 [CmdletBinding()]
@@ -24,6 +25,10 @@ param (
 
     [Parameter(Mandatory = $false)]
     [string]$TrustedValidatorPath = (Join-Path ([string]$env:BUILD_ARTIFACTSTAGINGDIRECTORY) 'EntraOps-trusted-validators'),
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('Configured', 'PullRequest', 'DirectPush')]
+    [string]$PublicationModeOverride = 'Configured',
 
     [Parameter(Mandatory = $false)]
     [switch]$Force
@@ -51,8 +56,18 @@ if ($ValidationFrequency -notin @('OnChange', 'Always', 'Never')) {
     throw "Unsupported AutomatedEntraOpsUpdate.ValidationFrequency '$ValidationFrequency'. Use OnChange, Always or Never."
 }
 $RunBrowserTests = $UpdateConfig.RunBrowserTests -ne $false
-if ([string]$UpdateConfig.PublicationMode -eq 'DirectPush') {
-    Write-Warning 'AutomatedEntraOpsUpdate.PublicationMode DirectPush is not supported by the Azure DevOps update pipeline; the update is published as a pull request.'
+$PublicationMode = if ($PublicationModeOverride -ne 'Configured') {
+    $PublicationModeOverride
+} elseif ([string]::IsNullOrWhiteSpace([string]$UpdateConfig.PublicationMode)) {
+    'PullRequest'
+} else {
+    [string]$UpdateConfig.PublicationMode
+}
+if ($PublicationMode -notin @('PullRequest', 'DirectPush')) {
+    throw "Unsupported AutomatedEntraOpsUpdate.PublicationMode '$PublicationMode'. Use PullRequest or DirectPush."
+}
+if ($PublicationMode -eq 'DirectPush') {
+    Write-Warning 'PublicationMode DirectPush pushes the update to the pipeline branch without review; updated pipeline definitions apply to the next runs.'
 }
 
 # An undefined EntraOpsUpdatePat variable arrives as the literal macro and must not be sent as a token
@@ -97,4 +112,5 @@ Set-EntraOpsAdoOutput -Name 'candidate_digest' -Value $Candidate.ArchiveSha256
 Set-EntraOpsAdoOutput -Name 'update_required' -Value $Decision.UpdateRequired.ToString().ToLowerInvariant()
 Set-EntraOpsAdoOutput -Name 'validation_required' -Value $Decision.ValidationRequired.ToString().ToLowerInvariant()
 Set-EntraOpsAdoOutput -Name 'run_browser_tests' -Value $Decision.RunBrowserTests.ToString().ToLowerInvariant()
+Set-EntraOpsAdoOutput -Name 'publication_mode' -Value $PublicationMode
 Write-Host "Resolved $($Candidate.Repository)@$($Candidate.SourceCommit). $($Decision.Reason) No candidate code was executed."

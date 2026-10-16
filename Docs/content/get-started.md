@@ -231,7 +231,7 @@ When tenant classification files from a previous run exist (e.g. after `-KeepCla
 | Value              | Behavior                                                                                                                    |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `Prompt` (default) | Asks whether to reuse or regenerate, only when tenant classification files exist. Non-interactive hosts stop with an error. |
-| `Reuse`            | Keeps the local classification templates and downloads only missing ones.                                                  |
+| `Reuse`            | Keeps the local classification templates and downloads only missing ones.                                                   |
 | `Regenerate`       | Downloads the latest classification templates.                                                                              |
 
 Both `Reuse` and `Regenerate` rebuild the tenant classification files and the Control Plane scope
@@ -577,7 +577,7 @@ Administrator when Azure role assignments are configured.
 4. Create an **Azure Resource Manager -> Workload Identity Federation (manual)** service connection. Add the exact issuer and subject identifier shown by Azure DevOps as a federated credential on the app registration; use `api://AzureADTokenExchange` as the audience.
 5. Import the five production YAML pipelines from `.azure-pipelines/`: pull, push, reporting, Tenant Governance, and update. Name the pull pipeline `entraops-pull` so its completion triggers resolve without modification. Optionally import `entraops-test.yml` for repository, cross-platform Pester, and browser validation; configure it as a build-validation policy for Azure Repos pull requests.
 6. Name the service connection `EntraOps-ServiceConnection` to use the shipped default. For another name, set `AzureDevOpsServiceConnection` in `EntraOpsConfig.json` (or `New-EntraOpsConfigFile -AzureDevOpsServiceConnection`); step 8 writes it into the pipelines. Add the secret `EntraOpsUpdatePat` only for a private update source.
-7. Grant `<Project> Build Service (<Organization>)` **Contribute** permission on the repository, plus **Create branch** and **Contribute to pull requests** for the update pipeline, and authorize the service connection for the imported pipelines. The build service also needs **View project-level information** (granted by default) so the pipelines can verify that the project is private.
+7. Grant `<Project> Build Service (<Organization>)` **Contribute** permission on the repository, plus **Create branch** and **Contribute to pull requests** for the update pipeline in its default `PullRequest` mode, and authorize the service connection for the imported pipelines. **Force push** isn't required. The build service also needs **View project-level information** (granted by default) so the pipelines can verify that the project is private.
 8. Apply the config-driven schedules and service connection, and commit the result:
 
 ```powershell
@@ -611,8 +611,13 @@ in the checkout. A PAT is needed only when the update pipeline reads a private u
 The update pipeline runs in three jobs: **Resolve** clones the configured upstream ref without
 executing it, **Validate** runs the candidate's tests without a repository checkout and without
 credentials, and **Apply** applies the validated candidate and opens a pull request from the branch
-`entraops/update-<commit>`. No job signs in to Azure. While the pull request is active, later runs
-leave its branch unchanged. Keep `./.github/scripts` in `AutomatedEntraOpsUpdate.TargetUpdateFolders`;
+`entraops/update-<commit>`. With `AutomatedEntraOpsUpdate.PublicationMode` set to `DirectPush`, Apply
+instead pushes the update to the pipeline branch without review; updated pipeline definitions then
+apply to the next scheduled runs, which use the Azure service connection. A manual run can override
+the mode with the **Publication mode for this run** parameter. No job signs in to Azure. While the pull request is active, later runs
+leave its branch unchanged. A branch left from a completed or abandoned pull request is never
+overwritten; the update then uses `entraops/update-<commit>-<n>`. Delete leftover update branches
+when convenient. Keep `./.github/scripts` in `AutomatedEntraOpsUpdate.TargetUpdateFolders`;
 it contains the trusted candidate validator. Candidate validation can't be skipped while
 `./.azure-pipelines` is an update target.
 
@@ -664,7 +669,7 @@ open the service connection's **Pipeline permissions** and add each imported Ent
 | `entraops-push.yml`                   | Runs enabled ingestion and protection operations                                           | Successful `entraops-pull` completion or manual                   |
 | `entraops-push-reporting.yml`         | Generates and tests reports, then publishes a private-project artifact                     | Pull completion, configured schedule, or manual                   |
 | `entraops-pull-tenant-governance.yml` | Starts or collects Tenant Governance snapshots and commits them                            | Configured start/collection schedules or manual                   |
-| `entraops-update.yml`                 | Validates an EntraOps update in isolation and opens a pull request                         | Configured schedule or manual                                     |
+| `entraops-update.yml`                 | Validates an EntraOps update in isolation and opens a pull request or pushes directly      | Configured schedule or manual                                     |
 | `entraops-test.yml`                   | Validates the repository on Linux, Windows, and macOS and runs browser tests               | Pushes to `main`; pull requests through a build-validation policy |
 
 The production pipelines default to the service connection name `EntraOps-ServiceConnection`. For
@@ -673,12 +678,16 @@ another name, set `AzureDevOpsServiceConnection` in `EntraOpsConfig.json` and ru
 a private update source. In **Project Settings -> Repositories -> Security**, grant
 `<Project> Build Service (<Organization>)` **Contribute**, **Create branch** and **Contribute to pull
 requests**; also grant branch-policy bypass when the pull or Tenant Governance pipeline must write
-to a protected branch. The update pipeline doesn't write to the branch; it opens a pull request.
+to a protected branch. In `PullRequest` mode, the update pipeline doesn't write to the branch; it
+opens a pull request and never force-pushes, so **Force push** isn't required. `DirectPush` needs only
+**Contribute** (plus branch-policy bypass for a protected branch), not **Create branch** or
+**Contribute to pull requests**.
 
 `AzurePowerShell@5` authenticates Azure PowerShell through the WIF service connection.
 `Connect-EntraOps -AuthenticationType FederatedCredentials` then obtains Microsoft Graph access
 through that context. Repository writes use `$(System.AccessToken)` through
-`.azure-pipelines/scripts/Ado-GitPush.ps1`; they do not require a stored Git credential.
+`.azure-pipelines/scripts/Ado-GitPush.ps1`, and the update pipeline publishes through
+`.azure-pipelines/scripts/Publish-EntraOpsAdoUpdate.ps1`; they do not require a stored Git credential.
 
 Before enabling Log Analytics ingestion, create the workspace, `PrivilegedEAM_CL` custom table,
 Data Collection Endpoint, and Data Collection Rule with a data flow for
@@ -692,7 +701,7 @@ that reporting guide.
 
 - **Service connection unavailable:** verify the connection is named `EntraOps-ServiceConnection`, or that `AzureDevOpsServiceConnection` in `EntraOpsConfig.json` exactly matches its name and `Update-EntraOpsAzureDevOpsSchedules` was run and committed; then authorize it for the pipeline.
 - **Federated sign-in fails:** compare the exact issuer, case-sensitive subject, and `api://AzureADTokenExchange` audience shown by Azure DevOps with the app registration credential.
-- **Git push returns HTTP 403:** grant `<Project> Build Service (<Organization>)` **Contribute** and any required branch-policy bypass; for the update pipeline also **Create branch** and **Contribute to pull requests**.
+- **Git push returns HTTP 403:** grant `<Project> Build Service (<Organization>)` **Contribute** and any required branch-policy bypass; for the update pipeline in `PullRequest` mode also **Create branch** and **Contribute to pull requests**. `TF401027 ... 'CreateBranch' permission` means **Create branch** is missing.
 - **Schedule is missing:** run `Update-EntraOpsAzureDevOpsSchedules`, commit the YAML changes, and verify `BranchName` matches the pipeline branch.
 - **Push or reporting does not follow pull:** keep the pull pipeline name `entraops-pull`, or update the dependent pipelines' `resources.pipelines.source`.
 - **Reporting has no artifact:** enable reporting and confirm the project is private; artifact publication fails closed when visibility cannot be verified.
@@ -702,17 +711,17 @@ that reporting guide.
 Both platforms execute the same EntraOps commands and honor the same feature switches. Their
 automation plumbing differs:
 
-| Area                         | GitHub Actions                                                                           | Azure DevOps                                                                                                                    |
-| ---------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Definitions                  | `.github/workflows/*.yaml`                                                               | `.azure-pipelines/entraops-*.yml`                                                                                               |
-| Workload federation          | GitHub OIDC; subject `repo:<org>/<repo>:ref:refs/heads/<branch>`                         | Azure Resource Manager WIF service connection; exact issuer and subject shown by the service connection                         |
+| Area                         | GitHub Actions                                                                           | Azure DevOps                                                                                                                                               |
+| ---------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Definitions                  | `.github/workflows/*.yaml`                                                               | `.azure-pipelines/entraops-*.yml`                                                                                                                          |
+| Workload federation          | GitHub OIDC; subject `repo:<org>/<repo>:ref:refs/heads/<branch>`                         | Azure Resource Manager WIF service connection; exact issuer and subject shown by the service connection                                                    |
 | Runtime configuration        | `Update-EntraOpsRequiredWorkflowParameters` embeds values and schedules in workflow YAML | Pipelines read operational values from `EntraOpsConfig.json`; `Update-EntraOpsAzureDevOpsSchedules` materializes YAML schedules and the service connection |
-| Repository writes            | Built-in `GITHUB_TOKEN`; workflow permissions are declared in YAML                       | `$(System.AccessToken)`; the Build Service needs repository **Contribute** permission                                           |
-| Pull/update linkage          | Native `workflow_run` triggers                                                           | Pipeline completion resources; keep the pull pipeline name `entraops-pull` or update each `source`                              |
-| Automated update publication | `PullRequest` by default, with optional `DirectPush`                                     | `PullRequest` only                                                                                                              |
-| Reporting                    | 30-day Actions artifact; optional releases in a private repository                       | Pipeline artifact only after ADO confirms the project is private                                                                |
-| CI and pull requests         | `Test-EntraOps` runs on pushes and pull requests; it can be a required status check      | `entraops-test.yml` runs on pushes; configure it as an Azure Repos build-validation policy for pull requests                    |
-| Tenant Governance            | One workflow with manual and materialized start/collection schedules                     | One parameterized pipeline with `Start`, `Collect`, and `RunAndWait`, plus materialized schedules                               |
+| Repository writes            | Built-in `GITHUB_TOKEN`; workflow permissions are declared in YAML                       | `$(System.AccessToken)`; the Build Service needs repository **Contribute** permission                                                                      |
+| Pull/update linkage          | Native `workflow_run` triggers                                                           | Pipeline completion resources; keep the pull pipeline name `entraops-pull` or update each `source`                                                         |
+| Automated update publication | `PullRequest` by default, with optional `DirectPush`                                     | `PullRequest` by default, with optional `DirectPush`                                                                                                       |
+| Reporting                    | 30-day Actions artifact; optional releases in a private repository                       | Pipeline artifact only after ADO confirms the project is private                                                                                           |
+| CI and pull requests         | `Test-EntraOps` runs on pushes and pull requests; it can be a required status check      | `entraops-test.yml` runs on pushes; configure it as an Azure Repos build-validation policy for pull requests                                               |
+| Tenant Governance            | One workflow with manual and materialized start/collection schedules                     | One parameterized pipeline with `Start`, `Collect`, and `RunAndWait`, plus materialized schedules                                                          |
 
 ## 4. Ingest to Sentinel {#phase-4-ingest-to-sentinel}
 
