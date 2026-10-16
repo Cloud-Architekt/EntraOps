@@ -8,12 +8,12 @@ parameters:
   - name: serviceConnection
     displayName: Azure Resource Manager service connection
     type: string
-    default: 'EntraOps-ServiceConnection'
+    default: "EntraOps-ServiceConnection"
   # END EntraOps managed service connection
   - name: operation
     displayName: Snapshot operation for manual runs
     type: string
-    default: RunAndWait
+    default: Start
     values:
       - Start
       - Collect
