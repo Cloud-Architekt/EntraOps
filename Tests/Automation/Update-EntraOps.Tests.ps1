@@ -899,8 +899,11 @@ Describe 'Deployment browser validation' {
 
         $Workflow | Should -Match 'ClassificationExplorerGenerateChangeHistory:\s*false'
         $Workflow | Should -Match "fetch-depth:\s*\$\{\{\s*env\.ClassificationExplorerGenerateChangeHistory\s*==\s*'true'\s*&&\s*'0'\s*\|\|\s*'1'\s*\}\}"
-        $Workflow | Should -Match 'Invoke-EntraOpsReportingGeneration'
+        $Workflow | Should -Match 'Invoke-EntraOpsGitHubReportingGeneration\.ps1'
+        $GenerationScript = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/scripts/Invoke-EntraOpsGitHubReportingGeneration.ps1') -Raw
+        $GenerationScript | Should -Match 'Invoke-EntraOpsReportingGeneration'
         $Workflow | Should -Not -Match 'New-EntraOpsClassificationExplorerData'
+        $GenerationScript | Should -Not -Match 'New-EntraOpsClassificationExplorerData'
     }
 }
 

@@ -4,8 +4,9 @@
 
 .DESCRIPTION
     Checks the RBAC-system aggregate files (<PrivilegedEamPath>/<RbacSystem>/<RbacSystem>.json) for invalid JSON,
-    missing or duplicate object IDs, role assignments without RoleAssignmentInstanceId, duplicate assignment paths
-    and unsupported Classification shapes. Optionally checks a Tenant Governance snapshot folder for its manifest,
+    missing or duplicate object IDs, role assignments without RoleAssignmentInstanceId, duplicate assignment paths,
+    unsupported Classification shapes and Classification/MatchedActions/ScopedObjects collections that collapsed
+    from an array into a single value. Optionally checks a Tenant Governance snapshot folder for its manifest,
     invalid JSON, resource types that don't match their folder, identities stored in multiple files and count
     mismatches with the manifest.
     Violations stop the validation with one error that lists all of them. Contradictory object tier pairs and
@@ -61,6 +62,27 @@ $CanonicalTierLevelByName = @{
     Unclassified  = 'Unclassified'
 }
 $Violations = [System.Collections.Generic.List[string]]::new()
+# Consumers (KQL parsers, watchlists, report apps) index these collections. A single-item array that
+# collapsed into a scalar causes git churn without content change, so it is rejected as a violation.
+$ArrayShapeProperties = @('MatchedActions', 'ScopedObjects')
+function Test-ArtifactCollectionShape {
+    param($Value, [string]$Context)
+    if ($null -ne $Value -and $Value -isnot [array]) {
+        $Violations.Add("$Context is stored as a single value instead of an array.")
+    }
+}
+function Test-ArtifactClassificationEntryShape {
+    param($Classification, [string]$Context)
+    foreach ($Entry in @($Classification)) {
+        if ($null -eq $Entry -or $Entry -isnot [pscustomobject]) { continue }
+        foreach ($PropertyName in $ArrayShapeProperties) {
+            $Property = $Entry.PSObject.Properties[$PropertyName]
+            if ($null -ne $Property) {
+                Test-ArtifactCollectionShape -Value $Property.Value -Context "$Context classification '$($Entry.AdminTierLevelName)/$($Entry.Service)' $PropertyName"
+            }
+        }
+    }
+}
 $TierPairWarnings = [System.Collections.Generic.List[string]]::new()
 $DataQualityWarnings = [System.Collections.Generic.List[string]]::new()
 $ObjectCount = 0
@@ -123,6 +145,12 @@ if ($ResolvedPrivilegedEamPath) {
             }
             }
 
+            $ObjectClassificationProperty = $EamObject.PSObject.Properties['Classification']
+            if ($null -ne $ObjectClassificationProperty) {
+                Test-ArtifactCollectionShape -Value $ObjectClassificationProperty.Value -Context "$($AggregateFile.Name): object '$ObjectId' Classification"
+                Test-ArtifactClassificationEntryShape -Classification $ObjectClassificationProperty.Value -Context "$($AggregateFile.Name): object '$ObjectId'"
+            }
+
             $SeenAssignmentPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
             foreach ($RoleAssignment in @($EamObject.RoleAssignments)) {
                 if ($null -eq $RoleAssignment) { continue }
@@ -142,9 +170,10 @@ if ($ResolvedPrivilegedEamPath) {
                 if (-not $ClassificationHasSupportedShape) {
                     $Violations.Add("$($AggregateFile.Name): assignment '$InstanceId' has unsupported Classification shape '$($Classification.GetType().FullName)'.")
                 } elseif ($null -ne $Classification -and $Classification -isnot [array]) {
-                    # Still readable, but consumers indexing Classification[0] (KQL/workbooks, report apps) expect an array.
-                    $DataQualityWarnings.Add("$($AggregateFile.Name): assignment '$InstanceId' for object '$ObjectId' stores Classification as a single object instead of an array.")
+                    # Consumers indexing Classification[0] (KQL/workbooks, report apps) expect an array.
+                    $Violations.Add("$($AggregateFile.Name): assignment '$InstanceId' for object '$ObjectId' stores Classification as a single object instead of an array.")
                 }
+                Test-ArtifactClassificationEntryShape -Classification $Classification -Context "$($AggregateFile.Name): assignment '$InstanceId' for object '$ObjectId'"
                 if ($RoleAssignment.RoleIsPrivileged -eq $true -and $ClassificationIsEmpty) {
                     $Message = "$($AggregateFile.Name): privileged assignment '$InstanceId' ('$($RoleAssignment.RoleDefinitionName)') for object '$ObjectId' has no classification result."
                     if ($FailOnPrivilegedAssignmentWithoutClassification) { $Violations.Add($Message) } else { $DataQualityWarnings.Add($Message) }

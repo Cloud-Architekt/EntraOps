@@ -284,17 +284,19 @@ Describe 'Azure DevOps trusted validation artifact' -Skip:(-not $HasAdoScripts) 
 }
 
 Describe 'Azure DevOps validation dependencies' -Skip:(-not $HasAdoScripts) {
-    It 'installs the pinned module versions of the GitHub update workflow' {
+    It 'installs the module versions required by the GitHub update workflow' {
         Mock Install-Module {}
 
         & (Join-Path $script:ScriptRoot 'Install-EntraOpsUpdateValidationDependencies.ps1')
 
         Should -Invoke Install-Module -Times 2 -Exactly
         Should -Invoke Install-Module -Times 1 -Exactly -ParameterFilter {
-            $Name -eq 'Pester' -and $Scope -eq 'CurrentUser' -and $Force -and $Repository -eq 'PSGallery' -and $MinimumVersion -eq '5.7.1'
+            $Name -eq 'Pester' -and $Scope -eq 'CurrentUser' -and $Force -and $Repository -eq 'PSGallery' -and
+            $MinimumVersion -eq '5.7.1' -and -not $MaximumVersion -and -not $RequiredVersion
         }
         Should -Invoke Install-Module -Times 1 -Exactly -ParameterFilter {
-            $Name -eq 'powershell-yaml' -and $Scope -eq 'CurrentUser' -and $Force -and $Repository -eq 'PSGallery' -and $RequiredVersion -eq '0.4.12'
+            $Name -eq 'powershell-yaml' -and $Scope -eq 'CurrentUser' -and $Force -and $Repository -eq 'PSGallery' -and
+            $RequiredVersion -eq '0.4.12' -and -not $MinimumVersion -and -not $MaximumVersion
         }
     }
 }

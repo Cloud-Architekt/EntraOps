@@ -53,7 +53,9 @@ function renderEntraOpsSnapshotHealth(containerId) {
     var health = DATA && DATA.snapshotHealth;
     if (!health) return;
     var stale = Array.isArray(health.staleResourceTypes) ? health.staleResourceTypes : [];
-    if (health.isComplete !== false && !stale.length) return;
+    var isPartial = health.isComplete === false || stale.length > 0;
+    var isOutdated = health.isStale === true;
+    if (!isPartial && !isOutdated) return;
     var container = containerId
         ? document.getElementById(containerId)
         : (document.getElementById("caSnapshotHealth") || document.getElementById("entraopsSnapshotHealth"));
@@ -100,8 +102,15 @@ function renderEntraOpsSnapshotHealth(containerId) {
     var diagnosticText = health.errorDetailsUnavailable
         ? " Graph did not return parseable per-type diagnostics."
         : "";
-    container.innerHTML = '<div class="entraops-snapshot-health" role="alert" aria-live="polite">' +
-        '<strong>Partial Tenant Governance snapshot — findings may use stale configuration.</strong> ' +
+    var ageDays = Number(health.ageHours) / 24;
+    var outdatedText = isOutdated
+        ? "<strong>Outdated Tenant Governance snapshot</strong> — captured " +
+            (Number.isFinite(ageDays) ? (ageDays >= 2 ? Math.round(ageDays) + " days" : Math.round(Number(health.ageHours)) + " hours") + " ago" : "earlier") +
+            (Number(health.maxAgeHours) ? ", older than the " + Number(health.maxAgeHours) + "-hour limit" : "") +
+            ". Findings show the configuration at capture time, not the current tenant state. "
+        : "";
+    container.innerHTML = '<div class="entraops-snapshot-health" role="alert" aria-live="polite">' + outdatedText +
+        (isPartial ? '<strong>Partial Tenant Governance snapshot — findings may use stale configuration.</strong> ' : "") +
         "Status: " + esc(health.status || "unknown") + ". " +
         (health.capturedDateTime ? "Attempt captured " + esc(fmtDate(health.capturedDateTime)) + ". " : "") +
         (stale.length ? stale.length + " stale resource type(s)." : "") + diagnosticText +

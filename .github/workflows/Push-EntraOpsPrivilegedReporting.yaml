@@ -26,13 +26,14 @@ env:
   ReportingReleasesToKeep: "10"
   ClassificationExplorerRepository: Cloud-Architekt/AzurePrivilegedIAM
   ClassificationExplorerGenerateChangeHistory: false
+  AuthenticationType: FederatedCredentials
 
 on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
     inputs:
       allowStaleTenantGovernance:
-        description: "Generate Configuration Analyzer from a successful Tenant Governance snapshot older than 30 hours"
+        description: "Generate Configuration Analyzer from a successful Tenant Governance snapshot older than its maximum age without applying StaleTenantGovernanceSnapshotAction"
         required: false
         type: boolean
         default: false
@@ -106,10 +107,7 @@ jobs:
           AllowStaleTenantGovernance: ${{ inputs.allowStaleTenantGovernance || 'false' }}
           AllowPartialTenantGovernance: ${{ env.AllowPartialTenantGovernanceSnapshot }}
           ManualAllowPartialTenantGovernance: ${{ inputs.allowPartialTenantGovernance }}
-        run: |
-          Import-Module ./EntraOps
-          $AllowPartial = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $env:ManualAllowPartialTenantGovernance -eq 'true' } else { $env:AllowPartialTenantGovernance -eq 'true' }
-          Invoke-EntraOpsReportingGeneration -ConfigFilePath ${env:ConfigFile} -AuthenticationType FederatedCredentials -AllowStaleTenantGovernanceSnapshot:($env:AllowStaleTenantGovernance -eq 'true') -AllowPartialTenantGovernanceSnapshot:$AllowPartial -RemoveClassificationRepositoryAfterRun | Out-Host
+        run: ./.github/scripts/Invoke-EntraOpsGitHubReportingGeneration.ps1
 
       # azure/powershell imports the Az context established by azure/login. Keep that provider
       # bootstrap outside the module; the same module command can run in GitLab CI or Azure Pipelines
@@ -122,10 +120,7 @@ jobs:
           AllowPartialTenantGovernance: ${{ env.AllowPartialTenantGovernanceSnapshot }}
           ManualAllowPartialTenantGovernance: ${{ inputs.allowPartialTenantGovernance }}
         with:
-          inlineScript: |
-            Import-Module ./EntraOps
-            $AllowPartial = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $env:ManualAllowPartialTenantGovernance -eq 'true' } else { $env:AllowPartialTenantGovernance -eq 'true' }
-            Invoke-EntraOpsReportingGeneration -ConfigFilePath ${env:ConfigFile} -AuthenticationType FederatedCredentials -AllowStaleTenantGovernanceSnapshot:($env:AllowStaleTenantGovernance -eq 'true') -AllowPartialTenantGovernanceSnapshot:$AllowPartial -RemoveClassificationRepositoryAfterRun | Out-Host
+          inlineScript: ./.github/scripts/Invoke-EntraOpsGitHubReportingGeneration.ps1
           azPSVersion: latest
 
       - name: Set up Node for generated report tests

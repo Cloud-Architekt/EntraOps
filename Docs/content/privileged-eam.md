@@ -796,6 +796,14 @@ The mutating update cmdlets protect against a degraded classification input remo
 
 `RemovalSafetyThreshold` is persisted in all four automated-protection sections of `EntraOpsConfig.json` and can also be supplied as `-RemovalSafetyThreshold <0..1>`. A value of `1.0` permits removal of the complete current protected set, which disables threshold-based `SafetyAbort` protection for automated runs. Use this only when the customer intentionally accepts that risk; `0.5` remains the default. After inspecting the reported plan, use `-ForceRemovalBeyondSafetyThreshold` to apply a deliberate oversized reconciliation. The force switch is invocation-only and intentionally unavailable in the Configuration Wizard.
 
+### Objects deleted after the pull
+
+The push run reads the Privileged EAM export of the last pull. When an object was deleted in
+Microsoft Entra in between, Microsoft Graph returns HTTP 404 for it. `Update-EntraOpsPrivilegedAdministrativeUnit`,
+`Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit`, and `Update-EntraOpsPrivilegedConditionalAccessGroup`
+skip such an object with an `ObjectNotFound` warning instead of failing the run; the next pull removes it
+from the export. Any other failed membership operation still fails the run.
+
 > [!IMPORTANT]
 > Entitlement Management catalog protection requires the elevated Microsoft Graph permission `EntitlementManagement.ReadWrite.All`, and EntraOps cannot distinguish a catalog it protected from one an administrator protected manually - a catalog without Control Plane scope in EntraOps is reverted to "standard" either way. Updating the privilege level protects the catalog itself, but existing role assignments on it remain classified as Control Plane and should still be reviewed and removed.
 

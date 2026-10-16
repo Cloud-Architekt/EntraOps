@@ -124,6 +124,15 @@ all with CSV export.
 The dashboard's drill-down view keeps privileged assets, assignments, and their classification
 evidence together for investigation and export.
 
+**Change notifications** list privileged assets and role assignments that were added, removed, or
+changed tier since the previous dataset. Local runs compare with the existing dataset. Generated
+report data is never committed, so without one, the comparison uses the Privileged EAM export in
+git history: the commit of the latest `reporting-*` release (`PublishReportsAsRelease`), otherwise
+the export before its latest change. This needs the full git history, which the
+`Push-EntraOpsPrivilegedReporting` workflow and the Azure DevOps pipeline already check out. The
+first export, or an unreadable or other-tenant baseline, produces no notifications and never fails
+the run.
+
 ![EAM Dashboard example showing privileged identity metrics and drill-down tables](../assets/examples/eam-dashboard.png)
 
 ### Privileged Assets {#privileged-assets}
@@ -309,6 +318,18 @@ a permanent partial-snapshot warning with the capture time and the source snapsh
 resource type, the retained-resource count of each type published with errors, plus the sanitized
 capture diagnostics and remediation hints retained in the
 manifest. Structural duplication or a manifest/file-count mismatch blocks report publication.
+
+A snapshot older than `ConfigurationAnalyzer.MaxTenantGovernanceSnapshotAgeHours` is stale. When the
+setting is not configured, the limit follows the snapshot schedule: 30 hours for a daily, 174 hours
+for a weekly and 750 hours for a monthly `TenantGovernanceSnapshot.SnapshotScheduledCron`. The
+reporting run checks the age before it connects to Microsoft Graph and applies
+`ConfigurationAnalyzer.StaleTenantGovernanceSnapshotAction`: `Warn` (default) generates the reports
+and shows an outdated-snapshot banner with the snapshot age, `Skip` publishes all other reports
+without the Configuration Analyzer, and `Fail` stops the run. The dataset includes the snapshots of
+the last `ConfigurationAnalyzer.TimeRangeInDays` (default 365) with at most one snapshot per
+`ConfigurationAnalyzer.SnapshotInterval` (default `P1W`). A manual run of the reporting workflow or
+pipeline can bypass the age check for that run with the `allowStaleTenantGovernance` input; scheduled
+and pull-triggered runs always apply the configured action.
 
 Generate or refresh the dataset with `New-EntraOpsTenantGovernanceConfigurationAnalyzerData` (or
 as part of `New-EntraOpsReportingData`). The app requires the Tenant Governance Snapshot feature

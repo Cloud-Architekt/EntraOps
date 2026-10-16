@@ -305,6 +305,10 @@
             ClassificationExplorerRepository: "Cloud-Architekt/AzurePrivilegedIAM",
             ResolveGroupMembersForPrivilegedAssets: true,
             AllowPartialTenantGovernanceSnapshot: true,
+            MaxTenantGovernanceSnapshotAgeHours: "",
+            StaleTenantGovernanceSnapshotAction: "Warn",
+            ConfigurationAnalyzerTimeRangeInDays: 365,
+            ConfigurationAnalyzerSnapshotInterval: "P1W",
             PimRequestFlowExcludedRiskFlags: [],
             AccessPackageFlowExcludedRiskFlags: [],
             ConditionalAccessAnalysisExcludedFindings: [],
@@ -635,6 +639,10 @@
                         { key: "ClassificationExplorerGenerateChangeHistory", label: "Generate Classification Explorer change history", type: "checkbox", default: false, help: "Disabled by default. Generating the history requires a full git log over the classification sources in the AzurePrivilegedIAM repository, which is slow. Enable it to populate the Change History view and its notifications." },
                         { key: "ResolveGroupMembersForPrivilegedAssets", label: "Resolve included group targets for Configuration Analyzer", type: "checkbox", default: true, help: "Expands nested and PIM-managed group membership through Microsoft Graph. Excluded targets are not evaluated." },
                         { key: "AllowPartialTenantGovernanceSnapshot", label: "Allow partial Tenant Governance snapshots for Configuration Analyzer", type: "checkbox", default: true, help: "Generates the report when UTCM partially succeeds. Failed resource types remain marked as stale; disable for a strict point-in-time configuration comparison." },
+                        { key: "MaxTenantGovernanceSnapshotAgeHours", label: "Maximum Tenant Governance snapshot age (hours)", type: "number", min: 1, max: 8760, placeholder: "derived from snapshot schedule", help: "Leave empty to derive it from the snapshot schedule: 30 hours for daily, 174 hours for weekly and 750 hours for monthly snapshots." },
+                        { key: "StaleTenantGovernanceSnapshotAction", label: "When the Tenant Governance snapshot is older", type: "select", options: ["Warn", "Skip", "Fail"], default: "Warn", help: "Warn generates the Configuration Analyzer and marks it as outdated. Skip publishes all other reports without the Configuration Analyzer. Fail stops the reporting run before any report is generated." },
+                        { key: "ConfigurationAnalyzerTimeRangeInDays", label: "Configuration Analyzer time range (days)", type: "number", default: 365, min: 1, placeholder: "unlimited", help: "Only Tenant Governance snapshots of the last N days are included. Leave empty for the full history; the dataset grows with every snapshot." },
+                        { key: "ConfigurationAnalyzerSnapshotInterval", label: "Configuration Analyzer snapshot interval", type: "text", default: "P1W", help: "ISO 8601 duration between two analyzed snapshots, e.g. P1D = daily, P1W = weekly. None keeps every snapshot." },
                         { key: "PimRequestFlowExcludedRiskFlags", label: "Exclude PIM Request Flow risk flags", type: "multiselect", options: ["noMfaActivation", "noApprovalActivation", "approverNotEnforced", "approverLowerTier", "authContextMissing", "permanentEligible", "permanentActive", "noMfaActiveAssign"], default: [], help: "Optional. Select findings to omit from PIM Request Flow. By default, every risk flag is reported." },
                         { key: "AccessPackageFlowExcludedRiskFlags", label: "Exclude Access Package Flow risk flags", type: "multiselect", options: ["noApproval", "broadRequestor", "approverLowerTier", "assignedMorePrivileged"], default: [], help: "Optional. Select findings to omit from Access Package Flow. By default, every risk flag is reported." },
                         { key: "ConditionalAccessAnalysisExcludedFindings", label: "Exclude Conditional Access findings", type: "multiselect", options: ["policyNotEnforced", "legacyAuthentication", "allUserMfa", "privilegedRoleControls", "riskBasedPolicies", "deviceControls", "guestCoverage", "clientAppCoverage", "exclusionSurface"], default: [], help: "Optional. Select coverage findings to omit. By default, every finding is reported." },
@@ -1601,6 +1609,10 @@
             ConfigurationAnalyzer: {
                 ResolveGroupMembersForPrivilegedAssets: state.ResolveGroupMembersForPrivilegedAssets,
                 AllowPartialTenantGovernanceSnapshot: state.AllowPartialTenantGovernanceSnapshot,
+                MaxTenantGovernanceSnapshotAgeHours: state.MaxTenantGovernanceSnapshotAgeHours === "" || state.MaxTenantGovernanceSnapshotAgeHours === null ? null : Number(state.MaxTenantGovernanceSnapshotAgeHours),
+                StaleTenantGovernanceSnapshotAction: state.StaleTenantGovernanceSnapshotAction,
+                TimeRangeInDays: state.ConfigurationAnalyzerTimeRangeInDays === "" || state.ConfigurationAnalyzerTimeRangeInDays === null ? null : Number(state.ConfigurationAnalyzerTimeRangeInDays),
+                SnapshotInterval: state.ConfigurationAnalyzerSnapshotInterval || "None",
                 PimRequestFlowExcludedRiskFlags: state.PimRequestFlowExcludedRiskFlags,
                 AccessPackageFlowExcludedRiskFlags: state.AccessPackageFlowExcludedRiskFlags,
                 ConditionalAccessAnalysisExcludedFindings: state.ConditionalAccessAnalysisExcludedFindings,
@@ -1889,6 +1901,14 @@
         state.ClassificationExplorerRepository = reporting.ClassificationExplorerRepository || state.ClassificationExplorerRepository;
         state.ResolveGroupMembersForPrivilegedAssets = pick(cfg, "ConfigurationAnalyzer.ResolveGroupMembersForPrivilegedAssets", state.ResolveGroupMembersForPrivilegedAssets);
         state.AllowPartialTenantGovernanceSnapshot = pick(cfg, "ConfigurationAnalyzer.AllowPartialTenantGovernanceSnapshot", state.AllowPartialTenantGovernanceSnapshot);
+        var maxSnapshotAge = pick(cfg, "ConfigurationAnalyzer.MaxTenantGovernanceSnapshotAgeHours", null);
+        state.MaxTenantGovernanceSnapshotAgeHours = maxSnapshotAge === null || maxSnapshotAge === undefined ? "" : maxSnapshotAge;
+        state.StaleTenantGovernanceSnapshotAction = pick(cfg, "ConfigurationAnalyzer.StaleTenantGovernanceSnapshotAction", state.StaleTenantGovernanceSnapshotAction);
+        var configurationAnalyzerSection = pick(cfg, "ConfigurationAnalyzer", null);
+        if (configurationAnalyzerSection && Object.prototype.hasOwnProperty.call(configurationAnalyzerSection, "TimeRangeInDays")) {
+            state.ConfigurationAnalyzerTimeRangeInDays = configurationAnalyzerSection.TimeRangeInDays === null ? "" : configurationAnalyzerSection.TimeRangeInDays;
+        }
+        state.ConfigurationAnalyzerSnapshotInterval = pick(cfg, "ConfigurationAnalyzer.SnapshotInterval", state.ConfigurationAnalyzerSnapshotInterval);
         state.PimRequestFlowExcludedRiskFlags = pick(cfg, "ConfigurationAnalyzer.PimRequestFlowExcludedRiskFlags", state.PimRequestFlowExcludedRiskFlags);
         state.AccessPackageFlowExcludedRiskFlags = pick(cfg, "ConfigurationAnalyzer.AccessPackageFlowExcludedRiskFlags", state.AccessPackageFlowExcludedRiskFlags);
         state.ConditionalAccessAnalysisExcludedFindings = pick(cfg, "ConfigurationAnalyzer.ConditionalAccessAnalysisExcludedFindings", state.ConditionalAccessAnalysisExcludedFindings);

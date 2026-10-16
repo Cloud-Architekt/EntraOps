@@ -167,8 +167,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ChildAgentIdentity.Id -TenantId $TenantId
 
                     # Classification
-                    $Classification = @()
-                    $Classification += $inheritablePermissionScopes.Classification | Sort-Object AdminTierLevel, AdminTierLevelName, Service
+                    $Classification = @(Merge-EntraOpsEAMClassification -RoleAssignments @($inheritablePermissionScopes))
                     if ($Classification.Count -eq 0) {
                         $Classification += [PSCustomObject]@{
                             'AdminTierLevel'     = "Unclassified"
@@ -176,7 +175,6 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                             'Service'            = "Unclassified"
                         }
                     }
-                    $Classification = @($Classification | Select-Object -Unique AdminTierLevel, AdminTierLevelName, Service)
 
                     [PSCustomObject]@{
                         'ObjectId'                      = $ChildAgentIdentity.id
@@ -247,6 +245,20 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         $SyncObjectDetailsCache = [System.Collections.Hashtable]::Synchronized($ObjectDetailsCache)
         $SyncAppRoleByObject = [System.Collections.Hashtable]::Synchronized($AppRoleByObject)
         $SyncAgentIdObjects = [System.Collections.Hashtable]::Synchronized($AgentIdObjectsByObject)
+
+        # Merge classifications up front (module helpers are not available in parallel runspaces).
+        # Same assignment sources as below; duplicates do not affect the union.
+        $MergedClassificationByObject = @{}
+        foreach ($UniqueObject in $UniqueObjects) {
+            $UniqueObjectId = $UniqueObject.ObjectId
+            if ($null -eq $UniqueObjectId -or $MergedClassificationByObject.ContainsKey($UniqueObjectId)) { continue }
+            $MergeAssignments = @($AppRoleByObject[$UniqueObjectId])
+            if ($AgentIdObjectsByObject.ContainsKey($UniqueObjectId)) {
+                $MergeAssignments += @($AgentIdObjectsByObject[$UniqueObjectId].RoleAssignments)
+            }
+            $MergedClassificationByObject[$UniqueObjectId] = @(Merge-EntraOpsEAMClassification -RoleAssignments $MergeAssignments)
+        }
+        $SyncMergedClassificationByObject = [System.Collections.Hashtable]::Synchronized($MergedClassificationByObject)
         
         $ClassificationThrottleLimit = [Math]::Min($ParallelThrottleLimit, 10)
         Write-Host "Using parallel classification processing with $ClassificationThrottleLimit threads for $($UniqueObjects.Count) objects..." -ForegroundColor Yellow
@@ -277,20 +289,10 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     $AppRoleAssignments += $SharedAppRoleByObject[$ObjectId] | Select-Object -Unique *
                 }
 
-                # Classification - use hashtable for unique aggregation
-                $UniqueClassificationsHash = @{}
-                foreach ($Assignment in $AppRoleAssignments) {
-                    if ($null -ne $Assignment.Classification) {
-                        foreach ($ClassItem in $Assignment.Classification) {
-                            $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
-                            if (-not $UniqueClassificationsHash.ContainsKey($key)) {
-                                $UniqueClassificationsHash[$key] = $ClassItem
-                            }
-                        }
-                    }
-                }
-                
-                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                # Merged classifications are precomputed in the calling runspace (module helpers are not
+                # available here); see Merge-EntraOpsEAMClassification.
+                $SharedMergedClassification = $using:SyncMergedClassificationByObject
+                $Classification = @($SharedMergedClassification[$ObjectId])
 
                 if ($Classification.Count -eq 0) {
                     $Classification = @([PSCustomObject]@{
@@ -365,20 +367,8 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     $AppRoleAssignments += $AppRoleByObject[$ObjectId] | Select-Object -Unique *
                 }
 
-                # Classification - use hashtable for unique aggregation
-                $UniqueClassificationsHash = @{}
-                foreach ($Assignment in $AppRoleAssignments) {
-                    if ($null -ne $Assignment.Classification) {
-                        foreach ($ClassItem in $Assignment.Classification) {
-                            $key = "$($ClassItem.AdminTierLevel)|$($ClassItem.AdminTierLevelName)|$($ClassItem.Service)"
-                            if (-not $UniqueClassificationsHash.ContainsKey($key)) {
-                                $UniqueClassificationsHash[$key] = $ClassItem
-                            }
-                        }
-                    }
-                }
-            
-                $Classification = @($UniqueClassificationsHash.Values | Select-Object -Unique -ExcludeProperty TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem | Sort-Object AdminTierLevel, AdminTierLevelName, Service)
+                # Classification - merge MatchedActions/ScopedObjects across all assignments per tier/service
+                $Classification = @(Merge-EntraOpsEAMClassification -RoleAssignments @($AppRoleAssignments))
 
                 if ($Classification.Count -eq 0) {
                     $Classification = @(
@@ -421,7 +411,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
 
     #region Add agent identities to classified objects if not already present and correct role assignment ObjectIds
     $AppRoleClassifiedAgentIdObjects = $AppRoleClassifiedAgentIdObjectsByParentId | where-object { $_.ObjectId -notin $AppRoleClassifiedSpObjects.ObjectId }
-    $AppRoleClassifiedObjects = $AppRoleClassifiedSpObjects + $AppRoleClassifiedAgentIdObjects
+    $AppRoleClassifiedObjects = @($AppRoleClassifiedSpObjects) + @($AppRoleClassifiedAgentIdObjects)
 
     # Overwrite ObjectId of RoleAssignments for Agent Identities to match Agent Identity ObjectId (and not include Blueprint Principal ObjectId)
     $AppRoleClassifiedObjects | Where-Object { $_.ObjectSubType -eq "AgentIdentity" } | ForEach-Object {

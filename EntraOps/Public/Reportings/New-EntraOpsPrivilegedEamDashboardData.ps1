@@ -42,6 +42,11 @@
     * controlPlaneReasoning - why an object entered the Control Plane input set, sourced
                      from Classification/<TenantName>/ScopeReasoning_ControlPlane.json.
 
+    Change notifications compare with the existing output file. Without one (the reporting
+    pipelines never commit report data), they compare with the Privileged EAM export in git
+    history: the latest `reporting-*` release tag reachable from HEAD, otherwise the export
+    before its latest change.
+
     This function requires the module to be imported from a repository checkout that
     contains the Reports/EamDashboard folder.
 
@@ -150,15 +155,21 @@ function New-EntraOpsPrivilegedEamDashboardData {
         }
     }
 
+    # Change notification baseline: the existing dataset (local runs), otherwise the previous
+    # Privileged EAM export from git history (the reporting pipelines never commit report data).
     $previousPayload = $null
+    $previousObjectList = $null
     if (Test-Path -LiteralPath $OutFile -PathType Leaf) {
         try {
             $previousText = Get-Content -LiteralPath $OutFile -Raw -Encoding UTF8
             $previousJson = $previousText -replace '(?s)^.*?window\.ENTRAOPS_EAM_DATA\s*=\s*', '' -replace ';\s*$', ''
             $previousPayload = $previousJson | ConvertFrom-Json -Depth 15 -ErrorAction Stop
+            if ($null -ne $previousPayload.objects) { $previousObjectList = @($previousPayload.objects) }
         } catch {
-                Write-Warning "Existing EAM Dashboard dataset could not be used as a notification baseline; change notifications will not be generated for this run: $($_.Exception.Message)"
+            Write-Warning "Existing EAM Dashboard dataset could not be used as a notification baseline; change notifications will not be generated for this run: $($_.Exception.Message)"
         }
+    } else {
+        $previousObjectList = Get-EntraOpsPrivilegedEamGitBaselineObjects -ImportPath $ImportPath -TenantId $TenantId
     }
 
     $sourceFilesRef = [ref]@()
@@ -248,8 +259,13 @@ function New-EntraOpsPrivilegedEamDashboardData {
     $repoRootFull = (Resolve-Path -LiteralPath $RepoRoot).Path
     $tenantName = Get-EntraOpsReportingTenantName -RepoRoot $RepoRoot
     $generatedAt = (Get-Date).ToUniversalTime().ToString('o')
+    if ($null -ne $previousPayload -and -not [string]::IsNullOrWhiteSpace("$($previousPayload.tenantName)") -and
+        -not [string]::IsNullOrWhiteSpace("$tenantName") -and "$($previousPayload.tenantName)" -ne "$tenantName") {
+        Write-Warning "EAM Dashboard baseline belongs to tenant '$($previousPayload.tenantName)' instead of '$tenantName'; change notifications will not be generated for this run."
+        $previousObjectList = $null
+    }
     $notifications = [System.Collections.Generic.List[object]]::new()
-    if ($null -ne $previousPayload -and $null -ne $previousPayload.objects) {
+    if ($null -ne $previousObjectList) {
         $previousObjects = @{}
         $currentObjects = @{}
         $previousAssignments = @{}
@@ -261,7 +277,7 @@ function New-EntraOpsPrivilegedEamDashboardData {
             return "$($Assignment.roleAssignmentId)"
         }
 
-        foreach ($object in @($previousPayload.objects)) {
+        foreach ($object in $previousObjectList) {
             if ($object.objectId -and -not $previousObjects.ContainsKey($object.objectId)) { $previousObjects[$object.objectId] = $object }
             foreach ($assignment in @($object.roleAssignments)) {
                 $assignmentKey = Get-AssignmentKey $assignment
@@ -333,10 +349,17 @@ function New-EntraOpsPrivilegedEamDashboardData {
         $sortedLinkedIdentityDisplayNames[$linkedIdentityId] = $linkedIdentityDisplayNames[$linkedIdentityId]
     }
 
+    # Derived from the notification content instead of the run time: the pipelines rebuild the dataset from
+    # git history on every run, so a run without new Privileged EAM changes repeats the same notifications
+    # and must keep them marked as read in the dashboard.
+    $notificationJson = ConvertTo-Json -InputObject @($notifications) -Depth 5 -Compress
+    $notificationHash = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes("$tenantName|$notificationJson"))
+    $changeSetId = [System.Convert]::ToHexString($notificationHash).Substring(0, 16).ToLowerInvariant()
+
     $payload = [ordered]@{
         tenantName                 = $tenantName
         generatedAt                = $generatedAt
-        changeSetId                = $generatedAt
+        changeSetId                = $changeSetId
         notifications              = @($notifications)
         generatedFrom              = @(@($files) | ForEach-Object {
                 if ($_.FullName.StartsWith($repoRootFull)) {

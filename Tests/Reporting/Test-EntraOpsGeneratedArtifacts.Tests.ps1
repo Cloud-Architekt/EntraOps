@@ -26,7 +26,9 @@ BeforeAll {
 
             [switch]$DuplicateObject,
 
-            [switch]$SingleObjectClassification
+            [switch]$SingleObjectClassification,
+
+            [switch]$ScalarMatchedActions
         )
 
         $SystemPath = Join-Path $Root 'EntraID'
@@ -35,6 +37,7 @@ BeforeAll {
         $AssignmentClassification = @([pscustomobject]@{ AdminTierLevel = '0'; AdminTierLevelName = 'ControlPlane' })
         if ($PrivilegedWithoutClassification) { $AssignmentClassification = @() }
         if ($SingleObjectClassification) { $AssignmentClassification = [pscustomobject]@{ AdminTierLevel = '0'; AdminTierLevelName = 'ControlPlane' } }
+        if ($ScalarMatchedActions) { $AssignmentClassification = @([pscustomobject]@{ AdminTierLevel = '0'; AdminTierLevelName = 'ControlPlane'; Service = 'Global'; MatchedActions = 'microsoft.directory/allEntities/allTasks' }) }
         $Assignment = [pscustomobject]@{
             RoleAssignmentInstanceId       = 'EO_RA_test'
             RoleDefinitionName             = 'Global Administrator'
@@ -134,13 +137,18 @@ Describe 'Test-EntraOpsGeneratedArtifacts' {
         { & $ValidatorPath -PrivilegedEamPath $ArtifactRoot -FailOnPrivilegedAssignmentWithoutClassification } | Should -Throw '*has no classification result*'
     }
 
-    It 'warns but accepts an assignment classification stored as a single object instead of an array' {
+    It 'rejects an assignment classification stored as a single object instead of an array' {
         $ArtifactRoot = Join-Path $TestDrive 'single-object-classification'
         New-TestEamArtifact -Root $ArtifactRoot -SingleObjectClassification
 
-        $Warnings = @()
-        & $ValidatorPath -PrivilegedEamPath $ArtifactRoot -WarningVariable +Warnings | Should -Match 'Validated 1 object'
-        $Warnings.Message | Should -Match 'single object instead of an array'
+        { & $ValidatorPath -PrivilegedEamPath $ArtifactRoot } | Should -Throw '*single object instead of an array*'
+    }
+
+    It 'rejects MatchedActions that collapsed from an array into a single value' {
+        $ArtifactRoot = Join-Path $TestDrive 'scalar-matched-actions'
+        New-TestEamArtifact -Root $ArtifactRoot -ScalarMatchedActions
+
+        { & $ValidatorPath -PrivilegedEamPath $ArtifactRoot } | Should -Throw '*MatchedActions is stored as a single value instead of an array*'
     }
 
     It 'does not warn about an assignment classification array with one entry' {

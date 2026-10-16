@@ -399,7 +399,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                     'AdminTierLevel'             = $UniqueClass.EAMTierLevelTagValue
                     'AdminTierLevelName'         = $UniqueClass.EAMTierLevelName
                     'MatchedActions'             = if ($MatchedActions.Count -gt 0) { , @($MatchedActions) } else { $null }
-                    'ScopedObjects'              = if ($ScopedObjects.Count -gt 0) { $ScopedObjects } else { $null }
+                    'ScopedObjects'              = if ($ScopedObjects.Count -gt 0) { , @($ScopedObjects) } else { $null }
                     'Service'                    = $UniqueClass.Service
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $TaggedByIds
@@ -424,7 +424,8 @@ function Get-EntraOpsPrivilegedEAMIntune {
         $DeviceMgmtRbacAssignment = $DeviceMgmtRbacAssignment | Select-Object -ExcludeProperty Classification, DirectoryScopeIds
         $Classification = @()
         $Classification += ($DeviceMgmtRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $DeviceMgmtRbacAssignment.RoleDefinitionId }).Classification
-        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem, MatchedActions, ScopedObjects, Justification | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification = @($Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem, MatchedActions, ScopedObjects, Justification | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy)
+        if ($Classification.Count -eq 0) { $Classification = $null }
         $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DeviceMgmtRbacAssignment
     }

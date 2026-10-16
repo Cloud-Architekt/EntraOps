@@ -187,6 +187,25 @@
     data from a partially successful Tenant Governance snapshot. Failed resource types remain marked
     as stale in the report. Default is true.
 
+.PARAMETER MaxTenantGovernanceSnapshotAgeHours
+    Maximum age in hours of the published Tenant Governance snapshot before the Configuration Analyzer
+    treats it as stale. Default is $null, which derives the limit from TenantGovernanceSnapshotScheduledCron:
+    30 hours for a daily, 174 hours for a weekly and 750 hours for a monthly schedule.
+
+.PARAMETER StaleTenantGovernanceSnapshotAction
+    Defines what automated reporting does when the Tenant Governance snapshot is older than its maximum
+    age. Warn (default) generates the Configuration Analyzer from it and marks the report as outdated,
+    Skip leaves the Configuration Analyzer out and publishes the other reports, Fail stops the run before
+    any report is generated.
+
+.PARAMETER ConfigurationAnalyzerTimeRangeInDays
+    Only Tenant Governance snapshots of the last N days are included in the Configuration Analyzer
+    dataset. Default is 365. Use $null for the full history.
+
+.PARAMETER ConfigurationAnalyzerSnapshotInterval
+    Minimum spacing between two Configuration Analyzer snapshots as ISO 8601 duration (P1D, P1W, P1M, ...)
+    or None to keep every snapshot commit. Default is P1W (weekly), which keeps the dataset size bounded.
+
 .PARAMETER PimRequestFlowExcludedRiskFlags
     Array of PIM Request Flow risk-flag IDs to exclude from the generated report. Default is empty,
     so every supported risk flag is reported. Use the Configuration Wizard to select flags by name.
@@ -404,6 +423,20 @@ function New-EntraOpsConfigFile {
         [boolean]$AllowPartialTenantGovernanceSnapshot = $true,
 
         [Parameter(Mandatory = $false)]
+        [System.Nullable[int]]$MaxTenantGovernanceSnapshotAgeHours,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Warn', 'Skip', 'Fail')]
+        [string]$StaleTenantGovernanceSnapshotAction = 'Warn',
+
+        [Parameter(Mandatory = $false)]
+        [System.Nullable[int]]$ConfigurationAnalyzerTimeRangeInDays = 365,
+
+        [Parameter(Mandatory = $false)]
+        [ValidatePattern('^(None|P\d+[DWMY])$')]
+        [string]$ConfigurationAnalyzerSnapshotInterval = 'P1W',
+
+        [Parameter(Mandatory = $false)]
         [ValidateSet('noMfaActivation', 'noApprovalActivation', 'approverNotEnforced', 'approverLowerTier', 'authContextMissing', 'permanentEligible', 'permanentActive', 'noMfaActiveAssign')]
         [string[]]$PimRequestFlowExcludedRiskFlags = @(),
 
@@ -471,6 +504,11 @@ function New-EntraOpsConfigFile {
     )
 
     $ErrorActionPreference = "Stop"
+
+    # Validated here instead of [ValidateRange] because that attribute rejects an explicit $null (derive from schedule).
+    if ($null -ne $MaxTenantGovernanceSnapshotAgeHours -and ($MaxTenantGovernanceSnapshotAgeHours -lt 1 -or $MaxTenantGovernanceSnapshotAgeHours -gt 8760)) {
+        throw "MaxTenantGovernanceSnapshotAgeHours must be between 1 and 8760 (or null to derive it from TenantGovernanceSnapshotScheduledCron), but is $MaxTenantGovernanceSnapshotAgeHours."
+    }
 
     #region Connect to Azure Resource Manager
     # Get TenantId
@@ -630,6 +668,10 @@ function New-EntraOpsConfigFile {
         ConfigurationAnalyzer                         = [ordered]@{
             ResolveGroupMembersForPrivilegedAssets    = $ResolveGroupMembersForPrivilegedAssets
             AllowPartialTenantGovernanceSnapshot      = $AllowPartialTenantGovernanceSnapshot
+            MaxTenantGovernanceSnapshotAgeHours       = $MaxTenantGovernanceSnapshotAgeHours
+            StaleTenantGovernanceSnapshotAction       = $StaleTenantGovernanceSnapshotAction
+            TimeRangeInDays                           = $ConfigurationAnalyzerTimeRangeInDays
+            SnapshotInterval                          = $ConfigurationAnalyzerSnapshotInterval
             PimRequestFlowExcludedRiskFlags           = @($PimRequestFlowExcludedRiskFlags)
             AccessPackageFlowExcludedRiskFlags        = @($AccessPackageFlowExcludedRiskFlags)
             ConditionalAccessAnalysisExcludedFindings = @($ConditionalAccessAnalysisExcludedFindings)

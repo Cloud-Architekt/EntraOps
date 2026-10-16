@@ -221,17 +221,22 @@ function New-EntraOpsAccessPackageFlowData {
                 $PackageAssignments = @(Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignments?`$filter=accessPackageId eq '${PackageId}'&`$expand=target" -OutputType PSObject -ThrowOnFailure)
                 foreach ($Assignment in $PackageAssignments) {
                     $Target = $Assignment.target
+                    # The beta accessPackageAssignment exposes assignmentState/assignmentStatus and
+                    # target.type; v1.0 names them state/status and target.subjectType.
+                    $AssignmentState = if ($Assignment.assignmentState) { $Assignment.assignmentState } else { $Assignment.state }
+                    $AssignmentStatus = if ($Assignment.assignmentStatus) { $Assignment.assignmentStatus } else { $Assignment.status }
+                    $SubjectType = if ($Target.type) { $Target.type } else { $Target.subjectType }
                     $Assignments.Add([ordered]@{
                             id                 = "$($Assignment.id)"
                             accessPackageId    = "$($Assignment.accessPackageId)"
                             assignmentPolicyId = "$($Assignment.assignmentPolicyId)"
-                            state              = "$($Assignment.state)"
-                            status             = "$($Assignment.status)"
+                            state              = "$AssignmentState"
+                            status             = "$AssignmentStatus"
                             target             = [ordered]@{
                                 objectId      = "$($Target.objectId)"
                                 displayName   = "$($Target.displayName)"
                                 principalName = "$($Target.principalName)"
-                                subjectType   = "$($Target.subjectType)"
+                                subjectType   = "$SubjectType"
                             }
                         })
                 }

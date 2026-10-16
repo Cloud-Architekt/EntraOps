@@ -139,6 +139,25 @@
     Path to the Configuration Analyzer app folder. Defaults to
     Reports/ConfigurationAnalyzer under EntraOpsRoot.
 
+.PARAMETER ConfigurationAnalyzerTimeRangeInDays
+    Only consider Tenant Governance snapshot commits from the last N days for the Configuration
+    Analyzer dataset. Forwarded as -TimeRangeInDays to
+    New-EntraOpsTenantGovernanceConfigurationAnalyzerData. Defaults to the
+    `ConfigurationAnalyzer.TimeRangeInDays` setting in EntraOpsConfig.json (null = full history),
+    or 365 when the setting is not present.
+
+.PARAMETER ConfigurationAnalyzerSnapshotInterval
+    Minimum spacing between two consecutive Configuration Analyzer snapshots, as an ISO 8601
+    duration (`P1D`, `P1W`, `P1M`, ... or `None` to keep every commit). Forwarded as
+    -SnapshotInterval. Defaults to the `ConfigurationAnalyzer.SnapshotInterval` setting in
+    EntraOpsConfig.json, or `P1W` (weekly) when the setting is not present.
+
+.PARAMETER ConfigurationAnalyzerMaxSnapshotAgeHours
+    Maximum age of the published Tenant Governance snapshot before it is treated as stale. Forwarded
+    as -MaxSnapshotAgeHours. Defaults to `ConfigurationAnalyzer.MaxTenantGovernanceSnapshotAgeHours`
+    in EntraOpsConfig.json, or a value derived from `TenantGovernanceSnapshot.SnapshotScheduledCron`
+    (daily 30 hours, weekly 174 hours, monthly 750 hours).
+
 .PARAMETER SkipConfigurationAnalyzer
     Do not generate the Configuration Analyzer data. When not skipped, the data is only
     generated if the Tenant Governance snapshot folder exists (or
@@ -286,6 +305,15 @@ function New-EntraOpsReportingData {
         [System.String]$ConfigurationAnalyzerAppRoot,
 
         [Parameter(Mandatory = $false)]
+        [System.Nullable[int]]$ConfigurationAnalyzerTimeRangeInDays,
+
+        [Parameter(Mandatory = $false)]
+        [System.String]$ConfigurationAnalyzerSnapshotInterval,
+
+        [Parameter(Mandatory = $false)]
+        [System.Nullable[int]]$ConfigurationAnalyzerMaxSnapshotAgeHours,
+
+        [Parameter(Mandatory = $false)]
         [switch]$SkipConfigurationAnalyzer,
 
         [Parameter(Mandatory = $false)]
@@ -335,6 +363,8 @@ function New-EntraOpsReportingData {
     } else {
         $ConfigFilePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ConfigFilePath)
     }
+    # Assigned explicitly so a missing or unreadable config never resolves a caller's $EntraOpsConfig through dynamic scoping.
+    $EntraOpsConfig = $null
     if (Test-Path -LiteralPath $ConfigFilePath -PathType Leaf) {
         try {
             $EntraOpsConfig = Get-Content -LiteralPath $ConfigFilePath -Raw | ConvertFrom-Json
@@ -350,7 +380,7 @@ function New-EntraOpsReportingData {
                 }
             }
         } catch {
-            Write-Warning "Failed to read PrivilegeHistory settings from ${ConfigFilePath}: $($_.Exception.Message). Using defaults (enabled, full history, bi-weekly)."
+            Write-Warning "Failed to read ${ConfigFilePath}: $($_.Exception.Message). Using defaults for PrivilegeHistory (enabled, full history, bi-weekly) and ConfigurationAnalyzer (365 days, weekly, 30-hour snapshot age limit)."
         }
     }
     if (-not $PSBoundParameters.ContainsKey('PrivilegeHistoryTimeRangeInDays')) {
@@ -358,6 +388,48 @@ function New-EntraOpsReportingData {
     }
     if (-not $PSBoundParameters.ContainsKey('PrivilegeHistorySnapshotInterval')) {
         $PrivilegeHistorySnapshotInterval = $ConfigPrivilegeHistorySnapshotInterval
+    }
+
+    # Configuration Analyzer history is bounded by default (365 days, weekly) because every snapshot adds
+    # its full resource index to the dataset. An explicit null/'None' in the config keeps the full history.
+    # Resolved and validated only when the Configuration Analyzer is generated, so an invalid setting never
+    # blocks the other reports, and checked before any report so it never fails the run late.
+    if (-not $SkipConfigurationAnalyzer) {
+        $ConfigurationAnalyzerConfig = if ($null -ne $EntraOpsConfig) { $EntraOpsConfig.ConfigurationAnalyzer } else { $null }
+        if (-not $PSBoundParameters.ContainsKey('ConfigurationAnalyzerTimeRangeInDays')) {
+            $ConfigurationAnalyzerTimeRangeInDays = 365
+            if ($null -ne $ConfigurationAnalyzerConfig -and $null -ne $ConfigurationAnalyzerConfig.PSObject.Properties['TimeRangeInDays']) {
+                $ConfiguredTimeRange = $ConfigurationAnalyzerConfig.TimeRangeInDays
+                if ($null -eq $ConfiguredTimeRange -or [string]::IsNullOrWhiteSpace("$ConfiguredTimeRange")) {
+                    $ConfigurationAnalyzerTimeRangeInDays = $null
+                } else {
+                    $ParsedTimeRange = 0
+                    if (-not [int]::TryParse("$ConfiguredTimeRange", [ref]$ParsedTimeRange) -or $ParsedTimeRange -lt 1) {
+                        throw "ConfigurationAnalyzer.TimeRangeInDays in $ConfigFilePath must be a whole number of at least 1 (or null for the full history), but is '$ConfiguredTimeRange'."
+                    }
+                    $ConfigurationAnalyzerTimeRangeInDays = $ParsedTimeRange
+                }
+            }
+        }
+        if (-not $PSBoundParameters.ContainsKey('ConfigurationAnalyzerSnapshotInterval')) {
+            $ConfigurationAnalyzerSnapshotInterval = 'P1W'
+            if ($null -ne $ConfigurationAnalyzerConfig -and $null -ne $ConfigurationAnalyzerConfig.PSObject.Properties['SnapshotInterval']) {
+                $ConfigurationAnalyzerSnapshotInterval = if ([string]::IsNullOrWhiteSpace("$($ConfigurationAnalyzerConfig.SnapshotInterval)")) { 'None' } else { [string]$ConfigurationAnalyzerConfig.SnapshotInterval }
+            }
+        }
+        # Same accepted values as New-EntraOpsTenantGovernanceConfigurationAnalyzerData -SnapshotInterval.
+        if (-not [string]::IsNullOrWhiteSpace($ConfigurationAnalyzerSnapshotInterval) -and
+            $ConfigurationAnalyzerSnapshotInterval -notin @('P0D', 'PT0S', 'None', 'none') -and
+            $ConfigurationAnalyzerSnapshotInterval -notmatch '^P(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?$') {
+            throw "ConfigurationAnalyzer.SnapshotInterval must be an ISO 8601 duration such as 'P1D', 'P1W' or 'P1M' (or 'None' to keep every snapshot), but is '$ConfigurationAnalyzerSnapshotInterval'."
+        }
+        # Validated here instead of [ValidateRange] because that attribute rejects an explicit $null (derive from schedule).
+        if ($null -ne $ConfigurationAnalyzerMaxSnapshotAgeHours -and ($ConfigurationAnalyzerMaxSnapshotAgeHours -lt 1 -or $ConfigurationAnalyzerMaxSnapshotAgeHours -gt 8760)) {
+            throw "ConfigurationAnalyzerMaxSnapshotAgeHours must be between 1 and 8760 (or null to derive it from the snapshot schedule), but is $ConfigurationAnalyzerMaxSnapshotAgeHours."
+        }
+        if ($null -eq $ConfigurationAnalyzerMaxSnapshotAgeHours) {
+            $ConfigurationAnalyzerMaxSnapshotAgeHours = Resolve-EntraOpsTenantGovernanceSnapshotMaxAge -Config $EntraOpsConfig
+        }
     }
 
     # Module-only installations (e.g. PowerShell Gallery) ship neither the reporting apps nor the classification templates.
@@ -528,6 +600,9 @@ function New-EntraOpsReportingData {
             if (-not [string]::IsNullOrWhiteSpace($ConfigurationAnalyzerAppRoot)) { $ConfigurationAnalyzerParams.AppRoot = $ConfigurationAnalyzerAppRoot }
             if ($AllowStaleTenantGovernanceSnapshot) { $ConfigurationAnalyzerParams.AllowStaleSnapshot = $true }
             if ($AllowPartialTenantGovernanceSnapshot) { $ConfigurationAnalyzerParams.AllowPartialSnapshot = $true }
+            if ($null -ne $ConfigurationAnalyzerTimeRangeInDays) { $ConfigurationAnalyzerParams.TimeRangeInDays = $ConfigurationAnalyzerTimeRangeInDays }
+            if (-not [string]::IsNullOrWhiteSpace($ConfigurationAnalyzerSnapshotInterval)) { $ConfigurationAnalyzerParams.SnapshotInterval = $ConfigurationAnalyzerSnapshotInterval }
+            if ($null -ne $ConfigurationAnalyzerMaxSnapshotAgeHours) { $ConfigurationAnalyzerParams.MaxSnapshotAgeHours = $ConfigurationAnalyzerMaxSnapshotAgeHours }
             if ($PassThru) { $ConfigurationAnalyzerParams.PassThru = $true }
 
             Write-Verbose "Generating Configuration Analyzer data..."

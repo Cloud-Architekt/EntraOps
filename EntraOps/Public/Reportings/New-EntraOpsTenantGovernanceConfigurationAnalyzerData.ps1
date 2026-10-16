@@ -76,7 +76,9 @@
 
 .PARAMETER MaxSnapshotAgeHours
 Maximum age of the successful Tenant Governance snapshot manifest. Default 30 hours.
-Use -AllowStaleSnapshot to generate a report from an older known-good snapshot.
+Use -AllowStaleSnapshot to generate a report from an older known-good snapshot; the report then
+marks the snapshot as stale (snapshotHealth.isStale). New-EntraOpsReportingData passes a limit
+derived from ConfigurationAnalyzer.MaxTenantGovernanceSnapshotAgeHours or the snapshot schedule.
 
 .PARAMETER AllowStaleSnapshot
 Allow report generation when the snapshot manifest is older than -MaxSnapshotAgeHours.
@@ -179,15 +181,6 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
         $days = ($weeks * 7) + $daysOnly
         if ($years -eq 0 -and $months -eq 0 -and $days -eq 0) { return $null }
         return [ordered]@{ Years = $years; Months = $months; Days = $days }
-    }
-
-    function Add-SnapshotInterval {
-        param([datetimeoffset]$Date, [System.Collections.Specialized.OrderedDictionary]$Interval)
-        $result = $Date
-        if ($Interval.Years -gt 0) { $result = $result.AddYears($Interval.Years) }
-        if ($Interval.Months -gt 0) { $result = $result.AddMonths($Interval.Months) }
-        if ($Interval.Days -gt 0) { $result = $result.AddDays($Interval.Days) }
-        return $result
     }
 
     $SnapshotIntervalComponents = ConvertTo-SnapshotIntervalComponents -Interval $SnapshotInterval
@@ -326,22 +319,19 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     if (-not $IsCompleteSnapshot) {
         Write-Warning "Generating Configuration Analyzer data from a partial Tenant Governance snapshot. Stale resource types: $(@($SnapshotManifest.StaleResourceTypes) -join ', ')."
     }
-    $CapturedDateTime = if ($SnapshotManifest.CapturedDateTime -is [datetime]) {
-        [datetimeoffset]$SnapshotManifest.CapturedDateTime
-    } elseif ($SnapshotManifest.CapturedDateTime -is [datetimeoffset]) {
-        $SnapshotManifest.CapturedDateTime
-    } else {
-        $ParsedCapturedDateTime = [datetimeoffset]::MinValue
-        if ([datetimeoffset]::TryParse([string]$SnapshotManifest.CapturedDateTime, [ref]$ParsedCapturedDateTime)) {
-            $ParsedCapturedDateTime
-        }
-    }
-    if ($null -eq $CapturedDateTime) {
+    # Same parser as the pre-check in Invoke-EntraOpsReportingGeneration, so both agree on the snapshot age.
+    $SnapshotAge = Get-EntraOpsTenantGovernanceSnapshotAge -ManifestPath $ManifestPath
+    if ($null -eq $SnapshotAge) {
         throw "Tenant Governance snapshot manifest has no valid CapturedDateTime: $ManifestPath."
     }
-    $SnapshotAgeHours = ((Get-Date).ToUniversalTime() - $CapturedDateTime.UtcDateTime).TotalHours
-    if (-not $AllowStaleSnapshot -and $SnapshotAgeHours -gt $MaxSnapshotAgeHours) {
+    $CapturedDateTime = $SnapshotAge.CapturedDateTime
+    $SnapshotAgeHours = $SnapshotAge.AgeHours
+    $IsStaleSnapshot = $SnapshotAgeHours -gt $MaxSnapshotAgeHours
+    if ($IsStaleSnapshot -and -not $AllowStaleSnapshot) {
         throw "Tenant Governance snapshot is $([math]::Round($SnapshotAgeHours, 1)) hour(s) old, exceeding the $MaxSnapshotAgeHours-hour limit. Run a new snapshot or use -AllowStaleSnapshot explicitly."
+    }
+    if ($IsStaleSnapshot) {
+        Write-Warning "Generating Configuration Analyzer data from a stale Tenant Governance snapshot ($([math]::Round($SnapshotAgeHours, 1)) hour(s) old, limit $MaxSnapshotAgeHours hour(s)). The report shows it as stale."
     }
 
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -373,13 +363,20 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     # Save-EntraOpsTenantGovernanceSnapshotJson), not captured resources.
     $ExcludedFileNames = @('.PendingSnapshotJob.json', '.SnapshotManifest.json', '.LastAttemptManifest.json')
 
-    # ---- Enumerate commits that touched the snapshot folder ------------------------
+    # ---- Enumerate commits that published snapshots --------------------------------
     $logArgs = @('-C', $GitRoot, 'log', "--format=%H%x1f%cI%x1f%s")
     if ($TimeRangeInDays) {
         $since = (Get-Date).ToUniversalTime().AddDays(-1 * [Math]::Abs($TimeRangeInDays)).ToString('o')
         $logArgs += "--since=$since"
     }
     $logArgs += @('--', $RelPath)
+    # Start/Collect polls and rejected attempts update only bookkeeping files. They must
+    # not take a sampling interval away from the completed capture that follows them.
+    # Keep .SnapshotManifest.json in the history: a successful capture can publish a new
+    # manifest even when all resource content is unchanged.
+    foreach ($BookkeepingFile in @('.PendingSnapshotJob.json', '.LastAttemptManifest.json')) {
+        $logArgs += ":(top,exclude,literal)$RelPath/$BookkeepingFile"
+    }
 
     $logOutput = & git @logArgs
     if ($LASTEXITCODE -ne 0) {
@@ -414,16 +411,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
 
     # ---- Thin commits down to the requested snapshot interval ----------------------
     if ($null -ne $SnapshotIntervalComponents -and $commits.Count -gt 2) {
-        $thinned = [System.Collections.Generic.List[object]]::new()
-        $lastKeptDate = $null
-        for ($ci = 0; $ci -lt $commits.Count; $ci++) {
-            $commit = $commits[$ci]
-            $isLast = ($ci -eq $commits.Count - 1)
-            if ($null -eq $lastKeptDate -or $isLast -or $commit.Date -ge (Add-SnapshotInterval -Date $lastKeptDate -Interval $SnapshotIntervalComponents)) {
-                $thinned.Add($commit)
-                $lastKeptDate = $commit.Date
-            }
-        }
+        $thinned = Select-EntraOpsSnapshotIntervalCommit -Commit @($commits) -Years $SnapshotIntervalComponents.Years -Months $SnapshotIntervalComponents.Months -Days $SnapshotIntervalComponents.Days
         Write-Verbose "Snapshot interval '$SnapshotInterval' reduced $($commits.Count) commit(s) to $($thinned.Count) snapshot(s)."
         $commits = $thinned
     }
@@ -698,6 +686,9 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
         status                  = if ($null -ne $SnapshotManifest.SnapshotJobStatus) { "$($SnapshotManifest.SnapshotJobStatus)" } else { $null }
         capturedDateTime        = if ($null -ne $CapturedDateTime) { $CapturedDateTime.ToString('o') } else { $null }
         isComplete              = $SnapshotManifest.IsComplete -eq $true
+        isStale                 = [bool]$IsStaleSnapshot
+        ageHours                = [math]::Round($SnapshotAgeHours, 1)
+        maxAgeHours             = $MaxSnapshotAgeHours
         staleResourceTypes      = @($SnapshotManifest.StaleResourceTypes | Where-Object { $_ } | ForEach-Object { "$_" })
         resourceTypeStates      = @($SnapshotManifest.ResourceTypeStates | ForEach-Object {
                 [ordered]@{
