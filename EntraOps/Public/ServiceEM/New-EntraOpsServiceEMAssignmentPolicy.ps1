@@ -410,6 +410,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
     process {
         Write-Verbose "$logPrefix Beginning EM Assignment Policy"
 
+        $policyFailures = [System.Collections.Generic.List[string]]::new()
         foreach($package in $ServicePackages){
             $policyParams.accessPackage.id = $package.Id
             if($package.Id -notin $policies.AccessPackage.Id){
@@ -419,7 +420,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         $params = $policyParams + $initialPolicyParams
                         $params.displayName = "Initial Workload Membership Policy"
                         & $setReviewSettings $params 'InitialWorkloadMembership'
-                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject -ThrowOnFailure
                     }elseif($package.displayName -like "*ManagementPlane-Admins"){
                         # Admin-only policy for the initial assignment of the workload plane admin; requests are disabled
                         $params = $initialPolicyParams.Clone()
@@ -433,14 +434,14 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         $params.requestorSettings = $adminOnlyRequestorSettings
                         & $setInitialAdminTarget $params
                         & $setReviewSettings $params 'InitialManagementAdmins'
-                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject -ThrowOnFailure
                     } elseif ($package.displayName -like "*WorkloadPlane-Admins" -and -not $mgmtApproverGroupId) {
                         Write-Verbose "$logPrefix Skipping Workload Plane Policy — no ManagementPlane-Admins approver for this scope"
                     }elseif($package.displayName -like "*WorkloadPlane-Admins"){
                         $params = $policyParams + $workloadPlanePolicyParams
                         & $setExtension $params 'WorkloadPlaneAdmins'
                         & $setReviewSettings $params 'WorkloadPlaneAdmins'
-                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject -ThrowOnFailure
                     } elseif ($package.displayName -like "*WorkloadPlane-Users" -and -not $wlUsersApproverId) {
                         Write-Verbose "$logPrefix Skipping Workload Plane Users Policy — no WorkloadPlane-Admins or ManagementPlane-Admins approver for this scope"
                     }elseif($package.displayName -like "*WorkloadPlane-Users"){
@@ -472,15 +473,16 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         $params = $policyParams + $params
                         & $setExtension $params 'WorkloadPlaneUsers'
                         & $setReviewSettings $params 'WorkloadPlaneUsers'
-                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject -ThrowOnFailure
                     }else{
                         $params = $policyParams + $baselinePolicyParams
                         & $setExtension $params 'BaselinePolicy'
                         & $setReviewSettings $params 'BaselinePolicy'
-                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                        $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject -ThrowOnFailure
                     }
                 } catch {
                     Write-Warning "$logPrefix Failed to create assignment policy for package '$($package.DisplayName)' (ID: $($package.Id)). Error: $_"
+                    $policyFailures.Add("assignment policy for '$($package.DisplayName)': $($_.Exception.Message)")
                 }
             }
 
@@ -527,6 +529,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject -ThrowOnFailure
                     } catch {
                         Write-Warning "$logPrefix Failed to create Management Plane Policy for package '$($package.DisplayName)'. ManagementPlane-Admins can't be requested until it exists; re-run the deployment. Error: $_"
+                        $policyFailures.Add("Management Plane Policy for '$($package.DisplayName)': $($_.Exception.Message)")
                     }
                 }
             }
@@ -549,11 +552,15 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                 & $setReviewSettings $params $initialDirectPolicy.ConfigKey
                 try {
                     Write-Verbose "$logPrefix Creating $($initialDirectPolicy.DisplayName) for Access Package ID: $($package.Id)"
-                    $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject
+                    $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject -ThrowOnFailure
                 } catch {
                     Write-Warning "$logPrefix Failed to create $($initialDirectPolicy.DisplayName) for package '$($package.DisplayName)'. Error: $_"
+                    $policyFailures.Add("$($initialDirectPolicy.DisplayName) for '$($package.DisplayName)': $($_.Exception.Message)")
                 }
             }
+        }
+        if ($policyFailures.Count -gt 0) {
+            throw "$logPrefix Failed to create $($policyFailures.Count) assignment policy(ies); re-run the deployment after resolving: $($policyFailures -join '; ')"
         }
     }
 
@@ -563,7 +570,8 @@ function New-EntraOpsServiceEMAssignmentPolicy {
         $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Assignment policies" -logPrefix $logPrefix -Condition {
             $check.Policies = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentPolicyUri -OutputType PSObject -DisableCache
             $actualIds = @($check.Policies | Where-Object { $_.id } | Select-Object -ExpandProperty id)
-            ($expectedIds.Count -eq 0 -and $actualIds.Count -eq 0) -or (Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0
+            # The catalog may hold further policies (e.g. added manually or by another deployment)
+            @($expectedIds | Where-Object { $_ -notin $actualIds }).Count -eq 0
         }
         if(-not $confirmed){
             throw "Assignment policy consistency with Entra not achieved"

@@ -47,6 +47,18 @@ function Import-EntraOpsClassificationOverwrites {
                                                         Invoke-EntraOpsClassificationActionOverwrite, reusing the same
                                                         nested-schema mechanism as the other RBAC systems).
 
+        Each file can be split into tagged variants named <BaseName>_<Tag>.json (for example
+        Classification_RoleDefinitionOverwrites_PAW.json), stored in the tenant-specific folder. They are
+        loaded in addition to the base file, in file name order after it, and their entries are applied in
+        that order. For role actions and API permissions, an entry of a later file therefore takes precedence
+        over an entry of an earlier file for the same action or permission. For role definitions, two rules
+        of Invoke-EntraOpsClassificationRoleOverwrite come first: entries matching the role by
+        RoleDefinitionId take precedence over entries matching it only by RoleDefinitionName, and an entry
+        for the whole role (empty or "*" Service) is applied after the service-specific entries and replaces
+        them. File order only decides between entries of the same kind. Entries of different files for the
+        same item are listed in the output so overlaps are visible, once per RBAC system and unchanged file
+        set in a session (repeated loads list them in the verbose output).
+
         All files contain a JSON array of overwrite entries. For role definition overwrites, Service scopes
         the overwrite to that classification service; use an empty or "*" Service to replace the entire role.
         For other overwrite types, Service (Category for API permission overwrites) is used as the service
@@ -101,40 +113,41 @@ function Import-EntraOpsClassificationOverwrites {
         Join-Path -Path $FolderClassification -ChildPath $TenantNameContext
     } else { $null }
 
-    # Role action overwrites: ONLY read from the tenant-specific folder, no Templates fallback
+    # Role action and API permission overwrites (ResourceApps only): ONLY read from the tenant-specific
+    # folder, no Templates fallback. The base file and every tagged variant (<BaseName>_<Tag>.json) are
+    # loaded in the order of Get-EntraOpsClassificationOverwriteFile.
     if ($null -ne $TenantFolder) {
-        $RoleActionFilePath = Join-Path -Path $TenantFolder -ChildPath 'Classification_RoleActionOverwrites.json'
-        if (Test-Path -Path $RoleActionFilePath) {
-            Write-Verbose "Using tenant-specific role action overwrites file: $RoleActionFilePath"
-            $OverwriteFileMap.Add([PSCustomObject]@{ Type = 'RoleAction'; Path = $RoleActionFilePath })
-        } else {
-            Write-Verbose "No tenant-specific role action overwrites file found at $RoleActionFilePath"
-        }
-
-        # API permission overwrites (ResourceApps only): ONLY read from the tenant-specific folder, no Templates
-        # fallback - same convention as role action overwrites.
-        $ApiPermissionFilePath = Join-Path -Path $TenantFolder -ChildPath 'Classification_ApiPermissionOverwrites.json'
-        if (Test-Path -Path $ApiPermissionFilePath) {
-            Write-Verbose "Using tenant-specific API permission overwrites file: $ApiPermissionFilePath"
-            $OverwriteFileMap.Add([PSCustomObject]@{ Type = 'ApiPermission'; Path = $ApiPermissionFilePath })
-        } else {
-            Write-Verbose "No tenant-specific API permission overwrites file found at $ApiPermissionFilePath"
+        foreach ($TenantOnlyType in @(
+                @{ Type = 'RoleAction'; BaseName = 'Classification_RoleActionOverwrites.json' },
+                @{ Type = 'ApiPermission'; BaseName = 'Classification_ApiPermissionOverwrites.json' }
+            )) {
+            $TypeFiles = @(Get-EntraOpsClassificationOverwriteFile -Folder $TenantFolder -BaseName $TenantOnlyType.BaseName)
+            if ($TypeFiles.Count -eq 0) {
+                Write-Verbose "No tenant-specific $($TenantOnlyType.BaseName) (or tagged variant) found in $TenantFolder"
+            }
+            foreach ($TypeFile in $TypeFiles) {
+                Write-Verbose "Using tenant-specific $($TenantOnlyType.Type) overwrites file: $($TypeFile.Path)"
+                $OverwriteFileMap.Add([PSCustomObject]@{ Type = $TenantOnlyType.Type; Path = $TypeFile.Path })
+            }
         }
     } else {
         Write-Verbose "No tenant context available, skipping tenant-specific role action and API permission overwrites"
     }
 
-    # Role definition overwrites: tenant-specific file preferred, Templates as fallback
+    # Role definition overwrites: the tenant-specific base file is preferred, the Templates base file is
+    # the fallback. Tagged variants are only read from the tenant-specific folder and are loaded in
+    # addition to whichever base file applies.
+    $RoleDefinitionBaseName = 'Classification_RoleDefinitionOverwrites.json'
     $RoleDefinitionFilePath = $null
     if ($null -ne $TenantFolder) {
-        $TenantRoleDefinitionFilePath = Join-Path -Path $TenantFolder -ChildPath 'Classification_RoleDefinitionOverwrites.json'
-        if (Test-Path -Path $TenantRoleDefinitionFilePath) {
-            Write-Verbose "Using tenant-specific role definition overwrites file: $TenantRoleDefinitionFilePath"
-            $RoleDefinitionFilePath = $TenantRoleDefinitionFilePath
+        $TenantRoleDefinitionFile = @(Get-EntraOpsClassificationOverwriteFile -Folder $TenantFolder -BaseName $RoleDefinitionBaseName | Where-Object { $null -eq $_.Tag })
+        if ($TenantRoleDefinitionFile.Count -gt 0) {
+            Write-Verbose "Using tenant-specific role definition overwrites file: $($TenantRoleDefinitionFile[0].Path)"
+            $RoleDefinitionFilePath = $TenantRoleDefinitionFile[0].Path
         }
     }
     if ($null -eq $RoleDefinitionFilePath) {
-        $TemplateRoleDefinitionFilePath = Join-Path -Path $FolderClassification -ChildPath 'Templates/Classification_RoleDefinitionOverwrites.json'
+        $TemplateRoleDefinitionFilePath = Join-Path -Path $FolderClassification -ChildPath "Templates/$RoleDefinitionBaseName"
         if (Test-Path -Path $TemplateRoleDefinitionFilePath) {
             Write-Verbose "Using template role definition overwrites file: $TemplateRoleDefinitionFilePath"
             $RoleDefinitionFilePath = $TemplateRoleDefinitionFilePath
@@ -144,6 +157,12 @@ function Import-EntraOpsClassificationOverwrites {
     }
     if ($null -ne $RoleDefinitionFilePath) {
         $OverwriteFileMap.Add([PSCustomObject]@{ Type = 'RoleDefinition'; Path = $RoleDefinitionFilePath })
+    }
+    if ($null -ne $TenantFolder) {
+        foreach ($TaggedFile in @(Get-EntraOpsClassificationOverwriteFile -Folder $TenantFolder -BaseName $RoleDefinitionBaseName -TaggedOnly)) {
+            Write-Verbose "Using tenant-specific role definition overwrites file: $($TaggedFile.Path)"
+            $OverwriteFileMap.Add([PSCustomObject]@{ Type = 'RoleDefinition'; Path = $TaggedFile.Path })
+        }
     }
 
     if ($OverwriteFileMap.Count -eq 0) {
@@ -318,6 +337,66 @@ function Import-EntraOpsClassificationOverwrites {
                 }) | Out-Null
         }
         #endregion
+    }
+
+    # Make overlaps between files visible: tagged files usually overlap the base file on purpose, so this
+    # is informational rather than a warning. A role definition entry with ID and name yields two keys with
+    # the same label, so messages are deduplicated.
+    $OverlapMessages = [System.Collections.Generic.List[string]]::new()
+    $ReportOverlaps = {
+        param($Overwrites, [string]$Kind, [scriptblock]$GetKeys, [string]$Rule)
+        $FilesByKey = @{}
+        $LabelByKey = @{}
+        foreach ($Overwrite in $Overwrites) {
+            foreach ($KeyInfo in @(& $GetKeys $Overwrite)) {
+                if (-not $FilesByKey.ContainsKey($KeyInfo.Key)) {
+                    $FilesByKey[$KeyInfo.Key] = [System.Collections.Generic.List[string]]::new()
+                    $LabelByKey[$KeyInfo.Key] = $KeyInfo.Label
+                }
+                if (-not $FilesByKey[$KeyInfo.Key].Contains($Overwrite.SourceFile)) { $FilesByKey[$KeyInfo.Key].Add($Overwrite.SourceFile) }
+            }
+        }
+        foreach ($Key in @($FilesByKey.Keys | Sort-Object)) {
+            if ($FilesByKey[$Key].Count -lt 2) { continue }
+            $Message = "Classification overwrite overlap ($RbacSystem): $Kind $($LabelByKey[$Key]) is defined in $($FilesByKey[$Key] -join ', '). $Rule"
+            if (-not $OverlapMessages.Contains($Message)) { $OverlapMessages.Add($Message) }
+        }
+    }
+    & $ReportOverlaps $RoleActionOverwrites 'role action' {
+        param($o)
+        foreach ($Action in $o.RoleDefinitionActions) {
+            foreach ($Scope in $o.RoleAssignmentScopeName) {
+                @{ Key = "$($o.ActionType)|$Action|$Scope".ToLowerInvariant(); Label = "'$Action' on '$Scope'" }
+            }
+        }
+    } 'The entry of the last file is applied last and takes precedence.'
+    & $ReportOverlaps $ApiPermissionOverwrites 'API permission' {
+        param($o)
+        @{ Key = "$($o.RoleDefinitionActions[0])|$($o.ResourceScope)|$($o.ResourceAppId)".ToLowerInvariant(); Label = "'$($o.RoleDefinitionActions[0])'" }
+    } 'The entry of the last file is applied last and takes precedence.'
+    & $ReportOverlaps $RoleDefinitionOverwrites 'role definition' {
+        param($o)
+        $Service = if ([string]::IsNullOrEmpty($o.Service) -or $o.Service -eq '*') { '*' } else { "$($o.Service)" }
+        $Role = if (-not [string]::IsNullOrEmpty($o.RoleDefinitionName)) { $o.RoleDefinitionName } else { $o.RoleDefinitionId }
+        foreach ($Identifier in @($o.RoleDefinitionId, $o.RoleDefinitionName) | Where-Object { -not [string]::IsNullOrEmpty($_) }) {
+            @{ Key = "$Identifier|$Service".ToLowerInvariant(); Label = "'$Role' (service '$Service')" }
+        }
+    } 'An entry matching by RoleDefinitionId takes precedence over a name-only match and a whole-role entry (Service empty or "*") over service-specific entries; otherwise the entry of the last file takes precedence.'
+
+    # A full run loads the overwrites of one RBAC system several times (classification file generation and
+    # the EAM cmdlets), so the overlaps of an unchanged file set are printed once per session.
+    if ($OverlapMessages.Count -gt 0) {
+        if ($null -eq $script:EntraOpsReportedOverwriteOverlaps) {
+            $script:EntraOpsReportedOverwriteOverlaps = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        }
+        $FileSetSignature = @($OverwriteFileMap | ForEach-Object {
+                $Item = Get-Item -LiteralPath $_.Path -ErrorAction SilentlyContinue
+                if ($Item) { "$($Item.FullName)|$($Item.Length)|$($Item.LastWriteTimeUtc.Ticks)" }
+            }) -join ';'
+        $FirstReport = $script:EntraOpsReportedOverwriteOverlaps.Add("$RbacSystem|$FileSetSignature")
+        foreach ($Message in $OverlapMessages) {
+            if ($FirstReport) { Write-Host $Message -ForegroundColor DarkYellow } else { Write-Verbose $Message }
+        }
     }
 
     if ($RoleActionOverwrites.Count -gt 0 -or $RoleDefinitionOverwrites.Count -gt 0 -or $ApiPermissionOverwrites.Count -gt 0) {

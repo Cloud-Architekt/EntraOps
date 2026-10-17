@@ -983,7 +983,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
     
     # Apply role definition classification overwrites (down-/upgrade by RoleDefinitionId or RoleDefinitionName)
     if ($ClassificationOverwrites.RoleDefinitionOverwrites.Count -gt 0) {
-        Write-Host "Applying $($ClassificationOverwrites.RoleDefinitionOverwrites.Count) role definition classification overwrite(s) from Classification_RoleDefinitionOverwrites.json..." -ForegroundColor Yellow
+        Write-Host "Applying $($ClassificationOverwrites.RoleDefinitionOverwrites.Count) role definition classification overwrite(s) from $((@($ClassificationOverwrites.RoleDefinitionOverwrites.SourceFile) | Sort-Object -Unique) -join ', ')..." -ForegroundColor Yellow
         $IdGovRbacClassifications = Invoke-EntraOpsClassificationRoleOverwrite -RbacClassifications $IdGovRbacClassifications -RoleDefinitionOverwrites $ClassificationOverwrites.RoleDefinitionOverwrites -RoleSystem "IdentityGovernance"
     }
 

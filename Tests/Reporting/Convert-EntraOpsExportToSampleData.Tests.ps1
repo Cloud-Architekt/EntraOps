@@ -128,6 +128,42 @@ Describe 'Convert-EntraOpsExportToSampleData' {
         $ReportText | Should -Not -Match 'fabrikam|Secret Person|secret_person'
     }
 
+    It 'uses the anonymized tenant name in reports while a real tenant session is connected (<Case>)' -ForEach @(
+        @{ Case = 'previous context restored'; HadContext = $true }
+        @{ Case = 'absent context removed'; HadContext = $false }
+    ) {
+        $OriginalContext = Get-Variable -Name TenantNameContext -Scope Global -ErrorAction SilentlyContinue
+        $ReportDestination = Join-Path $DestinationPath 'TenantReports'
+        $Identity | ConvertTo-Json | Set-Content -LiteralPath (Join-Path (Split-Path -Parent $PrivilegedEamPath) 'EntraID.json')
+        if ($HadContext) {
+            Set-Variable -Name TenantNameContext -Value 'adatum.onmicrosoft.com' -Scope Global -Force
+        } else {
+            Remove-Variable -Name TenantNameContext -Scope Global -ErrorAction SilentlyContinue
+        }
+        try {
+            $null = Convert-EntraOpsExportToSampleData -SourcePath $SourcePath -DestinationPath $DestinationPath `
+                -SourceTenantName 'fabrikam' -Seed 'pester-seed' -GenerateReports `
+                -ReportDestinationPath $ReportDestination -ProgressAction SilentlyContinue
+
+            $ReportText = Get-ChildItem -LiteralPath $ReportDestination -Recurse -File -Filter '*.js' |
+            Get-Content -Raw | Out-String
+            $ReportText | Should -Not -Match 'adatum'
+            Get-Content -LiteralPath (Join-Path $ReportDestination 'PrivilegedAssets/data/privileged-assets-data.js') -Raw |
+            Should -Match ([regex]::Escape('contoso.onmicrosoft.com'))
+            if ($HadContext) {
+                Get-Variable -Name TenantNameContext -Scope Global -ValueOnly | Should -Be 'adatum.onmicrosoft.com'
+            } else {
+                Get-Variable -Name TenantNameContext -Scope Global -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+            }
+        } finally {
+            if ($null -ne $OriginalContext) {
+                Set-Variable -Name TenantNameContext -Value $OriginalContext.Value -Scope Global -Force
+            } else {
+                Remove-Variable -Name TenantNameContext -Scope Global -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
     It 'reports each processing phase in verbose mode' {
         $VerboseDestination = Join-Path $TestDrive 'destination-verbose'
         $Output = @(Convert-EntraOpsExportToSampleData -SourcePath $SourcePath -DestinationPath $VerboseDestination `

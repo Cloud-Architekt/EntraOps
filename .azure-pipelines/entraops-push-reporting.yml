@@ -4,8 +4,14 @@ trigger: none
 pr: none
 
 parameters:
+  # BEGIN EntraOps managed service connection
+  - name: serviceConnection
+    displayName: Azure Resource Manager service connection
+    type: string
+    default: 'EntraOps-ServiceConnection'
+  # END EntraOps managed service connection
   - name: allowStaleTenantGovernance
-    displayName: Allow a Tenant Governance snapshot older than 30 hours
+    displayName: Allow a Tenant Governance snapshot older than its maximum age for this run (unchecked applies StaleTenantGovernanceSnapshotAction)
     type: boolean
     default: false
   - name: allowPartialTenantGovernance
@@ -24,7 +30,6 @@ resources:
 
 variables:
   ConfigFile: ./EntraOpsConfig.json
-  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
 pool:
   vmImage: ubuntu-latest
@@ -34,10 +39,20 @@ steps:
     fetchDepth: 0
     displayName: "Checkout repository"
 
+  # A run triggered by entraops-pull starts on the commit the pull run started from; use the data it committed since
+  - task: PowerShell@2
+    displayName: "Checkout latest branch commit"
+    inputs:
+      targetType: filePath
+      filePath: "./.azure-pipelines/scripts/Ado-CheckoutLatest.ps1"
+      pwsh: true
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
   - task: AzurePowerShell@5
     displayName: "Generate configured reports"
     inputs:
-      azureSubscription: "$(AzureServiceConnection)"
+      azureSubscription: ${{ parameters.serviceConnection }}
       ScriptType: InlineScript
       Inline: |
         Import-Module ./EntraOps
@@ -58,10 +73,17 @@ steps:
           if ($LASTEXITCODE -ne 0) { throw 'Could not configure the sparse classification checkout.' }
         }
 
-        Invoke-EntraOpsReportingGeneration -ConfigFilePath '$(ConfigFile)' -AuthenticationType FederatedCredentials `
-          -AllowStaleTenantGovernanceSnapshot:([bool]::Parse('${{ parameters.allowStaleTenantGovernance }}')) `
-          -AllowPartialTenantGovernanceSnapshot:([bool]::Parse('${{ parameters.allowPartialTenantGovernance }}')) `
-          -RemoveClassificationRepositoryAfterRun | Out-Host
+        $ReportingParameters = @{
+          ConfigFilePath                         = '$(ConfigFile)'
+          AuthenticationType                     = 'FederatedCredentials'
+          AllowPartialTenantGovernanceSnapshot   = [bool]::Parse('${{ parameters.allowPartialTenantGovernance }}')
+          RemoveClassificationRepositoryAfterRun = $true
+        }
+        # Only a manual override skips the stale snapshot check; otherwise ConfigurationAnalyzer.StaleTenantGovernanceSnapshotAction applies
+        if ([bool]::Parse('${{ parameters.allowStaleTenantGovernance }}')) {
+          $ReportingParameters.AllowStaleTenantGovernanceSnapshot = $true
+        }
+        Invoke-EntraOpsReportingGeneration @ReportingParameters | Out-Host
       pwsh: true
       azurePowerShellVersion: LatestVersion
 

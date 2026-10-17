@@ -298,7 +298,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
         if (-not $SkipRemovals) {
             foreach ($Removal in $PrincipalRemovalPlan) {
                 try {
-                    $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($Removal.Id)" -OutputType PSObject -DisableCache
+                    $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($Removal.Id)" -OutputType PSObject -DisableCache -ThrowOnFailure -SuppressNotFoundWarning
                     if ($IncludeObjectDetails) {
                         Write-Host "  [-] REM  [$($Removal.Type)] $($AdminUnitMember.displayName) ($($Removal.Reason))" -ForegroundColor Yellow
                     } else {
@@ -307,6 +307,11 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                     Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($Removal.Id)/`$ref" -OutputType PSObject -DisableCache -ThrowOnFailure
                     $AuRemoved++
                 } catch {
+                    if (Test-EntraOpsGraphNotFoundError -ErrorRecord $_ -DestinationUri "/beta/administrativeUnits/$($AdminUnitId)") {
+                        Write-Warning "  [SKIP] Object $($Removal.Id) no longer exists - nothing to remove from $AdminUnitName"
+                        $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = "Skipped removal of deleted object $($Removal.Id) from $AdminUnitName" })
+                        continue
+                    }
                     $RemoveFailureMessage = if ($IncludeObjectDetails) { "FAIL REMOVE $($Removal.Id) from $AdminUnitName`: $_" } else { "Failed to remove $($Removal.Type) object $($Removal.Id) from $AdminUnitName" }
                     Write-Warning "  [!] $RemoveFailureMessage"
                     $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $RemoveFailureMessage })
@@ -324,6 +329,11 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                     }
                     $AuRemoved++
                 } catch {
+                    if (Test-EntraOpsGraphNotFoundError -ErrorRecord $_ -DestinationUri "/beta/administrativeUnits/$($AdminUnitId)") {
+                        Write-Warning "  [SKIP] Device $($Removal.Id) no longer exists - nothing to remove from $AdminUnitName"
+                        $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = "Skipped removal of deleted device $($Removal.Id) from $AdminUnitName" })
+                        continue
+                    }
                     $RemoveFailureMessage = if ($IncludeObjectDetails) { "FAIL REMOVE device $($Removal.Id) from $AdminUnitName`: $_" } else { "Failed to remove device $($Removal.Id) from $AdminUnitName" }
                     Write-Warning "  [!] $RemoveFailureMessage"
                     $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $RemoveFailureMessage })
@@ -334,7 +344,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
 
         foreach ($PrincipalId in $PrincipalIdsToAdd) {
             try {
-                $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$PrincipalId" -OutputType PSObject -DisableCache
+                $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$PrincipalId" -OutputType PSObject -DisableCache -ThrowOnFailure -SuppressNotFoundWarning
                 $MemberType = $AdminUnitMember.'@odata.type'.Replace('#microsoft.graph.', '')
                 if ($IncludeObjectDetails) {
                     Write-Host "  [+] ADD  [$MemberType] $($AdminUnitMember.displayName)" -ForegroundColor Green
@@ -345,6 +355,11 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                 Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -Body $OdataBody -OutputType PSObject -ThrowOnFailure
                 $AuAdded++
             } catch {
+                if (Test-EntraOpsGraphNotFoundError -ErrorRecord $_ -DestinationUri "/beta/administrativeUnits/$($AdminUnitId)") {
+                    Write-Warning "  [SKIP] Object $PrincipalId no longer exists (deleted after the last Pull) - not added to $AdminUnitName"
+                    $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = "Skipped deleted object $PrincipalId for $AdminUnitName" })
+                    continue
+                }
                 $AddFailureMessage = if ($IncludeObjectDetails) { "FAIL ADD $PrincipalId to $AdminUnitName`: $_" } else { "Failed to add principal object $PrincipalId to $AdminUnitName" }
                 Write-Warning "  [!] $AddFailureMessage"
                 $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $AddFailureMessage })
@@ -363,6 +378,11 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                 }
                 $AuAdded++
             } catch {
+                if (Test-EntraOpsGraphNotFoundError -ErrorRecord $_ -DestinationUri "/beta/administrativeUnits/$($AdminUnitId)") {
+                    Write-Warning "  [SKIP] Device $DeviceId no longer exists (deleted after the last Pull) - not added to $AdminUnitName"
+                    $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = "Skipped deleted device $DeviceId for $AdminUnitName" })
+                    continue
+                }
                 $AddFailureMessage = if ($IncludeObjectDetails) { "FAIL ADD device $DeviceId to $AdminUnitName`: $_" } else { "Failed to add device $DeviceId to $AdminUnitName" }
                 Write-Warning "  [!] $AddFailureMessage"
                 $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $AddFailureMessage })

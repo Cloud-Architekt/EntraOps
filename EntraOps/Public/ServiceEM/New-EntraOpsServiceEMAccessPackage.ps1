@@ -67,6 +67,7 @@ function New-EntraOpsServiceEMAccessPackage {
         # ControlPlane-Admins is governed outside the catalog and gets no access package
         $packageRoles = @($ServiceRoles | Where-Object { $_.groupType -ne "Unified" -and -not ($_.accessLevel -eq "ControlPlane" -and $_.name -eq "Admins") })
         Write-Verbose "$logPrefix Processing $($packageRoles.Count) Access Package Roles"
+        $packageFailures = [System.Collections.Generic.List[string]]::new()
         foreach ($role in $packageRoles) {
             $packageParams = @{
                 catalog     = @{
@@ -78,12 +79,15 @@ function New-EntraOpsServiceEMAccessPackage {
             if ($packageParams.DisplayName -notin $ServiceAccessPackages.DisplayName) {
                 try {
                     Write-Verbose "$logPrefix Creating Access Package"
-                    $ServiceAccessPackages += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages" -Body (@{catalog = @{id = $ServiceCatalogId }; displayName = $packageParams.DisplayName; description = $packageParams.Description } | ConvertTo-Json -Depth 10) -OutputType PSObject
+                    $ServiceAccessPackages += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/accessPackages" -Body (@{catalog = @{id = $ServiceCatalogId }; displayName = $packageParams.DisplayName; description = $packageParams.Description } | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
                 } catch {
                     Write-Verbose "$logPrefix Failed to create Access Package"
-                    Write-Error $_
+                    $packageFailures.Add("$($packageParams.DisplayName): $($_.Exception.Message)")
                 }
             }
+        }
+        if ($packageFailures.Count -gt 0) {
+            throw "$logPrefix Failed to create $($packageFailures.Count) access package(s): $($packageFailures -join '; ')"
         }
     }
 

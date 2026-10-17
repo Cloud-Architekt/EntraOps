@@ -132,6 +132,15 @@
     Defaults to "PerService" unless overridden in EntraOpsConfig.json or via
     this parameter.
 
+    If the tenant-wide delegation groups of the Centralized model can't be resolved, the cmdlet stops
+    with an error before any object is created, unless -AllowPerServiceFallback is set.
+
+.PARAMETER AllowPerServiceFallback
+    Opt-in for the Centralized governance model: when the tenant-wide ControlPlane or ManagementPlane
+    delegation group can't be resolved or created, fall back to the PerService model and create
+    per-service ControlPlane-Admins and ManagementPlane-Admins groups (with their privileged catalog and
+    Azure roles) instead of stopping with an error. Not set by default.
+
 .PARAMETER ControlPlaneDelegationGroupId
     Object ID of an existing Entra group to use as ControlPlane-Admins instead of
     creating a per-service group, e.g. the ControlPlane-Admins of a governance landing zone shared by
@@ -255,6 +264,8 @@ function New-EntraOpsSubscriptionLandingZone {
 
         [ValidateSet("Centralized", "PerService")]
         [string]$GovernanceModel,
+
+        [switch]$AllowPerServiceFallback,
 
         [string]$AzureRegion,
 
@@ -400,7 +411,7 @@ function New-EntraOpsSubscriptionLandingZone {
             # Centralized model: Use tenant-wide delegation groups
             Write-Verbose "$logPrefix Centralized governance model - using tenant-wide delegation groups"
 
-            # Graceful fallback to PerService if delegation groups not found
+            # Falls back to PerService only with -AllowPerServiceFallback
             $centralizedFailed = $false
             $centralizedError = $null
             
@@ -434,11 +445,14 @@ function New-EntraOpsSubscriptionLandingZone {
                 }
             }
             
+            if ($centralizedFailed -and -not $AllowPerServiceFallback) {
+                throw "$logPrefix The Centralized governance model failed to resolve the tenant-wide delegation groups; nothing was created. Create the delegation groups and set their IDs in EntraOpsConfig.json (ServiceEM.ControlPlaneDelegationGroupId / ServiceEM.ManagementPlaneDelegationGroupId), use -GovernanceModel PerService, or pass -AllowPerServiceFallback to create per-service ControlPlane-Admins and ManagementPlane-Admins groups instead. Error: $centralizedError"
+            }
             if ($centralizedFailed) {
                 Write-Warning "$logPrefix =========================================="
                 Write-Warning "$logPrefix CENTRALIZED GOVERNANCE MODEL FAILED"
                 Write-Warning "$logPrefix =========================================="
-                Write-Warning "$logPrefix Falling back to PerService governance model."
+                Write-Warning "$logPrefix Falling back to PerService governance model (-AllowPerServiceFallback)."
                 Write-Warning "$logPrefix PerService will create per-service admin groups instead."
                 Write-Warning "$logPrefix "
                 Write-Warning "$logPrefix To use Centralized model, either:"

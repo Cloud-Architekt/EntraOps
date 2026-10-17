@@ -2738,6 +2738,19 @@ tr.eo-flash>td {
     margin: -6px 0 14px;
 }
 
+/* Entry removed in the editor: kept visible (Origin "Custom") until the export writes its file */
+#custTable tr.cust-removed td {
+    opacity: 0.55;
+}
+
+#custTable tr.cust-removed td:not(:nth-last-child(-n+2)) {
+    text-decoration: line-through;
+}
+
+#custTable tr.cust-removed {
+    cursor: default;
+}
+
 .cust-footer {
     display: flex;
     align-items: center;

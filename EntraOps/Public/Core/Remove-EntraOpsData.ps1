@@ -8,8 +8,10 @@
         * PrivilegedEAM    - the Privileged EAM export folder (PrivilegedEAM/, including FailedRequests logs)
         * Reports          - the generated report data bundles (Remove-EntraOpsReportingData); the apps are kept
         * Classification   - the tenant classification folders (Classification/<TenantName>/). The manually
-                             maintained Classification_RoleActionOverwrites.json and
-                             Classification_RoleDefinitionOverwrites.json, Classification/Templates,
+                             maintained overwrite files (Classification_RoleActionOverwrites.json,
+                             Classification_RoleDefinitionOverwrites.json, Classification_ApiPermissionOverwrites.json
+                             and their _<Tag> variants such as Classification_RoleDefinitionOverwrites_PAW.json),
+                             Classification/Templates,
                              Classification/Global.json and other files directly in Classification/ (e.g. the
                              Object Classification File) are kept.
         * TenantGovernance - the Tenant Governance snapshots (TenantGovernance/Snapshots/, including the
@@ -127,14 +129,14 @@ function Remove-EntraOpsData {
 
     if ($Content -contains 'Classification') {
         $ClassificationFolder = Join-Path $Path 'Classification'
-        $PreservedTenantFiles = @('Classification_RoleActionOverwrites.json', 'Classification_RoleDefinitionOverwrites.json')
         $TenantFolders = @(Get-ChildItem -LiteralPath $ClassificationFolder -Directory -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -ne 'Templates' -and (-not $TenantName -or $_.Name -in $TenantName) })
         if ($TenantFolders.Count -eq 0) {
             $Results.Add([pscustomobject]@{ Content = 'Classification'; Path = $ClassificationFolder; Removed = $false; Reason = 'NotFound' })
         }
         foreach ($TenantFolder in $TenantFolders) {
-            $Kept = @(Get-ChildItem -LiteralPath $TenantFolder.FullName -Force | Where-Object { $PreservedTenantFiles -contains $_.Name })
+            $Kept = @(Get-ChildItem -LiteralPath $TenantFolder.FullName -File -Force | Where-Object { Test-EntraOpsClassificationOverwriteFileName -Name $_.Name })
+            $PreservedTenantFiles = @($Kept.Name)
             if ($Kept.Count -eq 0) {
                 & $RemoveTarget 'Classification' $TenantFolder.FullName
                 continue

@@ -70,7 +70,7 @@ function New-EntraOpsEAMOutputObject {
         'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
         'RoleSystem'                    = $RoleSystem
         'Classification'                = $Classification
-        'RoleAssignments'               = @($RoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId)
+        'RoleAssignments'               = @($RoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId)
         'Sponsors'                      = $ObjectDetails.Sponsors
         'Owners'                        = $ObjectDetails.Owners
         'OwnedObjects'                  = $ObjectDetails.OwnedObjects

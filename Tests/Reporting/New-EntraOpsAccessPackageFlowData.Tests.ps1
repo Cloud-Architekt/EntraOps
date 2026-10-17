@@ -11,6 +11,7 @@ Describe 'New-EntraOpsAccessPackageFlowData' {
         $script:ManagementPlaneUserId = '22222222-2222-2222-2222-222222222222'
         $script:UnprivilegedUserId = '33333333-3333-3333-3333-333333333333'
         $script:GroupId = '44444444-4444-4444-4444-444444444444'
+        $script:AssignmentsResponse = @()
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid())
         New-Item -ItemType Directory -Path "$script:Root/PrivilegedEAM/EntraID", "$script:Root/TenantGovernance/Snapshots", "$script:Root/App" -Force | Out-Null
 
@@ -48,7 +49,7 @@ Describe 'New-EntraOpsAccessPackageFlowData' {
                 }
                 '*/accessPackages/package1' { return [pscustomobject]@{ displayName = 'Package 1'; catalogId = '' } }
                 '*/accessPackages/package1?*' { return [pscustomobject]@{ accessPackageResourceRoleScopes = @() } }
-                '*/accessPackageAssignments?*' { return @() }
+                '*/accessPackageAssignments?*' { return $script:AssignmentsResponse }
                 '*/groups/44444444-4444-4444-4444-444444444444*' { return [pscustomobject]@{ id = '44444444-4444-4444-4444-444444444444'; displayName = 'Requestor Group' } }
                 default { throw "Unexpected Graph request in test: $Uri" }
             }
@@ -78,5 +79,30 @@ Describe 'New-EntraOpsAccessPackageFlowData' {
         $MemberTiers[$script:ControlPlaneUserId] | Should -Be 'ControlPlane'
         $MemberTiers[$script:ManagementPlaneUserId] | Should -Be 'ManagementPlane'
         $MemberTiers[$script:UnprivilegedUserId] | Should -Be 'UserAccess'
+    }
+
+    It 'maps the beta assignment state, status and subject type' {
+        $script:AssignmentsResponse = @(
+            [pscustomobject]@{
+                id = 'assignment1'; accessPackageId = 'package1'; assignmentPolicyId = 'policy1'
+                assignmentState = 'Delivered'; assignmentStatus = 'Delivered'
+                target = [pscustomobject]@{ objectId = $script:ControlPlaneUserId; displayName = 'CP Admin'; principalName = 'cp@contoso.com'; type = 'User' }
+            }
+            [pscustomobject]@{
+                id = 'assignment2'; accessPackageId = 'package1'; assignmentPolicyId = 'policy1'
+                state = 'Expired'; status = 'ExpiredNotificationTriggered'
+                target = [pscustomobject]@{ objectId = $script:UnprivilegedUserId; subjectType = 'user' }
+            }
+        )
+
+        $Result = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningAction SilentlyContinue
+
+        $Delivered = @($Result.assignments | Where-Object { $_.id -eq 'assignment1' })[0]
+        $Delivered.state | Should -Be 'Delivered'
+        $Delivered.status | Should -Be 'Delivered'
+        $Delivered.target.subjectType | Should -Be 'User'
+        $Expired = @($Result.assignments | Where-Object { $_.id -eq 'assignment2' })[0]
+        $Expired.state | Should -Be 'Expired'
+        $Expired.target.subjectType | Should -Be 'user'
     }
 }

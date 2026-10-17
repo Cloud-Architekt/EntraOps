@@ -103,8 +103,36 @@ function Save-EntraOpsEAMRbacSystemJson {
 
     $EamData = $EamData | Sort-Object ObjectDisplayName, ObjectType, ObjectId
 
+    # A single-item pipeline result collapses an array into one value, so the JSON shape would depend
+    # on the number of entries and change between runs. Classification collections are always written as arrays.
+    $ArrayShapedEntryProperties = @('MatchedActions', 'ScopedObjects')
+    $NormalizeClassificationShape = {
+        param($Owner)
+        $ClassificationProperty = $Owner.PSObject.Properties['Classification']
+        if ($null -eq $ClassificationProperty -or $null -eq $ClassificationProperty.Value) { return }
+        # A scalar string is not a collapsed entry but an unsupported shape; it is left for Test-EntraOpsGeneratedArtifacts to reject.
+        if ($ClassificationProperty.Value -is [string]) { return }
+        if ($ClassificationProperty.Value -isnot [array]) { $Owner.Classification = @($ClassificationProperty.Value) }
+        foreach ($Entry in @($Owner.Classification)) {
+            if ($null -eq $Entry) { continue }
+            foreach ($PropertyName in $ArrayShapedEntryProperties) {
+                if ($Entry -is [System.Collections.IDictionary]) {
+                    if ($Entry.Contains($PropertyName) -and $null -ne $Entry[$PropertyName] -and $Entry[$PropertyName] -isnot [array]) {
+                        $Entry[$PropertyName] = @($Entry[$PropertyName])
+                    }
+                    continue
+                }
+                $EntryProperty = $Entry.PSObject.Properties[$PropertyName]
+                if ($null -ne $EntryProperty -and $null -ne $EntryProperty.Value -and $EntryProperty.Value -isnot [array]) {
+                    $Entry.$PropertyName = @($EntryProperty.Value)
+                }
+            }
+        }
+    }
+
     # Ensure stable RoleAssignments schema so null-only fields are still included in JSON output.
     foreach ($EamObject in $EamData) {
+        & $NormalizeClassificationShape $EamObject
         if ($null -eq $EamObject.RoleAssignments) {
             continue
         }
@@ -115,6 +143,7 @@ function Save-EntraOpsEAMRbacSystemJson {
             if ($null -eq $RoleAssignment) {
                 continue
             }
+            & $NormalizeClassificationShape $RoleAssignment
 
             if (-not $RoleAssignment.PSObject.Properties.Match('RoleAssignmentInstanceId').Count -or [string]::IsNullOrWhiteSpace("$($RoleAssignment.RoleAssignmentInstanceId)")) {
                 $RoleAssignment | Add-Member -NotePropertyName 'RoleAssignmentInstanceId' -NotePropertyValue (

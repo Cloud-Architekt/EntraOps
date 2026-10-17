@@ -6,22 +6,24 @@
     Reads all Entra ID Entitlement Management catalogs and, for each catalog, collects
     the catalog role assignments, registered resources, access packages (including
     their resource role scopes, assignment policies, and all active delivered
-    assignments). Returns one object per catalog — suitable for auditing, change
-    detection, or validating the state of ServiceEM-provisioned authorization
-    structures. No parameters are required; the function reads from the tenant the
-    signed-in context has access to.
+    assignments of each access package). Returns a single object with the properties
+    TenantId, InvokingUser and Catalogs; Catalogs holds one entry per catalog with the
+    properties Catalog, CatalogRoles, CatalogResources and AccessPackages — suitable for
+    auditing, change detection, or validating the state of ServiceEM-provisioned
+    authorization structures. No parameters are required; the function reads from the
+    tenant the signed-in context has access to.
 
 .EXAMPLE
     Get-EntraOpsServiceEMReport
 
-    Returns a report for every catalog in the tenant, including nested access
+    Returns the report for every catalog in the tenant, including nested access
     packages, assignment policies, and active member assignments.
 
 .EXAMPLE
     $report = Get-EntraOpsServiceEMReport
-    $report | Where-Object { $_.Catalog.DisplayName -like "Catalog-MyService" }
+    $report.Catalogs | Where-Object { $_.Catalog.displayName -eq "Catalog-MyService" }
 
-    Filters the full report to the catalog that belongs to "MyService".
+    Returns the report entry of the catalog that belongs to "MyService".
 
 #>
 function Get-EntraOpsServiceEMReport {
@@ -59,7 +61,8 @@ function Get-EntraOpsServiceEMReport {
                 $policies = $accessPackage.AssignmentPolicies
 
                 Write-Verbose "$logPrefix Obtaining Access Package Assignments"
-                $assignments = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignments?`$filter=accessPackage/catalog/id eq '$($catalog.Id)' and state eq 'delivered'&`$expand=accessPackage(`$expand=catalog),accessPackage,target,assignmentPolicy" -OutputType PSObject)
+                # Filtering by navigation path 'accessPackage/id' requires ConsistencyLevel:eventual + $count=true.
+                $assignments = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/assignments?`$count=true&`$filter=accessPackage/id eq '$($accessPackage.Id)' and state eq 'delivered'&`$expand=accessPackage(`$expand=catalog),accessPackage,target,assignmentPolicy" -OutputType PSObject -ConsistencyLevel "eventual")
 
                 $entraOpsAccessPackageResources = @()
                 foreach($resource in $accessPackage.ResourceRoleScopes.Role){

@@ -319,6 +319,45 @@ below). For `Azure`, the `RoleAssignmentScopeName` of an overwrite entry may als
 tokens `<Tier0IncludedResourceScope>`/`<Tier1IncludedResourceScope>`, which are resolved to the
 same ARM scope paths as in `Classification_Azure.Param.json` before the overwrite is applied.
 
+### Split overwrites into tagged files
+
+Every overwrite file can be split into tagged files named `<BaseName>_<Tag>.json`, for example
+`Classification_RoleDefinitionOverwrites_PAW.json` or
+`Classification_RoleActionOverwrites_AzureStrictControlPlane.json`. The tag is the text after the
+last `_` of the file name. EntraOps loads every tagged file from the tenant-specific folder
+(`Classification/<TenantName>/`) in addition to the base file and applies the entries in file name
+order after it. Tagged files in the `Templates` folder are ignored; for role definition overwrites,
+the tenant-specific tagged files are added to the base file that applies (the tenant-specific base file,
+otherwise the template). The tenant-specific overwrite files, tagged files included, are kept by
+`Invoke-EntraOpsPrivilegedEAM` and `Remove-EntraOpsData`.
+
+When several files overwrite the same item, the order decides as follows:
+
+- **Role actions and API permissions**: the entry of the later file is applied last and takes
+  precedence.
+- **Role definitions**: an entry that matches the role by `RoleDefinitionId` takes precedence over an
+  entry that matches it only by `RoleDefinitionName`, and an entry for the whole role (empty or `*`
+  `Service`) is applied after the service-specific entries and replaces them. Only between entries of
+  the same kind does the later file take precedence.
+
+EntraOps lists every item that is overwritten in more than one file when it loads the overwrites.
+
+> **Upgrading from 1.0 or earlier:** before tagged files were supported, a file such as
+> `Classification_RoleActionOverwrites_<anything>.json` in a tenant folder was ignored. It is now
+> loaded and applied. Check your `Classification/<TenantName>/` folders for `_<Tag>.json` files you
+> did not intend to activate - for example a copy of
+> `Samples/Classification_RoleActionOverwrites_AzureStrictControlPlane.json` kept as a reference, which
+> would reclassify the Authorization and Management Group actions on every scope as Control Plane.
+
+The **Customize Overwrites** editor of the [Classification Explorer](../reportings/index.html)
+shows the origin of every entry: *Base* for the base file and the tag for a tagged file (the full
+suffix when two files share a tag), prefixed with *Custom* once an entry is added, edited or removed in
+the editor (for example *Custom - PAW*). It imports and exports several files at once, lists items that
+are overwritten in more than one file, and writes every entry back to its origin file. A new entry goes
+to the target file chosen in the entry dialog: the base file, an existing tagged file or a new one.
+For a tenant without its own role definition base file, the editor loads the template base file
+together with the tenant's tagged files, so saving a tenant base file keeps the template entries.
+
 ### Overwrite classification of role actions
 
 The file `Classification_RoleActionOverwrites.json` allows you to change the tier level of
@@ -371,9 +410,9 @@ of an AzOps/GitOps deployment model. For this operational model, the sample
 overwrites the affected services (Authorization, Management Groups, Subscription Management,
 Billing, Reservations and Capacity, Azure Lighthouse, Blueprints, Custom Providers) so that these
 role actions are **always** classified as Control Plane on scope `/*`, regardless of where they are
-assigned - removing the Management Plane carve-out entirely. Copy the entries you need into your
-tenant-specific `Classification/<TenantName>/Classification_RoleActionOverwrites.json` and adjust
-the `Justification` to your environment.
+assigned - removing the Management Plane carve-out entirely. Copy the file as a tagged file into
+your tenant-specific `Classification/<TenantName>/` folder (or copy the entries you need into
+`Classification_RoleActionOverwrites.json`) and adjust the `Justification` to your environment.
 
 ### Overwrite classification of API permissions (Resource Apps)
 
@@ -747,6 +786,32 @@ information". Both default to (nearly) every supported RBAC system, so most envi
 to change them - narrow them only if you want to limit the update to specific RBAC systems (e.g.
 only regenerate the Azure classification file without touching Entra ID's).
 
+### Intune device scope by designated tier
+
+When `ClassificationParameterScope` contains `DeviceManagement`, the Control Plane scope update
+replaces the scope group placeholders in `Classification_DeviceManagement.Param.json` with groups that
+contain privileged devices or users. It selects users by their **designated tier**
+(`ObjectAdminTierLevelName` from [Custom Security Attributes, Alternate Tier Level Attributes or the
+Object Classification File](../core/index.html#classification-sources)) in the EAM export of the
+`EntraOpsScopes`, not by the tier of their role assignments. Their owned devices and associated PAW
+devices are resolved to the groups they are members of.
+
+`DeviceMgmtPrivilegedTierScope` (parameter of `Update-EntraOpsClassificationControlPlaneScope`, or
+property of `AutomatedControlPlaneScopeUpdate` in `EntraOpsConfig.json`) selects the tiers:
+
+| Value                                     | Selected users and groups                                                                                                                                                                                     |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ControlPlaneAndManagementPlane` (default) | Devices of users designated `ControlPlane` (Tier 0) and `ManagementPlane` (Tier 1), plus the transitive group memberships of these users. A device of both tiers counts as Tier 0.                          |
+| `ControlPlaneDevicesOnly`                 | Only devices of users designated `ControlPlane`; Tier 1 users and user group memberships are skipped.                                                                                                       |
+
+A user with Control Plane access whose designated tier is missing or lower doesn't contribute their
+devices. EntraOps compares the owned and PAW devices of all Control Plane users of the home tenant
+with the selected devices and reports every user with unselected devices as an
+**`IntuneDeviceScopeSelectionGap`** warning (with the user's object ID and whether the user was
+selected as `ControlPlane` or `ManagementPlane` source). Review and set the designated tier of these
+users, or choose the mode that includes them. A selected device is only covered when it is a member
+of a group with an Intune scope tag assignment.
+
 ## Automated protection of privileged assets
 
 Beyond classification, EntraOps can automatically apply Zero Trust protections to the privileged
@@ -769,6 +834,14 @@ setting is enabled):
 The mutating update cmdlets protect against a degraded classification input removing protections wholesale. `Update-EntraOpsPrivilegedConditionalAccessGroup`, `Update-EntraOpsPrivilegedAdministrativeUnit`, `Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit`, and `Update-EntraOpsPrivilegedUnprotectedElmCatalog` plan all eligible removals for each target before mutation. By default, a plan exceeding 50% of the current protected set applies no removals to that target, records an `ABORTED` summary status, and fails the command after the summary so automation cannot silently succeed. Independent additions and protection operations may still proceed.
 
 `RemovalSafetyThreshold` is persisted in all four automated-protection sections of `EntraOpsConfig.json` and can also be supplied as `-RemovalSafetyThreshold <0..1>`. A value of `1.0` permits removal of the complete current protected set, which disables threshold-based `SafetyAbort` protection for automated runs. Use this only when the customer intentionally accepts that risk; `0.5` remains the default. After inspecting the reported plan, use `-ForceRemovalBeyondSafetyThreshold` to apply a deliberate oversized reconciliation. The force switch is invocation-only and intentionally unavailable in the Configuration Wizard.
+
+### Objects deleted after the pull
+
+The push run reads the Privileged EAM export of the last pull. When an object was deleted in
+Microsoft Entra in between, Microsoft Graph returns HTTP 404 for it. `Update-EntraOpsPrivilegedAdministrativeUnit`,
+`Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit`, and `Update-EntraOpsPrivilegedConditionalAccessGroup`
+skip such an object with an `ObjectNotFound` warning instead of failing the run; the next pull removes it
+from the export. Any other failed membership operation still fails the run.
 
 > [!IMPORTANT]
 > Entitlement Management catalog protection requires the elevated Microsoft Graph permission `EntitlementManagement.ReadWrite.All`, and EntraOps cannot distinguish a catalog it protected from one an administrator protected manually - a catalog without Control Plane scope in EntraOps is reverted to "standard" either way. Updating the privilege level protects the catalog itself, but existing role assignments on it remain classified as Control Plane and should still be reviewed and removed.

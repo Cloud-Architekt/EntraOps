@@ -37,6 +37,10 @@
 .PARAMETER InitialRetryDelay
     Initial delay in seconds before first retry. Default is 2 seconds. Uses adaptive backoff with Retry-After header.
 
+.PARAMETER ThrowOnFailure
+    Throw a terminating error instead of writing a non-terminating error and returning $null when the
+    request fails. Use when a failed or incomplete result must not be mistaken for "no results".
+
 .PARAMETER SuppressNotFoundWarning
     Downgrade the non-retryable-error warning to Write-Verbose specifically for HTTP 404 (NotFound)
     responses. Use for "probe for absence" lookups where a 404 is an expected, common outcome rather
@@ -52,6 +56,9 @@
     responses. Use together with -ThrowOnFailure at call sites that catch the error and emit their
     own, more actionable warning (e.g. naming the missing Graph permission), so the same failure is
     not reported twice.
+
+.PARAMETER FirstPageOnly
+    Return only the first page and do not follow @odata.nextLink, e.g. for intentional $top samples.
 
 .EXAMPLE
     Get list of all transitive role assignments for a principal in Microsoft Entra ID by principalId and using ConsistencyLevel.
@@ -141,7 +148,7 @@ function Invoke-EntraOpsMsGraphQuery {
         if ($Body -match '(?s)(\{\s*"error".*\})\s*$') {
             try {
                 return ($Matches[1] | ConvertFrom-Json -ErrorAction Stop).error
-            } catch { }
+            } catch { Write-Verbose "Microsoft Graph error body is not valid JSON, returning no error details: $($_.Exception.Message)" }
         }
         return $null
     }
@@ -366,7 +373,7 @@ function Invoke-EntraOpsMsGraphQuery {
                                             if ($_.Exception.Response.Headers -and $_.Exception.Response.Headers['Retry-After']) {
                                                 $PageRetryAfter = [int]$_.Exception.Response.Headers['Retry-After']
                                             }
-                                        } catch { }
+                                        } catch { Write-Verbose "Ignoring unreadable Retry-After header, using exponential backoff: $($_.Exception.Message)" }
                                         
                                         if ($null -ne $PageRetryAfter -and $PageRetryAfter -gt 0) {
                                             $PageDelay = $PageRetryAfter
@@ -571,7 +578,7 @@ function Invoke-EntraOpsMsGraphQuery {
                                             if ($_.Exception.Response.Headers -and $_.Exception.Response.Headers['Retry-After']) {
                                                 $PageRetryAfter = [int]$_.Exception.Response.Headers['Retry-After']
                                             }
-                                        } catch { }
+                                        } catch { Write-Verbose "Ignoring unreadable Retry-After header, using exponential backoff: $($_.Exception.Message)" }
                                         
                                         if ($null -ne $PageRetryAfter -and $PageRetryAfter -gt 0) {
                                             $PageDelay = $PageRetryAfter

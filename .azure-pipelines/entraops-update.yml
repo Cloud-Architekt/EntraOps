@@ -1,10 +1,20 @@
 # Azure DevOps Pipeline for EntraOps Module Self-Update
 # Equivalent to GitHub Actions: Update-EntraOps.yaml
 #
+# The update runs in three jobs:
+#   1. Resolve:  clones the configured upstream ref and archives the immutable candidate without executing it
+#   2. Validate: runs the candidate validation (Pester and optional browser tests) without repository or Azure credentials
+#                and without a repository checkout, so candidate code can't read the generated tenant data
+#   3. Apply:    applies the validated candidate and publishes it as a pull request (branch entraops/update-<commit>)
+#                or, with AutomatedEntraOpsUpdate.PublicationMode DirectPush, pushes it to the pipeline branch
+# No job signs in to Azure; the pipeline doesn't use a service connection.
+#
 # Prerequisites:
-#   1. Create an Azure DevOps Service Connection with Workload Identity Federation
-#   2. Configure pipeline variables (see below) or link a Variable Group
-#   3. If updating from a private upstream, set ENTRAOPS_PAT as a secret pipeline variable
+#   1. Grant the project Build Service "Contribute", "Create branch" and "Contribute to pull requests" on the repository
+#      ("Force push" isn't needed: a branch left from a closed pull request is kept, not overwritten).
+#      DirectPush needs only "Contribute", plus "Bypass policies when pushing" for a branch protected by policies.
+#   2. If updating from a private upstream, set EntraOpsUpdatePat as a secret pipeline variable
+#   3. Keep './.github/scripts' in AutomatedEntraOpsUpdate.TargetUpdateFolders; it contains the trusted candidate validator
 #
 # Scheduling: Run Update-EntraOpsAzureDevOpsSchedules from the EntraOps module
 # after changing EntraOpsConfig.json.
@@ -12,47 +22,167 @@
 trigger: none
 pr: none
 
+parameters:
+  - name: force
+    displayName: Validate and apply even when this source commit is already installed
+    type: boolean
+    default: false
+  - name: publicationMode
+    displayName: Publication mode for this run
+    type: string
+    default: Configured
+    values:
+      - Configured
+      - PullRequest
+      - DirectPush
+
 # BEGIN EntraOps managed schedules
 # END EntraOps managed schedules
 
 variables:
   ConfigFile: ./EntraOpsConfig.json
-  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
-pool:
-  vmImage: ubuntu-latest
+jobs:
+  - job: Resolve
+    displayName: "Resolve update candidate without executing it"
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - checkout: self
+        displayName: "Checkout repository"
 
-steps:
-  - checkout: self
-    persistCredentials: true
-    displayName: "Checkout repository"
+      - task: PowerShell@2
+        name: resolve
+        displayName: "Resolve immutable candidate"
+        inputs:
+          targetType: filePath
+          filePath: "./.azure-pipelines/scripts/Resolve-EntraOpsAdoUpdate.ps1"
+          arguments: "-ConfigFile '$(ConfigFile)' -Force:$${{ parameters.force }} -PublicationModeOverride '${{ parameters.publicationMode }}'"
+          pwsh: true
+        env:
+          # Optional: Personal Access Token for private upstream repos
+          ENTRAOPS_PAT: $(EntraOpsUpdatePat)
 
-  - task: AzurePowerShell@5
-    displayName: "Update EntraOps Module & Resources"
-    inputs:
-      azureSubscription: "$(AzureServiceConnection)"
-      ScriptType: InlineScript
-      Inline: |
-        Import-Module ./EntraOps
-        $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
-        if ($Config.AutomatedEntraOpsUpdate.ApplyAutomatedEntraOpsUpdate -ne $true) {
-          Write-Host 'Automated EntraOps updates are disabled in the configuration.'
-          exit 0
-        }
-        Update-EntraOps -ConfigFile '$(ConfigFile)'
-      pwsh: true
-      azurePowerShellVersion: LatestVersion
-    env:
-      # Optional: Personal Access Token for private upstream repos
-      ENTRAOPS_PAT: $(EntraOpsUpdatePat)
+      - task: PublishPipelineArtifact@1
+        displayName: "Transfer candidate to the credential-free validation job"
+        condition: and(succeeded(), eq(variables['resolve.validation_required'], 'true'))
+        inputs:
+          targetPath: "$(Build.ArtifactStagingDirectory)/EntraOps-update-candidate.tar"
+          artifact: EntraOps-update-candidate
+          publishLocation: pipeline
 
-  # Commit updated module/resources back to the repo
-  - task: PowerShell@2
-    displayName: "Git Commit & Push"
-    inputs:
-      targetType: filePath
-      filePath: "./.azure-pipelines/scripts/Ado-GitPush.ps1"
-      arguments: '-CommitMessage "EntraOps Update"'
-      pwsh: true
-    env:
-      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      # The validation job has no checkout: it receives only the trusted validators of this repository
+      - task: PublishPipelineArtifact@1
+        displayName: "Transfer trusted validators to the validation job"
+        condition: and(succeeded(), eq(variables['resolve.validation_required'], 'true'))
+        inputs:
+          targetPath: "$(Build.ArtifactStagingDirectory)/EntraOps-trusted-validators"
+          artifact: EntraOps-trusted-validators
+          publishLocation: pipeline
+
+  - job: Validate
+    displayName: "Validate candidate without credentials"
+    dependsOn: Resolve
+    condition: and(succeeded(), eq(dependencies.Resolve.outputs['resolve.validation_required'], 'true'))
+    timeoutInMinutes: 30
+    pool:
+      vmImage: ubuntu-latest
+    variables:
+      CandidateDigest: $[ dependencies.Resolve.outputs['resolve.candidate_digest'] ]
+      RunBrowserTests: $[ dependencies.Resolve.outputs['resolve.run_browser_tests'] ]
+    steps:
+      # Candidate tests and npm scripts run in this job. A sparse checkout would still fetch the whole
+      # commit, including the generated tenant data, into .git; so the repository isn't checked out.
+      - checkout: none
+
+      - download: current
+        artifact: EntraOps-trusted-validators
+        displayName: "Download trusted validators"
+
+      - download: current
+        artifact: EntraOps-update-candidate
+        displayName: "Download resolved candidate"
+
+      - task: UseNode@1
+        displayName: "Use Node.js 22"
+        condition: and(succeeded(), eq(variables.RunBrowserTests, 'true'))
+        inputs:
+          version: "22.x"
+
+      - task: PowerShell@2
+        displayName: "Install candidate validation dependencies"
+        inputs:
+          targetType: filePath
+          filePath: "$(Pipeline.Workspace)/EntraOps-trusted-validators/Install-EntraOpsUpdateValidationDependencies.ps1"
+          pwsh: true
+
+      - task: PowerShell@2
+        displayName: "Validate candidate"
+        inputs:
+          targetType: filePath
+          filePath: "$(Pipeline.Workspace)/EntraOps-trusted-validators/Test-EntraOpsUpdateCandidate.ps1"
+          arguments: >-
+            -CandidateRoot "$(Agent.TempDirectory)/TmpUpdate"
+            -ArchivePath "$(Pipeline.Workspace)/EntraOps-update-candidate/EntraOps-update-candidate.tar"
+            -ExpectedArchiveSha256 "$(CandidateDigest)"
+            -RunBrowserTests:$$(RunBrowserTests)
+          pwsh: true
+
+  - job: Apply
+    displayName: "Apply candidate and publish update"
+    dependsOn:
+      - Resolve
+      - Validate
+    condition: and(eq(dependencies.Resolve.result, 'Succeeded'), eq(dependencies.Resolve.outputs['resolve.update_required'], 'true'), or(ne(dependencies.Resolve.outputs['resolve.validation_required'], 'true'), eq(dependencies.Validate.result, 'Succeeded')))
+    timeoutInMinutes: 20
+    pool:
+      vmImage: ubuntu-latest
+    variables:
+      SourceSha: $[ dependencies.Resolve.outputs['resolve.source_sha'] ]
+      ValidationRequired: $[ dependencies.Resolve.outputs['resolve.validation_required'] ]
+      RunBrowserTests: $[ dependencies.Resolve.outputs['resolve.run_browser_tests'] ]
+      PublicationMode: $[ dependencies.Resolve.outputs['resolve.publication_mode'] ]
+    steps:
+      - checkout: self
+        displayName: "Checkout repository"
+
+      # Update-EntraOps can replace ./.azure-pipelines. Freeze the reviewed publisher before applying
+      # the candidate so the job access token never reaches candidate code.
+      - task: PowerShell@2
+        displayName: "Stage trusted publisher and prepare candidate"
+        inputs:
+          targetType: filePath
+          filePath: "./.azure-pipelines/scripts/Prepare-EntraOpsAdoUpdate.ps1"
+          arguments: >-
+            -ConfigFile "$(ConfigFile)"
+            -SourceCommit "$(SourceSha)"
+            -PublisherPath "$(Agent.TempDirectory)/EntraOpsPublisher"
+          pwsh: true
+        env:
+          ENTRAOPS_PAT: $(EntraOpsUpdatePat)
+
+      - task: PowerShell@2
+        displayName: "Apply candidate without credentials"
+        inputs:
+          targetType: filePath
+          filePath: "./.azure-pipelines/scripts/Install-EntraOpsAdoUpdate.ps1"
+          arguments: >-
+            -ConfigFile "$(ConfigFile)"
+            -SourceCommit "$(SourceSha)"
+            -ValidationRequired:$$(ValidationRequired)
+            -BrowserTestsValidated:$$(RunBrowserTests)
+          pwsh: true
+
+      - task: PowerShell@2
+        displayName: "Publish update"
+        inputs:
+          targetType: filePath
+          filePath: "$(Agent.TempDirectory)/EntraOpsPublisher/Publish-EntraOpsAdoUpdate.ps1"
+          arguments: >-
+            -SourceCommit "$(SourceSha)"
+            -ValidationRequired:$$(ValidationRequired)
+            -BrowserTests:$$(RunBrowserTests)
+            -PublicationMode "$(PublicationMode)"
+          pwsh: true
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)

@@ -203,6 +203,31 @@ Describe 'New-EntraOpsWorkloadIdentity provisioning safety' {
         }
     }
 
+    It 'uses the exact subject for the Microsoft Entra issuer of new Azure DevOps service connections' {
+        $ConfigPath = Join-Path $TestDrive 'ado-entra-issuer.json'
+        New-WorkloadIdentityTestConfig -Path $ConfigPath -RbacSystems @('EntraID') -DevOpsPlatform AzureDevOps
+        $Issuer = 'https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0'
+        $Subject = '/eid1/c/pub/t/example-tenant/a/example-app/sc/example-org/example-connection'
+
+        New-EntraOpsWorkloadIdentity -AppDisplayName 'entraops' -ConfigFile $ConfigPath -ExistingSpObjectId 'workload-sp-object-id' -CreateFederatedCredential `
+            -AdoOrgName 'Contoso' -AdoProjectName 'Identity' -AdoServiceConnectionName 'EntraOps-WIF' -AdoFederatedCredentialIssuer $Issuer -AdoFederatedCredentialSubject $Subject 6>$null | Out-Null
+
+        Should -Invoke New-MgApplicationFederatedIdentityCredential -Times 1 -ParameterFilter {
+            $BodyParameter.issuer -ceq $Issuer -and $BodyParameter.subject -ceq $Subject
+        }
+    }
+
+    It 'requires the exact subject for the Microsoft Entra issuer instead of deriving it' {
+        $ConfigPath = Join-Path $TestDrive 'ado-entra-issuer-no-subject.json'
+        New-WorkloadIdentityTestConfig -Path $ConfigPath -RbacSystems @('EntraID') -DevOpsPlatform AzureDevOps
+
+        { New-EntraOpsWorkloadIdentity -AppDisplayName 'entraops' -ConfigFile $ConfigPath -CreateFederatedCredential `
+                -AdoOrgName 'Contoso' -AdoProjectName 'Identity' -AdoServiceConnectionName 'EntraOps-WIF' `
+                -AdoFederatedCredentialIssuer 'https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0' } |
+        Should -Throw '*AdoFederatedCredentialSubject is required*'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
     It 'uses a URL-friendly Azure DevOps federated credential name but keeps the raw subject' {
         $ConfigPath = Join-Path $TestDrive 'ado-federation-spaces.json'
         New-WorkloadIdentityTestConfig -Path $ConfigPath -RbacSystems @('EntraID') -DevOpsPlatform AzureDevOps

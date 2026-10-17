@@ -669,7 +669,7 @@ function Get-EntraOpsPrivilegedEAMAzure {
     # Applied after the constrained-delegation evaluation so an explicit operator pin always wins.
     $ClassificationOverwrites = Import-EntraOpsClassificationOverwrites -RbacSystem "Azure" -FolderClassification $FolderClassification
     if ($ClassificationOverwrites.RoleDefinitionOverwrites.Count -gt 0) {
-        Write-Host "Applying $($ClassificationOverwrites.RoleDefinitionOverwrites.Count) role definition classification overwrite(s) from Classification_RoleDefinitionOverwrites.json..." -ForegroundColor Yellow
+        Write-Host "Applying $($ClassificationOverwrites.RoleDefinitionOverwrites.Count) role definition classification overwrite(s) from $((@($ClassificationOverwrites.RoleDefinitionOverwrites.SourceFile) | Sort-Object -Unique) -join ', ')..." -ForegroundColor Yellow
         $AzureRbacClassifications = @(Invoke-EntraOpsClassificationRoleOverwrite -RbacClassifications $AzureRbacClassifications -RoleDefinitionOverwrites $ClassificationOverwrites.RoleDefinitionOverwrites -RoleSystem "Azure")
     }
 

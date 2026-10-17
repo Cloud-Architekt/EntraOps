@@ -6,6 +6,36 @@
     Recovers information omitted by Tenant Governance snapshots: groupMembers user-set IDs,
     access package resource-role scopes, and current package assignments. The generated data is
     merged with the snapshot-only Configuration Analyzer dataset by the static report.
+
+.PARAMETER RepoRoot
+    Root of the EntraOps working folder with TenantGovernance/Snapshots, PrivilegedEAM and EntraOpsConfig.json.
+    Defaults to the EntraOps working folder ($EntraOpsBaseFolder).
+
+.PARAMETER SnapshotPath
+    Folder of the Tenant Governance snapshots. Defaults to <RepoRoot>/TenantGovernance/Snapshots. The folder must
+    exist; run Save-EntraOpsTenantGovernanceSnapshotJson first.
+
+.PARAMETER AppRoot
+    Folder of the Access Package Flow reporting app. Defaults to <RepoRoot>/Reports/AccessPackageFlow.
+
+.PARAMETER OutFile
+    Path of the generated data file. Defaults to <AppRoot>/data/access-package-assignments-data.js.
+
+.PARAMETER ResolveRequestorApproverTiers
+    Resolves the tiers of requestor and approver groups through transitive group membership and the Privileged EAM
+    export in <RepoRoot>/PrivilegedEAM, and the classification of access package targets. Defaults to
+    ConfigurationAnalyzer.ResolveGroupMembersForPrivilegedAssets of <RepoRoot>/EntraOpsConfig.json (true when not set).
+
+.PARAMETER PassThru
+    Returns the generated dataset in addition to writing the data file.
+
+.EXAMPLE
+    Generate the Access Package Flow enrichment data from the snapshots in the EntraOps working folder.
+    New-EntraOpsAccessPackageFlowData
+
+.EXAMPLE
+    Generate the data without resolving group tiers and return the dataset.
+    New-EntraOpsAccessPackageFlowData -ResolveRequestorApproverTiers $false -PassThru
 #>
 
 function New-EntraOpsAccessPackageFlowData {
@@ -191,17 +221,22 @@ function New-EntraOpsAccessPackageFlowData {
                 $PackageAssignments = @(Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignments?`$filter=accessPackageId eq '${PackageId}'&`$expand=target" -OutputType PSObject -ThrowOnFailure)
                 foreach ($Assignment in $PackageAssignments) {
                     $Target = $Assignment.target
+                    # The beta accessPackageAssignment exposes assignmentState/assignmentStatus and
+                    # target.type; v1.0 names them state/status and target.subjectType.
+                    $AssignmentState = if ($Assignment.assignmentState) { $Assignment.assignmentState } else { $Assignment.state }
+                    $AssignmentStatus = if ($Assignment.assignmentStatus) { $Assignment.assignmentStatus } else { $Assignment.status }
+                    $SubjectType = if ($Target.type) { $Target.type } else { $Target.subjectType }
                     $Assignments.Add([ordered]@{
                             id                 = "$($Assignment.id)"
                             accessPackageId    = "$($Assignment.accessPackageId)"
                             assignmentPolicyId = "$($Assignment.assignmentPolicyId)"
-                            state              = "$($Assignment.state)"
-                            status             = "$($Assignment.status)"
+                            state              = "$AssignmentState"
+                            status             = "$AssignmentStatus"
                             target             = [ordered]@{
                                 objectId      = "$($Target.objectId)"
                                 displayName   = "$($Target.displayName)"
                                 principalName = "$($Target.principalName)"
-                                subjectType   = "$($Target.subjectType)"
+                                subjectType   = "$SubjectType"
                             }
                         })
                 }

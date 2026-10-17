@@ -40,7 +40,7 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
     It 'keeps every embedded PowerShell block parseable after template expansion' {
         foreach ($PipelineName in $PipelineNames) {
             $Pipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw | ConvertFrom-Yaml
-            foreach ($Step in @($Pipeline.steps)) {
+            foreach ($Step in @($Pipeline.steps) + @($Pipeline.jobs | ForEach-Object { $_.steps })) {
                 $ScriptText = if ($Step.inputs.Inline) {
                     [string]$Step.inputs.Inline
                 } elseif ($Step.inputs.targetType -eq 'inline' -and $Step.inputs.script) {
@@ -61,7 +61,7 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
     }
 
     It 'uses the repository-local git helper from every writing pipeline' -Skip:$IsConfiguredDeployment {
-        foreach ($PipelineName in @('entraops-pull.yml', 'entraops-pull-tenant-governance.yml', 'entraops-update.yml')) {
+        foreach ($PipelineName in @('entraops-pull.yml', 'entraops-pull-tenant-governance.yml')) {
             $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw
             $Content | Should -Match ([regex]::Escape('./.azure-pipelines/scripts/Ado-GitPush.ps1'))
             $Content | Should -Not -Match ([regex]::Escape('./scripts/ado/Ado-GitPush.ps1'))
@@ -107,10 +107,93 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
         }
     }
 
-    It 'uses the documented service connection by default and allows an override' -Skip:$IsConfiguredDeployment {
-        foreach ($PipelineName in @('entraops-pull.yml', 'entraops-push.yml', 'entraops-push-reporting.yml', 'entraops-pull-tenant-governance.yml', 'entraops-update.yml')) {
+    It 'resolves the service connection from a compile-time parameter in a managed region' -Skip:$IsConfiguredDeployment {
+        # Azure Pipelines authorizes service connections before runtime expressions are evaluated
+        foreach ($PipelineName in @('entraops-pull.yml', 'entraops-push.yml', 'entraops-push-reporting.yml', 'entraops-pull-tenant-governance.yml')) {
             $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw
-            $Content | Should -Match "AzureServiceConnection: \$\[ coalesce\(variables\['EntraOpsAzureServiceConnection'\], 'EntraOps-ServiceConnection'\) \]"
+            $Pipeline = $Content | ConvertFrom-Yaml
+            $Parameter = @($Pipeline.parameters | Where-Object { $_.name -eq 'serviceConnection' })
+            $Parameter.Count | Should -Be 1 -Because $PipelineName
+            $Parameter[0].default | Should -Be 'EntraOps-ServiceConnection'
+            $Content | Should -Match '(?m)^\s*# BEGIN EntraOps managed service connection\r?$'
+            $Content | Should -Not -Match 'AzureServiceConnection'
+            $AzureSteps = @($Pipeline.steps | Where-Object task -Like 'AzurePowerShell@*')
+            $AzureSteps.Count | Should -BeGreaterThan 0
+            foreach ($Step in $AzureSteps) {
+                $Step.inputs.azureSubscription | Should -Be '${{ parameters.serviceConnection }}' -Because $PipelineName
+            }
+        }
+    }
+
+    It 'never persists the job access token in the git configuration' {
+        foreach ($PipelineName in $PipelineNames) {
+            $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw
+            $Content | Should -Not -Match 'persistCredentials:\s*true' -Because "$PipelineName runs module code after checkout"
+        }
+    }
+
+    It 'processes the latest branch commit in pipelines triggered by the pull pipeline' -Skip:$IsConfiguredDeployment {
+        foreach ($PipelineName in @('entraops-push.yml', 'entraops-push-reporting.yml')) {
+            $Pipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw | ConvertFrom-Yaml
+            $Steps = @($Pipeline.steps)
+            $LatestIndex = [array]::FindIndex($Steps, [Predicate[object]] { param($Step) $Step.inputs.filePath -eq './.azure-pipelines/scripts/Ado-CheckoutLatest.ps1' })
+            $AzureIndex = [array]::FindIndex($Steps, [Predicate[object]] { param($Step) $Step.task -like 'AzurePowerShell@*' })
+            $LatestIndex | Should -Be 1 -Because "$PipelineName must switch to the latest commit right after checkout"
+            $AzureIndex | Should -BeGreaterThan $LatestIndex
+            $Steps[$LatestIndex].env.SYSTEM_ACCESSTOKEN | Should -Be '$(System.AccessToken)'
+        }
+    }
+
+    It 'resolves, validates and applies updates in separate jobs and publishes a pull request without Azure credentials' -Skip:$IsConfiguredDeployment {
+        $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-update.yml') -Raw
+        $Pipeline = $Content | ConvertFrom-Yaml
+        @($Pipeline.jobs.job) | Should -Be @('Resolve', 'Validate', 'Apply')
+        $Content | Should -Not -Match 'AzurePowerShell@|azureSubscription|Ado-GitPush'
+        $Resolve, $Validate, $Apply = $Pipeline.jobs
+
+        $ResolveStep = $Resolve.steps | Where-Object name -EQ 'resolve'
+        $ResolveStep.inputs.filePath | Should -Be './.azure-pipelines/scripts/Resolve-EntraOpsAdoUpdate.ps1'
+        $ResolveStep.env.ENTRAOPS_PAT | Should -Be '$(EntraOpsUpdatePat)'
+
+        # Candidate code runs only in the validation job. A sparse checkout would still fetch the generated
+        # tenant data into .git, so the job has no checkout and receives the trusted validators as an artifact.
+        $Validate.condition | Should -Match "dependencies\.Resolve\.outputs\['resolve\.validation_required'\], 'true'"
+        @($Validate.steps | Where-Object { $_.ContainsKey('checkout') }).checkout | Should -Be @('none')
+        @($Validate.steps.download | Where-Object { $_ }) | Should -Be @('current', 'current')
+        @($Validate.steps.artifact | Where-Object { $_ }) | Should -Be @('EntraOps-trusted-validators', 'EntraOps-update-candidate')
+        $ValidatorArtifact = $Resolve.steps | Where-Object { $_.inputs.artifact -eq 'EntraOps-trusted-validators' }
+        $ValidatorArtifact.inputs.targetPath | Should -Be '$(Build.ArtifactStagingDirectory)/EntraOps-trusted-validators'
+        ($Validate.steps | ConvertTo-Json -Depth 10) | Should -Not -Match 'AccessToken|ENTRAOPS_PAT'
+        $DependenciesStep = $Validate.steps | Where-Object displayName -EQ 'Install candidate validation dependencies'
+        $DependenciesStep.inputs.filePath | Should -Be '$(Pipeline.Workspace)/EntraOps-trusted-validators/Install-EntraOpsUpdateValidationDependencies.ps1'
+        $ValidationStep = $Validate.steps | Where-Object displayName -EQ 'Validate candidate'
+        $ValidationStep.inputs.filePath | Should -Be '$(Pipeline.Workspace)/EntraOps-trusted-validators/Test-EntraOpsUpdateCandidate.ps1'
+        $ValidationStep.inputs.arguments | Should -Match '\-ExpectedArchiveSha256 "\$\(CandidateDigest\)"'
+        $ValidationStep.inputs.arguments | Should -Match ([regex]::Escape('-RunBrowserTests:$$(RunBrowserTests)'))
+
+        $Apply.condition | Should -Match "eq\(dependencies\.Validate\.result, 'Succeeded'\)"
+        $ApplySteps = @($Apply.steps | Where-Object { $_.displayName })
+        $StageIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.inputs.filePath -eq './.azure-pipelines/scripts/Prepare-EntraOpsAdoUpdate.ps1' })
+        $InstallIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.inputs.filePath -eq './.azure-pipelines/scripts/Install-EntraOpsAdoUpdate.ps1' })
+        $PublishIndex = [array]::FindIndex($ApplySteps, [Predicate[object]] { param($Step) $Step.displayName -eq 'Publish update' })
+        $StageIndex | Should -BeGreaterThan -1
+        $StageIndex | Should -BeLessThan $InstallIndex
+        $InstallIndex | Should -BeLessThan $PublishIndex
+        $ApplySteps[$StageIndex].inputs.arguments | Should -Match ([regex]::Escape('-PublisherPath "$(Agent.TempDirectory)/EntraOpsPublisher"'))
+        $ApplySteps[$PublishIndex].inputs.filePath | Should -Be '$(Agent.TempDirectory)/EntraOpsPublisher/Publish-EntraOpsAdoUpdate.ps1'
+        $ApplySteps[$PublishIndex].inputs.arguments | Should -Match ([regex]::Escape('-PublicationMode "$(PublicationMode)"'))
+        $Apply.variables.PublicationMode | Should -Be "`$[ dependencies.Resolve.outputs['resolve.publication_mode'] ]"
+        $ResolveStep = $Resolve.steps | Where-Object { $_.name -eq 'resolve' }
+        $ResolveStep.inputs.arguments | Should -Match ([regex]::Escape("-PublicationModeOverride '`${{ parameters.publicationMode }}'"))
+        @($ApplySteps | Where-Object { $_.env.SYSTEM_ACCESSTOKEN }).Count | Should -Be 1
+        $ApplySteps[$PublishIndex].env.SYSTEM_ACCESSTOKEN | Should -Be '$(System.AccessToken)'
+        $ApplySteps[$InstallIndex].env | Should -BeNullOrEmpty
+        ($ApplySteps | Where-Object { $_.env.ENTRAOPS_PAT }).inputs.filePath | Should -Be './.azure-pipelines/scripts/Prepare-EntraOpsAdoUpdate.ps1'
+        # The template contains orchestration only; every PowerShell task delegates to a script.
+        foreach ($Step in $Pipeline.jobs.steps | Where-Object task -EQ 'PowerShell@2') {
+            $Step.inputs.targetType | Should -Be 'filePath'
+            $Step.inputs.script | Should -BeNullOrEmpty
+            $Step.inputs.filePath | Should -Not -BeNullOrEmpty
         }
     }
 

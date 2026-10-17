@@ -95,3 +95,34 @@ for (const reportApp of ["AccessPackageFlow", "ConditionalAccessAnalysis", "Conf
         await expect(health.locator("button")).toHaveCount(0);
     });
 }
+
+for (const reportApp of ["ConfigurationAnalyzer", "PimRequestFlow"]) {
+    test(`${reportApp} shows an outdated complete Tenant Governance snapshot`, async ({ page }) => {
+        const reportUrl = pathToFileURL(join(reportsRoot, reportApp, "index.html")).href;
+        await page.goto(reportUrl);
+        await page.evaluate(() => {
+            window.DATA = {
+                snapshotHealth: {
+                    status: "succeeded",
+                    isComplete: true,
+                    isStale: true,
+                    ageHours: 200,
+                    maxAgeHours: 174,
+                    capturedDateTime: "2026-01-01T00:00:00Z",
+                    staleResourceTypes: [],
+                    resourceTypeStates: []
+                }
+            };
+            if (document.getElementById("caSnapshotHealth")) {
+                window.renderEntraOpsSnapshotHealth("caSnapshotHealth");
+            }
+            window.renderEntraOpsSnapshotHealth();
+        });
+        const health = page.locator(".entraops-snapshot-health");
+        await expect(health).toHaveCount(1);
+        await expect(health).toContainText("Outdated Tenant Governance snapshot");
+        await expect(health).toContainText("8 days ago");
+        await expect(health).toContainText("174-hour limit");
+        await expect(health).not.toContainText("Partial Tenant Governance snapshot");
+    });
+}

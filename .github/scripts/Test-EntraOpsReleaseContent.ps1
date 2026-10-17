@@ -44,6 +44,10 @@ $ExcludedPathPatterns = @(
     'Reports/*/data/'
     'Docs/data/'
     'EntraOpsConfig.json'
+    # Local npm and Playwright output (git-ignored) is not part of the shipped content.
+    'node_modules/'
+    'playwright-report/'
+    'test-results/'
     # This validator's own tests must contain the patterns it rejects.
     'Tests/Reporting/Test-EntraOpsReleaseContent.Tests.ps1'
 )

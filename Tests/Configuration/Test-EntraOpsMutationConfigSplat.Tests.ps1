@@ -90,9 +90,23 @@ Describe "Mutation configuration workflow splatting" {
         $Config = [System.IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json
 
         $Config.DevOpsPlatform | Should -Be 'AzureDevOps'
-        $Config.AutomatedEntraOpsUpdate.PublicationMode | Should -Be 'DirectPush'
+        $Config.AzureDevOpsServiceConnection | Should -Be 'EntraOps-ServiceConnection'
+        $Config.AutomatedEntraOpsUpdate.PublicationMode | Should -Be 'PullRequest'
         @($Config.AutomatedEntraOpsUpdate.TargetUpdateFolders) | Should -Contain './.azure-pipelines'
+        # The update pipeline validates candidates with the trusted validator in .github/scripts
+        @($Config.AutomatedEntraOpsUpdate.TargetUpdateFolders) | Should -Contain './.github/scripts'
         @($Config.AutomatedEntraOpsUpdate.TargetUpdateFolders) | Should -Not -Contain './.github/actions'
+    }
+
+    It "writes DirectPush for Azure DevOps when it is selected explicitly" {
+        $ConfigPath = Join-Path $TestDrive 'EntraOps-AzureDevOps-DirectPush.json'
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -DevOpsPlatform AzureDevOps -UpdatePublicationMode DirectPush `
+            -AzureDevOpsServiceConnection 'Contoso EntraOps' -ConfigFilePath $ConfigPath -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        $Config = [System.IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json
+
+        $Config.AutomatedEntraOpsUpdate.PublicationMode | Should -Be 'DirectPush'
+        $Config.AzureDevOpsServiceConnection | Should -Be 'Contoso EntraOps'
+        @($warnings | Where-Object { "$_" -like '*DirectPush*Azure DevOps*' }).Count | Should -Be 0
     }
 
     It "writes explicitly selected automated-update validation options" {

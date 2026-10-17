@@ -315,8 +315,11 @@ Monday at 09:00 UTC and does not require a preceding pull.
 Tenant Governance snapshots are disabled by default. When enabled, the supplied workflow starts a
 UTCM job at 06:00 UTC and checks it at 07:00, 07:30, and 08:00 UTC. Collection never blocks while a
 Graph job is running, and a completed snapshot does not directly trigger reporting. The next
-reporting run reads the latest accepted snapshot; it requires a snapshot no older than 30 hours by
-default and can be configured to accept a partial snapshot with explicitly stale resource types.
+reporting run reads the latest accepted snapshot. A snapshot older than its maximum age (30 hours
+for a daily, 174 hours for a weekly schedule, or `ConfigurationAnalyzer.MaxTenantGovernanceSnapshotAgeHours`)
+is handled by `ConfigurationAnalyzer.StaleTenantGovernanceSnapshotAction` (default `Warn`: generate
+and mark the report as outdated). Reporting can also be configured to accept a partial snapshot with
+explicitly stale resource types.
 
 - **Start schedule**: creates a UTCM snapshot job and persists its id without polling.
 - **Collect schedules**: check the pending job once and publish it only after completion. The

@@ -8,8 +8,13 @@
     - "VIP Users" - The VIP Users watchlist lists user accounts of employees that have high impact value in the organization, it includes the identified privileged users from EntraOps.
     - "Identity Correlation" - The Identity Correlation watchlist lists related user accounts that belong to the same person, it includes the users which has been identified by using custom security attribute to connect privileged and regular work accounts.
 
-.PARAMETER TenantId
-    Tenant ID of the Microsoft Entra ID tenant. Default is the current tenant ID.
+.PARAMETER UserClassificationSource
+    Source of the tier tag of privileged users in the WatchLists. "RoleClassification" (default) uses the highest
+    tier of the classified role assignments, "Object" the object tier (ObjectAdminTierLevelName) of the user.
+
+.PARAMETER ImportPath
+    Folder of the Privileged EAM export (<ImportPath>/<RbacSystem>/<RbacSystem>.json). Defaults to the export
+    folder of the session; it must be within the EntraOps working folder.
 
 .PARAMETER SentinelResourceGroupName
     Resource group name of the Microsoft Sentinel workspace.
@@ -29,7 +34,7 @@
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to WatchList in Microsoft Sentinel Workspace for correlation between work and privileged accounts.
-    Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists WatchListTemplates "IdentityCorrelation" -SentinelSubscriptionId "11111111-1111-1111-1111-111111111111" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
+    Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists -WatchListTemplates "IdentityCorrelation" -SentinelSubscriptionId "11111111-1111-1111-1111-111111111111" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
 #>
 function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
 

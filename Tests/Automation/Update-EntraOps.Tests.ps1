@@ -94,9 +94,9 @@ Describe 'Update-EntraOps update scope' {
         $Source | Should -Match 'SourceCommit'
         $Source.IndexOf('Test-EntraOpsUpdateContract') | Should -BeLessThan $ReplacementIndex
         $Source | Should -Match "TargetUpdateFolders -contains './\.github/workflows'"
-        $Source | Should -Match 'Update-EntraOpsRequiredWorkflowParameters -ConfigFile \$ConfigFile'
         $Source | Should -Match "TargetUpdateFolders -contains './\.azure-pipelines'"
-        $Source | Should -Match 'Update-EntraOpsAzureDevOpsSchedules -ConfigFile \$ConfigFile'
+        $Source.IndexOf('Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile') | Should -BeGreaterThan $ReplacementIndex
+        $Source.IndexOf('Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigFile') | Should -BeGreaterThan $ReplacementIndex
     }
 
     It 'requires workflow dependencies and prevents validation bypass' {
@@ -307,6 +307,71 @@ Describe 'Update-EntraOps prepared candidate apply path' {
         $Manifest.ValidationIsolation | Should -Be 'SeparateJob'
         @($Manifest.TargetUpdateFolders) | Should -Be @('./Samples')
         ($Output -join "`n") | Should -Match 'Using prepared update candidate'
+    }
+
+    It 'replaces targets in the repository root when run from another location' {
+        $Deployment = Join-Path $TestDrive 'root-deployment'
+        $Candidate = Join-Path $TestDrive 'root-candidate'
+        $Elsewhere = Join-Path $TestDrive 'elsewhere'
+        New-Item -ItemType Directory -Path (Join-Path $Deployment 'Samples'), (Join-Path $Candidate 'Samples'), (Join-Path $Candidate '.azure-pipelines'), (Join-Path $Elsewhere 'Samples'), (Join-Path $Candidate '.git') -Force | Out-Null
+        $Contract = @{ SchemaVersion = 1; Product = 'EntraOps'; DistributionRepositories = @{ 'Cloud-Architekt/EntraOps' = @{ Channel = 'Release'; RequiresPersonalAccessToken = $false } }; SupportedUpdateTargets = @('./Samples', './.azure-pipelines'); RequiredValidationPaths = @() } | ConvertTo-Json -Depth 5
+        Set-Content -LiteralPath (Join-Path $Deployment 'EntraOpsUpdateContract.json') -Value $Contract
+        Set-Content -LiteralPath (Join-Path $Candidate 'EntraOpsUpdateContract.json') -Value $Contract
+        Set-Content -LiteralPath (Join-Path $Deployment 'Samples/old.txt') -Value 'old'
+        Set-Content -LiteralPath (Join-Path $Candidate 'Samples/new.txt') -Value 'new'
+        Set-Content -LiteralPath (Join-Path $Candidate '.azure-pipelines/entraops-pull.yml') -Value 'pipeline'
+        Set-Content -LiteralPath (Join-Path $Deployment 'EntraOpsConfig.json') -Value '{}'
+        Set-Content -LiteralPath (Join-Path $Elsewhere 'Samples/unrelated.txt') -Value 'keep'
+        # The refresh must use the loaded (trusted) helper. The candidate's helper would leave a marker:
+        # the publish step that follows on the same agent holds the token, so no candidate code may run.
+        $ScheduleRecord = Join-Path $TestDrive 'schedule-call.json'
+        $CandidateMarker = Join-Path $TestDrive 'candidate-helper-executed.marker'
+        $CandidateHelperFolder = Join-Path $Candidate 'EntraOps/Public/Configuration'
+        New-Item -ItemType Directory -Path $CandidateHelperFolder -Force | Out-Null
+        foreach ($HelperName in 'Update-EntraOpsAzureDevOpsSchedules', 'Update-EntraOpsRequiredWorkflowParameters') {
+            Set-Content -LiteralPath (Join-Path $CandidateHelperFolder "$HelperName.ps1") -Value "Set-Content -LiteralPath '$CandidateMarker' -Value 'executed'; function $HelperName { Set-Content -LiteralPath '$CandidateMarker' -Value 'executed' }"
+        }
+        function Update-EntraOpsAzureDevOpsSchedules {
+            param($ConfigFile, $PipelineFolder)
+            @{ Location = (Get-Location).ProviderPath; ConfigFile = $ConfigFile; PipelineFolder = $PipelineFolder } |
+            ConvertTo-Json | Set-Content -LiteralPath $ScheduleRecord
+        }
+
+        $PreviousBaseFolder = $script:EntraOpsBaseFolder
+        $PreviousPat = $env:ENTRAOPS_PAT
+        $PreviousAccessToken = $env:SYSTEM_ACCESSTOKEN
+        $script:EntraOpsBaseFolder = $Deployment
+        Push-Location $Elsewhere
+        try {
+            Remove-Item Env:ENTRAOPS_PAT -ErrorAction SilentlyContinue
+            $env:SYSTEM_ACCESSTOKEN = 'must-not-reach-candidate-code'
+            Mock git {
+                if ($args -contains 'rev-parse') { $global:LASTEXITCODE = 0; return ('a' * 40) }
+                throw "git must not clone or fetch for a prepared candidate (called with: $($args -join ' '))"
+            }
+            Update-EntraOps -ConfigFile 'EntraOpsConfig.json' -Repository 'EntraOps' -PreparedCandidatePath $Candidate `
+                -TargetUpdateFolders @('./Samples', './.azure-pipelines') -ValidatedSourceCommit ('a' * 40) -WarningAction SilentlyContinue | Out-Null
+            (Get-Location).ProviderPath | Should -Be (Get-Item -LiteralPath $Elsewhere).FullName
+            $env:SYSTEM_ACCESSTOKEN | Should -Be 'must-not-reach-candidate-code'
+        } finally {
+            Pop-Location
+            $script:EntraOpsBaseFolder = $PreviousBaseFolder
+            if ($null -eq $PreviousPat) { Remove-Item Env:ENTRAOPS_PAT -ErrorAction SilentlyContinue } else { $env:ENTRAOPS_PAT = $PreviousPat }
+            if ($null -eq $PreviousAccessToken) { Remove-Item Env:SYSTEM_ACCESSTOKEN -ErrorAction SilentlyContinue } else { $env:SYSTEM_ACCESSTOKEN = $PreviousAccessToken }
+        }
+
+        Test-Path -LiteralPath (Join-Path $Deployment 'Samples/new.txt') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $Deployment 'Samples/old.txt') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $Deployment '.azure-pipelines/entraops-pull.yml') | Should -BeTrue
+        $ScheduleCall = Get-Content -LiteralPath $ScheduleRecord -Raw | ConvertFrom-Json
+        $ScheduleCall.Location | Should -Be (Get-Item -LiteralPath $Deployment).FullName
+        $ScheduleCall.ConfigFile | Should -Be 'EntraOpsConfig.json'
+        $ScheduleCall.PipelineFolder | Should -Be './.azure-pipelines'
+        Test-Path -LiteralPath $CandidateMarker | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $Elsewhere '.azure-pipelines') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $Elsewhere 'Samples/unrelated.txt') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $Elsewhere 'Samples/new.txt') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $Elsewhere '.EntraOpsUpdateManifest.json') | Should -BeFalse
     }
 }
 
@@ -576,7 +641,7 @@ Describe 'Automated update defaults' {
         $ConfigGenerator | Should -Match "\[ValidateSet\('PullRequest', 'DirectPush'\)\]"
         $ConfigGenerator | Should -Match '\[string\]\$UpdatePublicationMode\s*=\s*''PullRequest'''
         $ConfigGenerator | Should -Match 'PublicationMode\s*=\s*\$DefaultUpdatePublicationMode'
-        $ConfigGenerator | Should -Match '(?s)\$DevOpsPlatform -eq ''AzureDevOps''.*DirectPush'
+        $ConfigGenerator | Should -Match '\$DefaultUpdatePublicationMode = \$UpdatePublicationMode'
         $ConfigGenerator | Should -Match "\[ValidateSet\('OnChange', 'Always', 'Never'\)\]"
         $ConfigGenerator | Should -Match '\[string\]\$ValidationFrequency\s*=\s*''OnChange'''
         $ConfigGenerator | Should -Match '\[boolean\]\$RunBrowserTests\s*=\s*\$true'
@@ -833,8 +898,11 @@ Describe 'Deployment browser validation' {
 
         $Workflow | Should -Match 'ClassificationExplorerGenerateChangeHistory:\s*false'
         $Workflow | Should -Match "fetch-depth:\s*\$\{\{\s*env\.ClassificationExplorerGenerateChangeHistory\s*==\s*'true'\s*&&\s*'0'\s*\|\|\s*'1'\s*\}\}"
-        $Workflow | Should -Match 'Invoke-EntraOpsReportingGeneration'
+        $Workflow | Should -Match 'Invoke-EntraOpsGitHubReportingGeneration\.ps1'
+        $GenerationScript = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/scripts/Invoke-EntraOpsGitHubReportingGeneration.ps1') -Raw
+        $GenerationScript | Should -Match 'Invoke-EntraOpsReportingGeneration'
         $Workflow | Should -Not -Match 'New-EntraOpsClassificationExplorerData'
+        $GenerationScript | Should -Not -Match 'New-EntraOpsClassificationExplorerData'
     }
 }
 

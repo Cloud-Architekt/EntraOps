@@ -143,12 +143,12 @@
 
 .EXAMPLE
     Get privileged objects from various Microsoft Entra RBACs and Microsoft Azure roles to identify the scope of privileged objects and update the classification definition file for Microsoft Entra ID.
-    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "EntraOps" -RBACSystems ("Azure","EntraID","IdentityGovernance","DeviceManagement","ResourceApps")
+    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "EntraOps" -EntraOpsScopes ("Azure","EntraID","IdentityGovernance","DeviceManagement","ResourceApps")
 
 .EXAMPLE
     Get exposure graph edges from Microsoft Security Exposure Management with relation of "has permissions to", "can authenticate as", "has role on", "has credentials of" or "affecting" to assets with criticality level <1.
     This identitfies objects with direct/indirect permissions which leads in attack/access paths to high sensitive assets which can be identified as Control Plane.
-    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "PrivilegedEdgesFromExposureManagement" -ExposureCriticalityLevel = "<1"
+    Update-EntraOpsClassificationControlPlaneScope -PrivilegedObjectClassificationSource "PrivilegedEdgesFromExposureManagement" -ExposureCriticalityLevel "<1"
 
 .EXAMPLE
     Get permanent role assignments in Azure RBAC from Azure Resource Graph for high privileged roles (Owner, Role Based Access Control Administrator or User Access Administrator) on specific high-privileged scope ("/", "/providers/microsoft.management/managementgroups/8693dc7e-63c1-47ab-a7ee-acfe488bf52a").
@@ -863,7 +863,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
         $EntraIdRoleClassificationDefinition = @($EntraIdRoleClassification | ConvertFrom-Json -Depth 10)
         $EntraIdRoleActionOverwrites = @((Import-EntraOpsClassificationOverwrites -RbacSystem "EntraID").RoleActionOverwrites)
         if ($EntraIdRoleActionOverwrites.Count -gt 0) {
-            Write-Host "  Applying $($EntraIdRoleActionOverwrites.Count) role action overwrite(s) from Classification_RoleActionOverwrites.json..." -ForegroundColor Yellow
+            Write-Host "  Applying $($EntraIdRoleActionOverwrites.Count) role action overwrite(s) from $((@($EntraIdRoleActionOverwrites.SourceFile) | Sort-Object -Unique) -join ', ')..." -ForegroundColor Yellow
             $EntraIdRoleClassificationDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $EntraIdRoleClassificationDefinition -RoleActionOverwrites $EntraIdRoleActionOverwrites
         }
         $EntraIdRoleClassificationDefinition | ConvertTo-Json -Depth 10 | Out-File -FilePath $EntraIdCustomizedClassificationFile -Force
@@ -1272,7 +1272,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
         $DeviceMgmtRoleClassificationDefinition = @($DeviceMgmtRoleClassification | ConvertFrom-Json -Depth 10)
         $DeviceMgmtRoleActionOverwrites = @((Import-EntraOpsClassificationOverwrites -RbacSystem "DeviceManagement").RoleActionOverwrites)
         if ($DeviceMgmtRoleActionOverwrites.Count -gt 0) {
-            Write-Host "  Applying $($DeviceMgmtRoleActionOverwrites.Count) role action overwrite(s) from Classification_RoleActionOverwrites.json..." -ForegroundColor Yellow
+            Write-Host "  Applying $($DeviceMgmtRoleActionOverwrites.Count) role action overwrite(s) from $((@($DeviceMgmtRoleActionOverwrites.SourceFile) | Sort-Object -Unique) -join ', ')..." -ForegroundColor Yellow
             $DeviceMgmtRoleClassificationDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $DeviceMgmtRoleClassificationDefinition -RoleActionOverwrites $DeviceMgmtRoleActionOverwrites
         }
         $DeviceMgmtRoleClassificationDefinition | ConvertTo-Json -Depth 10 | Out-File -FilePath $DeviceMgmtCustomizedClassificationFile -Force
@@ -1651,7 +1651,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
                     }
                     $Overwrite.RoleAssignmentScopeName = @($ResolvedScopes | Select-Object -Unique)
                 }
-                Write-Host "  Applying $($IdGovRoleActionOverwrites.Count) role action overwrite(s) from Classification_RoleActionOverwrites.json..." -ForegroundColor Yellow
+                Write-Host "  Applying $($IdGovRoleActionOverwrites.Count) role action overwrite(s) from $((@($IdGovRoleActionOverwrites.SourceFile) | Sort-Object -Unique) -join ', ')..." -ForegroundColor Yellow
                 $IdGovClassificationDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $IdGovClassificationDefinition -RoleActionOverwrites $IdGovRoleActionOverwrites
             }
 
@@ -1768,7 +1768,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
             $DefenderRoleClassificationDefinition = @($DefenderRoleClassification | ConvertFrom-Json -Depth 10)
             $DefenderRoleActionOverwrites = @((Import-EntraOpsClassificationOverwrites -RbacSystem "Defender").RoleActionOverwrites)
             if ($DefenderRoleActionOverwrites.Count -gt 0) {
-                Write-Host "  Applying $($DefenderRoleActionOverwrites.Count) role action overwrite(s) from Classification_RoleActionOverwrites.json..." -ForegroundColor Yellow
+                Write-Host "  Applying $($DefenderRoleActionOverwrites.Count) role action overwrite(s) from $((@($DefenderRoleActionOverwrites.SourceFile) | Sort-Object -Unique) -join ', ')..." -ForegroundColor Yellow
                 $DefenderRoleClassificationDefinition = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition $DefenderRoleClassificationDefinition -RoleActionOverwrites $DefenderRoleActionOverwrites
             }
 
@@ -1965,7 +1965,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
                 $Overwrite.RoleAssignmentScopeName = @($ResolvedScopes | Select-Object -Unique)
             }
 
-            Write-Host "  Applying $($AzureRoleActionOverwrites.Count) role action overwrite(s) from Classification_RoleActionOverwrites.json..." -ForegroundColor Yellow
+            Write-Host "  Applying $($AzureRoleActionOverwrites.Count) role action overwrite(s) from $((@($AzureRoleActionOverwrites.SourceFile) | Sort-Object -Unique) -join ', ')..." -ForegroundColor Yellow
 
             # Warn when an overwritten action currently lives in one of the categories whose scope is driven by
             # the hosted managed identity's own tier (<Tier0/Tier1IncludedResourceScope>, identified above from

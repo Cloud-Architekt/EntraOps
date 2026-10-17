@@ -4,6 +4,12 @@ trigger: none
 pr: none
 
 parameters:
+  # BEGIN EntraOps managed service connection
+  - name: serviceConnection
+    displayName: Azure Resource Manager service connection
+    type: string
+    default: 'EntraOps-ServiceConnection'
+  # END EntraOps managed service connection
   - name: operation
     displayName: Snapshot operation for manual runs
     type: string
@@ -22,20 +28,18 @@ parameters:
 
 variables:
   ConfigFile: ./EntraOpsConfig.json
-  AzureServiceConnection: $[ coalesce(variables['EntraOpsAzureServiceConnection'], 'EntraOps-ServiceConnection') ]
 
 pool:
   vmImage: ubuntu-latest
 
 steps:
   - checkout: self
-    persistCredentials: true
     displayName: "Checkout repository"
 
   - task: AzurePowerShell@5
     displayName: "Run Tenant Governance snapshot operation"
     inputs:
-      azureSubscription: "$(AzureServiceConnection)"
+      azureSubscription: ${{ parameters.serviceConnection }}
       ScriptType: InlineScript
       Inline: |
         Import-Module ./EntraOps
