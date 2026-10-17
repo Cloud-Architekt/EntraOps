@@ -389,6 +389,7 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
         Set-Content "$TenantFolder/Classification_AadResources.json" -Value '[{"old":true}]'
         Set-Content "$TenantFolder/Classification_RoleActionOverwrites.json" -Value '[{"custom":"preserve"}]'
         Set-Content "$TenantFolder/Classification_RoleDefinitionOverwrites.json" -Value '[{"custom":"preserve"}]'
+        Set-Content "$TenantFolder/Classification_RoleDefinitionOverwrites_PAW.json" -Value '[{"custom":"preserve"}]'
         Set-Content "$script:Workspace/Classification/Templates/Classification_AadResources.json" -Value '[{"custom":"preserve"}]'
         Mock -ModuleName EntraOps Save-EntraOpsPrivilegedEAMJson { throw 'Export failed' }
 
@@ -397,6 +398,7 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
         Get-Content "$TenantFolder/Classification_AadResources.json" -Raw | Should -Match '^\{\}\s*$'
         Get-Content "$TenantFolder/Classification_RoleActionOverwrites.json" -Raw | Should -Match 'preserve'
         Get-Content "$TenantFolder/Classification_RoleDefinitionOverwrites.json" -Raw | Should -Match 'preserve'
+        Get-Content "$TenantFolder/Classification_RoleDefinitionOverwrites_PAW.json" -Raw | Should -Match 'preserve'
         Get-Content "$script:Workspace/Classification/Templates/Classification_AadResources.json" -Raw | Should -Match 'preserve'
     }
 

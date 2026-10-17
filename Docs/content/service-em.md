@@ -1644,6 +1644,20 @@ group is tenant-wide and would otherwise read the assignments of every service c
 > role in the Privileged EAM data. Catalog role assignments created by earlier versions for CatalogPlane-Members or
 > ManagementPlane-Admins are not removed by a re-run; remove them in the catalog's **Roles and administrators** page.
 
+### Progress and completion feedback
+
+Creation and removal show progress for the current phase, including elapsed wait time and pending request counts, without
+requiring `-Verbose`. Progress clears when the command finishes or stops with an error. These are status indicators;
+fulfillment duration depends on Entitlement Management and no completion percentage is estimated.
+
+Creation prints a brief summary that identifies pending access requests or requests needing attention; provisioning the
+resources does not mean those requests have delivered access. Removal summarizes the deleted service groups and whether
+the Azure resource group was deleted, kept, or needs cleanup. Request IDs and API details remain in `-Verbose` output.
+
+Completion messages use the information stream and do not change pipeline results: creation returns its report, and removal
+returns an empty hashtable. Set `$ProgressPreference = 'SilentlyContinue'` to hide progress and pass `-InformationAction Ignore`
+to hide completion messages. `-WhatIf` on removal does not display a completion message or start teardown progress.
+
 ### Service Owner and Member Assignment
 
 **Owner vs. Members** (initial `adminAdd` assignments by `New-EntraOpsServiceEMAssignment`):
@@ -1653,7 +1667,13 @@ group is tenant-wide and would otherwise read the assignments of every service c
 
 The cmdlet waits up to 5 minutes (at most 30 seconds between checks) until the submitted requests are delivered. Requests that
 wait for approval or failed are reported with a warning and not awaited; requests that are still in progress after 5 minutes are
-listed with their last state and completed in the background.
+listed with their last state and status and continue processing in the background. Access is not ready until the request is
+fully delivered. The bootstrap report includes `AssignmentRequests` (ID, state, status, target ID and access package ID) for
+requests submitted or found open in this run; `Assignments` contains only delivered assignments. A re-run detects existing
+open requests instead of submitting duplicates.
+
+Polling budgets include time spent in Graph calls and cap the final sleep to the remaining time. An in-flight API call is
+allowed to finish, so actual elapsed time can exceed the budget. Verbose output shows elapsed time and pending request states.
 
 **ControlPlaneAdmins** (`-ControlPlaneAdmins`, PerService only): ControlPlane-Admins has no access package. The users are added
 directly to the per-service ControlPlane-Admins group: as **PIM for Groups eligible members** with
@@ -1738,7 +1758,7 @@ ServiceEM exports 15 cmdlets for automated landing zone provisioning and managem
 | 8   | `New-EntraOpsServiceEMAssignmentPolicy`                | Creates assignment policies: requestor scopes, approvers, expiration, quarterly access reviews                                                                                                                                                                                                                                                                                                           |
 | 9   | `New-EntraOpsServiceEMAssignment`                      | Initial `adminAdd` assignments: service members → WorkloadPlane-Members (fallback WorkloadPlane-Users); admin → ManagementPlane-Admins (fallback WorkloadPlane-Admins); admin and `-CatalogPlaneMembers` → CatalogPlane-Members                                                                                                                                                                          |
 | 10  | `New-EntraOpsServicePIMPolicy`                         | Configures PIM for Groups activation policies (MFA, justification, optional authentication context, max duration (10 hours), no approval) for ControlPlane-/ManagementPlane-Admins with `-EnablePimForGroups` and WorkloadPlane-Admins with `-EnableWorkloadPlanePimForGroups`, before the groups are added to the catalog; only called when a group is selected (`PimPolicies` in the bootstrap report) |
-| 11  | `New-EntraOpsServicePIMAssignment`                     | Creates the PIM for Groups eligible owner assignments (no expiration) of the WorkloadPlane groups for `-WorkloadPlaneAdminPrincipalId`; only with `-EnableOwnerAssignment`, which the bootstrap sets for `-GroupOwnership Eligible` (without the switch the cmdlet returns an empty array). Failed lookups or assignments stop with one error after all groups were processed. Returned as `PimForGroupsAssignments` in the bootstrap report                                                |
+| 11  | `New-EntraOpsServicePIMAssignment`                     | Creates the PIM for Groups eligible owner assignments (no expiration) of the WorkloadPlane groups for `-WorkloadPlaneAdminPrincipalId`; only with `-EnableOwnerAssignment`, which the bootstrap sets for `-GroupOwnership Eligible` (without the switch the cmdlet returns an empty array). Failed lookups or assignments stop with one error after all groups were processed; the bootstrap still runs the remaining steps (including the Azure resource group) and then stops with that error. Returned as `PimForGroupsAssignments` in the bootstrap report                                                |
 | 12  | `New-EntraOpsServiceAZContainer`                       | Creates the Azure Resource Group `RG-<Prefix>` (or, with `-AzureScope Subscription`, uses the subscription) with PIM-eligible RBAC (Contributor, UAA, constrained RBAC Administrator) and permanent Reader for WorkloadPlane-Admins; assigns no Owner role                                                                                                                                               |
 | 13  | `New-EntraOpsSubscriptionLandingZone`                  | **Landing Zone** — exactly one scope: resource group (default) or subscription (`-DeploymentScope`); resolves governance model and delegation groups                                                                                                                                                                                                                                                     |
 | 14  | `Get-EntraOpsServiceEMReport`                          | Read-only report of **all** Entitlement Management catalogs in the tenant (roles, resources, access packages, policies, delivered assignments)                                                                                                                                                                                                                                                           |
@@ -1761,7 +1781,12 @@ group by ID or display name, or creates a role-assignable one, and persists its 
 > The cmdlet asks for confirmation before deleting anything; `-Force` (or `-Confirm:$false`) skips the prompt for automation,
 > and `-WhatIf` shows the catalog, number of access packages and group resources without changing anything.
 > Open assignment requests (e.g. pending approval) are canceled first, and requests that can't be canceled (e.g. delivering)
-> are awaited, because Microsoft Graph rejects removing an assignment while a request for it is open. If a request doesn't
+> are awaited, because Microsoft Graph rejects removing an assignment while a request for it is open. Waiting for open requests
+> and waiting for removals each have a separate five-minute budget; deleting soon after provisioning can therefore take longer.
+> Removal requests must succeed, and the cmdlet checks that no non-expired assignments remain before deleting package resource
+> roles. Failed, canceled or partially delivered removals and failed verification reads stop teardown. Assignment visibility is
+> polled for up to five minutes; package deletion retries only `InvalidDeleteEntitlementHasGrants` for up to another 60 seconds.
+> Verbose output identifies pending requests by ID, state and status. If a request doesn't
 > complete, an assignment can't be removed or an access package can't be deleted, the cmdlet stops with an error listing the
 > causes and keeps the catalog, the groups and the resource group; run it again once the causes are resolved.
 > The groups are deleted before the catalog. If a group can't be deleted, the cmdlet continues with the other groups, keeps
@@ -2290,7 +2315,7 @@ Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso
 **Symptom:**
 ```
 WARNING: [New-EntraOpsServiceEMAssignment] Fulfillment can take 5+ minutes to complete
-WARNING: [New-EntraOpsServiceEMAssignment] Assignment requests not fulfilled after 300 seconds, continuing without waiting: <request-id>=delivering
+WARNING: [New-EntraOpsServiceEMAssignment] Assignment requests not fulfilled within the 300-second wait budget, continuing without waiting; access for these requests is not ready: <request-id>=delivering
 ```
 
 **Cause:**

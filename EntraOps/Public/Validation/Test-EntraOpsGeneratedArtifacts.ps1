@@ -11,6 +11,9 @@
     mismatches with the manifest.
     Violations stop the validation with one error that lists all of them. Contradictory object tier pairs and
     privileged assignments without classification are reported as warnings unless the related switch is set.
+    Collapsed collections in an aggregate file that is tracked by git and unchanged since HEAD were written by
+    an earlier version (the RBAC system returned no data or is no longer collected) and are reported as one
+    warning per file; the next non-empty export rewrites them as arrays.
     Used by the Privileged EAM pull workflow/pipeline and Invoke-EntraOpsTenantGovernanceSnapshot before generated
     artifacts are committed.
 
@@ -64,12 +67,29 @@ $CanonicalTierLevelByName = @{
 $Violations = [System.Collections.Generic.List[string]]::new()
 # Consumers (KQL parsers, watchlists, report apps) index these collections. A single-item array that
 # collapsed into a scalar causes git churn without content change, so it is rejected as a violation.
+# Collected per file: an unchanged committed export was written by an earlier version and is only
+# reported (see below).
 $ArrayShapeProperties = @('MatchedActions', 'ScopedObjects')
+$ShapeIssues = [System.Collections.Generic.List[string]]::new()
 function Test-ArtifactCollectionShape {
     param($Value, [string]$Context)
     if ($null -ne $Value -and $Value -isnot [array]) {
-        $Violations.Add("$Context is stored as a single value instead of an array.")
+        $ShapeIssues.Add("$Context is stored as a single value instead of an array.")
     }
+}
+# True when the file is tracked and matches HEAD, i.e. it isn't output of the current run. An RBAC
+# system with an empty result or one removed from RbacSystems keeps its previous export, so a strict
+# check would fail every run until that system is exported again.
+function Test-ArtifactCommittedUnchanged {
+    param([string]$Path)
+    if (-not (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) { return $false }
+    $Directory = Split-Path -Parent $Path
+    $Name = Split-Path -Leaf $Path
+    & git -C $Directory ls-files --error-unmatch -- $Name *> $null
+    if ($LASTEXITCODE -ne 0) { return $false }
+    # 0 = working tree and index match HEAD; 1 = changed; anything else (e.g. no commit yet) = unknown
+    & git -C $Directory diff --quiet HEAD -- $Name *> $null
+    return $LASTEXITCODE -eq 0
 }
 function Test-ArtifactClassificationEntryShape {
     param($Classification, [string]$Context)
@@ -112,6 +132,7 @@ if ($ResolvedPrivilegedEamPath) {
 
     foreach ($AggregateFile in $AggregateFiles) {
         $SeenObjectIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $ShapeIssues.Clear()
         try {
             $EamObjects = @([System.IO.File]::ReadAllText($AggregateFile.FullName) | ConvertFrom-Json -Depth 100 -ErrorAction Stop)
         } catch {
@@ -171,7 +192,7 @@ if ($ResolvedPrivilegedEamPath) {
                     $Violations.Add("$($AggregateFile.Name): assignment '$InstanceId' has unsupported Classification shape '$($Classification.GetType().FullName)'.")
                 } elseif ($null -ne $Classification -and $Classification -isnot [array]) {
                     # Consumers indexing Classification[0] (KQL/workbooks, report apps) expect an array.
-                    $Violations.Add("$($AggregateFile.Name): assignment '$InstanceId' for object '$ObjectId' stores Classification as a single object instead of an array.")
+                    $ShapeIssues.Add("$($AggregateFile.Name): assignment '$InstanceId' for object '$ObjectId' stores Classification as a single object instead of an array.")
                 }
                 Test-ArtifactClassificationEntryShape -Classification $Classification -Context "$($AggregateFile.Name): assignment '$InstanceId' for object '$ObjectId'"
                 if ($RoleAssignment.RoleIsPrivileged -eq $true -and $ClassificationIsEmpty) {
@@ -186,6 +207,15 @@ if ($ResolvedPrivilegedEamPath) {
                 if (-not $SeenAssignmentPaths.Add($AssignmentPathKey)) {
                     $Violations.Add("$($AggregateFile.Name): object '$ObjectId' contains duplicate assignment path '$InstanceId'.")
                 }
+            }
+        }
+
+        if ($ShapeIssues.Count -gt 0) {
+            if (Test-ArtifactCommittedUnchanged -Path $AggregateFile.FullName) {
+                $Examples = @($ShapeIssues | Select-Object -First 3) -join ' '
+                $DataQualityWarnings.Add("$($AggregateFile.Name): $($ShapeIssues.Count) collection(s) are stored as a single value instead of an array in the committed export of an earlier EntraOps version (for example: $Examples) The file is rewritten with arrays on the next non-empty export of $($AggregateFile.Directory.Name); delete the folder if the RBAC system is no longer collected.")
+            } else {
+                foreach ($Issue in $ShapeIssues) { $Violations.Add($Issue) }
             }
         }
     }

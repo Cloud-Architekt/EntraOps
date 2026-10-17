@@ -112,8 +112,9 @@ automatically, or set `ENTRAOPS_ROOT`.
 | Graph and ARM response cache | `<user cache folder>/EntraOps` | `Get-EntraOpsCacheStatistics`                                                    | `Cache`                        |
 
 `Remove-EntraOpsData` removes this output from the working folder, all content types by default. It prompts for
-confirmation (`-WhatIf` lists what would be removed), keeps the manually maintained
-`Classification_RoleActionOverwrites.json` / `Classification_RoleDefinitionOverwrites.json`, the classification
+confirmation (`-WhatIf` lists what would be removed), keeps the manually maintained overwrite files
+(`Classification_RoleActionOverwrites.json`, `Classification_RoleDefinitionOverwrites.json`,
+`Classification_ApiPermissionOverwrites.json` and their `_<Tag>` variants), the classification
 templates, `Global.json` and the Object Classification File, and only removes the classification folders of
 `-TenantName` when it is passed. In a git repository the exports are tracked history, so it stops unless `-Force` is
 used:
@@ -201,8 +202,9 @@ New-AzRoleAssignment -SignInName "AdeleV@contoso.com" -RoleDefinitionName "Reade
 `Invoke-EntraOpsPrivilegedEAM` resolves the tenant from the EntraOps connection, provides the
 classification templates, computes the Control Plane scope, runs
 `Save-EntraOpsPrivilegedEAMJson`, and cleans up every intermediate file so only the PrivilegedEAM
-JSON output remains (except for any pre-existing `Classification_RoleActionOverwrites.json` /
-`Classification_RoleDefinitionOverwrites.json` tenant customization files, which are always
+JSON output remains (except for any pre-existing tenant overwrite files -
+`Classification_RoleActionOverwrites.json`, `Classification_RoleDefinitionOverwrites.json`,
+`Classification_ApiPermissionOverwrites.json` and their `_<Tag>` variants - which are always
 preserved). Use `-RbacSystems` to limit the scope, or `-PrivilegedObjectClassificationSource` to
 change how Control Plane scope is determined - see
 [Privileged EAM &rarr; Automatic Control Plane scope updates](../privileged-eam/index.html#automatic-updated-control-plane-scope).

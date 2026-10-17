@@ -92,7 +92,12 @@ reclassified role actions/scopes and access-level distribution changes. Entra ID
 compared against the public Microsoft Learn role reference to flag documentation mismatches, and a
 **Customize Overwrites** editor lets you build `Classification_RoleDefinitionOverwrites.json` /
 `Classification_RoleActionOverwrites.json` / `Classification_ApiPermissionOverwrites.json`
-interactively.
+interactively. It imports and exports several files at once, including tagged files such as
+`Classification_RoleDefinitionOverwrites_PAW.json`, and shows the origin of every entry: *Base*
+(base file) or the tag (tagged file), prefixed with *Custom* once the entry is added, edited or removed
+in the editor. Export writes every entry back to its origin file; a new entry goes to the target file
+chosen in the entry dialog. See
+[Split overwrites into tagged files](../privileged-eam/index.html#split-overwrites-into-tagged-files).
 
 The **Change History** view and its notifications are derived from a git log over the
 classification sources. Because those sources live in the sparsely checked out

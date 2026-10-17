@@ -151,6 +151,27 @@ Describe 'Test-EntraOpsGeneratedArtifacts' {
         { & $ValidatorPath -PrivilegedEamPath $ArtifactRoot } | Should -Throw '*MatchedActions is stored as a single value instead of an array*'
     }
 
+    It 'only warns about collapsed collections in an unchanged committed export and rejects them once rewritten' {
+        # An RBAC system with an empty result keeps the export of an earlier version; failing on it
+        # would fail every pull run until that system returns data again.
+        $Repository = Join-Path $TestDrive 'committed-legacy-export'
+        $ArtifactRoot = Join-Path $Repository 'PrivilegedEAM'
+        New-TestEamArtifact -Root $ArtifactRoot -SingleObjectClassification
+        & git -C $Repository init --quiet
+        & git -C $Repository -c user.email=test@contoso.com -c user.name=Test -c commit.gpgsign=false add --all
+        & git -C $Repository -c user.email=test@contoso.com -c user.name=Test -c commit.gpgsign=false commit --quiet -m 'legacy export'
+        $LASTEXITCODE | Should -Be 0
+
+        # Throws (and fails the test) if the committed export is rejected
+        $Warnings = @()
+        & $ValidatorPath -PrivilegedEamPath $ArtifactRoot -WarningVariable +Warnings -WarningAction SilentlyContinue | Out-Null
+        @($Warnings.Message | Where-Object { $_ -like '*EntraID.json: 1 collection(s)*committed export of an earlier EntraOps version*' }).Count | Should -Be 1
+
+        # Output of the current run (a changed file) is still rejected
+        New-TestEamArtifact -Root $ArtifactRoot -SingleObjectClassification -TierLevel '1' -TierName 'ManagementPlane'
+        { & $ValidatorPath -PrivilegedEamPath $ArtifactRoot -WarningAction SilentlyContinue } | Should -Throw '*single object instead of an array*'
+    }
+
     It 'does not warn about an assignment classification array with one entry' {
         $ArtifactRoot = Join-Path $TestDrive 'single-entry-array-classification'
         New-TestEamArtifact -Root $ArtifactRoot

@@ -354,14 +354,37 @@ function Update-EntraOps {
         # process/session after reviewing the applied diff.
         Write-Output 'Updated module import deferred until a subsequent clean process or session.'
 
-        # Loaded helpers belong to the old version and may expect obsolete template names. Reapply
-        # configuration with the candidate's matching helpers, without loading them into this process.
+        # Reapply the configuration with the helpers of the loaded (trusted) module. Candidate code must not
+        # run here, not even in a child process: the token-bearing publish step runs next on the same agent.
+        # The installed helpers must therefore understand the new templates; the GitHub helper rewrites the
+        # whole workflow YAML and fails if a release renames a node it sets. That failure stays fatal, so
+        # workflows with template defaults are never published.
         $RefreshGitHubWorkflows = $TargetUpdateFolders -contains './.github/workflows'
         $RefreshAzureDevOpsPipelines = $TargetUpdateFolders -contains './.azure-pipelines'
         if ($RefreshGitHubWorkflows -or $RefreshAzureDevOpsPipelines) {
-            Write-Host 'Re-applying workflow and pipeline configuration in a clean process...'
-            Invoke-EntraOpsUpdateConfigurationRefresh -SourceRoot $TemporaryUpdateFolder -RepositoryRoot $EntraOpsBaseFolder `
-                -ConfigFile $ConfigFile -UpdateGitHubWorkflows:$RefreshGitHubWorkflows -UpdateAzureDevOpsPipelines:$RefreshAzureDevOpsPipelines
+            # The helpers resolve the configuration and template paths relative to the location
+            Push-Location -LiteralPath $EntraOpsBaseFolder
+            try {
+                if ($RefreshGitHubWorkflows) {
+                    Write-Host "Re-adding workflow parameters in GitHub workflows after update..."
+                    try {
+                        Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigFile
+                    } catch {
+                        throw "Failed to update required workflow parameters. Error: $_ The updated files were copied, but the configuration was not re-applied to them. The installed EntraOps module may not support the updated workflow templates: update the module in a clean session (Update-PSResource EntraOps or Update-Module EntraOps), then run Update-EntraOpsRequiredWorkflowParameters -ConfigFile '$ConfigFile' from the repository root and commit the result, or rerun the update."
+                    }
+                }
+                # The upstream pipeline templates ship with default schedules; re-apply the ones from the configuration
+                if ($RefreshAzureDevOpsPipelines) {
+                    Write-Host "Re-applying the configured schedules and service connection in Azure DevOps pipelines after update..."
+                    try {
+                        Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile -PipelineFolder './.azure-pipelines'
+                    } catch {
+                        throw "Failed to update the Azure DevOps pipeline schedules. Error: $_ The updated files were copied, but the configuration was not re-applied to them. Update the EntraOps module in a clean session, then run Update-EntraOpsAzureDevOpsSchedules -ConfigFile '$ConfigFile' -PipelineFolder './.azure-pipelines' from the repository root and commit the result, or rerun the update."
+                    }
+                }
+            } finally {
+                Pop-Location
+            }
         }
 
         $UpdateManifest = [ordered]@{

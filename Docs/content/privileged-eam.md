@@ -319,6 +319,45 @@ below). For `Azure`, the `RoleAssignmentScopeName` of an overwrite entry may als
 tokens `<Tier0IncludedResourceScope>`/`<Tier1IncludedResourceScope>`, which are resolved to the
 same ARM scope paths as in `Classification_Azure.Param.json` before the overwrite is applied.
 
+### Split overwrites into tagged files
+
+Every overwrite file can be split into tagged files named `<BaseName>_<Tag>.json`, for example
+`Classification_RoleDefinitionOverwrites_PAW.json` or
+`Classification_RoleActionOverwrites_AzureStrictControlPlane.json`. The tag is the text after the
+last `_` of the file name. EntraOps loads every tagged file from the tenant-specific folder
+(`Classification/<TenantName>/`) in addition to the base file and applies the entries in file name
+order after it. Tagged files in the `Templates` folder are ignored; for role definition overwrites,
+the tenant-specific tagged files are added to the base file that applies (the tenant-specific base file,
+otherwise the template). The tenant-specific overwrite files, tagged files included, are kept by
+`Invoke-EntraOpsPrivilegedEAM` and `Remove-EntraOpsData`.
+
+When several files overwrite the same item, the order decides as follows:
+
+- **Role actions and API permissions**: the entry of the later file is applied last and takes
+  precedence.
+- **Role definitions**: an entry that matches the role by `RoleDefinitionId` takes precedence over an
+  entry that matches it only by `RoleDefinitionName`, and an entry for the whole role (empty or `*`
+  `Service`) is applied after the service-specific entries and replaces them. Only between entries of
+  the same kind does the later file take precedence.
+
+EntraOps lists every item that is overwritten in more than one file when it loads the overwrites.
+
+> **Upgrading from 1.0 or earlier:** before tagged files were supported, a file such as
+> `Classification_RoleActionOverwrites_<anything>.json` in a tenant folder was ignored. It is now
+> loaded and applied. Check your `Classification/<TenantName>/` folders for `_<Tag>.json` files you
+> did not intend to activate - for example a copy of
+> `Samples/Classification_RoleActionOverwrites_AzureStrictControlPlane.json` kept as a reference, which
+> would reclassify the Authorization and Management Group actions on every scope as Control Plane.
+
+The **Customize Overwrites** editor of the [Classification Explorer](../reportings/index.html)
+shows the origin of every entry: *Base* for the base file and the tag for a tagged file (the full
+suffix when two files share a tag), prefixed with *Custom* once an entry is added, edited or removed in
+the editor (for example *Custom - PAW*). It imports and exports several files at once, lists items that
+are overwritten in more than one file, and writes every entry back to its origin file. A new entry goes
+to the target file chosen in the entry dialog: the base file, an existing tagged file or a new one.
+For a tenant without its own role definition base file, the editor loads the template base file
+together with the tenant's tagged files, so saving a tenant base file keeps the template entries.
+
 ### Overwrite classification of role actions
 
 The file `Classification_RoleActionOverwrites.json` allows you to change the tier level of
@@ -371,9 +410,9 @@ of an AzOps/GitOps deployment model. For this operational model, the sample
 overwrites the affected services (Authorization, Management Groups, Subscription Management,
 Billing, Reservations and Capacity, Azure Lighthouse, Blueprints, Custom Providers) so that these
 role actions are **always** classified as Control Plane on scope `/*`, regardless of where they are
-assigned - removing the Management Plane carve-out entirely. Copy the entries you need into your
-tenant-specific `Classification/<TenantName>/Classification_RoleActionOverwrites.json` and adjust
-the `Justification` to your environment.
+assigned - removing the Management Plane carve-out entirely. Copy the file as a tagged file into
+your tenant-specific `Classification/<TenantName>/` folder (or copy the entries you need into
+`Classification_RoleActionOverwrites.json`) and adjust the `Justification` to your environment.
 
 ### Overwrite classification of API permissions (Resource Apps)
 

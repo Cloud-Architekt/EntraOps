@@ -22,7 +22,7 @@ BeforeAll {
     function Save-EntraOpsServiceEMConfigKey { param($ConfigKey, $Value, $ConfigFilePath, $logPrefix) }
     function Get-MgContext { throw 'Get-MgContext must be mocked' }
     function Get-AzResourceGroup { param($Name, $ErrorAction) throw 'Get-AzResourceGroup must be mocked' }
-    function Remove-AzResourceGroup { param($Name, [switch]$Force) }
+    function Remove-AzResourceGroup { [CmdletBinding()] param($Name, [switch]$Force) }
     function Get-AzContext { throw 'Get-AzContext must be mocked' }
     function Set-AzContext { param($Subscription, $Tenant, $Context, $ErrorAction) throw 'Set-AzContext must be mocked' }
     function Get-AzSubscription { param($SubscriptionId, $TenantId, $ErrorAction) throw 'Get-AzSubscription must be mocked' }
@@ -34,6 +34,7 @@ BeforeAll {
     . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsPathWithinRoot.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Update-EntraOpsServiceEMObjectClassificationFile.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Set-EntraOpsServiceEMWorkloadClassification.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Undo-EntraOpsServiceEMUnregisteredGroup.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/New-EntraOpsServiceEMCatalog.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/New-EntraOpsServiceEMAssignmentPolicy.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/New-EntraOpsServicePIMPolicy.ps1"
@@ -48,13 +49,19 @@ AfterAll {
     }
 }
 
+Describe 'ServiceEM security and consistency' {
+BeforeEach {
+    $script:ServiceEMNow = [datetime]'2026-01-01T00:00:00Z'
+    Mock Get-Date { $script:ServiceEMNow }
+}
+
 Describe 'ServiceEM shared helpers' {
     AfterEach {
         $Global:EntraOpsConfig = $null
     }
 
     It 'returns true as soon as the condition is met' {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         $state = @{ Calls = 0 }
 
         Wait-EntraOpsServiceEMCondition -Condition { $state.Calls++; $state.Calls -ge 3 } | Should -BeTrue
@@ -64,13 +71,56 @@ Describe 'ServiceEM shared helpers' {
 
     It 'caps the interval and returns false after the maximum wait time' {
         $script:Sleeps = [System.Collections.Generic.List[int]]::new()
-        Mock Start-Sleep { $script:Sleeps.Add($Seconds) }
+        Mock Start-Sleep { $script:Sleeps.Add($Seconds); $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
 
         Wait-EntraOpsServiceEMCondition -Condition { $false } -MaxWaitSeconds 100 -MaxIntervalSeconds 30 | Should -BeFalse
 
         ($script:Sleeps | Measure-Object -Maximum).Maximum | Should -Be 30
-        ($script:Sleeps | Measure-Object -Sum).Sum | Should -BeGreaterOrEqual 100
-        $script:Sleeps -join ',' | Should -Be '0,1,3,7,15,30,30,30'
+        ($script:Sleeps | Measure-Object -Sum).Sum | Should -Be 100
+        $script:Sleeps -join ',' | Should -Be '0,1,3,7,15,30,30,14'
+    }
+
+    It 'includes time spent performing checks in the timeout budget' {
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
+        $state = @{ Calls = 0 }
+
+        Wait-EntraOpsServiceEMCondition -MaxWaitSeconds 100 -Condition {
+            $state.Calls++
+            $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds(75)
+            $false
+        } | Should -BeFalse
+
+        $state.Calls | Should -Be 2
+        Should -Invoke Start-Sleep -Times 0 -Exactly -ParameterFilter { $Seconds -gt 1 }
+    }
+
+    It 'checks once without sleeping when the wait budget is zero' {
+        Mock Start-Sleep {}
+        $state = @{ Calls = 0 }
+
+        Wait-EntraOpsServiceEMCondition -MaxWaitSeconds 0 -Condition { $state.Calls++; $false } | Should -BeFalse
+
+        $state.Calls | Should -Be 1
+        Should -Invoke Start-Sleep -Times 0 -Exactly -ParameterFilter { $Seconds -gt 0 }
+    }
+
+    It 'shows elapsed time and pending counts and clears progress on timeout' {
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
+        Mock Write-Progress {}
+
+        Wait-EntraOpsServiceEMCondition -Activity 'Access delivery' -MaxWaitSeconds 1 -ProgressStatus { '2 requests pending' } -Condition { $false } | Should -BeFalse
+
+        Should -Invoke Write-Progress -ParameterFilter { $Activity -eq 'Access delivery' -and $Status -like '*seconds elapsed*2 requests pending*' }
+        Should -Invoke Write-Progress -Times 1 -Exactly -ParameterFilter { $Activity -eq 'Access delivery' -and $Completed }
+    }
+
+    It 'clears wait progress when a condition throws' {
+        Mock Start-Sleep {}
+        Mock Write-Progress {}
+
+        { Wait-EntraOpsServiceEMCondition -Activity 'Access delivery' -Condition { throw 'Graph lookup failed' } } | Should -Throw '*Graph lookup failed*'
+
+        Should -Invoke Write-Progress -Times 1 -Exactly -ParameterFilter { $Activity -eq 'Access delivery' -and $Completed }
     }
 
     It 'reads ServiceEM config values from hashtable and PSCustomObject configurations' {
@@ -503,7 +553,7 @@ Describe 'ServiceEM catalog owner assignment' {
     BeforeEach {
         $script:RoleBodies = [System.Collections.Generic.List[object]]::new()
         $script:CreatedRoles = [System.Collections.Generic.List[object]]::new()
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') {
                 $role = $Body | ConvertFrom-Json
@@ -568,7 +618,7 @@ Describe 'ServiceEM access package assignment fulfillment' {
     }
 
     BeforeEach {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') {
                 if (-not $ThrowOnFailure) { throw 'POST without -ThrowOnFailure' }
@@ -715,6 +765,7 @@ Describe 'ServiceEM access package assignment fulfillment' {
 
     It 'does not submit a duplicate while a request of the same package waits for approval' {
         $script:AssignmentBodies = [System.Collections.Generic.List[object]]::new()
+        $statuses = [System.Collections.Generic.List[object]]::new()
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') { $script:AssignmentBodies.Add(($Body | ConvertFrom-Json)); return [pscustomobject]@{ Id = 'req-x'; State = 'submitted' } }
             if ($Uri -like "*assignmentRequests?*accessPackage/id eq 'ap-admins'*") {
@@ -727,21 +778,34 @@ Describe 'ServiceEM access package assignment fulfillment' {
         }
 
         New-EntraOpsServiceEMAssignment -ServiceCatalogId 'cat' -ServiceMembers @() `
+            -AssignmentRequestStatuses $statuses `
             -WorkloadPlaneAdmin ([pscustomobject]@{ Id = 'admin' }) -ServiceAssignmentPolicies $script:Policies -ServicePackages $script:Packages 6>$null | Out-Null
 
         $script:AssignmentBodies.Count | Should -Be 0
+        $statuses.Count | Should -Be 1
+        $statuses[0].State | Should -Be 'pendingApproval'
+        $statuses[0].TargetId | Should -Be 'admin'
+        $statuses[0].AccessPackageId | Should -Be 'ap-admins'
     }
 
     It 'continues with a warning instead of waiting indefinitely' {
         $script:NextState = { param($id) 'delivering' }
+        $statuses = [System.Collections.Generic.List[object]]::new()
 
         { New-EntraOpsServiceEMAssignment -ServiceCatalogId 'cat' -ServiceMembers @([pscustomobject]@{ Id = 'admin' }) `
+                -AssignmentRequestStatuses $statuses `
                 -ServiceAssignmentPolicies $script:Policies -ServicePackages $script:Packages `
                 -WarningVariable script:warnings -WarningAction SilentlyContinue 6>$null } | Should -Not -Throw
 
         @($script:warnings | Where-Object { "$_" -like '*continuing without waiting*req-admin=delivering*' }).Count | Should -Be 1
         Should -Invoke Start-Sleep -Times 15 -Exactly
         Should -Invoke Start-Sleep -ParameterFilter { $Seconds -gt 30 } -Times 0 -Exactly
+        $statuses.Count | Should -Be 1
+        $statuses[0].State | Should -Be 'delivering'
+        $statuses[0].Status | Should -Be 'x'
+        $statuses[0].TargetId | Should -Be 'admin'
+        $statuses[0].AccessPackageId | Should -Be 'ap-users'
+        ($script:ServiceEMNow - [datetime]'2026-01-01T00:00:00Z').TotalSeconds | Should -Be 300
     }
 
     It 'assigns the workload plane admin and CatalogPlaneMembers to CatalogPlane-Members' {
@@ -1015,7 +1079,7 @@ Describe 'ServiceEM PIM for Groups eligible assignments' {
 
     BeforeEach {
         $script:EligibilityBodies = [System.Collections.Generic.List[object]]::new()
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') {
                 $script:EligibilityBodies.Add(($Body | ConvertFrom-Json))
@@ -1144,7 +1208,7 @@ Describe 'ServiceEM Azure container scope' {
             if ($script:RgLookups -eq 1) { throw 'Provided resource group does not exist.' }
             [pscustomobject]@{ ResourceId = '/subscriptions/sub1/resourceGroups/RG-X'; ResourceGroupName = 'RG-X' }
         }
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
 
         New-EntraOpsServiceAZContainer -ServiceName 'Rg-X' -ServiceGroups $script:Groups -Location 'westeurope' -WarningAction SilentlyContinue 6>$null | Out-Null
 
@@ -1202,7 +1266,7 @@ Describe 'ServiceEM Azure container scope' {
         }
 
         BeforeEach {
-            Mock Start-Sleep {}
+            Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
             $script:TargetGroupExists = $false
             $script:ExistingSchedules = @()
             Mock Get-AzRoleEligibilitySchedule { $script:ExistingSchedules }
@@ -1275,7 +1339,7 @@ Describe 'ServiceEM access package resource roles' {
 
     It 'adds the Microsoft 365 group to every access package of the scope' {
         $script:RoleScopeBodies = [System.Collections.Generic.List[object]]::new()
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') {
                 $script:RoleScopeBodies.Add([pscustomobject]@{ Uri = $Uri; Body = ($Body | ConvertFrom-Json -Depth 10) })
@@ -1310,7 +1374,7 @@ Describe 'ServiceEM access package resource roles' {
 
     It 'adds the remaining resource roles and reports a failed one' {
         $script:RoleScopeBodies = [System.Collections.Generic.List[object]]::new()
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') {
                 if (-not $ThrowOnFailure) { throw 'POST without -ThrowOnFailure' }
@@ -1341,7 +1405,7 @@ Describe 'ServiceEM access package resource roles' {
     It 'accepts further resource roles in the catalog packages and still waits for missing ones' {
         $script:RoleScopeBodies = [System.Collections.Generic.List[object]]::new()
         $script:DropCreated = $false
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') {
                 $script:RoleScopeBodies.Add(($Body | ConvertFrom-Json -Depth 10))
@@ -1377,7 +1441,7 @@ Describe 'ServiceEM access package resource roles' {
             $script:RoleScopeBodies = [System.Collections.Generic.List[object]]::new()
             $script:DeletedUris = [System.Collections.Generic.List[string]]::new()
             $script:OfferEligibleRole = $true
-            Mock Start-Sleep {}
+            Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
             Mock Invoke-EntraOpsMsGraphQuery {
                 if ($Method -eq 'POST') {
                     $script:RoleScopeBodies.Add([pscustomobject]@{ Uri = $Uri; Body = ($Body | ConvertFrom-Json -Depth 10) })
@@ -1481,7 +1545,7 @@ Describe 'ServiceEM catalog resource onboarding' {
     }
 
     BeforeEach {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         $script:PostCalls = 0
         $script:PostErrors = @()
         Mock Invoke-EntraOpsMsGraphQuery {
@@ -1490,7 +1554,7 @@ Describe 'ServiceEM catalog resource onboarding' {
                 if ($script:PostCalls -le $script:PostErrors.Count) { throw $script:PostErrors[$script:PostCalls - 1] }
                 return [pscustomobject]@{ id = 'request' }
             }
-            if ($script:PostCalls -gt 0) { return [pscustomobject]@{ Id = 'r1'; DisplayName = 'SG-Rg-X-WorkloadPlane-Users' } }
+            if ($script:PostCalls -gt 0) { return [pscustomobject]@{ Id = 'r1'; DisplayName = 'SG-Rg-X-WorkloadPlane-Users'; OriginSystem = 'AadGroup'; OriginId = 'g1' } }
             return @()
         }
     }
@@ -1521,7 +1585,7 @@ Describe 'ServiceEM catalog resource onboarding' {
     It 'accepts further resources in the catalog, e.g. a Microsoft 365 group of an earlier run' {
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') { throw 'Unexpected POST' }
-            @([pscustomobject]@{ Id = 'r1'; DisplayName = 'SG-Rg-X-WorkloadPlane-Users' }, [pscustomobject]@{ Id = 'r2'; DisplayName = 'Rg-X Members' })
+            @([pscustomobject]@{ Id = 'r1'; DisplayName = 'SG-Rg-X-WorkloadPlane-Users'; OriginSystem = 'AadGroup'; OriginId = 'g1' }, [pscustomobject]@{ Id = 'r2'; DisplayName = 'Rg-X Members'; OriginSystem = 'AadGroup'; OriginId = 'g2' })
         }
 
         $result = New-EntraOpsServiceEMCatalogResource -ServiceGroups $script:ResourceGroups -ServiceCatalogId 'cat' 6>$null
@@ -1533,10 +1597,75 @@ Describe 'ServiceEM catalog resource onboarding' {
     It 'still waits for a missing expected resource' {
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') { return [pscustomobject]@{ id = 'request' } }
-            @([pscustomobject]@{ Id = 'r2'; DisplayName = 'Rg-X Members' })
+            @([pscustomobject]@{ Id = 'r2'; DisplayName = 'Rg-X Members'; OriginSystem = 'AadGroup'; OriginId = 'g2' })
         }
 
         { New-EntraOpsServiceEMCatalogResource -ServiceGroups $script:ResourceGroups -ServiceCatalogId 'cat' 6>$null } | Should -Throw '*Catalog Resource object consistency*'
+    }
+
+    It 'records the groups whose registration was accepted, including already registered ones' {
+        $script:PostErrors = @((& $script:NewGraphError 400 'ResourceAlreadyOnboarded'))
+        $registered = [System.Collections.Generic.List[string]]::new()
+
+        New-EntraOpsServiceEMCatalogResource -ServiceGroups $script:ResourceGroups -ServiceCatalogId 'cat' -RegisteredGroupIds $registered 6>$null | Out-Null
+
+        @($registered) | Should -Be @('g1')
+    }
+
+    It 'keeps polling the consistency check after a <StatusCode> lookup error' -ForEach @(
+        @{ StatusCode = 503; ErrorCode = 'ServiceUnavailable' }
+        @{ StatusCode = 404; ErrorCode = 'ResourceNotFound' }
+    ) {
+        $script:GetCalls = 0
+        $script:PollError = (& $script:NewGraphError $StatusCode $ErrorCode)
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'POST') { return [pscustomobject]@{ id = 'request' } }
+            $script:GetCalls++
+            # 1: initial lookup (empty), 2: first consistency poll fails, 3: consistent
+            if ($script:GetCalls -eq 2) { throw $script:PollError }
+            if ($script:GetCalls -ge 3) { return @([pscustomobject]@{ Id = 'r1'; DisplayName = 'SG-Rg-X-WorkloadPlane-Users'; OriginSystem = 'AadGroup'; OriginId = 'g1' }) }
+            return @()
+        }
+
+        $result = New-EntraOpsServiceEMCatalogResource -ServiceGroups $script:ResourceGroups -ServiceCatalogId 'cat' 6>$null
+
+        @($result).Count | Should -Be 1
+        $script:GetCalls | Should -Be 3
+    }
+
+    It 'reports a permission error of the consistency check at once instead of waiting' {
+        $script:GetCalls = 0
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'POST') { return [pscustomobject]@{ id = 'request' } }
+            $script:GetCalls++
+            if ($script:GetCalls -ge 2) { throw (& $script:NewGraphError 403 'Authorization_RequestDenied') }
+            return @()
+        }
+
+        { New-EntraOpsServiceEMCatalogResource -ServiceGroups $script:ResourceGroups -ServiceCatalogId 'cat' 6>$null } | Should -Throw 'Graph 403'
+        $script:GetCalls | Should -Be 2
+    }
+
+    It 'includes the last lookup error when the consistency wait expires' {
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'POST') { return [pscustomobject]@{ id = 'request' } }
+            if ($Uri -like '*resources*' -and $script:InitialLookupDone) { throw (& $script:NewGraphError 503 'ServiceUnavailable') }
+            $script:InitialLookupDone = $true
+            return @()
+        }
+        $script:InitialLookupDone = $false
+
+        { New-EntraOpsServiceEMCatalogResource -ServiceGroups $script:ResourceGroups -ServiceCatalogId 'cat' 6>$null } |
+        Should -Throw '*consistency with Entra not achieved. Last catalog resource lookup error: Graph 503*'
+    }
+
+    It 'fails the initial lookup instead of registering against an unknown catalog state' {
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'POST') { throw 'Unexpected POST' }
+            throw (& $script:NewGraphError 403 'Authorization_RequestDenied')
+        }
+
+        { New-EntraOpsServiceEMCatalogResource -ServiceGroups $script:ResourceGroups -ServiceCatalogId 'cat' 6>$null } | Should -Throw '*Failed to look up catalog resources for cat*Graph 403*'
     }
 }
 
@@ -1563,7 +1692,7 @@ Describe 'ServiceEM Graph lookup safety' {
             }
             throw "Unexpected Graph method: $Method"
         }
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
 
         New-EntraOpsServiceEMCatalog -ServiceName "Director's Service" | Out-Null
 
@@ -1730,7 +1859,7 @@ Describe 'ServiceEM assignment policy group references' {
     BeforeEach {
         $script:PolicyBodies = [System.Collections.Generic.List[object]]::new()
         $script:CreatedPolicies = [System.Collections.Generic.List[object]]::new()
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'POST') {
                 $policy = $Body | ConvertFrom-Json -Depth 20
@@ -2152,6 +2281,25 @@ Describe 'ServiceEM catalog removal resource group' {
         $script:CurrentSub | Should -Be '22222222-2222-2222-2222-222222222222'
     }
 
+    It 'reports Azure cleanup needs attention when Azure deletion produces a <FailureMode>' -TestCases @(
+        @{ FailureMode = 'terminating error' }, @{ FailureMode = 'nonterminating error' }
+    ) {
+        param($FailureMode)
+        $script:AzureFailureMode = $FailureMode
+        Mock Get-AzRoleEligibilitySchedule { @() }
+        Mock Remove-AzResourceGroup {
+            if ($script:AzureFailureMode -eq 'terminating error') { throw 'Azure deletion denied' }
+            Write-Error 'Azure deletion denied'
+        }
+
+        $result = Remove-EntraOpsServiceCatalog -ServiceCatalogName 'Catalog-Rg-MyApp' -Force -RemoveAzureResourceGroup -SubscriptionId $script:TargetSub -ErrorAction SilentlyContinue -InformationVariable feedback 6>$null
+
+        $result | Should -BeOfType [hashtable]
+        ($feedback.MessageData -join ' ') | Should -BeLike '*Azure cleanup needs attention*'
+        ($feedback.MessageData -join ' ') | Should -Not -BeLike "*Azure resource group 'RG-MyApp' deleted*"
+        Should -Invoke Remove-AzResourceGroup -Times 1 -Exactly -ParameterFilter { $ErrorAction -eq 'Stop' }
+    }
+
     It 'requires SubscriptionId before anything is deleted' {
         { Remove-EntraOpsServiceCatalog -ServiceCatalogName 'Catalog-Rg-MyApp' -Force -RemoveAzureResourceGroup } |
         Should -Throw '*requires -SubscriptionId*'
@@ -2262,7 +2410,7 @@ Describe 'ServiceEM catalog removal resource group' {
 
 Describe 'ServiceEM workload group classification' {
     BeforeEach {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         $script:AuPosts = [System.Collections.Generic.List[string]]::new()
         $script:AuRestricted = $false
         Mock Invoke-EntraOpsMsGraphQuery {
@@ -2328,11 +2476,12 @@ Describe 'ServiceEM workload group classification' {
 
 Describe 'ServiceEM catalog removal with open assignment requests' {
     BeforeEach {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         $script:DeletedUris = [System.Collections.Generic.List[string]]::new()
         $script:PostedUris = [System.Collections.Generic.List[string]]::new()
         $script:OpenRequest = [pscustomobject]@{ id = 'open-req'; requestType = 'userAdd'; state = 'pendingApproval'; status = 'PendingApproval' }
         $script:AdminRemoveFails = $false
+        $script:AssignmentRemoved = $false
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'DELETE') { $script:DeletedUris.Add($Uri); return }
             if ($Method -eq 'POST') {
@@ -2342,9 +2491,9 @@ Describe 'ServiceEM catalog removal with open assignment requests' {
                 return [pscustomobject]@{ id = 'remove-req' }
             }
             if ($Uri -like '*/assignmentRequests/open-req') { return $script:OpenRequest }
-            if ($Uri -like '*/assignmentRequests/remove-req') { return [pscustomobject]@{ id = 'remove-req'; state = 'delivered'; status = 'Delivered' } }
+            if ($Uri -like '*/assignmentRequests/remove-req') { $script:AssignmentRemoved = $true; return [pscustomobject]@{ id = 'remove-req'; state = 'delivered'; status = 'Delivered' } }
             if ($Uri -like '*/assignmentRequests?*') { return $script:OpenRequest }
-            if ($Uri -like '*/assignments?*') { return [pscustomobject]@{ id = 'assignment-1'; state = 'delivered'; target = [pscustomobject]@{ displayName = 'User' } } }
+            if ($Uri -like '*/assignments?*') { if ($script:AssignmentRemoved) { return @() }; return [pscustomobject]@{ id = 'assignment-1'; state = 'delivered'; target = [pscustomobject]@{ displayName = 'User' } } }
             if ($Uri -like '*/resourceRoleScopes') { return @() }
             if ($Uri -like '/v1.0/groups/*') { return [pscustomobject]@{ Id = 'own'; MailNickname = 'Rg-MyApp.WorkloadPlane.Users' } }
             return [pscustomobject]@{
@@ -2484,7 +2633,7 @@ Describe 'ServiceEM PIM policy safety' {
     }
 
     It 'retries the policy PATCH while the policy object returns 404' {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         $script:PatchCalls = 0
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'GET') { return [pscustomobject]@{ Id = 'assignment-member'; PolicyId = 'policy-id' } }
@@ -2504,7 +2653,7 @@ Describe 'ServiceEM PIM policy safety' {
     }
 
     It 'does not retry the policy PATCH on non-404 errors' {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         $script:PatchCalls = 0
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'GET') { return [pscustomobject]@{ Id = 'assignment-member'; PolicyId = 'policy-id' } }
@@ -2522,7 +2671,7 @@ Describe 'ServiceEM PIM policy safety' {
     }
 
     It 'waits for the member policy assignment of a new group without using the cache' {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         $script:GetCalls = 0
         $script:PatchCalls = 0
         Mock Invoke-EntraOpsMsGraphQuery {
@@ -2542,7 +2691,7 @@ Describe 'ServiceEM PIM policy safety' {
     }
 
     It 'fails when the policy PATCH keeps returning 404 until the wait times out' {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'GET') { return [pscustomobject]@{ Id = 'assignment-member'; PolicyId = 'policy-id' } }
             if ($Method -eq 'PATCH') {
@@ -2558,7 +2707,7 @@ Describe 'ServiceEM PIM policy safety' {
     }
 
     It 'updates the remaining groups after a failed group and then reports the failure' {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         $script:PatchedUris = [System.Collections.Generic.List[string]]::new()
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'GET') {
@@ -2579,7 +2728,7 @@ Describe 'ServiceEM PIM policy safety' {
     }
 
     It 'fails when no member policy assignment appears before the wait times out' {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'GET') { return $null }
             if ($Method -eq 'PATCH') { throw 'PATCH must not be called' }
@@ -2591,7 +2740,7 @@ Describe 'ServiceEM PIM policy safety' {
     }
 
     It 'fails when the member policy assignment lookup fails' {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Invoke-EntraOpsMsGraphQuery {
             if ($Method -eq 'GET') { throw 'Forbidden' }
         }
@@ -2623,7 +2772,7 @@ Describe 'ServiceEM create failures' {
     }
 
     BeforeEach {
-        Mock Start-Sleep {}
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
         Mock Write-Warning {}
         $script:Created = [System.Collections.Generic.List[object]]::new()
         $script:FailOn = $null
@@ -2713,6 +2862,216 @@ Describe 'ServiceEM create failures' {
     }
 }
 
+Describe 'ServiceEM provisioning failure cleanup' {
+    BeforeAll {
+        foreach ($name in 'New-EntraOpsServiceEntraGroup', 'New-EntraOpsServiceEMCatalogResource', 'New-EntraOpsServiceEMCatalogResourceRole', 'New-EntraOpsServiceEMAccessPackage', 'New-EntraOpsServiceEMAccessPackageResourceAssignment', 'New-EntraOpsServiceEMAssignment', 'New-EntraOpsServicePIMAssignment', 'New-EntraOpsServiceAZContainer', 'New-EntraOpsServiceBootstrap') {
+            . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/$name.ps1"
+        }
+    }
+
+    BeforeEach {
+        Mock Get-MgContext { [pscustomobject]@{ Account = 'caller@contoso.com'; AuthType = 'Delegated' } }
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
+        }
+        # The group step reports what it created through the hidden -CreatedGroupIds list; one group already existed
+        Mock New-EntraOpsServiceEntraGroup {
+            $CreatedGroupIds.Add('new-admins')
+            @([pscustomobject]@{ Id = 'existing-users'; DisplayName = 'SG-Rg-X-WorkloadPlane-Users' }, [pscustomobject]@{ Id = 'new-admins'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins' })
+        }
+        Mock New-EntraOpsServiceEMCatalog { [pscustomobject]@{ Id = 'cat' } }
+        Mock New-EntraOpsServiceEMCatalogResource { @([pscustomobject]@{ Id = 'r1' }) }
+        Mock New-EntraOpsServiceEMCatalogResourceRole { @() }
+        Mock New-EntraOpsServiceEMAccessPackage { @([pscustomobject]@{ Id = 'ap1'; DisplayName = 'AP-Rg-X-WorkloadPlane-Admins' }) }
+        Mock New-EntraOpsServiceEMAccessPackageResourceAssignment { @() }
+        Mock New-EntraOpsServiceEMAssignmentPolicy { @([pscustomobject]@{ Id = 'pol1'; DisplayName = 'Workload Plane Policy' }) }
+        Mock New-EntraOpsServiceEMAssignment { @() }
+        Mock New-EntraOpsServicePIMPolicy { @() }
+        Mock New-EntraOpsServicePIMAssignment { @() }
+        Mock Set-EntraOpsServiceEMWorkloadClassification { @() }
+        Mock Undo-EntraOpsServiceEMUnregisteredGroup {}
+    }
+
+    It 'removes the groups created in this run when the PIM policy step fails, then reports that error' {
+        Mock New-EntraOpsServicePIMPolicy { throw 'PIM onboarding race' }
+
+        { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -EnableWorkloadPlanePimForGroups -WarningAction SilentlyContinue 6>$null } |
+        Should -Throw '*PIM onboarding race*'
+
+        # No catalog yet, so nothing is registered and the created group is the only candidate
+        Should -Invoke Undo-EntraOpsServiceEMUnregisteredGroup -Times 1 -Exactly -ParameterFilter {
+            @($CreatedGroupIds) -eq @('new-admins') -and @($RegisteredGroupIds).Count -eq 0 -and [string]::IsNullOrEmpty($ServiceCatalogId)
+        }
+        Should -Invoke Set-EntraOpsServiceEMWorkloadClassification -Times 0 -Exactly
+        Should -Invoke New-EntraOpsServiceEMCatalog -Times 0 -Exactly
+    }
+
+    It 'passes the catalog and the registered groups to the cleanup when resource registration fails' {
+        Mock New-EntraOpsServiceEMCatalogResource {
+            $RegisteredGroupIds.Add('new-admins')
+            throw 'Catalog Resource object consistency with Entra not achieved'
+        }
+
+        { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -WarningAction SilentlyContinue 6>$null } |
+        Should -Throw '*consistency with Entra not achieved*'
+
+        Should -Invoke Undo-EntraOpsServiceEMUnregisteredGroup -Times 1 -Exactly -ParameterFilter {
+            @($CreatedGroupIds) -eq @('new-admins') -and @($RegisteredGroupIds) -eq @('new-admins') -and $ServiceCatalogId -eq 'cat'
+        }
+        Should -Invoke Set-EntraOpsServiceEMWorkloadClassification -Times 0 -Exactly
+    }
+
+    It 'reports the provisioning error even when the cleanup itself fails' {
+        Mock New-EntraOpsServiceEMCatalog { throw 'catalog quota' }
+        Mock Undo-EntraOpsServiceEMUnregisteredGroup { throw 'cleanup exploded' }
+
+        { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -WarningAction SilentlyContinue 6>$null } |
+        Should -Throw '*catalog quota*'
+    }
+
+    It 'includes unfinished access requests in the bootstrap report' {
+        Mock New-EntraOpsServiceEMAssignment {
+            $AssignmentRequestStatuses.Add([pscustomobject]@{ Id = 'request-1'; State = 'delivering'; Status = 'ReadyToFulfill'; TargetId = 'admin'; AccessPackageId = 'ap1' })
+            @()
+        }
+
+        Mock Write-Progress {}
+        $result = New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -WarningAction SilentlyContinue -InformationVariable feedback 6>$null
+
+        $result.Assignments | Should -BeNullOrEmpty
+        @($result.AssignmentRequests).Count | Should -Be 1
+        $result.AssignmentRequests[0].State | Should -Be 'delivering'
+        $result.AssignmentRequests[0].Status | Should -Be 'ReadyToFulfill'
+        ($feedback.MessageData -join ' ') | Should -BeLike '*1 access request(s) pending*Access is not ready*'
+        Should -Invoke Write-Progress -Times 1 -Exactly -ParameterFilter { $Activity -eq 'Provisioning ServiceEM: Rg-X' -and $Completed }
+    }
+
+    It 'does not run the cleanup once registration succeeded, even if a later step fails' {
+        Mock New-EntraOpsServiceEMAccessPackage { throw 'access package failed' }
+        Mock Write-Progress {}
+
+        { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -WarningAction SilentlyContinue 6>$null } |
+        Should -Throw '*access package failed*'
+
+        Should -Invoke Undo-EntraOpsServiceEMUnregisteredGroup -Times 0 -Exactly
+        Should -Invoke Set-EntraOpsServiceEMWorkloadClassification -Times 1 -Exactly
+        Should -Invoke Write-Progress -Times 1 -Exactly -ParameterFilter { $Activity -eq 'Provisioning ServiceEM: Rg-X' -and $Completed }
+    }
+
+    It 'creates the Azure resource group before it reports a failed eligible owner assignment' {
+        Mock New-EntraOpsServicePIMAssignment { throw 'eligible owner assignment failed' }
+        Mock Get-AzContext { [pscustomobject]@{ Tenant = [pscustomobject]@{ Id = 't' }; Subscription = [pscustomobject]@{ Id = '11111111-1111-1111-1111-111111111111' } } }
+        Mock Get-AzSubscription { [pscustomobject]@{ Id = $SubscriptionId } }
+        Mock New-EntraOpsServiceAZContainer { [pscustomobject]@{ ResourceId = 'rg' } }
+
+        $thrown = $null
+        try {
+            New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -AzureRegion 'westeurope' -SubscriptionId '11111111-1111-1111-1111-111111111111' -ServiceMembers @() `
+                -GroupOwnership Eligible -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+        } catch { $thrown = $_ }
+
+        "$thrown" | Should -BeLike '*eligible owner assignment failed*'
+        Should -Invoke New-EntraOpsServiceAZContainer -Times 1 -Exactly
+        Should -Invoke Undo-EntraOpsServiceEMUnregisteredGroup -Times 0 -Exactly
+        @($warnings | Where-Object { "$_" -like '*eligible owner assignment failed. The remaining steps continue*' }).Count | Should -Be 1
+    }
+}
+
+Describe 'ServiceEM retry after an early provisioning failure' {
+    BeforeAll {
+        foreach ($name in 'New-EntraOpsServiceEntraGroup', 'New-EntraOpsServiceEMCatalogResource', 'New-EntraOpsServiceEMCatalogResourceRole', 'New-EntraOpsServiceEMAccessPackage', 'New-EntraOpsServiceEMAccessPackageResourceAssignment', 'New-EntraOpsServiceEMAssignment', 'New-EntraOpsServicePIMAssignment', 'New-EntraOpsServiceAZContainer', 'New-EntraOpsServiceBootstrap') {
+            . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/$name.ps1"
+        }
+        $script:Deploy = { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -ServiceMembers @() -EnableWorkloadPlanePimForGroups -WarningAction SilentlyContinue 6>$null }
+        $script:GroupNamed = { param($Suffix) @($script:TenantGroups.Values | Where-Object { $_.DisplayName -like "*-$Suffix" })[0] }
+    }
+
+    # The real group and cleanup cmdlets run against an in-memory tenant that keeps its groups and catalog
+    # registrations between the two runs; only the steps after them are mocked.
+    BeforeEach {
+        $script:TenantGroups = [ordered]@{}
+        $script:CatalogGroupIds = [System.Collections.Generic.List[string]]::new()
+        $script:NextGroupId = 0
+        $script:RegisterOnlyThenFail = $null
+        Mock Start-Sleep { $script:ServiceEMNow = $script:ServiceEMNow.AddSeconds($Seconds) }
+        Mock Get-MgContext { [pscustomobject]@{ Account = 'caller@contoso.com'; AuthType = 'Delegated' } }
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
+            if ($Method -eq 'POST' -and $Uri -eq '/v1.0/groups') {
+                $request = $Body | ConvertFrom-Json
+                $script:NextGroupId++
+                $group = [pscustomobject]@{
+                    Id = "group-$($script:NextGroupId)"; DisplayName = $request.displayName; MailNickname = $request.mailNickname
+                    GroupTypes = @($request.groupTypes | Where-Object { $_ }); IsAssignableToRole = [bool]$request.isAssignableToRole; SecurityEnabled = [bool]$request.securityEnabled
+                }
+                $script:TenantGroups[$group.Id] = $group
+                return $group
+            }
+            if ($Method -eq 'GET' -and $Uri.StartsWith('/v1.0/groups?')) { return @($script:TenantGroups.Values) }
+            if ($Method -eq 'GET' -and $Uri -match '^/v1.0/groups/([^?]+)') { return $script:TenantGroups[$Matches[1]] }
+            if ($Method -eq 'DELETE' -and $Uri -match '^/v1.0/groups/(.+)$') { $script:TenantGroups.Remove($Matches[1]); return $null }
+            if ($Uri.StartsWith('/v1.0/identityGovernance/entitlementManagement/catalogs?')) {
+                return @([pscustomobject]@{ Id = 'cat'; DisplayName = 'Catalog-Rg-X'; Resources = @($script:CatalogGroupIds | ForEach-Object { [pscustomobject]@{ OriginId = $_ } }) })
+            }
+            if ($Uri.StartsWith('/v1.0/identityGovernance/entitlementManagement/catalogs/cat/resources')) {
+                return @($script:CatalogGroupIds | ForEach-Object { [pscustomobject]@{ OriginSystem = 'AadGroup'; OriginId = $_ } })
+            }
+            return @()
+        }
+        Mock New-EntraOpsServiceEMCatalog { [pscustomobject]@{ Id = 'cat' } }
+        # Registers the groups in the in-memory catalog; with RegisterOnlyThenFail, registers that group only and fails
+        Mock New-EntraOpsServiceEMCatalogResource {
+            foreach ($group in $ServiceGroups) {
+                if ($script:RegisterOnlyThenFail -and $group.DisplayName -notlike "*-$($script:RegisterOnlyThenFail)") { continue }
+                if ($group.Id -notin $script:CatalogGroupIds) { $script:CatalogGroupIds.Add($group.Id) }
+                if ($null -ne $RegisteredGroupIds) { $RegisteredGroupIds.Add($group.Id) }
+            }
+            if ($script:RegisterOnlyThenFail) { throw 'Group object consistency with Entitlement Management not achieved' }
+            @($ServiceGroups | ForEach-Object { [pscustomobject]@{ Id = "res-$($_.Id)"; OriginId = $_.Id; OriginSystem = 'AadGroup' } })
+        }
+        Mock New-EntraOpsServiceEMCatalogResourceRole { @() }
+        Mock New-EntraOpsServiceEMAccessPackage { @() }
+        Mock New-EntraOpsServicePIMPolicy { @() }
+        Mock Set-EntraOpsServiceEMWorkloadClassification { @() }
+    }
+
+    It 'recreates the groups on the retry after the PIM policy step failed' {
+        Mock New-EntraOpsServicePIMPolicy { throw 'PIM onboarding race' }
+        { & $script:Deploy } | Should -Throw '*PIM onboarding race*'
+        $script:TenantGroups.Count | Should -Be 0
+
+        Mock New-EntraOpsServicePIMPolicy { @() }
+        $report = & $script:Deploy
+
+        @($report.Groups).Count | Should -BeGreaterThan 0
+        & $script:GroupNamed 'WorkloadPlane-Users' | Should -Not -BeNullOrEmpty
+        @($script:TenantGroups.Keys | Where-Object { $_ -notin $script:CatalogGroupIds }).Count | Should -Be 0
+    }
+
+    It 'reuses the registered group and recreates the others on the retry after a partial registration' {
+        $script:RegisterOnlyThenFail = 'WorkloadPlane-Users'
+        { & $script:Deploy } | Should -Throw '*consistency with Entitlement Management not achieved*'
+        $usersGroup = & $script:GroupNamed 'WorkloadPlane-Users'
+        @($script:TenantGroups.Keys) | Should -Be @($usersGroup.Id)
+
+        $script:RegisterOnlyThenFail = $null
+        & $script:Deploy | Out-Null
+
+        (& $script:GroupNamed 'WorkloadPlane-Users').Id | Should -Be $usersGroup.Id
+        $script:TenantGroups.Count | Should -BeGreaterThan 1
+        @($script:TenantGroups.Keys | Where-Object { $_ -notin $script:CatalogGroupIds }).Count | Should -Be 0
+    }
+
+    It 'stops the retry at the provenance check when the groups of the failed run were not removed' {
+        Mock Undo-EntraOpsServiceEMUnregisteredGroup {}
+        Mock New-EntraOpsServicePIMPolicy { throw 'PIM onboarding race' }
+        { & $script:Deploy } | Should -Throw '*PIM onboarding race*'
+
+        Mock New-EntraOpsServicePIMPolicy { @() }
+        { & $script:Deploy } | Should -Throw "*isn't a resource of the catalog 'Catalog-Rg-X'*"
+    }
+}
+
 Describe 'ServiceEM report' {
     BeforeAll {
         . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/Get-EntraOpsServiceEMReport.ps1"
@@ -2743,4 +3102,6 @@ Describe 'ServiceEM report' {
         Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 2 -Exactly -ParameterFilter { $Uri -like '*/assignments?*accessPackage/id eq*' -and $ConsistencyLevel -eq 'eventual' }
         Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly -ParameterFilter { $Uri -like '*accessPackage/catalog/id eq*' }
     }
+}
+
 }

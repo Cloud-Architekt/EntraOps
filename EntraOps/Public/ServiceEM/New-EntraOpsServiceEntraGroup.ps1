@@ -55,6 +55,10 @@
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
 
+.PARAMETER CreatedGroupIds
+    Used by New-EntraOpsServiceBootstrap to record the IDs returned by group creation, including when a
+    later step fails. Existing groups are never recorded. This collection is only used for failure cleanup.
+
 .EXAMPLE
     New-EntraOpsServiceEntraGroup `
         -ServiceName "MyService" `
@@ -81,6 +85,10 @@ function New-EntraOpsServiceEntraGroup {
 
         [Parameter(Mandatory)]
         [psobject[]]$ServiceRoles,
+
+        [Parameter(DontShow)]
+        [AllowEmptyCollection()]
+        [System.Collections.Generic.List[string]]$CreatedGroupIds,
 
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
@@ -252,10 +260,14 @@ function New-EntraOpsServiceEntraGroup {
             try {
                 if ($ServiceRole.groupType -eq "Unified" -and $groups.MailNickname -notcontains $unifiedParams.MailNickname) {
                     Write-Verbose "$logPrefix $($unifiedParams|ConvertTo-Json -Compress)"
-                    $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($unifiedParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
+                    $newGroup = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($unifiedParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
+                    if ($null -ne $CreatedGroupIds -and $newGroup.Id) { $CreatedGroupIds.Add($newGroup.Id) }
+                    $groups += $newGroup
                 } elseif ($isSecurityGroup -and $groups.MailNickname -notcontains $secParams.MailNickname) {
                     Write-Verbose "$logPrefix $($secParams|ConvertTo-Json -Compress)"
-                    $groups += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
+                    $newGroup = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/groups" -Body ($secParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
+                    if ($null -ne $CreatedGroupIds -and $newGroup.Id) { $CreatedGroupIds.Add($newGroup.Id) }
+                    $groups += $newGroup
                 }
             } catch {
                 throw "Failed to create group for service role '$($ServiceRole.accessLevel) $($ServiceRole.Name)': $($_.Exception.Message)"

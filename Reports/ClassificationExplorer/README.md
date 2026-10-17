@@ -31,6 +31,10 @@ interactive, Microsoft **Fluent UI / Azure Portal** styled experience.
   **where** it is granted, driven by the EntraOps `*.Param.json` scope placeholders
   (privileged users / service principals / groups / devices, Azure Tier 0/1 resource
   scopes, Intune Tier 0/1 group IDs).
+- **Customize Overwrites** – editor for the overwrite files, including tagged files
+  (`<BaseName>_<Tag>.json`); every entry shows its origin (*Base* or the tag, prefixed with *Custom*
+  for editor changes), items overwritten in more than one file are listed, and several files can be
+  imported and exported at once
 - **Role Overwrites** – roles classified independently of their listed actions
   (`Classification_RoleDefinitionOverwrites.json`), each with its justification and a
   reference to the applicable role actions of the service.
