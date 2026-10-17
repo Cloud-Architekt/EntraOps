@@ -192,7 +192,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                         'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                         'RoleSystem'                    = "ResourceApps"
                         'Classification'                = $Classification
-                        'RoleAssignments'               = @($inheritablePermissionScopes | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
+                        'RoleAssignments'               = @($inheritablePermissionScopes | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
                         'Sponsors'                      = $ObjectDetails.Sponsors
                         'Owners'                        = $ObjectDetails.Owners
                         'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -318,7 +318,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                     'RoleSystem'                    = "ResourceApps"
                     'Classification'                = $Classification
-                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
+                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
                     'Sponsors'                      = $ObjectDetails.Sponsors
                     'Owners'                        = $ObjectDetails.Owners
                     'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -396,7 +396,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                     'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                     'RoleSystem'                    = "ResourceApps"
                     'Classification'                = $Classification
-                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
+                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
                     'Sponsors'                      = $ObjectDetails.Sponsors
                     'Owners'                        = $ObjectDetails.Owners
                     'OwnedObjects'                  = $ObjectDetails.OwnedObjects

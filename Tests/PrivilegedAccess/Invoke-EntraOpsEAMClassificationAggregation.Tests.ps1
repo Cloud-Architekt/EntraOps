@@ -113,33 +113,33 @@ Describe "Save-EntraOpsEAMRbacSystemJson assignment deduplication" {
             })
         $Assignments = @(
             [pscustomobject]@{
-                RoleAssignmentId                     = "assignment-1"
-                RoleDefinitionId                     = "role-1"
-                RoleDefinitionName                   = "Global Administrator"
-                RoleAssignmentScopeId                = "/"
-                RoleAssignmentSubType                = "Permanent"
-                Classification                       = $Classification
-                TransitiveByNestingObjectIds         = @("group-a", "group-b")
+                RoleAssignmentId                      = "assignment-1"
+                RoleDefinitionId                      = "role-1"
+                RoleDefinitionName                    = "Global Administrator"
+                RoleAssignmentScopeId                 = "/"
+                RoleAssignmentSubType                 = "Permanent"
+                Classification                        = $Classification
+                TransitiveByNestingObjectIds          = @("group-a", "group-b")
                 TransitiveByNestingObjectDisplayNames = @("Group A", "Group B")
             }
             [pscustomobject]@{
-                RoleAssignmentId                     = "assignment-1"
-                RoleDefinitionId                     = "role-1"
-                RoleDefinitionName                   = "Global Administrator"
-                RoleAssignmentScopeId                = "/"
-                RoleAssignmentSubType                = "Permanent"
-                Classification                       = $Classification
-                TransitiveByNestingObjectIds         = @("group-a", "group-b")
+                RoleAssignmentId                      = "assignment-1"
+                RoleDefinitionId                      = "role-1"
+                RoleDefinitionName                    = "Global Administrator"
+                RoleAssignmentScopeId                 = "/"
+                RoleAssignmentSubType                 = "Permanent"
+                Classification                        = $Classification
+                TransitiveByNestingObjectIds          = @("group-a", "group-b")
                 TransitiveByNestingObjectDisplayNames = @("Group A", "Group B")
             }
             [pscustomobject]@{
-                RoleAssignmentId                     = "assignment-1"
-                RoleDefinitionId                     = "role-1"
-                RoleDefinitionName                   = "Global Administrator"
-                RoleAssignmentScopeId                = "/"
-                RoleAssignmentSubType                = "Permanent"
-                Classification                       = $Classification
-                TransitiveByNestingObjectIds         = @("group-b")
+                RoleAssignmentId                      = "assignment-1"
+                RoleDefinitionId                      = "role-1"
+                RoleDefinitionName                    = "Global Administrator"
+                RoleAssignmentScopeId                 = "/"
+                RoleAssignmentSubType                 = "Permanent"
+                Classification                        = $Classification
+                TransitiveByNestingObjectIds          = @("group-b")
                 TransitiveByNestingObjectDisplayNames = @("Group B")
             }
         )
@@ -205,7 +205,7 @@ Describe "Save-EntraOpsEAMRbacSystemJson assignment deduplication" {
 Describe "Invoke-EntraOpsEAMClassificationAggregation" {
     Context "Sequential processing" {
         BeforeAll {
-    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+            $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
             $ResolvedId = "aaaaaaaa-0000-0000-0000-000000000001"
             $UnresolvedId = "bbbbbbbb-0000-0000-0000-000000000002"
             $UniqueObjects = @(
@@ -301,7 +301,7 @@ Describe "Invoke-EntraOpsEAMClassificationAggregation" {
 
     Context "Parallel processing" {
         BeforeAll {
-    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+            $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
             # 50+ objects trigger the parallel branch (inline output build, no module functions)
             $UnresolvedId = "bbbbbbbb-0000-0000-0000-000000000002"
             $UniqueObjects = [System.Collections.Generic.List[psobject]]::new()
@@ -517,6 +517,50 @@ Describe "Merge-EntraOpsEAMClassification" {
             }
         }
 
+        It "sorts assignments without changing shared classification type names (parallel: <Parallel>)" -ForEach @(
+            @{ Parallel = $false }
+            @{ Parallel = $true }
+        ) {
+            # The same classification can contribute to several principals (e.g. group inheritance).
+            # Its type names must stay untouched even when several workers sort it concurrently.
+            $SharedClassification = @(
+                New-TestClassItem -TierLevel "1" -TierLevelName "ManagementPlane" -MatchedActions @("read")
+                New-TestClassItem -TierLevel "0" -TierLevelName "ControlPlane" -MatchedActions @("write")
+            )
+            $OriginalTypeNames = @($SharedClassification | ForEach-Object { $_.PSObject.TypeNames -join "`n" })
+            $Assignments = @(
+                New-TestAssignmentWithClass -RoleName "Zeta" -Classification $SharedClassification
+                New-TestAssignmentWithClass -RoleName "Alpha" -Classification $SharedClassification
+                New-TestAssignmentWithClass -RoleName "Alpha" -Classification $SharedClassification
+                New-TestAssignmentWithClass -RoleName "Earlier name, lower privilege" -Classification @($SharedClassification[0])
+            )
+            $Assignments[1].RoleAssignmentScopeId = "/z"
+            $Assignments[2].RoleAssignmentScopeId = "/a"
+            $UniqueObjects = @(foreach ($Index in 1..50) {
+                    [pscustomobject]@{ ObjectId = "shared-$Index"; ObjectType = "user" }
+                })
+            $Details = @{}
+            $ByObject = @{}
+            foreach ($Object in $UniqueObjects) {
+                $Details[$Object.ObjectId] = New-TestObjectDetails -ObjectId $Object.ObjectId -DisplayName $Object.ObjectId
+                $ByObject[$Object.ObjectId] = $Assignments
+            }
+
+            $Result = @(Invoke-EntraOpsEAMClassificationAggregation `
+                    -UniqueObjects $UniqueObjects -ObjectDetailsCache $Details `
+                    -RbacClassificationsByObject $ByObject -RoleSystem "IdentityGovernance" `
+                    -EnableParallelProcessing $Parallel -ParallelThrottleLimit 5 6>$null)
+
+            @($SharedClassification | ForEach-Object { $_.PSObject.TypeNames -join "`n" }) | Should -Be $OriginalTypeNames
+            $Result.Count | Should -Be 50
+            foreach ($Object in $Result) {
+                @($Object.RoleAssignments.RoleDefinitionName) | Should -Be @("Alpha", "Alpha", "Zeta", "Earlier name, lower privilege")
+                @($Object.RoleAssignments.RoleAssignmentScopeId) | Should -Be @("/a", "/z", "/", "/")
+                $RoundTrip = $Object | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+                Assert-TestClassificationEvidence -Object $RoundTrip
+            }
+        }
+
         It "preserves per-tier/service evidence for <RoleSystem> with parallel processing <Parallel>" -ForEach @(
             foreach ($RoleSystem in @('EntraID', 'Azure', 'IdentityGovernance', 'DeviceManagement', 'Defender')) {
                 foreach ($Parallel in @($false, $true)) {
@@ -623,7 +667,7 @@ Describe "Get-EntraOpsPrivilegedEAMResourceApps classification aggregation" {
             }
             if ($Uri -like '*/inheritablePermissions') {
                 return [pscustomobject]@{
-                    resourceAppId = 'resource-app'
+                    resourceAppId     = 'resource-app'
                     inheritableScopes = [pscustomobject]@{ kind = $script:InheritanceKind; scopes = @('User.Read.All', 'Group.Read.All') }
                 }
             }
@@ -653,7 +697,13 @@ Describe "Get-EntraOpsPrivilegedEAMResourceApps classification aggregation" {
         }
         Mock Show-EntraOpsWarningSummary {}
 
+        $OriginalTypeNames = @($script:AppAssignments | ForEach-Object {
+                $_.Classification | ForEach-Object { $_.PSObject.TypeNames -join "`n" }
+            })
         $Result = @(Get-EntraOpsPrivilegedEamResourceApps -TenantId 'tenant-1' -EnableParallelProcessing $Parallel 6>$null)
+        @($script:AppAssignments | ForEach-Object {
+                $_.Classification | ForEach-Object { $_.PSObject.TypeNames -join "`n" }
+            }) | Should -Be $OriginalTypeNames
         $Result.Count | Should -Be (2 + $(if ($Parallel) { 499 } else { 0 }))
         foreach ($Object in $Result) {
             Assert-TestClassificationEvidence -Object $Object
@@ -677,7 +727,7 @@ Describe "Get-EntraOpsPrivilegedEAMResourceApps classification aggregation" {
         $Path = Join-Path $script:TestRepositoryRoot "EntraOps/Public/PrivilegedAccess/Get-EntraOpsPrivilegedEAMResourceApps.ps1"
         $Ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
         $Commands = $Ast.FindAll({ param($Node) $Node -is [System.Management.Automation.Language.CommandAst] }, $true) |
-            ForEach-Object { $_.GetCommandName() }
+        ForEach-Object { $_.GetCommandName() }
         @($Commands | Where-Object { $_ -eq "Merge-EntraOpsEAMClassification" }).Count | Should -BeGreaterOrEqual 2
         (Get-Content -Path $Path -Raw) | Should -Not -Match 'UniqueClassificationsHash'
     }

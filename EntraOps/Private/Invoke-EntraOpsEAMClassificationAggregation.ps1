@@ -301,10 +301,10 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                 $Classification = @($SharedMergedClassification[$ObjectId])
                 if ($Classification.Count -eq 0) {
                     $Classification = @([PSCustomObject]@{
-                        'AdminTierLevel'     = "Unclassified"
-                        'AdminTierLevelName' = "Unclassified"
-                        'Service'            = "Unclassified"
-                    })
+                            'AdminTierLevel'     = "Unclassified"
+                            'AdminTierLevelName' = "Unclassified"
+                            'Service'            = "Unclassified"
+                        })
                 }
 
                 if ($IsUnresolvedObject) {
@@ -315,7 +315,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     $Classification = @(($using:UnresolvedMarkerClassification).PSObject.Copy()) + @($Classification | Where-Object { $_.AdminTierLevelName -ne "Unclassified" })
                 }
 
-                # Build output object inline (cannot call module functions from parallel runspace)
+                # Build output object inline (cannot call module functions from parallel runspace).
                 [PSCustomObject]@{
                     'ObjectId'                      = $ObjectId
                     'ObjectTenantId'                = $ObjectDetails.ObjectTenantId
@@ -332,7 +332,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                     'RoleSystem'                    = $LocalRoleSystem
                     'Classification'                = $Classification
-                    'RoleAssignments'               = @($RbacClassifiedAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel | Select-Object -First 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId)
+                    'RoleAssignments'               = @($RbacClassifiedAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId)
                     'Sponsors'                      = $ObjectDetails.Sponsors
                     'Owners'                        = $ObjectDetails.Owners
                     'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -352,10 +352,10 @@ function Invoke-EntraOpsEAMClassificationAggregation {
             $UnresolvedWarning = "Object $($UnresolvedObject.ObjectId) could not be resolved - emitted as fail-closed ControlPlane placeholder (TaggedBy=UnresolvedObject)"
             if ($null -ne $WarningMessages) {
                 $WarningMessages.Add([PSCustomObject]@{
-                    Type    = "UnresolvedObject"
-                    Message = $UnresolvedWarning
-                    Target  = $UnresolvedObject.ObjectId
-                })
+                        Type    = "UnresolvedObject"
+                        Message = $UnresolvedWarning
+                        Target  = $UnresolvedObject.ObjectId
+                    })
             }
             Write-Warning $UnresolvedWarning
         }
@@ -391,10 +391,10 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     $UnresolvedWarning = "Object $ObjectId could not be resolved - emitted as fail-closed ControlPlane placeholder (TaggedBy=UnresolvedObject)"
                     if ($null -ne $WarningMessages) {
                         $WarningMessages.Add([PSCustomObject]@{
-                            Type    = "UnresolvedObject"
-                            Message = $UnresolvedWarning
-                            Target  = $ObjectId
-                        })
+                                Type    = "UnresolvedObject"
+                                Message = $UnresolvedWarning
+                                Target  = $ObjectId
+                            })
                     }
                     Write-Warning $UnresolvedWarning
 
@@ -416,10 +416,10 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                 $Classification = @(Merge-EntraOpsEAMClassification -RoleAssignments @($RbacClassifiedAssignments))
                 if ($Classification.Count -eq 0) {
                     $Classification = @([PSCustomObject]@{
-                        'AdminTierLevel'     = "Unclassified"
-                        'AdminTierLevelName' = "Unclassified"
-                        'Service'            = "Unclassified"
-                    })
+                            'AdminTierLevel'     = "Unclassified"
+                            'AdminTierLevelName' = "Unclassified"
+                            'Service'            = "Unclassified"
+                        })
                 }
 
                 if ($IsUnresolvedObject) {
