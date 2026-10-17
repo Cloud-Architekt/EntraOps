@@ -18,6 +18,17 @@ function jsonFile(name, entries) {
     return { name, mimeType: "application/json", buffer: Buffer.from(JSON.stringify(entries)) };
 }
 
+async function setClassificationFixture(page, fixture) {
+    await page.addInitScript(({ tenants, data }) => {
+        // Generated deployment bundles load after init scripts and assign these globals.
+        // Keep each test's fixture in place when that bundle exists, including after reload.
+        Object.defineProperties(window, {
+            EOCE_TENANTS: { get: () => tenants, set() { } },
+            EOCE_DATA: { get: () => data, set() { } }
+        });
+    }, fixture);
+}
+
 async function openCustomize(page) {
     const pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -161,17 +172,17 @@ test.describe("Classification Explorer: Customize Overwrites with tagged files",
 
     test("loads the tenant base file together with its tagged files", async ({ page }) => {
         const tenantFolder = "Classification/contoso.onmicrosoft.com";
-        await page.addInitScript((folder) => {
-            window.EOCE_TENANTS = [{
+        await setClassificationFixture(page, {
+            tenants: [{
                 name: "contoso.onmicrosoft.com",
-                files: [`${folder}/Classification_AadResources.json`, `${folder}/Classification_RoleDefinitionOverwrites.json`,
-                    `${folder}/Classification_RoleDefinitionOverwrites_PAW.json`, `${folder}/Classification_RoleActionOverwrites_PAW.json`]
-            }];
-            window.EOCE_DATA = {
-                [`${folder}/Classification_RoleDefinitionOverwrites.json`]: [{ RbacSystem: "EntraID", RoleDefinitionName: "Tenant Role", EAMTierLevelName: "ControlPlane", Justification: "tenant" }],
-                [`${folder}/Classification_RoleDefinitionOverwrites_PAW.json`]: [{ RbacSystem: "EntraID", RoleDefinitionName: "PAW Role", EAMTierLevelName: "ControlPlane", Justification: "paw" }]
-            };
-        }, tenantFolder);
+                files: [`${tenantFolder}/Classification_AadResources.json`, `${tenantFolder}/Classification_RoleDefinitionOverwrites.json`,
+                    `${tenantFolder}/Classification_RoleDefinitionOverwrites_PAW.json`, `${tenantFolder}/Classification_RoleActionOverwrites_PAW.json`]
+            }],
+            data: {
+                [`${tenantFolder}/Classification_RoleDefinitionOverwrites.json`]: [entry("Tenant Role", "ControlPlane", "tenant")],
+                [`${tenantFolder}/Classification_RoleDefinitionOverwrites_PAW.json`]: [entry("PAW Role", "ControlPlane", "paw")]
+            }
+        });
         const pageErrors = await openCustomize(page);
 
         await expect(page.locator("#custSource option", { hasText: "contoso.onmicrosoft.com" })).toHaveText("contoso.onmicrosoft.com (tenant-specific, tags: PAW)");
@@ -186,13 +197,13 @@ test.describe("Classification Explorer: Customize Overwrites with tagged files",
 
     test("loads the template base file for a tenant that only has tagged role definition files", async ({ page }) => {
         const tenantFolder = "Classification/contoso.onmicrosoft.com";
-        await page.addInitScript((folder) => {
-            window.EOCE_TENANTS = [{ name: "contoso.onmicrosoft.com", files: [`${folder}/Classification_RoleDefinitionOverwrites_PAW.json`] }];
-            window.EOCE_DATA = {
-                "Classification/Templates/Classification_RoleDefinitionOverwrites.json": [{ RbacSystem: "EntraID", RoleDefinitionName: "Template Role", EAMTierLevelName: "ControlPlane", Justification: "template" }],
-                [`${folder}/Classification_RoleDefinitionOverwrites_PAW.json`]: [{ RbacSystem: "EntraID", RoleDefinitionName: "PAW Role", EAMTierLevelName: "ControlPlane", Justification: "paw" }]
-            };
-        }, tenantFolder);
+        await setClassificationFixture(page, {
+            tenants: [{ name: "contoso.onmicrosoft.com", files: [`${tenantFolder}/Classification_RoleDefinitionOverwrites_PAW.json`] }],
+            data: {
+                "Classification/Templates/Classification_RoleDefinitionOverwrites.json": [entry("Template Role", "ControlPlane", "template")],
+                [`${tenantFolder}/Classification_RoleDefinitionOverwrites_PAW.json`]: [entry("PAW Role", "ControlPlane", "paw")]
+            }
+        });
         const pageErrors = await openCustomize(page);
 
         await expect(page.locator("#custSource option", { hasText: "contoso.onmicrosoft.com" })).toHaveText("contoso.onmicrosoft.com (tenant-specific, tags: PAW, base from template)");
