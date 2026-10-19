@@ -69,6 +69,9 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
         [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
     )
 
+    # Give every batch the same timestamp to identify the ingestion run.
+    $IngestionTimeGenerated = (Get-Date).ToUniversalTime()
+
     $OriginalAzContext = Get-AzContext
     try {
         Set-AzContext -SubscriptionId $DataCollectionRuleSubscriptionId | Out-Null
@@ -115,7 +118,7 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
                         $Json = $EamSummary | ConvertTo-Json -Depth 10 -AsArray
 
                         # Send the batch to the API
-                        Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId
+                        Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId -TimeGenerated $IngestionTimeGenerated
                     }
 
                     Write-Host "Processed batch ${CurrentBatch}/${TotalBatches}: $($EamSummary.Count) files (starting at index $i)"

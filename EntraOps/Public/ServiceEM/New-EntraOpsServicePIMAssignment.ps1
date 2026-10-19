@@ -55,6 +55,23 @@ function New-EntraOpsServicePIMAssignment {
     begin {
         $pimEligibilities = @()
         $isOwnerTarget = { param($group) $EnableOwnerAssignment -and $group.DisplayName -like "*-WorkloadPlane-*" }
+        # ServiceEM configures member policies; owner eligibility must follow the existing owner policy.
+        $getOwnerEligibilityExpiration = {
+            param($group)
+            $ownerPolicyUri = "/v1.0/policies/roleManagementPolicyAssignments?`$filter=scopeId eq '$($group.Id)' and scopeType eq 'Group' and roleDefinitionId eq 'owner'&`$expand=policy(`$expand=rules)"
+            try {
+                $ownerPolicyAssignments = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $ownerPolicyUri -OutputType PSObject -DisableCache -ThrowOnFailure)
+            } catch {
+                Write-Warning "$logPrefix Could not read the PIM owner policy of group $($group.Id); requesting a permanent eligibility. Error: $($_.Exception.Message)"
+                return @{ type = "noExpiration" }
+            }
+            $expirationRule = @($ownerPolicyAssignments | ForEach-Object { $_.policy.rules } | Where-Object { $_ -and $_.id -eq "Expiration_Admin_Eligibility" }) | Select-Object -First 1
+            if ($null -ne $expirationRule -and $expirationRule.isExpirationRequired -eq $true -and -not [string]::IsNullOrWhiteSpace("$($expirationRule.maximumDuration)")) {
+                Write-Verbose "$logPrefix The owner policy of group $($group.Id) requires an expiration; requesting $($expirationRule.maximumDuration)"
+                return @{ type = "afterDuration"; duration = "$($expirationRule.maximumDuration)" }
+            }
+            return @{ type = "noExpiration" }
+        }
         $targetGroups = @($ServiceGroups | Where-Object {
                 $_.GroupTypes -notcontains "Unified" -and (& $isOwnerTarget $_)
             })
@@ -96,6 +113,7 @@ function New-EntraOpsServicePIMAssignment {
                 Write-Verbose "$logPrefix $WorkloadPlaneAdminPrincipalId is already eligible owner of group $($group.Id)"
             } else {
                 Write-Verbose "$logPrefix Creating owner eligible assignment for $WorkloadPlaneAdminPrincipalId on group $($group.Id)"
+                $ownerParams.scheduleInfo.expiration = & $getOwnerEligibilityExpiration $group
                 try {
                     Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($ownerParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure | Out-Null
                     $createdGroupIds.Add($group.Id)

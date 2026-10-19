@@ -94,6 +94,14 @@ try {
     }
 
     $UpdateBranch = "entraops/update-$($SourceCommit.Substring(0, 12))"
+
+    $ExistingPullRequests = @(& gh pr list --repo $Repository --state open --base $BaseBranch --head $UpdateBranch --json number | ConvertFrom-Json)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not query existing EntraOps update pull requests.' }
+    if ($ExistingPullRequests.Count -gt 0) {
+        Write-Host "EntraOps update pull request #$($ExistingPullRequests[0].number) for this candidate is still open. Its branch '$UpdateBranch' was left unchanged."
+        return
+    }
+
     # git ls-remote --exit-code: 0 = branch exists, 2 = no matching ref, anything else = git/auth/network error.
     & git ls-remote --exit-code --heads origin $UpdateBranch | Out-Null
     $LsRemoteExitCode = $LASTEXITCODE
@@ -110,17 +118,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Could not publish update branch '$UpdateBranch'." }
     & $PostValidationStatus $CommitSha
 
-    $ExistingPullRequests = @(& gh pr list --repo $Repository --state open --base $BaseBranch --head $UpdateBranch --json number | ConvertFrom-Json)
-    if ($LASTEXITCODE -ne 0) { throw 'Could not query existing EntraOps update pull requests.' }
-    if ($ExistingPullRequests.Count -gt 0) {
-        Write-Host "Updated existing EntraOps update pull request #$($ExistingPullRequests[0].number)."
-        return
-    }
-
     $ReviewGuidance = if ($WorkflowChanges) {
         'This branch replaces workflow definitions, so its commit carries `[skip actions]` and no repository workflow runs on the branch before review; the isolated validation result above is the trusted check. Review every workflow diff before merging. Test-EntraOps runs on the base branch after the merge.'
     } else {
-        'Test-EntraOps runs on this pull request through its `pull_request` trigger. Wait for it and for the `EntraOps / Update candidate validation` commit status before merging.'
+        'Test-EntraOps runs on this pull request through its `pull_request` trigger. Because the pull request was opened by GitHub Actions, GitHub may hold that run until a maintainer approves it (**Approve and run workflows** on the pull request); a run that is never approved ends without jobs. Wait for it and for the `EntraOps / Update candidate validation` commit status before merging.'
     }
     $Body = "EntraOps update from source commit ``$SourceCommit``. ${StatusDescription}: ${RunUrl}. This branch contains the applied candidate and configuration-restored workflow templates. $ReviewGuidance Recommended: protect the base branch with a ruleset that requires the ``EntraOps / Update candidate validation`` status, which every update pull request receives. Do not make Test-EntraOps a required check: a ``[skip actions]`` commit leaves it pending forever and would block workflow updates."
     & gh pr create --repo $Repository --base $BaseBranch --head $UpdateBranch --title "Update EntraOps to $($SourceCommit.Substring(0, 12))" --body $Body

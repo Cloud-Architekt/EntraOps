@@ -445,6 +445,15 @@ enabled ingestion to both targets):
 - [Deploy the Custom Table parser to Azure](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FParsers%2FPrivilegedEAM_CustomTable.json)
 - [Deploy the WatchLists parser to Azure](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FParsers%2FPrivilegedEAM_WatchLists.json)
 
+The Custom Table parser returns the latest ingestion of each RBAC system within the last 14 days, so
+objects stay visible between weekly collections and objects removed in the latest run don't reappear.
+`Save-EntraOpsPrivilegedEAMInsightsCustomTable` writes the same `TimeGenerated` for all records of a run.
+If your data collection rule sets `TimeGenerated` itself (e.g. `extend TimeGenerated = now()`), the parser
+treats records within 10 minutes of the latest one as the latest run, so keep ingestion runs further apart.
+For a collection interval longer than 14 days, increase `LookbackPeriod` in the parser. The WatchLists
+parser also returns role assignments without classification, with an empty `Classification`.
+Redeploy the parser after updating EntraOps when the changelog lists parser changes.
+
 ### Ingest classification and enrichment data
 
 - `Save-EntraOpsPrivilegedEAMInsightsCustomTable` ingests classified Privileged EAM data into a Log Analytics/Sentinel custom table (`IngestToLogAnalytics` in `EntraOpsConfig.json`).

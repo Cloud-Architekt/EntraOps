@@ -134,6 +134,13 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         }
     }
 
+    # Failed lookups must not shrink the Control Plane scope; only confirmed deletions may be skipped.
+    $UnresolvedPrivilegedObjectIds = [System.Collections.Generic.List[string]]::new()
+    $TestResolutionFailed = {
+        param($ResolvedObject)
+        $null -eq $ResolvedObject -or $ResolvedObject.ResolutionStatus -eq 'Unresolved'
+    }
+
     #region Get list of all privileged objects in Entra with classification on Control Plane by Custom Security Attribute or EntraOps Classification
     if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "EntraOps") {
         Write-Host "Get privileged objects from EntraOps..."
@@ -196,7 +203,8 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         $Query = $Query.Replace("%AzureHighPrivilegedRoles%", "'$($AzureHighPrivilegedRoles -join "', '")'")
         if ($null -ne $AzureHighPrivilegedScopes -and $AzureHighPrivilegedScopes -ne "*") {
             $Scopes = "'$($AzureHighPrivilegedScopes -join "', '")'"
-            $Query = $Query.Replace("isnotempty(RoleScope)", "RoleScope in ($($Scopes))")
+            # Configured scopes may retain casing while RoleScope is lowercased.
+            $Query = $Query.Replace("isnotempty(RoleScope)", "RoleScope in~ ($($Scopes))")
         }
 
         # Get details of high privileged objects
@@ -220,6 +228,8 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value $HighPrivilegedRoles -Force | Out-Null
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "Azure Resource Graph" -Force | Out-Null
                 $PrivilegedObject
+            } elseif (& $TestResolutionFailed $ResolvedObject) {
+                $UnresolvedPrivilegedObjectIds.Add($HighPrivilegedObjectId.ObjectId)
             } else {
                 Write-Warning "High privileged object with id $($HighPrivilegedObjectId.ObjectId) not found!"
             }
@@ -291,11 +301,18 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                     $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value $ClassificationReason -Force | Out-Null
                     $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "XSPM" -Force | Out-Null
                     $PrivilegedObject
+                } elseif (& $TestResolutionFailed $ResolvedObject) {
+                    $UnresolvedPrivilegedObjectIds.Add($GraphEdge.ObjectId)
                 }
             }
         }
     }
     #endregion
+
+    if ($UnresolvedPrivilegedObjectIds.Count -gt 0) {
+        $UnresolvedList = @($UnresolvedPrivilegedObjectIds | Sort-Object -Unique)
+        throw "Control Plane scope was not updated: $($UnresolvedList.Count) privileged object(s) could not be resolved ($($UnresolvedList -join ', ')). The previous classification files are kept; re-run the update once Microsoft Graph is reachable."
+    }
 
     #region Get list of all privileged objects by manual list of ObjectIds
     if ($PrivilegedObjectClassificationSource -contains "PrivilegedObjectIds" -and $null -ne $PrivilegedObjectIds) {

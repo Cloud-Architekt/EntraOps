@@ -307,6 +307,22 @@ Describe 'ServiceEM workload plane admin and group ownership' {
             $script:CpRequests[0].Body.principalId | Should -Be 'id:cp@contoso.com'
         }
 
+        It 'completes the other steps and then fails when a ControlPlane admin can not be added' {
+            # Like the real helper: a failed lookup only throws with -ThrowOnFailure, otherwise it returns nothing.
+            Mock Invoke-EntraOpsMsGraphQuery {
+                if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
+                if ($Uri -like '/v1.0/groups/cp/members*') { if ($ThrowOnFailure) { throw 'simulated lookup failure' }; return @() }
+                if ($Method -eq 'POST') { $script:CpRequests.Add([pscustomobject]@{ Uri = $Uri; Body = ($Body | ConvertFrom-Json) }); return [pscustomobject]@{ Id = 'req' } }
+                return @()
+            }
+
+            { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -AzureRegion 'westeurope' -SubscriptionId '11111111-1111-1111-1111-111111111111' -ServiceMembers @() `
+                    -ControlPlaneAdmins @('cp@contoso.com') -WarningAction SilentlyContinue 6>$null } | Should -Throw '*Failed to add 1 ControlPlane admin(s)*simulated lookup failure*'
+
+            $script:CpRequests.Count | Should -Be 0
+            Should -Invoke New-EntraOpsServiceAZContainer -Times 1 -Exactly
+        }
+
         It 'warns when no per-service ControlPlane-Admins group exists' {
             Mock New-EntraOpsServiceEntraGroup { @([pscustomobject]@{ Id = 'g1'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins' }) }
 
@@ -413,6 +429,17 @@ Describe 'ServiceEM workload plane admin and group ownership' {
 
         Should -Invoke New-EntraOpsServiceEntraGroup -Times 0 -Exactly
         Should -Invoke New-EntraOpsServiceEMCatalog -Times 0 -Exactly
+    }
+
+    It 'escapes guest user principal names in user lookups' {
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
+        }
+
+        New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -WorkloadPlaneAdmin 'adele_fabrikam.com#EXT#@contoso.com' -ServiceMembers @('ben_fabrikam.com#EXT#@contoso.com') 6>$null | Out-Null
+
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -eq '/v1.0/users/adele_fabrikam.com%23EXT%23@contoso.com' }
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -eq '/v1.0/users/ben_fabrikam.com%23EXT%23@contoso.com' }
     }
 
     It 'forwards SkipCatalogOwnerAssignment to the catalog role assignment' {
@@ -1085,6 +1112,9 @@ Describe 'ServiceEM PIM for Groups eligible assignments' {
                 $script:EligibilityBodies.Add(($Body | ConvertFrom-Json))
                 return
             }
+            if ($Uri -like '/v1.0/policies/roleManagementPolicyAssignments?*') {
+                return @([pscustomobject]@{ policy = [pscustomobject]@{ rules = @($script:OwnerPolicyRules) } })
+            }
             if ($Uri -notlike '/v1.0/identityGovernance/privilegedAccess/group/eligibilitySchedules?*') { throw "Unexpected Graph URI: $Uri" }
             $groupId = [regex]::Match($Uri, "groupId eq '([^']+)'").Groups[1].Value
             return @(@($script:ExistingSchedules) + @($script:EligibilityBodies) | Where-Object { $_ -and $_.groupId -eq $groupId } | ForEach-Object {
@@ -1092,6 +1122,27 @@ Describe 'ServiceEM PIM for Groups eligible assignments' {
                 })
         }
         $script:ExistingSchedules = @()
+        $script:OwnerPolicyRules = @()
+    }
+
+    It 'requests the maximum duration when the owner policy does not allow permanent eligibility' {
+        $groups = @([pscustomobject]@{ Id = 'id:SG-Rg-X-WorkloadPlane-Admins'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins' })
+        $script:OwnerPolicyRules = @([pscustomobject]@{ id = 'Expiration_Admin_Eligibility'; isExpirationRequired = $true; maximumDuration = 'P180D' })
+
+        New-EntraOpsServicePIMAssignment -ServiceGroups $groups -WorkloadPlaneAdminPrincipalId 'admin-id' -EnableOwnerAssignment 6>$null | Out-Null
+
+        $script:EligibilityBodies[0].scheduleInfo.expiration.type | Should -Be 'afterDuration'
+        $script:EligibilityBodies[0].scheduleInfo.expiration.duration | Should -Be 'P180D'
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -like "*roleManagementPolicyAssignments*scopeId eq 'id:SG-Rg-X-WorkloadPlane-Admins'*roleDefinitionId eq 'owner'*" }
+    }
+
+    It 'keeps a permanent owner eligibility when the owner policy allows it' {
+        $groups = @([pscustomobject]@{ Id = 'id:SG-Rg-X-WorkloadPlane-Admins'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins' })
+        $script:OwnerPolicyRules = @([pscustomobject]@{ id = 'Expiration_Admin_Eligibility'; isExpirationRequired = $false; maximumDuration = 'P365D' })
+
+        New-EntraOpsServicePIMAssignment -ServiceGroups $groups -WorkloadPlaneAdminPrincipalId 'admin-id' -EnableOwnerAssignment 6>$null | Out-Null
+
+        $script:EligibilityBodies[0].scheduleInfo.expiration.type | Should -Be 'noExpiration'
     }
 
     It 'skips groups where the workload plane admin is already eligible owner' {

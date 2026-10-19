@@ -44,6 +44,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "git config user.email failed with exit code $LASTEXITCODE." }
     & git config user.name $Actor
     if ($LASTEXITCODE -ne 0) { throw "git config user.name failed with exit code $LASTEXITCODE." }
+    $MatchingPaths = @($Paths | Where-Object { (Test-Path -LiteralPath $_) -or @(& git ls-files -- $_).Count -gt 0 })
+    if ($MatchingPaths.Count -gt 0 -and $MatchingPaths.Count -lt $Paths.Count) {
+        $SkippedPaths = @($Paths | Where-Object { $_ -notin $MatchingPaths })
+        Write-Host "::warning::Skipped pathspec(s) without files: $($SkippedPaths -join ' ')"
+        $Paths = $MatchingPaths
+    }
     & git add --all -- @Paths
     if ($LASTEXITCODE -ne 0) { throw "git add failed for pathspec(s) '$($Paths -join ' ')' with exit code $LASTEXITCODE." }
     # git diff --quiet: 0 = no staged changes, 1 = staged changes, anything else = git error.

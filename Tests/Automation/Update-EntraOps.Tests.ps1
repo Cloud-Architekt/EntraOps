@@ -840,6 +840,7 @@ Describe 'Automated update defaults' {
         $Publisher | Should -Not -Match 'intentionally not run'
         $Publisher | Should -Match '\$ReviewGuidance = if \(\$WorkflowChanges\)'
         $Publisher | Should -Match 'runs on this pull request through its `pull_request` trigger'
+        $Publisher | Should -Match 'Approve and run workflows'
         $Publisher | Should -Match 'no repository workflow runs on the branch before review'
         # A required check that [skip actions] skipped stays pending forever, so the only check the
         # ruleset may require is the status the Apply job posts itself.
@@ -945,6 +946,8 @@ Describe 'Git-Push credential header' {
             }
             $Publisher | Should -Match '(?s)finally \{\s*foreach \(\$Name in \$ManagedEnvironment\)'
         }
+        $UpdatePublisher.IndexOf('& gh pr list') | Should -BeGreaterThan 0
+        $UpdatePublisher.IndexOf('& gh pr list') | Should -BeLessThan $UpdatePublisher.IndexOf('& git ls-remote')
         $UpdatePublisher | Should -Match '\$LsRemoteExitCode -eq 0'
         $UpdatePublisher | Should -Match 'elseif \(\$LsRemoteExitCode -eq 2\)'
         $UpdatePublisher | Should -Match 'git ls-remote exit code \$LsRemoteExitCode'
@@ -1020,6 +1023,21 @@ Describe 'Git-Push publisher behavior' {
         try {
             { & $script:Publisher -Paths 'does-not-exist' -AccessToken 'token' -Repository 'org/repo' -Actor 'tester' -CommitMessage 'test' -ServerUrl 'https://github.com' } |
             Should -Throw '*git add failed*does-not-exist*'
+        } finally {
+            Pop-Location
+        }
+    }
+
+    It 'skips a missing pathspec when another pathspec matches' {
+        $Clone = New-PublisherClone 'clone-partial-paths'
+        # Use a separate folder because later tests share this remote and create PrivilegedEAM themselves.
+        New-Item -ItemType Directory -Path (Join-Path $Clone 'TenantGovernance') | Out-Null
+        Set-Content -LiteralPath (Join-Path $Clone 'TenantGovernance/PartialPaths.json') -Value '[]'
+        Push-Location $Clone
+        try {
+            & $script:Publisher -Paths 'Classification/contoso.onmicrosoft.com', 'TenantGovernance' -AccessToken 'token' -Repository 'org/repo' -Actor 'tester' -CommitMessage 'partial' -ServerUrl 'https://github.com' 6>$null
+            (& git -C $script:Remote log -1 --format=%s main) | Should -Be 'partial'
+            @(& git -C $script:Remote ls-tree -r --name-only main) | Should -Contain 'TenantGovernance/PartialPaths.json'
         } finally {
             Pop-Location
         }

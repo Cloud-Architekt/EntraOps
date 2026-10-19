@@ -829,6 +829,14 @@ setting is enabled):
 - **RMAU assignment for unprotected objects** (`AutomatedRmauAssignmentsForUnprotectedObjects`, cmdlets `New-EntraOpsPrivilegedUnprotectedAdministrativeUnit` / `Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit`): adds every privileged user or group that has no existing restricted management (no role-assignable group membership, Entra ID role, or RMAU membership) to an RMAU named "UnprotectedObjects". Set `IncludeUnprotectedDevices` to also add devices owned by or associated with privileged users, unless another RMAU already protects the device. Device synchronization only considers owners in the connected tenant and skips devices that cannot be resolved there. The cmdlet reports any failed RMAU membership operation in its summary and then returns an error so automated workflows can fail visibly.
 - **Entitlement Management catalog protection** (`AutomatedElmCatalogProtection.ApplyPrivilegedElmCatalogProtection`, cmdlet `Update-EntraOpsPrivilegedUnprotectedElmCatalog`): syncs the privilege level of Identity Governance Entitlement Management (access package) catalogs to match their EntraOps classification - a catalog classified as Control Plane scope is protected as "privileged" (stricter write/assignment controls), an already-protected catalog is left unchanged, and a catalog that is no longer in Control Plane scope is reverted to "standard".
 
+> [!NOTE]
+> Conditional Access target groups and Administrative Units select objects by the tier of their **role
+> assignments** in each RBAC system (`Classification`), not by the object tier (`ObjectAdminTierLevelName`)
+> from custom security attributes, Alternate Tier Level Attributes or the Object Classification File.
+> An object classified as Control Plane only by its object tier is part of the Control Plane scope, but is
+> not added to the Control Plane group or Administrative Unit unless it also holds a Control Plane role
+> assignment.
+
 ### Removal safety brake
 
 The mutating update cmdlets protect against a degraded classification input removing protections wholesale. `Update-EntraOpsPrivilegedConditionalAccessGroup`, `Update-EntraOpsPrivilegedAdministrativeUnit`, `Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit`, and `Update-EntraOpsPrivilegedUnprotectedElmCatalog` plan all eligible removals for each target before mutation. By default, a plan exceeding 50% of the current protected set applies no removals to that target, records an `ABORTED` summary status, and fails the command after the summary so automation cannot silently succeed. Independent additions and protection operations may still proceed.

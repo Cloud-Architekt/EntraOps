@@ -62,12 +62,22 @@ jobs:
         with:
           inlineScript: |
             Import-Module ./EntraOps
-            Invoke-EntraOpsTenantGovernanceSnapshot -ConfigFilePath ${env:ConfigFile} -AuthenticationType FederatedCredentials -Operation ${env:SnapshotOperation} -TimeoutInSeconds ${env:StepTimeoutInSeconds} -Force | Out-Host
+            # Reserve time for export and commit within the 75-minute job timeout.
+            $TimeoutInSeconds = [Math]::Min([int]${env:StepTimeoutInSeconds}, 4200)
+            Invoke-EntraOpsTenantGovernanceSnapshot -ConfigFilePath ${env:ConfigFile} -AuthenticationType FederatedCredentials -Operation ${env:SnapshotOperation} -TimeoutInSeconds $TimeoutInSeconds -Force | Out-Host
           azPSVersion: latest
       - name: Git - Commit and Push to repository
         if: env.EnableTenantGovernanceSnapshot == 'true' && steps.snapshot.outcome == 'success'
         uses: ./.github/actions/Git-Push
         with:
           paths: TenantGovernance
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Persist released job state so the next checkout cannot restore the failed job.
+      - name: Git - Commit and Push released snapshot job state
+        if: failure() && env.EnableTenantGovernanceSnapshot == 'true' && steps.snapshot.outcome == 'failure'
+        uses: ./.github/actions/Git-Push
+        with:
+          paths: TenantGovernance/Snapshots/.PendingSnapshotJob.json TenantGovernance/Snapshots/.LastAttemptManifest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

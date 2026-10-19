@@ -230,6 +230,14 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
         $TenantGovernanceContent | Should -Match 'BUILD_CRONSCHEDULE_DISPLAYNAME'
     }
 
+    It 'commits a released snapshot job after a failed Tenant Governance run on both platforms' {
+        $TenantGovernanceContent = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-pull-tenant-governance.yml') -Raw
+        $TenantGovernanceContent | Should -Match '(?s)condition: failed\(\).*-Paths "TenantGovernance/Snapshots/\.PendingSnapshotJob\.json","TenantGovernance/Snapshots/\.LastAttemptManifest\.json"'
+
+        $GitHubWorkflow = Get-Content -LiteralPath (Join-Path $PipelineRoot '../.github/workflows/Pull-EntraOpsTenantGovernance.yaml') -Raw
+        $GitHubWorkflow | Should -Match "(?s)if: failure\(\) && .*steps\.snapshot\.outcome == 'failure'.*paths: TenantGovernance/Snapshots/\.PendingSnapshotJob\.json TenantGovernance/Snapshots/\.LastAttemptManifest\.json"
+    }
+
     It 'keeps pull collection operations separate and validates generated artifacts' -Skip:$IsConfiguredDeployment {
         $PullPipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-pull.yml') -Raw | ConvertFrom-Yaml
         $DisplayNames = @($PullPipeline.steps | ForEach-Object { $_.displayName })

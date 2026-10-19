@@ -69,8 +69,6 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
         [boolean]$ApplyAdministrativeUnitAssignments = $false
     )
 
-    $FirstPartyApps = Invoke-WebRequest -UseBasicParsing -Method GET -Uri "https://raw.githubusercontent.com/merill/microsoft-info/main/_info/MicrosoftApps.json" | ConvertFrom-Json
-
     # Summary tracking across all AUs
     $SyncSummary = [System.Collections.Generic.List[psobject]]::new()
     $TotalAdded = 0

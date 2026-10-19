@@ -130,7 +130,7 @@ function New-EntraOpsPrivilegedEamDashboardData {
     $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
-    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/EamDashboard' }
+    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepoRoot 'Reports/EamDashboard' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
         throw "EAM Dashboard app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/EamDashboard, or run Install-EntraOpsReportingFolder to download the Reports folder."
     }

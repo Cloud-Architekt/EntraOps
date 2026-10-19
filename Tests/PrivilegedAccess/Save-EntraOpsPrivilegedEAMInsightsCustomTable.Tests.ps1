@@ -9,7 +9,7 @@ BeforeAll {
     function Get-AzContext { throw "Get-AzContext must be mocked" }
     function Set-AzContext { param($SubscriptionId, $Context) throw "Set-AzContext must be mocked" }
     function Push-EntraOpsLogsIngestionAPI {
-        param($TableName, $JsonContent, $DataCollectionRuleName, $DataCollectionResourceGroupName, $DataCollectionRuleSubscriptionId)
+        param($TableName, $JsonContent, $DataCollectionRuleName, $DataCollectionResourceGroupName, $DataCollectionRuleSubscriptionId, $TimeGenerated)
         throw "Push-EntraOpsLogsIngestionAPI must be mocked"
     }
     . "$script:TestRepositoryRoot/EntraOps/Public/PrivilegedAccess/Save-EntraOpsPrivilegedEAMInsightsCustomTable.ps1"
@@ -70,5 +70,24 @@ Describe "Save-EntraOpsPrivilegedEAMInsightsCustomTable Azure context isolation"
             -PrincipalTypeFilter @("user", "group") -RbacSystems "Azure"
 
         Should -Invoke Push-EntraOpsLogsIngestionAPI -Times 1 -Exactly
+    }
+
+    It "stamps every batch of one run with the same TimeGenerated" {
+        foreach ($System in "Azure", "EntraID") {
+            $ObjectTypePath = Join-Path $TestDrive "$System/user"
+            New-Item -ItemType Directory -Path $ObjectTypePath -Force | Out-Null
+            @{ ObjectId = [guid]::NewGuid().ToString() } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ObjectTypePath "record.json")
+        }
+        $script:CapturedTimes = [System.Collections.Generic.List[object]]::new()
+        Mock Push-EntraOpsLogsIngestionAPI { $script:CapturedTimes.Add($TimeGenerated) }
+
+        Save-EntraOpsPrivilegedEAMInsightsCustomTable -ImportPath $TestDrive `
+            -DataCollectionRuleName "dcr" -DataCollectionResourceGroupName "rg" `
+            -DataCollectionRuleSubscriptionId "target" -TenantId "tenant" `
+            -PrincipalTypeFilter "user" -RbacSystems "Azure", "EntraID"
+
+        $script:CapturedTimes.Count | Should -Be 2
+        $script:CapturedTimes[0] | Should -Not -BeNullOrEmpty
+        @($script:CapturedTimes | Sort-Object -Unique).Count | Should -Be 1
     }
 }

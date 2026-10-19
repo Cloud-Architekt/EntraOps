@@ -133,6 +133,48 @@ AfterAll {
     $Global:TenantNameContext = $script:PreviousTenantNameContext
 }
 
+Describe 'Get-EntraOpsClassificationControlPlaneObjects resolution failures' {
+    BeforeEach {
+        $Global:DefaultFolderClassification = Join-Path $TestDrive 'Classification'
+        $Global:TenantNameContext = 'contoso.onmicrosoft.com'
+        Mock -ModuleName EntraOps Invoke-EntraOpsMsGraphQuery { [pscustomobject]@{ results = $null } }
+        Mock -ModuleName EntraOps Invoke-EntraOpsAzGraphQuery {
+            @([pscustomobject]@{ PrincipalId = '22222222-2222-2222-2222-222222222222'; PrincipalType = 'user'; RoleScope = '/'; RoleName = 'Owner' })
+        }
+    }
+
+    It 'stops instead of dropping a privileged object whose lookup failed' -ForEach @(
+        @{ Case = 'exception'; Resolved = $null }
+        @{ Case = 'unresolved'; Resolved = [pscustomobject]@{ ObjectId = '22222222-2222-2222-2222-222222222222'; ObjectType = 'unknown'; ResolutionStatus = 'Unresolved' } }
+    ) {
+        $script:ResolvedFixture = $Resolved
+        Mock -ModuleName EntraOps Invoke-EntraOpsParallelObjectResolution { @{ '22222222-2222-2222-2222-222222222222' = $script:ResolvedFixture } }
+
+        { Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource 'PrivilegedRolesFromAzGraph' -EntraOpsEamFolder '' -TenantId $script:TenantId -EnableParallelProcessing $false 6>$null 3>$null } |
+            Should -Throw '*could not be resolved (22222222-2222-2222-2222-222222222222)*'
+    }
+
+    It 'matches configured Azure scopes case-insensitively' {
+        Mock -ModuleName EntraOps Invoke-EntraOpsParallelObjectResolution {
+            @{ '22222222-2222-2222-2222-222222222222' = [pscustomobject]@{ ObjectId = '22222222-2222-2222-2222-222222222222'; ObjectType = 'unknown'; ResolutionStatus = 'NotFound' } }
+        }
+
+        $null = @(Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource 'PrivilegedRolesFromAzGraph' -AzureHighPrivilegedScopes '/providers/Microsoft.Management/managementGroups/Contoso' -EntraOpsEamFolder '' -TenantId $script:TenantId -EnableParallelProcessing $false 6>$null 3>$null)
+
+        Should -Invoke -ModuleName EntraOps Invoke-EntraOpsAzGraphQuery -Times 1 -Exactly -ParameterFilter { $KqlQuery -match "RoleScope in~ \('/providers/Microsoft.Management/managementGroups/Contoso'\)" }
+    }
+
+    It 'skips a privileged object that no longer exists' {
+        Mock -ModuleName EntraOps Invoke-EntraOpsParallelObjectResolution {
+            @{ '22222222-2222-2222-2222-222222222222' = [pscustomobject]@{ ObjectId = '22222222-2222-2222-2222-222222222222'; ObjectType = 'unknown'; ResolutionStatus = 'NotFound' } }
+        }
+
+        $Result = @(Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource 'PrivilegedRolesFromAzGraph' -EntraOpsEamFolder '' -TenantId $script:TenantId -EnableParallelProcessing $false 6>$null 3>$null)
+
+        $Result.Count | Should -Be 0
+    }
+}
+
 Describe 'Get-EntraOpsClassificationControlPlaneObjects identity merge' {
     BeforeEach {
         # The Exposure Management source is not under test.

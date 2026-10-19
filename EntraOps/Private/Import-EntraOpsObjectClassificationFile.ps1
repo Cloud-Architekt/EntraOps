@@ -57,7 +57,22 @@ function Import-EntraOpsObjectClassificationFile {
 
     $Entries = @{}
     if (-not $FileExists) {
-        Write-Warning "Object Classification File is enabled but '$ResolvedPath' does not exist. No object is classified by the file."
+        # Share the warning marker across runspaces; each has its own module cache.
+        $ShouldWarn = $true
+        $SharedSession = Get-Variable -Name __EntraOpsSession -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        if ($SharedSession -is [hashtable] -and $SharedSession.IsSynchronized) {
+            $WarnedKey = "ObjectClassificationFileMissingWarned|$ResolvedPath"
+            [System.Threading.Monitor]::Enter($SharedSession.SyncRoot)
+            try {
+                $ShouldWarn = -not $SharedSession.ContainsKey($WarnedKey)
+                $SharedSession[$WarnedKey] = $true
+            } finally {
+                [System.Threading.Monitor]::Exit($SharedSession.SyncRoot)
+            }
+        }
+        if ($ShouldWarn) {
+            Write-Warning "Object Classification File is enabled but '$ResolvedPath' does not exist. No object is classified by the file."
+        }
         $Script:ObjectClassificationFileCache = @{ Key = $CacheKey; Entries = $Entries }
         return $Entries
     }

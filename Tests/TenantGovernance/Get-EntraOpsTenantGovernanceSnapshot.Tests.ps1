@@ -205,6 +205,36 @@ Describe 'Get-EntraOpsTenantGovernanceSnapshot timeout handling' {
         $Result.ResourceCount | Should -Be 1
         $Result.Resources[0].id | Should -Be 'resource-1'
     }
+
+    It 'marks a failed snapshot job as terminal' {
+        Mock Invoke-EntraOpsMsGraphQuery {
+            [PSCustomObject]@{ id = 'job-failed'; status = 'failed'; error = 'simulated job failure' }
+        }
+
+        $ErrorRecord = $null
+        try {
+            Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId 'job-failed' -ResourcesToInclude @('microsoft.entra.conditionalAccessPolicy') -SkipWaitForCompletion -SkipPrerequisiteCheck
+        } catch {
+            $ErrorRecord = $_
+        }
+
+        $ErrorRecord.FullyQualifiedErrorId | Should -BeLike 'EntraOpsTenantGovernanceSnapshotJobTerminal*'
+        $ErrorRecord.Exception.Message | Should -Match 'job-failed failed'
+    }
+
+    It 'does not mark a failed status request as terminal' {
+        Mock Invoke-EntraOpsMsGraphQuery { throw 'simulated polling outage' }
+
+        $ErrorRecord = $null
+        try {
+            Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId 'job-transient' -ResourcesToInclude @('microsoft.entra.conditionalAccessPolicy') -SkipWaitForCompletion -SkipPrerequisiteCheck
+        } catch {
+            $ErrorRecord = $_
+        }
+
+        $ErrorRecord | Should -Not -BeNullOrEmpty
+        $ErrorRecord.FullyQualifiedErrorId | Should -Not -BeLike 'EntraOpsTenantGovernanceSnapshotJobTerminal*'
+    }
 }
 
 Describe 'Save-EntraOpsTenantGovernanceSnapshotJson pending state' {
@@ -245,6 +275,44 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson pending state' {
         $PendingJob.LastPollingError | Should -Match 'simulated polling outage'
         Test-Path (Join-Path $script:ExportFolder '.SnapshotManifest.json') | Should -BeFalse
         @(Get-ChildItem -Path $script:ExportFolder -Recurse -Force -Filter '*.json').Count | Should -Be 1
+    }
+
+    It 'releases a pending job that can never be collected and records the failure' {
+        $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder 'TenantGovernance/SnapshotsTerminal'
+        New-Item -ItemType Directory -Path $script:ExportFolder -Force | Out-Null
+        $PendingJobPath = Join-Path $script:ExportFolder '.PendingSnapshotJob.json'
+        @{ SnapshotJobId = 'job-terminal'; SnapshotDisplayName = 'Test Snapshot'; ResourcesToInclude = @('microsoft.entra.conditionalAccessPolicy'); CreatedDateTime = '2026-10-17T06:00:00Z' } |
+            ConvertTo-Json | Set-Content -LiteralPath $PendingJobPath -Encoding utf8
+        Mock Get-EntraOpsTenantGovernanceSnapshot {
+            throw [System.Management.Automation.ErrorRecord]::new(
+                [System.InvalidOperationException]::new('Tenant Governance snapshot job job-terminal failed.'),
+                'EntraOpsTenantGovernanceSnapshotJobTerminal', 'InvalidResult', 'job-terminal')
+        }
+
+        { Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('unused-by-mock') -Operation Collect -SkipPrerequisiteCheck -WarningAction SilentlyContinue } |
+            Should -Throw '*job-terminal failed*'
+
+        Test-Path -LiteralPath $PendingJobPath | Should -BeFalse
+        $LastAttempt = Get-Content -LiteralPath (Join-Path $script:ExportFolder '.LastAttemptManifest.json') -Raw | ConvertFrom-Json
+        $LastAttempt.SnapshotId | Should -Be 'job-terminal'
+        $LastAttempt.IsComplete | Should -BeFalse
+        $LastAttempt.Diagnostics[0].ErrorCode | Should -Be 'SnapshotJobNotCollectable'
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') | Should -BeFalse
+    }
+
+    It 'keeps a pending job when its status can not be retrieved' {
+        $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder 'TenantGovernance/SnapshotsTransient'
+        New-Item -ItemType Directory -Path $script:ExportFolder -Force | Out-Null
+        $PendingJobPath = Join-Path $script:ExportFolder '.PendingSnapshotJob.json'
+        @{ SnapshotJobId = 'job-transient'; ResourcesToInclude = @('microsoft.entra.conditionalAccessPolicy'); CreatedDateTime = '2026-10-17T06:00:00Z' } |
+            ConvertTo-Json | Set-Content -LiteralPath $PendingJobPath -Encoding utf8
+        Mock Get-EntraOpsTenantGovernanceSnapshot { throw 'Failed to retrieve status of snapshot job job-transient.' }
+
+        { Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('unused-by-mock') -Operation Collect -SkipPrerequisiteCheck } |
+            Should -Throw '*Failed to retrieve status*'
+
+        Test-Path -LiteralPath $PendingJobPath | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder '.LastAttemptManifest.json') | Should -BeFalse
     }
 }
 

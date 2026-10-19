@@ -215,9 +215,9 @@ function Connect-EntraOps {
 
             # Info lines are printed to the right of the pyramid base
             $SplashInfo = @{
-                 6 = @("📦 Version $($ModuleVersion) on $($PSEnvironment)", 'Gray')
-                 7 = @("👤 Community Project by Thomas Naunheim", 'Gray')
-                 8 = @("🌐 www.entraops.com", 'Cyan')
+                6 = @("📦 Version $($ModuleVersion) on $($PSEnvironment)", 'Gray')
+                7 = @("👤 Community Project by Thomas Naunheim", 'Gray')
+                8 = @("🌐 www.entraops.com", 'Cyan')
             }
 
             for ($Row = 0; $Row -lt $SplashArt.Count; $Row++) {
@@ -590,7 +590,8 @@ function Connect-EntraOps {
         # Recommendation 3: Optimize context retrieval and verbose output generation
         Write-Verbose -Message "Connected to Azure Management"
         $AzContextRaw = Get-AzContext
-        $AzContext = $AzContextRaw | Select-Object Account, Tenant, TokenCache
+
+        $AzContext = $AzContextRaw | Select-Object Account, Tenant
         Write-Verbose ($AzContext | Out-String)
 
         # Retrieve MG context once (skipped when Connect-MgGraph was itself skipped in REST-only mode)

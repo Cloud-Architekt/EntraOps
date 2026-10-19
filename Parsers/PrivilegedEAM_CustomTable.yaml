@@ -1,7 +1,7 @@
 Parser:
   Title: PrivilegedEAM (Custom Table)
-  Version: 0.3
-  LastUpdated: 2026-07-02
+  Version: 0.4
+  LastUpdated: 2026-10-19
 Product:
   Name: EntraOps
 References:
@@ -11,23 +11,36 @@ Description: |
   This parser is used to have a standarized schema of EntraOps classification of Privileged EAM.
 ParserName: PrivilegedEAM
 ParserQuery: |
-  PrivilegedEAM_CL
-  | where TimeGenerated > ago(1d)
+  // Only the latest ingestion of each RBAC system is returned. The lookback must cover the collection
+  // schedule (e.g. weekly); objects removed in the latest run do not reappear from older ingestions.
+  // EntraOps stamps all records of an ingestion run with the same TimeGenerated. The window only covers
+  // data collection rules that set TimeGenerated at ingestion; runs less than this apart can overlap.
+  let LookbackPeriod = 14d;
+  let IngestionWindow = 10m;
+  let EntraOpsData = PrivilegedEAM_CL
+      | where TimeGenerated > ago(LookbackPeriod);
+  let LatestIngestion = EntraOpsData
+      | summarize LatestTimeGenerated = max(TimeGenerated) by RoleSystem;
+  EntraOpsData
+  | lookup kind=inner LatestIngestion on RoleSystem
+  | where TimeGenerated > LatestTimeGenerated - IngestionWindow
+  | project-away LatestTimeGenerated
   | summarize arg_max(TimeGenerated, *) by ObjectId,RoleSystem
   | project-away TenantId
   | extend Type = "EntraOps_CustomTable"
   | mv-apply RoleAssignments on
   (
-      extend RoleAssignments = bag_merge(
+      extend SubType = tostring(RoleAssignments.RoleAssignmentSubType)
+      | extend RoleAssignments = bag_merge(
           RoleAssignments,
           bag_pack(
               "EligibilityBy", case(
+                  RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible" and SubType in ("Eligible member", "Nested Eligible member", "Nested Eligible group member"), "PIM for Entra ID Roles and Groups",
                   RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible", "PIM for Entra ID Roles",
-                  RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible" and (RoleAssignments.RoleAssignmentSubType == "Nested Eligible member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member"), "PIM for Entra ID Roles and Groups",
                   RoleSystem == "Azure" and RoleAssignments.PIMAssignmentType == "Eligible", "PIM for Azure Roles",
-                  RoleAssignments.RoleAssignmentSubType == "Nested Eligible group member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member", "PIM for Groups",
+                  SubType in ("Eligible member", "Nested Eligible member", "Nested Eligible group member"), "PIM for Groups",
                   "N/A"),
-              "TransitiveByPim", iff((RoleAssignments.RoleAssignmentSubType == "Nested Eligible member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member"), true, false)
+              "TransitiveByPim", SubType in ("Eligible member", "Nested Eligible member", "Nested Eligible group member")
               )
           )
       | summarize RoleAssignments = make_list(RoleAssignments)

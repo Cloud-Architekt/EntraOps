@@ -34,11 +34,21 @@ Describe "Push-EntraOpsLogsIngestionAPI Azure context isolation" {
         Should -Invoke Get-AzAccessToken -Times 0 -Exactly
     }
 
+    It "stamps every record with the given TimeGenerated" {
+        $RunTime = [datetime]::new(2026, 10, 19, 6, 20, 0, [System.DateTimeKind]::Utc)
+
+        $Result = Push-EntraOpsLogsIngestionAPI -JsonContent '[{"value":1},{"value":2}]' -DataCollectionRuleName "dcr" -DataCollectionRuleSubscriptionId "target" -SampleDataOnly $true -TimeGenerated $RunTime
+
+        $Records = @($Result | ConvertFrom-Json -DateKind String)
+        $Records.Count | Should -Be 2
+        @($Records.TimeGenerated | Sort-Object -Unique) | Should -Be @('2026-10-19T06:20:00.0000000Z')
+    }
+
     It "restores the original context when ARM lookup fails" {
         Mock Invoke-AzRestMethod { throw "simulated ARM failure" }
 
         { Push-EntraOpsLogsIngestionAPI -JsonContent '{"value":1}' -DataCollectionRuleName "dcr" -DataCollectionRuleSubscriptionId "target" } |
-            Should -Throw "*simulated ARM failure*"
+        Should -Throw "*simulated ARM failure*"
 
         Should -Invoke Set-AzContext -Times 1 -Exactly -ParameterFilter { $SubscriptionId -eq "target" }
         Should -Invoke Set-AzContext -Times 1 -Exactly -ParameterFilter { $Context -eq $script:OriginalContext }
@@ -54,7 +64,7 @@ Describe "Push-EntraOpsLogsIngestionAPI Azure context isolation" {
         Mock Invoke-RestMethod {}
 
         { Push-EntraOpsLogsIngestionAPI -JsonContent '{"value":1}' -DataCollectionRuleName "dcr" -DataCollectionResourceGroupName "rg" -DataCollectionRuleSubscriptionId "target" } |
-            Should -Not -Throw
+        Should -Not -Throw
 
         Should -Invoke Invoke-RestMethod -Times 1 -Exactly
         Should -Invoke Set-AzContext -Times 1 -Exactly -ParameterFilter { $SubscriptionId -eq "target" }

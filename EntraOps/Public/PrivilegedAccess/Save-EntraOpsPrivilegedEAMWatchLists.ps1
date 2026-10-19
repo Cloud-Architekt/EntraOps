@@ -155,9 +155,11 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                 foreach ( $RoleAssignment in $Privilege.RoleAssignments) {
                     # Extract classification into separate watchlist to avoid 10 KB item limit
                     $RoleAssignmentClassifications = $RoleAssignment.Classification
+                    # Match the parser join key; delegated grants reuse assignment IDs across scopes and permissions.
+                    $RoleAssignmentKey = "$($Rbac)_$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.RoleAssignmentScopeId)_$($RoleAssignment.RoleDefinitionId)"
                     if ($null -ne $RoleAssignmentClassifications) {
                         foreach ($ClassificationItem in $RoleAssignmentClassifications) {
-                            $ClassificationUniqueId = "$($RoleAssignment.RoleAssignmentId)_$($ClassificationItem.AdminTierLevelName)_$($ClassificationItem.Service)"
+                            $ClassificationUniqueId = "$($RoleAssignmentKey)_$($ClassificationItem.AdminTierLevelName)_$($ClassificationItem.Service)"
                             if (-not $SeenClassificationUniqueIds.Add($ClassificationUniqueId)) {
                                 continue
                             }
@@ -184,11 +186,13 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     # Remove Classification from RoleAssignment to reduce watchlist item size
                     $RoleAssignment.PSObject.Properties.Remove("Classification")
 
-                    if ($null -eq $RoleAssignment.TransitiveByObjectId ) {
-                        $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)" -Force
-                    } else {
-                        $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)_$($RoleAssignment.TransitiveByObjectId)" -Force
+                    # Include the resolved principal for transitive assignments and use the name for unresolved roles.
+                    $RoleDefinitionKey = if ([string]::IsNullOrEmpty($RoleAssignment.RoleDefinitionId)) { $RoleAssignment.RoleDefinitionName } else { $RoleAssignment.RoleDefinitionId }
+                    $RoleAssignmentUniqueId = "$($Rbac)_$($RoleAssignment.RoleAssignmentId)_$($Privilege.ObjectId)_$($RoleDefinitionKey)_$($RoleAssignment.RoleAssignmentScopeId)"
+                    if (-not [string]::IsNullOrEmpty($RoleAssignment.TransitiveByObjectId)) {
+                        $RoleAssignmentUniqueId = "$($RoleAssignmentUniqueId)_$($RoleAssignment.TransitiveByObjectId)"
                     }
+                    $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value $RoleAssignmentUniqueId -Force
                     $TagValue = @("$($Rbac)", "Role Assignment", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress -AsArray
                     $RoleAssignment | Add-Member -MemberType NoteProperty -Name "RoleSystem" -Value $Rbac -Force
                     $RoleAssignment | Add-Member -MemberType NoteProperty -Name "Tags" -Value $TagValue -Force

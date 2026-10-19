@@ -193,7 +193,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             Write-Verbose "Object $AadObjectId is a known remoteTenantGroup (ForeignGroup) in this tenant."
             $ObjectDetails = [PSCustomObject]@{
                 '@odata.type' = '#microsoft.graph.remoteTenantGroup'
-                'id' = $AadObjectId
+                'id'          = $AadObjectId
                 'displayName' = ($AllRemoteTenantGroups | Where-Object { $_.remoteGroupId -eq $AadObjectId }).remoteGroupDisplayName
             }
         } else {
@@ -712,6 +712,19 @@ function Get-EntraOpsPrivilegedEntraObject {
     if ($null -ne $CsaObjectTypeName -and -not (Test-EntraOpsCustomSecurityAttributeClassificationEnabled -ObjectType $CsaObjectTypeName -Enabled $CustomSecurityAttributeClassification -ObjectClassificationFile $ObjectClassificationFile -AlternateObjectTierLevelAttributes $AlternateObjectTierLevelAttributes)) {
         $AdminTierLevel = $null
         $AdminTierLevelName = $null
+    }
+
+    # Complete partial CSA tier pairs; preserve conflicting pairs for validation.
+    $TierLevelByName = @{ ControlPlane = '0'; ManagementPlane = '1'; WorkloadPlane = '1'; UserAccess = '2' }
+    $TierNameByLevel = @{ '0' = 'ControlPlane'; '1' = 'ManagementPlane'; '2' = 'UserAccess' }
+    $HasTierLevel = -not [string]::IsNullOrWhiteSpace("$AdminTierLevel") -and "$AdminTierLevel" -ne 'Unclassified'
+    $HasTierLevelName = -not [string]::IsNullOrWhiteSpace("$AdminTierLevelName") -and "$AdminTierLevelName" -ne 'Unclassified'
+    if ($HasTierLevelName -and -not $HasTierLevel -and $TierLevelByName.ContainsKey("$AdminTierLevelName")) {
+        $AdminTierLevel = $TierLevelByName["$AdminTierLevelName"]
+        Write-Verbose "Object $AadObjectId has only the tier name '$AdminTierLevelName' as custom security attribute; tier level $AdminTierLevel derived."
+    } elseif ($HasTierLevel -and -not $HasTierLevelName -and $TierNameByLevel.ContainsKey("$AdminTierLevel".Trim())) {
+        $AdminTierLevelName = $TierNameByLevel["$AdminTierLevel".Trim()]
+        Write-Verbose "Object $AadObjectId has only the tier level '$AdminTierLevel' as custom security attribute; tier name $AdminTierLevelName derived."
     }
 
     $AlternateObjectTypeName = switch ($ObjectType) {

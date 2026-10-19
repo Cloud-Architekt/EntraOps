@@ -332,6 +332,11 @@ function New-EntraOpsServiceBootstrap {
             }
             $directoryObject
         }
+        # Escape guest UPN '#' characters; decode first to accept already-escaped Graph URLs.
+        $directoryObjectPath = {
+            param([string]$Collection, [string]$Identifier)
+            "/v1.0/$Collection/$([uri]::EscapeDataString([uri]::UnescapeDataString($Identifier.Trim())) -replace '%40', '@')"
+        }
 
         if ($GroupOwnership -ne "None") {
             Write-Warning "$logPrefix -GroupOwnership $GroupOwnership makes the WorkloadPlaneAdmin owner of the WorkloadPlane groups. Owners can add members directly, bypassing access package approvals and access reviews."
@@ -352,15 +357,15 @@ function New-EntraOpsServiceBootstrap {
                 Write-Verbose "$logPrefix WorkloadPlaneAdmin set, looking up $WorkloadPlaneAdmin"
                 if ($WorkloadPlaneAdmin -match '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/') {
                     $spId = $WorkloadPlaneAdmin -replace '^https://graph\.microsoft\.com/v1\.0/servicePrincipals/', ''
-                    $graphOwner = & $resolveDirectoryObject "/v1.0/servicePrincipals/$spId" "WorkloadPlaneAdmin"
+                    $graphOwner = & $resolveDirectoryObject (& $directoryObjectPath 'servicePrincipals' $spId) "WorkloadPlaneAdmin"
                     $owner = "https://graph.microsoft.com/v1.0/servicePrincipals/$($graphOwner.Id)"
                 } elseif ($WorkloadPlaneAdmin -match '^https://graph\.microsoft\.com/v1\.0/users/') {
                     $userId = $WorkloadPlaneAdmin -replace '^https://graph\.microsoft\.com/v1\.0/users/', ''
-                    $graphOwner = & $resolveDirectoryObject "/v1.0/users/$userId" "WorkloadPlaneAdmin"
+                    $graphOwner = & $resolveDirectoryObject (& $directoryObjectPath 'users' $userId) "WorkloadPlaneAdmin"
                     $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
                 } else {
                     # UPN or object ID
-                    $graphOwner = & $resolveDirectoryObject "/v1.0/users/$WorkloadPlaneAdmin" "WorkloadPlaneAdmin"
+                    $graphOwner = & $resolveDirectoryObject (& $directoryObjectPath 'users' $WorkloadPlaneAdmin) "WorkloadPlaneAdmin"
                     $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
                 }
             } else {
@@ -369,7 +374,7 @@ function New-EntraOpsServiceBootstrap {
                     throw "WorkloadPlaneAdmin parameter is required when using service principal (AppOnly) authentication. Please specify -WorkloadPlaneAdmin with a user UPN (e.g., 'user@contoso.com') or user ID."
                 }
                 Write-Verbose "$logPrefix WorkloadPlaneAdmin not specified, looking up $($mgContext.Account)"
-                $graphOwner = & $resolveDirectoryObject "/v1.0/users/$($mgContext.Account)" "WorkloadPlaneAdmin (signed-in user)"
+                $graphOwner = & $resolveDirectoryObject (& $directoryObjectPath 'users' $mgContext.Account) "WorkloadPlaneAdmin (signed-in user)"
                 $owner = "https://graph.microsoft.com/v1.0/users/$($graphOwner.Id)"
             }
             Write-Verbose "$logPrefix Resolved workload plane admin as $owner"
@@ -388,11 +393,11 @@ function New-EntraOpsServiceBootstrap {
             if ([string]::IsNullOrWhiteSpace($mgContext.Account) -or $mgContext.AuthType -eq "AppOnly") {
                 Write-Verbose "$logPrefix ServiceMembers not specified with AppOnly auth, defaulting to empty members list"
             } else {
-                $graphMembers = @(& $resolveDirectoryObject "/v1.0/users/$($mgContext.Account)" "service member (signed-in user)")
+                $graphMembers = @(& $resolveDirectoryObject (& $directoryObjectPath 'users' $mgContext.Account) "service member (signed-in user)")
             }
         } else {
             foreach ($serviceMember in $ServiceMembers) {
-                $graphMembers += & $resolveDirectoryObject "/v1.0/users/$serviceMember" "service member"
+                $graphMembers += & $resolveDirectoryObject (& $directoryObjectPath 'users' $serviceMember) "service member"
             }
         }
         if ($graphOwner -and $graphOwner.Id -notin $graphMembers.Id -and $AddWorkloadPlaneAdminToUsers) {
@@ -400,10 +405,10 @@ function New-EntraOpsServiceBootstrap {
             $graphMembers += $graphOwner
         }
         $graphCatalogMembers = @(foreach ($catalogMember in $CatalogPlaneMembers) {
-                & $resolveDirectoryObject "/v1.0/users/$catalogMember" "CatalogPlane member"
+                & $resolveDirectoryObject (& $directoryObjectPath 'users' $catalogMember) "CatalogPlane member"
             })
         $graphControlPlaneAdmins = @(foreach ($controlPlaneAdmin in $ControlPlaneAdmins) {
-                & $resolveDirectoryObject "/v1.0/users/$controlPlaneAdmin" "ControlPlane admin"
+                & $resolveDirectoryObject (& $directoryObjectPath 'users' $controlPlaneAdmin) "ControlPlane admin"
             })
         #endregion
 
@@ -779,6 +784,7 @@ ManagementPlane,Admins,
             Write-Verbose "$logPrefix Service Az Container ID: $($report.AzContainer.ResourceId|ConvertTo-Json -Compress)"
         }
 
+        $ControlPlaneAdminFailures = [System.Collections.Generic.List[string]]::new()
         if ($graphControlPlaneAdmins.Count -gt 0) {
             $controlPlaneGroup = $ownedGroups | Where-Object { $_.DisplayName -like "*-ControlPlane-Admins" } | Select-Object -First 1
             if (-not $controlPlaneGroup) {
@@ -788,7 +794,7 @@ ManagementPlane,Admins,
                 $report.ControlPlaneAdminAssignments = @(foreach ($controlPlaneAdmin in $graphControlPlaneAdmins) {
                         try {
                             if ($eligibleMembership) {
-                                $existing = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq '$($controlPlaneGroup.Id)' and principalId eq '$($controlPlaneAdmin.Id)'" -OutputType PSObject -DisableCache | Where-Object { $_ -and $_.AccessId -eq 'member' })
+                                $existing = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq '$($controlPlaneGroup.Id)' and principalId eq '$($controlPlaneAdmin.Id)'" -OutputType PSObject -DisableCache -ThrowOnFailure | Where-Object { $_ -and $_.AccessId -eq 'member' })
                                 if ($existing.Count -gt 0) {
                                     Write-Verbose "$logPrefix $($controlPlaneAdmin.Id) is already an eligible member of $($controlPlaneGroup.DisplayName)"
                                     continue
@@ -806,7 +812,7 @@ ManagementPlane,Admins,
                                 }
                                 Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($eligibilityBody | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
                             } else {
-                                $existing = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$($controlPlaneGroup.Id)/members?`$select=id" -OutputType PSObject -DisableCache)
+                                $existing = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$($controlPlaneGroup.Id)/members?`$select=id" -OutputType PSObject -DisableCache -ThrowOnFailure)
                                 if (@($existing | ForEach-Object { $_.Id }) -contains $controlPlaneAdmin.Id) {
                                     Write-Verbose "$logPrefix $($controlPlaneAdmin.Id) is already a member of $($controlPlaneGroup.DisplayName)"
                                     continue
@@ -818,6 +824,7 @@ ManagementPlane,Admins,
                             }
                         } catch {
                             Write-Warning "$logPrefix Failed to add ControlPlane admin $($controlPlaneAdmin.Id) to $($controlPlaneGroup.DisplayName): $($_.Exception.Message)"
+                            $ControlPlaneAdminFailures.Add("$($controlPlaneAdmin.Id): $($_.Exception.Message)")
                         }
                     })
             }
@@ -825,6 +832,9 @@ ManagementPlane,Admins,
 
         if ($null -ne $DeferredPimAssignmentError) {
             throw $DeferredPimAssignmentError
+        }
+        if ($ControlPlaneAdminFailures.Count -gt 0) {
+            throw "$logPrefix Failed to add $($ControlPlaneAdminFailures.Count) ControlPlane admin(s) to the ControlPlane-Admins group of '$ServiceName': $($ControlPlaneAdminFailures -join '; ')"
         }
 
         $pendingAccess = @($report.AssignmentRequests | Where-Object { $_ -and $_.State -notin @('delivered', 'partiallyDelivered', 'deliveryFailed', 'denied', 'canceled') }).Count
