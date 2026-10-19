@@ -1145,11 +1145,15 @@ Describe 'Deployment browser validation' {
 
         $Workflow | Should -Match 'ClassificationExplorerGenerateChangeHistory:\s*false'
         $Workflow | Should -Match "fetch-depth:\s*\$\{\{\s*env\.ClassificationExplorerGenerateChangeHistory\s*==\s*'true'\s*&&\s*'0'\s*\|\|\s*'1'\s*\}\}"
-        $Workflow | Should -Match 'Invoke-EntraOpsGitHubReportingGeneration\.ps1'
-        $GenerationScript = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/scripts/Invoke-EntraOpsGitHubReportingGeneration.ps1') -Raw
-        $GenerationScript | Should -Match 'Invoke-EntraOpsReportingGeneration'
         $Workflow | Should -Not -Match 'New-EntraOpsClassificationExplorerData'
-        $GenerationScript | Should -Not -Match 'New-EntraOpsClassificationExplorerData'
+        # .github/workflows is never an automated update target, so deployments may still run the earlier inline call.
+        if ($Workflow -match 'Invoke-EntraOpsGitHubReportingGeneration\.ps1') {
+            $GenerationScript = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/scripts/Invoke-EntraOpsGitHubReportingGeneration.ps1') -Raw
+            $GenerationScript | Should -Match 'Invoke-EntraOpsReportingGeneration'
+            $GenerationScript | Should -Not -Match 'New-EntraOpsClassificationExplorerData'
+        } else {
+            $Workflow | Should -Match 'Invoke-EntraOpsReportingGeneration\s+-'
+        }
     }
 }
 
@@ -1358,4 +1362,3 @@ Describe 'Shipped workflow schedule triggers' {
         $Workflow | Should -Not -Match '(?m)^\s*schedule:\s*$'
     }
 }
-
