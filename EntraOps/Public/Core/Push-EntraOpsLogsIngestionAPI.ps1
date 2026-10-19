@@ -79,12 +79,14 @@ function Push-EntraOpsLogsIngestionAPI {
     # Add Timestamp to JSON data
     try {
         $Records = @($JsonContent | ConvertFrom-Json -Depth 10)
+        # PowerShell unwraps Nullable[DateTime], so $TimeGenerated is the DateTime itself (no .Value)
         $RecordTimeGenerated = if ($null -ne $TimeGenerated) { $TimeGenerated.ToUniversalTime().ToString("o") } else { (Get-Date).ToUniversalTime().ToString("o") }
         $Records | ForEach-Object {
             $_ | Add-Member -NotePropertyName TimeGenerated -NotePropertyValue $RecordTimeGenerated -Force
         }
         $json = $Records | ConvertTo-Json -Depth 10 -AsArray
-    } catch {
+    }
+    catch {
         Write-Error "Cannot convert JSON content to JSON object"
         throw $_
     }
@@ -99,82 +101,94 @@ function Push-EntraOpsLogsIngestionAPI {
             $PlainAccessToken = ConvertFrom-SecureString -SecureString $AccessToken -AsPlainText
             $headers = @{"Authorization" = "Bearer $PlainAccessToken"; "Content-Type" = "application/json" }
 
-            $DcrArmUri = "https://management.azure.com/subscriptions/$($DataCollectionRuleSubscriptionId)/resourceGroups/$($DataCollectionResourceGroupName)/providers/Microsoft.Insights/dataCollectionRules/$($DataCollectionRuleName)?api-version=$($ApiVersion)"
-            $Dcr = ((Invoke-AzRestMethod -Method "Get" -Uri $DcrArmUri).Content | ConvertFrom-Json)
-            if ($Dcr.properties.dataflows.outputStream -notcontains "Custom-$($TableName)") {
-                Write-Error "Custom table $($TableName) does not match with data flow in data collection rule $($DataCollectionRuleName)!"
+        # Get Data Collection Rule details and Uri
+        $DcrArmUri = "https://management.azure.com/subscriptions/$($DataCollectionRuleSubscriptionId)/resourceGroups/$($DataCollectionResourceGroupName)/providers/Microsoft.Insights/dataCollectionRules/$($DataCollectionRuleName)?api-version=$($ApiVersion)"
+        $Dcr = ((Invoke-AzRestMethod -Method "Get" -Uri $DcrArmUri).Content | ConvertFrom-Json)
+        if ($Dcr.properties.dataflows.outputStream -notcontains "Custom-$($TableName)") {
+            Write-Error "Custom table $($TableName) does not match with data flow in data collection rule $($DataCollectionRuleName)!"
+        }
+
+        # Get Data Collection Endpoint details and Uri
+        $DceEndpointId = $Dcr.properties.dataCollectionEndpointId
+        $DceArmUri = "https://management.azure.com$($DceEndpointId)?api-version=$($ApiVersion)"
+        $Dce = ((Invoke-AzRestMethod -Method "Get" -Uri $DceArmUri).Content | ConvertFrom-Json)
+        $DceIngestEndpointUrl = $Dce.properties.logsIngestion.endpoint
+
+        if ($null -eq $DceIngestEndpointUrl) {
+            Write-Error "No Data Collection endpoint found!"
+        }
+
+        # Get Ingest API Uri
+        $PostUri = "$DceIngestEndpointUrl/dataCollectionRules/$($Dcr.properties.immutableId)/streams/Custom-$($TableName)?api-version=2023-01-01"
+
+        # Logs Ingestion API allows a maximum of 1 MB (1048576 bytes) per request.
+        # Split records into chunks below the limit (with buffer for JSON array overhead).
+        $MaxRequestBytes = 1000000
+        $ChunkIndex = 0
+
+        # Recursively serialize and, if the actual (Compress'd, AsArray) body still exceeds the
+        # limit, split the batch in half and retry each half. This does not rely on any
+        # per-record size *estimate* staying in sync with the real serialized size (which can
+        # drift due to JSON array/whitespace overhead, nesting depth accounting, etc.) - the
+        # actual body that will be transmitted is always measured before it is sent, so an
+        # oversized request can never reach the API.
+        function Send-EntraOpsLogsIngestionChunk {
+            param(
+                [Parameter(Mandatory = $true)]
+                [System.Collections.Generic.List[object]]$RecordsSubset
+            )
+
+            $Body = $RecordsSubset | ConvertTo-Json -Depth 10 -AsArray -Compress
+            $BodySize = [System.Text.Encoding]::UTF8.GetByteCount($Body)
+
+            if ($BodySize -gt $MaxRequestBytes -and $RecordsSubset.Count -gt 1) {
+                $SplitIndex = [Math]::Ceiling($RecordsSubset.Count / 2)
+                $FirstHalf = [System.Collections.Generic.List[object]]::new($RecordsSubset.GetRange(0, $SplitIndex))
+                $SecondHalf = [System.Collections.Generic.List[object]]::new($RecordsSubset.GetRange($SplitIndex, $RecordsSubset.Count - $SplitIndex))
+                Send-EntraOpsLogsIngestionChunk -RecordsSubset $FirstHalf
+                Send-EntraOpsLogsIngestionChunk -RecordsSubset $SecondHalf
+                return
             }
 
-            $DceEndpointId = $Dcr.properties.dataCollectionEndpointId
-            $DceArmUri = "https://management.azure.com$($DceEndpointId)?api-version=$($ApiVersion)"
-            $Dce = ((Invoke-AzRestMethod -Method "Get" -Uri $DceArmUri).Content | ConvertFrom-Json)
-            $DceIngestEndpointUrl = $Dce.properties.logsIngestion.endpoint
-
-            if ($null -eq $DceIngestEndpointUrl) {
-                Write-Error "No Data Collection endpoint found!"
+            if ($BodySize -gt $MaxRequestBytes) {
+                throw "Single record exceeds the 1 MB Logs Ingestion API request limit ($BodySize bytes). The record cannot be split safely."
             }
 
-            $PostUri = "$DceIngestEndpointUrl/dataCollectionRules/$($Dcr.properties.immutableId)/streams/Custom-$($TableName)?api-version=2023-01-01"
+            $script:ChunkIndex++
+            Write-Verbose "Sending chunk $($script:ChunkIndex) with $($RecordsSubset.Count) record(s) and body size $BodySize bytes to Logs Ingestion API"
+            Invoke-RestMethod -Uri $PostUri -Method "Post" -Body $Body -Headers $headers -Verbose
+        }
 
-            # Logs Ingestion API allows a maximum of 1 MB (1048576 bytes) per request.
-            # Split records into chunks below the limit (with buffer for JSON array overhead).
-            $MaxRequestBytes = 1000000
-            $ChunkIndex = 0
+        # Batch records up-front by an estimated per-record size to avoid serializing the whole
+        # (potentially large) record set to JSON up front just to measure it; the recursive
+        # splitter above then guarantees each batch actually sent is within the real limit.
+        $Batches = [System.Collections.Generic.List[object]]::new()
+        $CurrentBatch = [System.Collections.Generic.List[object]]::new()
+        $CurrentSize = 0
 
-            # Measure the serialized UTF-8 body and split batches that exceed the request limit.
-            function Send-EntraOpsLogsIngestionChunk {
-                param(
-                    [Parameter(Mandatory = $true)]
-                    [System.Collections.Generic.List[object]]$RecordsSubset
-                )
-
-                $Body = $RecordsSubset | ConvertTo-Json -Depth 10 -AsArray -Compress
-                $BodySize = [System.Text.Encoding]::UTF8.GetByteCount($Body)
-
-                if ($BodySize -gt $MaxRequestBytes -and $RecordsSubset.Count -gt 1) {
-                    $SplitIndex = [Math]::Ceiling($RecordsSubset.Count / 2)
-                    $FirstHalf = [System.Collections.Generic.List[object]]::new($RecordsSubset.GetRange(0, $SplitIndex))
-                    $SecondHalf = [System.Collections.Generic.List[object]]::new($RecordsSubset.GetRange($SplitIndex, $RecordsSubset.Count - $SplitIndex))
-                    Send-EntraOpsLogsIngestionChunk -RecordsSubset $FirstHalf
-                    Send-EntraOpsLogsIngestionChunk -RecordsSubset $SecondHalf
-                    return
-                }
-
-                if ($BodySize -gt $MaxRequestBytes) {
-                    throw "Single record exceeds the 1 MB Logs Ingestion API request limit ($BodySize bytes). The record cannot be split safely."
-                }
-
-                $script:ChunkIndex++
-                Write-Verbose "Sending chunk $($script:ChunkIndex) with $($RecordsSubset.Count) record(s) and body size $BodySize bytes to Logs Ingestion API"
-                Invoke-RestMethod -Uri $PostUri -Method "Post" -Body $Body -Headers $headers -Verbose
+        foreach ($Record in $Records) {
+            $RecordSize = [System.Text.Encoding]::UTF8.GetByteCount(($Record | ConvertTo-Json -Depth 10 -Compress)) + 1
+            if ($CurrentBatch.Count -gt 0 -and ($CurrentSize + $RecordSize) -gt $MaxRequestBytes) {
+                $Batches.Add($CurrentBatch)
+                $CurrentBatch = [System.Collections.Generic.List[object]]::new()
+                $CurrentSize = 0
             }
+            $CurrentBatch.Add($Record)
+            $CurrentSize += $RecordSize
+        }
+        if ($CurrentBatch.Count -gt 0) { $Batches.Add($CurrentBatch) }
 
-            # Estimate batch sizes first to avoid serializing the entire dataset at once.
-            $Batches = [System.Collections.Generic.List[object]]::new()
-            $CurrentBatch = [System.Collections.Generic.List[object]]::new()
-            $CurrentSize = 0
-
-            foreach ($Record in $Records) {
-                $RecordSize = [System.Text.Encoding]::UTF8.GetByteCount(($Record | ConvertTo-Json -Depth 10 -Compress)) + 1
-                if ($CurrentBatch.Count -gt 0 -and ($CurrentSize + $RecordSize) -gt $MaxRequestBytes) {
-                    $Batches.Add($CurrentBatch)
-                    $CurrentBatch = [System.Collections.Generic.List[object]]::new()
-                    $CurrentSize = 0
-                }
-                $CurrentBatch.Add($Record)
-                $CurrentSize += $RecordSize
-            }
-            if ($CurrentBatch.Count -gt 0) { $Batches.Add($CurrentBatch) }
-
-            foreach ($Batch in $Batches) {
-                Send-EntraOpsLogsIngestionChunk -RecordsSubset $Batch
-            }
+        # Ingest data to Log Analytics
+        foreach ($Batch in $Batches) {
+            Send-EntraOpsLogsIngestionChunk -RecordsSubset $Batch
+        }
         } finally {
             if ($null -ne $OriginalAzContext) {
                 Set-AzContext -Context $OriginalAzContext | Out-Null
             }
         }
-    } else {
+    }
+    else {
         return $json
     }
 }

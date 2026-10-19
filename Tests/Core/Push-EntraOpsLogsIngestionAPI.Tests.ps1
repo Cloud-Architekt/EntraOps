@@ -35,6 +35,7 @@ Describe "Push-EntraOpsLogsIngestionAPI Azure context isolation" {
     }
 
     It "stamps every record with the given TimeGenerated" {
+        # Runs the real timestamp code: the caller-side test mocks this function and can't catch a failure here.
         $RunTime = [datetime]::new(2026, 10, 19, 6, 20, 0, [System.DateTimeKind]::Utc)
 
         $Result = Push-EntraOpsLogsIngestionAPI -JsonContent '[{"value":1},{"value":2}]' -DataCollectionRuleName "dcr" -DataCollectionRuleSubscriptionId "target" -SampleDataOnly $true -TimeGenerated $RunTime
@@ -48,7 +49,7 @@ Describe "Push-EntraOpsLogsIngestionAPI Azure context isolation" {
         Mock Invoke-AzRestMethod { throw "simulated ARM failure" }
 
         { Push-EntraOpsLogsIngestionAPI -JsonContent '{"value":1}' -DataCollectionRuleName "dcr" -DataCollectionRuleSubscriptionId "target" } |
-        Should -Throw "*simulated ARM failure*"
+            Should -Throw "*simulated ARM failure*"
 
         Should -Invoke Set-AzContext -Times 1 -Exactly -ParameterFilter { $SubscriptionId -eq "target" }
         Should -Invoke Set-AzContext -Times 1 -Exactly -ParameterFilter { $Context -eq $script:OriginalContext }
@@ -64,7 +65,7 @@ Describe "Push-EntraOpsLogsIngestionAPI Azure context isolation" {
         Mock Invoke-RestMethod {}
 
         { Push-EntraOpsLogsIngestionAPI -JsonContent '{"value":1}' -DataCollectionRuleName "dcr" -DataCollectionResourceGroupName "rg" -DataCollectionRuleSubscriptionId "target" } |
-        Should -Not -Throw
+            Should -Not -Throw
 
         Should -Invoke Invoke-RestMethod -Times 1 -Exactly
         Should -Invoke Set-AzContext -Times 1 -Exactly -ParameterFilter { $SubscriptionId -eq "target" }

@@ -44,6 +44,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "git config user.email failed with exit code $LASTEXITCODE." }
     & git config user.name $Actor
     if ($LASTEXITCODE -ne 0) { throw "git config user.name failed with exit code $LASTEXITCODE." }
+    # A path that doesn't exist yet (e.g. disabled classification update) doesn't block the others;
+    # tracked paths are kept so deletions are staged
     $MatchingPaths = @($Paths | Where-Object { (Test-Path -LiteralPath $_) -or @(& git ls-files -- $_).Count -gt 0 })
     if ($MatchingPaths.Count -gt 0 -and $MatchingPaths.Count -lt $Paths.Count) {
         $SkippedPaths = @($Paths | Where-Object { $_ -notin $MatchingPaths })

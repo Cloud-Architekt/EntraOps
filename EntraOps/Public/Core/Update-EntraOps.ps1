@@ -28,7 +28,8 @@
 
 .PARAMETER UpstreamUrl
     Git URL of a custom upstream repository to clone instead of the contract-resolved repository.
-    A Personal Access Token is used for this URL when one is provided.
+    A Personal Access Token passed with -PersonalAccessToken is used for this URL. The ENTRAOPS_PAT environment
+    variable is only used for github.com URLs. Credentials embedded in the URL are not logged or recorded.
 
 .PARAMETER PersonalAccessToken
     Personal Access Token for private repositories (required for "EntraOps-Insiders"). Defaults to the
@@ -43,7 +44,7 @@
 
 .PARAMETER TemporaryUpdateFolder
     Folder for the temporary clone of the update candidate, relative to the current PowerShell location
-    unless absolute. Default is "TmpUpdate". Removed after the update.
+    unless absolute. Default is "TmpUpdate". It must not exist yet and is removed after the update.
 
 .PARAMETER RunBrowserTests
     Also run the documentation and reporting browser tests when validating the update candidate.
@@ -183,14 +184,36 @@ function Update-EntraOps {
         throw '-ValidatedSourceCommit requires -PreparedCandidatePath. Resolve and validate the candidate in a separate, credential-free job before applying it.'
     }
 
+    $PersonalAccessTokenFromEnvironment = $false
     if ([string]::IsNullOrWhiteSpace($PersonalAccessToken) -and -not [string]::IsNullOrWhiteSpace($env:ENTRAOPS_PAT)) {
         $PersonalAccessToken = $env:ENTRAOPS_PAT
+        $PersonalAccessTokenFromEnvironment = $true
     }
     $UsePersonalAccessToken = $false
 
     if (-not [string]::IsNullOrWhiteSpace($UpstreamUrl)) {
+        $UpstreamUri = $null
+        if (-not [System.Uri]::TryCreate($UpstreamUrl, [System.UriKind]::Absolute, [ref]$UpstreamUri)) {
+            $UpstreamUri = $null
+        }
+        # Credentials embedded in the URL must not reach the console, logs or .EntraOpsUpdateManifest.json
         $SourceRepository = $UpstreamUrl
-        $UsePersonalAccessToken = -not [string]::IsNullOrWhiteSpace($PersonalAccessToken)
+        if ($null -ne $UpstreamUri -and -not [string]::IsNullOrEmpty($UpstreamUri.UserInfo)) {
+            $SanitizedUpstreamUri = [System.UriBuilder]::new($UpstreamUri)
+            $SanitizedUpstreamUri.UserName = ''
+            $SanitizedUpstreamUri.Password = ''
+            $SourceRepository = $SanitizedUpstreamUri.Uri.AbsoluteUri
+        }
+        if (-not [string]::IsNullOrWhiteSpace($PersonalAccessToken)) {
+            # ENTRAOPS_PAT is a GitHub token: another host only gets an explicit -PersonalAccessToken
+            if ($PersonalAccessTokenFromEnvironment -and ($null -eq $UpstreamUri -or $UpstreamUri.Host -ne 'github.com')) {
+                Write-Warning "ENTRAOPS_PAT is not sent to the custom upstream host '$(if ($null -ne $UpstreamUri) { $UpstreamUri.Host } else { $SourceRepository })'. Pass -PersonalAccessToken to authenticate against it."
+            } elseif ($null -eq $UpstreamUri) {
+                throw "-PersonalAccessToken requires an absolute https URL as -UpstreamUrl. No local folder was changed."
+            } else {
+                $UsePersonalAccessToken = $true
+            }
+        }
     } else {
         # The local contract is the single source of truth for which Cloud-Architekt repositories
         # distribute EntraOps and whether they need a Personal Access Token. Resolving it here, before
@@ -219,7 +242,7 @@ function Update-EntraOps {
 
     $CloneUpdateCandidate = {
         param([string]$RepositoryUrl)
-        & git clone --filter=blob:none --no-checkout $RepositoryUrl $TemporaryUpdateFolder
+        & git clone --filter=blob:none --no-checkout -- $RepositoryUrl $TemporaryUpdateFolder
         if ($LASTEXITCODE -ne 0) {
             throw "git clone failed with exit code $LASTEXITCODE. Verify the repository name and whether a Personal Access Token (secret: EntraOpsUpdatePat) is required."
         }
@@ -244,6 +267,10 @@ function Update-EntraOps {
     $OwnCandidateCheckout = [string]::IsNullOrWhiteSpace($PreparedCandidatePath)
     if ($OwnCandidateCheckout) {
         $TemporaryUpdateFolder = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TemporaryUpdateFolder)
+        # The folder is removed after the update: never clone into (and later delete) an existing folder.
+        if (Test-Path -LiteralPath $TemporaryUpdateFolder) {
+            throw "Temporary update folder '$TemporaryUpdateFolder' already exists. Remove it or pass another -TemporaryUpdateFolder. No local folder was changed."
+        }
     } else {
         $TemporaryUpdateFolder = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PreparedCandidatePath)
     }
@@ -293,6 +320,22 @@ function Update-EntraOps {
         # The contract validator confirms every requested target exists before anything is removed,
         # so a stale or dishonest source contract cannot leave the deployment partially updated.
 
+        # List the files to install before candidate code runs (validation): git in the candidate afterwards could
+        # run its hooks (e.g. core.fsmonitor) with this process' credentials, and .git or the index could be changed
+        $CandidateIsGitCheckout = Test-Path -LiteralPath (Join-Path $TemporaryUpdateFolder '.git')
+        $TargetSources = [ordered]@{}
+        foreach ($TargetUpdateFolder in $TargetUpdateFolders) {
+            if ($CandidateIsGitCheckout) {
+                $TrackedFiles = @(Get-EntraOpsGitTrackedFile -Root $TemporaryUpdateFolder -Pathspec @($TargetUpdateFolder -replace '^\./', '') | ForEach-Object { $_.Path })
+                if ($TrackedFiles.Count -eq 0) {
+                    throw "Update candidate tracks no file in '$TargetUpdateFolder'. No local folder was changed."
+                }
+                $TargetSources[$TargetUpdateFolder] = $TrackedFiles
+            } else {
+                $TargetSources[$TargetUpdateFolder] = $null
+            }
+        }
+
         if ($ValidatedSourceCommit) {
             Write-Output "Applying candidate $SourceRepository@$SourceCommit after validation completed in a separate credential-free job."
         } elseif (-not $SkipCandidateValidation) {
@@ -307,7 +350,7 @@ function Update-EntraOps {
                 'PATH', 'PSModulePath', 'LANG', 'LC_ALL', 'TMPDIR', 'TEMP', 'TMP', 'CI',
                 'HOME', 'USER', 'USERNAME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA',
                 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'SystemRoot', 'SystemDrive', 'windir',
-                'COMSPEC', 'PATHEXT', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'POWERSHELL_TELEMETRY_OPTOUT'
+                'COMSPEC', 'PATHEXT', 'DOTNET_ROOT', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'POWERSHELL_TELEMETRY_OPTOUT'
             )
             $SavedEnvironment = @{}
             foreach ($Entry in Get-ChildItem Env:) { $SavedEnvironment[$Entry.Name] = $Entry.Value }
@@ -328,6 +371,38 @@ function Update-EntraOps {
             Write-Warning 'Candidate validation was explicitly skipped. Apply only candidates from a fully trusted source.'
         }
 
+        # Checked without git before any local folder is removed: a link would install the content of its target,
+        # and a missing tracked file would leave the target incomplete
+        foreach ($TargetUpdateFolder in $TargetUpdateFolders) {
+            $RelativeTarget = $TargetUpdateFolder -replace '^\./', ''
+            $SourcePath = Join-Path $TemporaryUpdateFolder $RelativeTarget
+            # The target itself and every parent folder inside the candidate
+            $Segments = $RelativeTarget -split '/'
+            $LinkedItems = @(for ($Index = 1; $Index -le $Segments.Count; $Index++) {
+                    $SegmentPath = Join-Path $TemporaryUpdateFolder ($Segments[0..($Index - 1)] -join '/')
+                    $SegmentItem = Get-Item -LiteralPath $SegmentPath -Force -ErrorAction SilentlyContinue
+                    if ($null -ne $SegmentItem -and $SegmentItem.LinkType) { $SegmentPath }
+                })
+            if ((Test-Path -LiteralPath $SourcePath -PathType Container) -and $LinkedItems.Count -eq 0) {
+                $LinkedItems += @(Get-ChildItem -LiteralPath $SourcePath -Recurse -Force | Where-Object { $_.LinkType } | ForEach-Object { $_.FullName })
+            }
+            if ($LinkedItems.Count -gt 0) {
+                throw "Update candidate contains symbolic link(s) or junction(s) in '$TargetUpdateFolder': $($LinkedItems -join ', '). No local folder was changed."
+            }
+
+            if ($null -ne $TargetSources[$TargetUpdateFolder]) {
+                $MissingFiles = @($TargetSources[$TargetUpdateFolder] | Where-Object {
+                        $SourceItem = Get-Item -LiteralPath (Join-Path $TemporaryUpdateFolder $_) -Force -ErrorAction SilentlyContinue
+                        $null -eq $SourceItem -or $SourceItem.PSIsContainer -or $SourceItem.LinkType
+                    })
+                if ($MissingFiles.Count -gt 0) {
+                    throw "Update candidate is missing tracked file(s) in '$TargetUpdateFolder' or they are no regular files: $(@($MissingFiles | Select-Object -First 10) -join ', '). No local folder was changed."
+                }
+            } elseif (-not (Test-Path -LiteralPath $SourcePath)) {
+                throw "Update candidate no longer contains '$TargetUpdateFolder'. No local folder was changed."
+            }
+        }
+
         foreach ($TargetUpdateFolder in $TargetUpdateFolders) {
             $TargetPath = Join-Path $EntraOpsBaseFolder $TargetUpdateFolder
 
@@ -342,7 +417,17 @@ function Update-EntraOps {
 
             Write-Output "Updating folder $TargetUpdateFolder..."
             try {
-                Copy-Item -LiteralPath (Join-Path $TemporaryUpdateFolder $TargetUpdateFolder) -Destination $TargetPath -Force -Recurse
+                if ($null -ne $TargetSources[$TargetUpdateFolder]) {
+                    # Only the tracked (validated) files of the checkout
+                    foreach ($TrackedFile in $TargetSources[$TargetUpdateFolder]) {
+                        $Destination = Join-Path $EntraOpsBaseFolder $TrackedFile
+                        # .NET instead of New-Item: tracked paths can contain wildcard characters such as [ ]
+                        [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($Destination))
+                        Copy-Item -LiteralPath (Join-Path $TemporaryUpdateFolder $TrackedFile) -Destination $Destination -Force
+                    }
+                } else {
+                    Copy-Item -LiteralPath (Join-Path $TemporaryUpdateFolder $TargetUpdateFolder) -Destination $TargetPath -Force -Recurse
+                }
             } catch {
                 throw "Failed to copy folder $($TemporaryUpdateFolder)/$($TargetUpdateFolder) to $($TargetUpdateFolder). The local folder is now incomplete and must be restored from source control. Error: $_"
             }
@@ -403,9 +488,9 @@ function Update-EntraOps {
         $UpdateManifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $UpdateManifestPath -Encoding utf8
     } finally {
         # A caller-supplied -PreparedCandidatePath is left in place for inspection.
-        if ($OwnCandidateCheckout -and (Test-Path -Path $TemporaryUpdateFolder)) {
+        if ($OwnCandidateCheckout -and (Test-Path -LiteralPath $TemporaryUpdateFolder)) {
             Write-Output "Cleaning up temporary folder $TemporaryUpdateFolder."
-            Remove-Item -Path $TemporaryUpdateFolder -Force -Recurse -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $TemporaryUpdateFolder -Force -Recurse -ErrorAction SilentlyContinue
         }
     }
 }

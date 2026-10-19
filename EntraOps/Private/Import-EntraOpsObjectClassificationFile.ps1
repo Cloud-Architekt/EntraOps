@@ -57,7 +57,7 @@ function Import-EntraOpsObjectClassificationFile {
 
     $Entries = @{}
     if (-not $FileExists) {
-        # Share the warning marker across runspaces; each has its own module cache.
+        # Runspaces import the module with their own script scope: the shared session carries the warn-once marker
         $ShouldWarn = $true
         $SharedSession = Get-Variable -Name __EntraOpsSession -Scope Script -ValueOnly -ErrorAction SilentlyContinue
         if ($SharedSession -is [hashtable] -and $SharedSession.IsSynchronized) {

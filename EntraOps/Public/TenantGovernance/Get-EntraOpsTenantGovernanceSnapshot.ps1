@@ -113,7 +113,7 @@ function Get-EntraOpsTenantGovernanceSnapshot {
 
     $ErrorActionPreference = "Stop"
 
-    # A distinct error ID lets callers release terminal jobs while retaining retryable jobs.
+    # Job failures never succeed on a later collect: their error id lets callers release the pending job
     $NewTerminalSnapshotJobError = {
         param([string]$Message)
         [System.Management.Automation.ErrorRecord]::new(
@@ -305,13 +305,24 @@ function Get-EntraOpsTenantGovernanceSnapshot {
     }
     #endregion
 
+    # The snapshot age counts from the job creation, not from the download of its results
+    $CapturedDateTime = (Get-Date).ToUniversalTime().ToString("o")
+    if ($null -ne $SnapshotJob.createdDateTime -and -not [string]::IsNullOrWhiteSpace("$($SnapshotJob.createdDateTime)")) {
+        $JobCreatedDateTime = [datetimeoffset]::MinValue
+        if ($SnapshotJob.createdDateTime -is [datetime]) {
+            $CapturedDateTime = $SnapshotJob.createdDateTime.ToUniversalTime().ToString("o")
+        } elseif ([datetimeoffset]::TryParse("$($SnapshotJob.createdDateTime)", [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$JobCreatedDateTime)) {
+            $CapturedDateTime = $JobCreatedDateTime.UtcDateTime.ToString("o")
+        }
+    }
+
     [PSCustomObject]@{
         SnapshotId         = $SnapshotJobId
         Status             = "Completed"
         SnapshotJobStatus  = $SnapshotJob.status
         DisplayName        = $SnapshotResult.displayName
         Description        = $SnapshotResult.description
-        CreatedDateTime    = (Get-Date).ToUniversalTime().ToString("o")
+        CreatedDateTime    = $CapturedDateTime
         ResourcesToInclude = @($ResourcesToInclude)
         ResourceCount      = $SnapshotResources.Count
         Resources          = $SnapshotResources

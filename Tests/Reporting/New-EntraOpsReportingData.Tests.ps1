@@ -56,6 +56,7 @@ Describe 'New-EntraOpsReportingData content preflight' {
     It 'checks and installs the reporting apps below an explicit EntraOpsRoot' {
         $OtherRoot = Join-Path $TestDrive "other-$([guid]::NewGuid().ToString('N'))"
         Copy-Item -LiteralPath $script:Workspace -Destination $OtherRoot -Recurse
+        # The base folder lacks every app; only the explicit root is relevant.
         Remove-Item -LiteralPath "$script:Workspace/Reports" -Recurse -Force
 
         New-EntraOpsReportingData @script:Parameters -EntraOpsRoot $OtherRoot -InstallMissingReportingFolder
@@ -72,6 +73,8 @@ Describe 'New-EntraOpsReportingData content preflight' {
         @{ Generator = 'New-EntraOpsPrivilegedEamPrivilegeHistoryData'; App = 'PrivilegeHistory' }
         @{ Generator = 'New-EntraOpsTenantGovernanceConfigurationAnalyzerData'; App = 'ConfigurationAnalyzer' }
     ) {
+        # The base folder has no reporting apps; only the explicit root has them. Other input may be missing,
+        # but no error may refer to the base folder.
         $OtherRoot = Join-Path $TestDrive "root-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path "$OtherRoot/Reports/$App/data" -Force | Out-Null
         Remove-Item -LiteralPath "$script:Workspace/Reports" -Recurse -Force

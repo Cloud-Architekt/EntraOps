@@ -51,6 +51,14 @@
 .PARAMETER PrivilegedObjectIds
     Array of Entra object IDs to classify as Control Plane when using the PrivilegedObjectIds source.
 
+.PARAMETER ExposureManagementBaselineFile
+    Previous ScopeReasoning_ControlPlane.json. When the Exposure Management query fails, the objects of the last
+    successful query recorded in this file are used instead (re-resolved; deleted objects are removed).
+
+.PARAMETER ExposureManagementResult
+    Optional hashtable that receives the Exposure Management query outcome (Status, Metadata, Results, Warnings,
+    HasUnusablePreviousResults) so the caller can persist it in ScopeReasoning_ControlPlane.json.
+
 .EXAMPLE
     Return Control Plane objects identified by EntraOps EAM data across all available RBAC scopes.
     Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource "EntraOps"
@@ -121,6 +129,12 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         ,
         [Parameter(Mandatory = $false)]
         [System.Int32]$ParallelThrottleLimit = 10
+        ,
+        [Parameter(Mandatory = $false)]
+        [string]$ExposureManagementBaselineFile
+        ,
+        [Parameter(Mandatory = $false)]
+        [hashtable]$ExposureManagementResult
     )
 
     $PrivilegedObjects = @()
@@ -134,7 +148,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         }
     }
 
-    # Failed lookups must not shrink the Control Plane scope; only confirmed deletions may be skipped.
+    # Only objects confirmed as not found are skipped: a failed lookup must not shrink the Control Plane scope
     $UnresolvedPrivilegedObjectIds = [System.Collections.Generic.List[string]]::new()
     $TestResolutionFailed = {
         param($ResolvedObject)
@@ -145,10 +159,16 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     if ($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "EntraOps") {
         Write-Host "Get privileged objects from EntraOps..."
         $EntraOpsAllPrivilegedObjects = foreach ($EntraOpsScope in $EntraOpsScopes) {
+            $EntraOpsEamFile = "$EntraOpsEamFolder/$EntraOpsScope/$EntraOpsScope.json"
+            if (-not (Test-Path -LiteralPath $EntraOpsEamFile -PathType Leaf)) {
+                Write-Warning "No privileged objects found for $($EntraOpsScope) in EntraOps! File $EntraOpsEamFile not found."
+                continue
+            }
+            # Only a missing export is skipped: an unreadable one would silently remove its Control Plane objects
             try {
-                Get-Content -Path $EntraOpsEamFolder\$($EntraOpsScope)\$($EntraOpsScope).json -ErrorAction Stop | ConvertFrom-Json -Depth 10
+                Get-Content -LiteralPath $EntraOpsEamFile -Raw -ErrorAction Stop | ConvertFrom-Json -Depth 10 -ErrorAction Stop
             } catch {
-                Write-Warning "No privileged objects found for $($EntraOpsScope) in EntraOps! $_.Exception.Message"
+                throw "Control Plane scope was not updated: EAM export '$EntraOpsEamFile' could not be read ($($_.Exception.Message)). The previous classification files are kept."
             }
         }
 
@@ -203,7 +223,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
         $Query = $Query.Replace("%AzureHighPrivilegedRoles%", "'$($AzureHighPrivilegedRoles -join "', '")'")
         if ($null -ne $AzureHighPrivilegedScopes -and $AzureHighPrivilegedScopes -ne "*") {
             $Scopes = "'$($AzureHighPrivilegedScopes -join "', '")'"
-            # Configured scopes may retain casing while RoleScope is lowercased.
+            # RoleScope is lowercased above, configured scopes keep their casing (e.g. management group ids): compare case-insensitively
             $Query = $Query.Replace("isnotempty(RoleScope)", "RoleScope in~ ($($Scopes))")
         }
 
@@ -270,13 +290,36 @@ function Get-EntraOpsClassificationControlPlaneObjects {
             | project ObjectDisplayName = NodeName, ObjectType = NodeLabel, ObjectId, NodeId) on $left.SourceNodeId == $right.NodeId
         | where isnotempty(ObjectId)
         | extend ClassificationReason = bag_pack_columns(EdgeLabel, TargetNodeName)
-        | summarize by ObjectDisplayName, SourceNodeName, tolower(ObjectType), ObjectId, NodeId, tostring(ClassificationReason)'
+        | summarize by ObjectDisplayName, SourceNodeName, ObjectType = tolower(ObjectType), ObjectId, NodeId, tostring(ClassificationReason)'
         $Query = $Query.Replace("%CriticalLevel%", $ExposureCriticalityLevel)
-        $Body = @{
-            "Query"    = $Query;
-            "Timespan" = $Timespan;
-        } | ConvertTo-Json
-        $PrivilegedObjectsGraphEdges = (Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/security/runHuntingQuery" -Body $Body).results
+        # Increase when the meaning of the results changes: older results are then no longer carried forward
+        $ExposureManagementQueryVersion = 1
+        $ExposureManagementBaseline = Get-EntraOpsExposureManagementBaseline -Path $ExposureManagementBaselineFile -TenantId $TenantId -ExposureCriticalityLevel $ExposureCriticalityLevel -QueryVersion $ExposureManagementQueryVersion -GetLegacyResults {
+            param($Content)
+            @($Content.PrivilegedObjects | Where-Object { @($_.ClassificationSource) -contains 'XSPM' })
+        }
+        # A failed query falls back to the objects of the last successful query
+        $ExposureManagementQuery = Invoke-EntraOpsExposureManagementQuery -Query $Query -Timespan $Timespan -Context "Control Plane objects" -Baseline $ExposureManagementBaseline -TenantId $TenantId -ExposureCriticalityLevel $ExposureCriticalityLevel -QueryVersion $ExposureManagementQueryVersion
+        $ExposureManagementWarnings = [System.Collections.Generic.List[psobject]]::new()
+        foreach ($QueryWarning in $ExposureManagementQuery.Warnings) { $ExposureManagementWarnings.Add($QueryWarning) }
+        $ExposureManagementObjects = [System.Collections.Generic.List[psobject]]::new()
+
+        $PrivilegedObjectsGraphEdges = switch ($ExposureManagementQuery.Status) {
+            'Succeeded' { $ExposureManagementQuery.Results }
+            'CarriedForward' {
+                # Same shape as the query result: one row per object and edge with the edge as JSON
+                foreach ($CarriedObject in $ExposureManagementQuery.Results) {
+                    foreach ($CarriedReason in @($CarriedObject.ClassificationReason)) {
+                        [pscustomobject]@{
+                            ObjectDisplayName    = $CarriedObject.ObjectDisplayName
+                            ObjectId             = $CarriedObject.ObjectId
+                            ObjectType           = $CarriedObject.ObjectType
+                            ClassificationReason = $CarriedReason | ConvertTo-Json -Compress
+                        }
+                    }
+                }
+            }
+        }
         if ($null -ne $PrivilegedObjectsGraphEdges) {
             $UniqueGraphEdgeObjects = @($PrivilegedObjectsGraphEdges | Select-Object -Unique ObjectDisplayName, ObjectId, ObjectType | Where-Object { -not [string]::IsNullOrEmpty($_.ObjectId) })
             $XspmObjectDetailsCache = @{}
@@ -300,11 +343,31 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                     $ClassificationReason = @($ClassificationReason | Sort-Object EdgeLabel, TargetNodeName)
                     $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value $ClassificationReason -Force | Out-Null
                     $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "XSPM" -Force | Out-Null
+                    # Baseline for the next run: only this source's edges, with resolved type and name
+                    $ExposureManagementObjects.Add([pscustomobject][ordered]@{
+                            ObjectId             = $GraphEdge.ObjectId
+                            ObjectType           = if ($PrivilegedObject.ObjectType) { $PrivilegedObject.ObjectType } else { $GraphEdge.ObjectType }
+                            ObjectDisplayName    = if ($PrivilegedObject.ObjectDisplayName) { $PrivilegedObject.ObjectDisplayName } else { $GraphEdge.ObjectDisplayName }
+                            ClassificationReason = $ClassificationReason
+                        })
                     $PrivilegedObject
                 } elseif (& $TestResolutionFailed $ResolvedObject) {
                     $UnresolvedPrivilegedObjectIds.Add($GraphEdge.ObjectId)
+                } elseif ($ExposureManagementQuery.Status -eq 'CarriedForward') {
+                    $ExposureManagementWarnings.Add([pscustomobject]@{ Type = 'ExposureManagementObjectRemoved'; Message = "Exposure Management object $($GraphEdge.ObjectId) of the last successful query no longer exists and is no longer classified." })
                 }
             }
+        }
+
+        foreach ($ExposureManagementWarning in $ExposureManagementWarnings) {
+            Write-Warning $ExposureManagementWarning.Message
+        }
+        if ($null -ne $ExposureManagementResult) {
+            $ExposureManagementResult['Status'] = $ExposureManagementQuery.Status
+            $ExposureManagementResult['Metadata'] = $ExposureManagementQuery.Metadata
+            $ExposureManagementResult['Results'] = @($ExposureManagementObjects | Sort-Object ObjectType, ObjectDisplayName, ObjectId)
+            $ExposureManagementResult['Warnings'] = @($ExposureManagementWarnings)
+            $ExposureManagementResult['HasUnusablePreviousResults'] = $ExposureManagementQuery.HasUnusablePreviousResults
         }
     }
     #endregion

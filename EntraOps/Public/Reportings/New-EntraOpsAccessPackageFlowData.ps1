@@ -134,6 +134,7 @@ function New-EntraOpsAccessPackageFlowData {
     $GroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($PolicyId in $PolicyIds) {
         try {
+            # A deleted policy is reported once by the catch below, not again by the Graph helper
             $Policy = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies/$PolicyId" -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
             if ($null -eq $Policy) { continue }
             $Requestors = @($Policy.requestorSettings.allowedRequestors)

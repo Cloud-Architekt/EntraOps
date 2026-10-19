@@ -364,7 +364,7 @@ function Invoke-EntraOpsMsGraphQuery {
                                 } catch {
                                     $PageStatusCode = $_.Exception.Response.StatusCode.value__
                                     
-                                    if ($PageStatusCode -in @(429, 503, 504) -and $PageRetryCount -lt 3) {
+                                    if ($PageStatusCode -in @(429, 502, 503, 504) -and $PageRetryCount -lt 3) {
                                         $PageRetryCount++
                                         
                                         # Try to extract Retry-After from pagination response
@@ -435,7 +435,7 @@ function Invoke-EntraOpsMsGraphQuery {
                     $IsTokenRefreshable = ($StatusCode -eq 401 -and -not $HasStaticToken)
 
                     # Retry logic for rate limiting, transient errors, and network errors
-                    if (($StatusCode -in @(429, 503, 504) -or $IsNetworkError -or $IsTokenRefreshable) -and $RetryCount -lt $MaxRetries) {
+                    if (($StatusCode -in @(429, 502, 503, 504) -or $IsNetworkError -or $IsTokenRefreshable) -and $RetryCount -lt $MaxRetries) {
                         $RetryCount++
 
                         if ($IsTokenRefreshable) {
@@ -565,7 +565,7 @@ function Invoke-EntraOpsMsGraphQuery {
                                         $PageStatusCode = 429
                                     }
                                     
-                                    if ($PageStatusCode -in @(429, 503, 504) -and $PageRetryCount -lt 3) {
+                                    if ($PageStatusCode -in @(429, 502, 503, 504) -and $PageRetryCount -lt 3) {
                                         $PageRetryCount++
                                         
                                         # Try to extract Retry-After from pagination response
@@ -615,6 +615,8 @@ function Invoke-EntraOpsMsGraphQuery {
                         $StatusCode = $_.Exception.Response.StatusCode.value__
                     } elseif ($_.Exception.Message -match 'TooManyRequests|429') {
                         $StatusCode = 429
+                    } elseif ($_.Exception.Message -match 'BadGateway|502') {
+                        $StatusCode = 502
                     } elseif ($_.Exception.Message -match 'ServiceUnavailable|503') {
                         $StatusCode = 503
                     } elseif ($_.Exception.Message -match 'GatewayTimeout|504') {
@@ -624,7 +626,7 @@ function Invoke-EntraOpsMsGraphQuery {
                     }
                     
                     # Retry logic for rate limiting, transient errors, and network errors
-                    if (($StatusCode -in @(429, 503, 504) -or $IsNetworkError) -and $RetryCount -lt $MaxRetries) {
+                    if (($StatusCode -in @(429, 502, 503, 504) -or $IsNetworkError) -and $RetryCount -lt $MaxRetries) {
                         $RetryCount++
                         
                         # Try to extract Retry-After header from response

@@ -94,7 +94,7 @@ try {
     }
 
     $UpdateBranch = "entraops/update-$($SourceCommit.Substring(0, 12))"
-
+    # Leave the branch of an open pull request unchanged, so reviewer commits are kept
     $ExistingPullRequests = @(& gh pr list --repo $Repository --state open --base $BaseBranch --head $UpdateBranch --json number | ConvertFrom-Json)
     if ($LASTEXITCODE -ne 0) { throw 'Could not query existing EntraOps update pull requests.' }
     if ($ExistingPullRequests.Count -gt 0) {

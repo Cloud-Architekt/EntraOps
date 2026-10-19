@@ -11,20 +11,47 @@ Description: |
   This parser is used to have a standarized schema of EntraOps classification of Privileged EAM.
 ParserName: PrivilegedEAM
 ParserQuery: |
-  // Only the latest ingestion of each RBAC system is returned. The lookback must cover the collection
-  // schedule (e.g. weekly); objects removed in the latest run do not reappear from older ingestions.
-  // EntraOps stamps all records of an ingestion run with the same TimeGenerated. The window only covers
-  // data collection rules that set TimeGenerated at ingestion; runs less than this apart can overlap.
+  // Returns the latest completed run per RBAC system (completion marker after its last record).
+  // The lookback must cover the collection schedule.
   let LookbackPeriod = 14d;
   let IngestionWindow = 10m;
+  let RunMarkerType = "EntraOpsIngestionRun";
   let EntraOpsData = PrivilegedEAM_CL
       | where TimeGenerated > ago(LookbackPeriod);
-  let LatestIngestion = EntraOpsData
+  let Records = EntraOpsData
+      | where ObjectType != RunMarkerType;
+  let RunMarkers = EntraOpsData
+      | where ObjectType == RunMarkerType
+      | project RoleSystem, MarkerTime = TimeGenerated;
+  let LatestRun = RunMarkers
+      | summarize LatestMarker = max(MarkerTime) by RoleSystem;
+  let PreviousRun = RunMarkers
+      | lookup kind=inner LatestRun on RoleSystem
+      | where MarkerTime < LatestMarker
+      | summarize PreviousMarker = max(MarkerTime) by RoleSystem;
+  let RunBounds = LatestRun
+      | lookup kind=leftouter PreviousRun on RoleSystem
+      | extend PreviousMarker = iff(isnull(PreviousMarker), LatestMarker - LookbackPeriod, PreviousMarker);
+  // A data collection rule that keeps TimeGenerated returns the records of the run with exactly the marker time.
+  // A rule that sets TimeGenerated at ingestion returns them between the previous and the latest marker.
+  let ExactRuns = Records
+      | lookup kind=inner RunBounds on RoleSystem
+      | summarize ExactRecords = countif(TimeGenerated == LatestMarker) by RoleSystem;
+  let CompletedRunRecords = Records
+      | lookup kind=inner RunBounds on RoleSystem
+      | lookup kind=leftouter ExactRuns on RoleSystem
+      | where (ExactRecords > 0 and TimeGenerated == LatestMarker)
+          or (coalesce(ExactRecords, 0) == 0 and TimeGenerated > PreviousMarker and TimeGenerated <= LatestMarker)
+      | project-away LatestMarker, PreviousMarker, ExactRecords;
+  // Data ingested before the completion marker existed: the latest ingestion of the RBAC system
+  let UnmarkedLatestIngestion = Records
+      | where RoleSystem !in ((RunMarkers | distinct RoleSystem))
       | summarize LatestTimeGenerated = max(TimeGenerated) by RoleSystem;
-  EntraOpsData
-  | lookup kind=inner LatestIngestion on RoleSystem
-  | where TimeGenerated > LatestTimeGenerated - IngestionWindow
-  | project-away LatestTimeGenerated
+  let UnmarkedRecords = Records
+      | lookup kind=inner UnmarkedLatestIngestion on RoleSystem
+      | where TimeGenerated > LatestTimeGenerated - IngestionWindow
+      | project-away LatestTimeGenerated;
+  union CompletedRunRecords, UnmarkedRecords
   | summarize arg_max(TimeGenerated, *) by ObjectId,RoleSystem
   | project-away TenantId
   | extend Type = "EntraOps_CustomTable"

@@ -22,15 +22,8 @@ parameters:
   # END EntraOps managed service connection
 
 # BEGIN EntraOps managed schedules
-schedules:
-  - cron: "30 9 * * *"
-    displayName: "EntraOps privileged access pull"
-    branches:
-      include:
-        - "main"
-    always: true
+# Schedules are added by Update-EntraOpsAzureDevOpsSchedules from EntraOpsConfig.json.
 # END EntraOps managed schedules
-
 variables:
   ConfigFile: ./EntraOpsConfig.json
 

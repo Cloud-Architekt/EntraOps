@@ -378,7 +378,7 @@ function New-EntraOpsWorkloadIdentity {
                 Add-EntraOpsProvisioningFailure -Message "Cannot create required Administrative Unit '$AdminUnitName'. Error: $($_.Exception.Message)"
             }
 
-            # Allow for replication delay; an empty ID would query the AU collection.
+            # Bounded wait for the new AU (replication delay); an empty id would query the AU list instead
             if (-not [string]::IsNullOrWhiteSpace($NewAdminUnitId)) {
                 $MaxAdminUnitPollAttempts = 60
                 for ($Attempt = 1; $Attempt -le $MaxAdminUnitPollAttempts -and -not $AdminUnitId; $Attempt++) {
@@ -399,6 +399,7 @@ function New-EntraOpsWorkloadIdentity {
             Write-Host "Administrative Unit $($AdminUnitName) - $($AdminUnitId) already exists"
         }
 
+        # Add scoped permissions as Group Administrator to the Administrative Unit (skipped without AU id)
         if ([string]::IsNullOrWhiteSpace($AdminUnitId)) {
             Write-Warning "Skipping the scoped Group Administrator role: Administrative Unit '$AdminUnitName' is not available."
         } else {

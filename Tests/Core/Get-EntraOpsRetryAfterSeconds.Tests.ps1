@@ -14,6 +14,7 @@ BeforeAll {
 
 Describe 'Get-EntraOpsRetryAfterSeconds' {
     It 'reads the delta seconds of an HttpResponseMessage' {
+        # A string index on HttpResponseHeaders returns nothing, which previously disabled Retry-After entirely.
         Get-EntraOpsRetryAfterSeconds -Response (New-TestThrottledResponse -RetryAfter '120') | Should -Be 120
     }
 

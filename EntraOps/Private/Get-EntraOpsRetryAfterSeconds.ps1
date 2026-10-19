@@ -18,6 +18,7 @@ function Get-EntraOpsRetryAfterSeconds {
         [object]$Response
     )
 
+    # Direct assignment: returning the headers through a statement would enumerate them into key/value pairs.
     if ($null -eq $Response) { return $null }
     $Headers = $Response.Headers
     if ($null -eq $Headers) { return $null }
@@ -30,6 +31,7 @@ function Get-EntraOpsRetryAfterSeconds {
     if ($Headers -is [System.Net.Http.Headers.HttpResponseHeaders]) {
         $RetryAfter = $Headers.RetryAfter
         if ($null -eq $RetryAfter) { return $null }
+        # PowerShell unwraps the Nullable<TimeSpan>/Nullable<DateTimeOffset> properties itself.
         if ($null -ne $RetryAfter.Delta) { return [int][Math]::Ceiling($RetryAfter.Delta.TotalSeconds) }
         if ($null -ne $RetryAfter.Date) { return (& $ConvertDate $RetryAfter.Date) }
         return $null

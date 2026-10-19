@@ -193,7 +193,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             Write-Verbose "Object $AadObjectId is a known remoteTenantGroup (ForeignGroup) in this tenant."
             $ObjectDetails = [PSCustomObject]@{
                 '@odata.type' = '#microsoft.graph.remoteTenantGroup'
-                'id'          = $AadObjectId
+                'id' = $AadObjectId
                 'displayName' = ($AllRemoteTenantGroups | Where-Object { $_.remoteGroupId -eq $AadObjectId }).remoteGroupDisplayName
             }
         } else {
@@ -714,7 +714,8 @@ function Get-EntraOpsPrivilegedEntraObject {
         $AdminTierLevelName = $null
     }
 
-    # Complete partial CSA tier pairs; preserve conflicting pairs for validation.
+    # Complete a half-set tier level/name pair from the EAM mapping; a conflicting pair is kept for the
+    # pair validation
     $TierLevelByName = @{ ControlPlane = '0'; ManagementPlane = '1'; WorkloadPlane = '1'; UserAccess = '2' }
     $TierNameByLevel = @{ '0' = 'ControlPlane'; '1' = 'ManagementPlane'; '2' = 'UserAccess' }
     $HasTierLevel = -not [string]::IsNullOrWhiteSpace("$AdminTierLevel") -and "$AdminTierLevel" -ne 'Unclassified'

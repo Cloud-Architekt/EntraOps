@@ -118,7 +118,7 @@ function Remove-EntraOpsData {
     if ($Content -contains 'Reports') {
         $ReportsFolder = Join-Path $Path 'Reports'
         if (Test-Path -LiteralPath $ReportsFolder -PathType Container) {
-            # Confirm once for Reports; the nested command lists individual files under -WhatIf.
+            # Confirm once for the report data like for the other content; -WhatIf still lists the individual files.
             $RemoveReportData = $PSCmdlet.ShouldProcess($ReportsFolder, "Remove EntraOps Reports data")
             if ($RemoveReportData -or $WhatIfPreference) {
                 $RemovedReportData = @(Remove-EntraOpsReportingData -EntraOpsRoot $Path -PassThru -WhatIf:$WhatIfPreference -Confirm:$false)

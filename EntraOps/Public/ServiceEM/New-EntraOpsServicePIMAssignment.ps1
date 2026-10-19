@@ -55,7 +55,7 @@ function New-EntraOpsServicePIMAssignment {
     begin {
         $pimEligibilities = @()
         $isOwnerTarget = { param($group) $EnableOwnerAssignment -and $group.DisplayName -like "*-WorkloadPlane-*" }
-        # ServiceEM configures member policies; owner eligibility must follow the existing owner policy.
+        # The owner policy is the tenant's: request its maximum duration when it requires an expiration
         $getOwnerEligibilityExpiration = {
             param($group)
             $ownerPolicyUri = "/v1.0/policies/roleManagementPolicyAssignments?`$filter=scopeId eq '$($group.Id)' and scopeType eq 'Group' and roleDefinitionId eq 'owner'&`$expand=policy(`$expand=rules)"

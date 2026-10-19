@@ -215,9 +215,9 @@ function Connect-EntraOps {
 
             # Info lines are printed to the right of the pyramid base
             $SplashInfo = @{
-                6 = @("📦 Version $($ModuleVersion) on $($PSEnvironment)", 'Gray')
-                7 = @("👤 Community Project by Thomas Naunheim", 'Gray')
-                8 = @("🌐 www.entraops.com", 'Cyan')
+                 6 = @("📦 Version $($ModuleVersion) on $($PSEnvironment)", 'Gray')
+                 7 = @("👤 Community Project by Thomas Naunheim", 'Gray')
+                 8 = @("🌐 www.entraops.com", 'Cyan')
             }
 
             for ($Row = 0; $Row -lt $SplashArt.Count; $Row++) {
@@ -590,7 +590,7 @@ function Connect-EntraOps {
         # Recommendation 3: Optimize context retrieval and verbose output generation
         Write-Verbose -Message "Connected to Azure Management"
         $AzContextRaw = Get-AzContext
-
+        # Account and tenant only - the token cache has no diagnostic value and doesn't belong in logs
         $AzContext = $AzContextRaw | Select-Object Account, Tenant
         Write-Verbose ($AzContext | Out-String)
 

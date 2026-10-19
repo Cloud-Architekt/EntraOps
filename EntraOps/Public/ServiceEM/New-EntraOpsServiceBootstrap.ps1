@@ -332,7 +332,7 @@ function New-EntraOpsServiceBootstrap {
             }
             $directoryObject
         }
-        # Escape guest UPN '#' characters; decode first to accept already-escaped Graph URLs.
+        # Escape each identifier as one path segment: '#' in guest UPNs would start a URI fragment ('@' stays)
         $directoryObjectPath = {
             param([string]$Collection, [string]$Identifier)
             "/v1.0/$Collection/$([uri]::EscapeDataString([uri]::UnescapeDataString($Identifier.Trim())) -replace '%40', '@')"
@@ -793,6 +793,7 @@ ManagementPlane,Admins,
                 $eligibleMembership = [bool]$EnablePimForGroups
                 $report.ControlPlaneAdminAssignments = @(foreach ($controlPlaneAdmin in $graphControlPlaneAdmins) {
                         try {
+                            # -ThrowOnFailure on the lookups: a failed lookup must not look like "not assigned yet"
                             if ($eligibleMembership) {
                                 $existing = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq '$($controlPlaneGroup.Id)' and principalId eq '$($controlPlaneAdmin.Id)'" -OutputType PSObject -DisableCache -ThrowOnFailure | Where-Object { $_ -and $_.AccessId -eq 'member' })
                                 if ($existing.Count -gt 0) {
@@ -833,6 +834,7 @@ ManagementPlane,Admins,
         if ($null -ne $DeferredPimAssignmentError) {
             throw $DeferredPimAssignmentError
         }
+        # Like the eligible owners: the other steps are completed, then the deployment fails instead of reporting success
         if ($ControlPlaneAdminFailures.Count -gt 0) {
             throw "$logPrefix Failed to add $($ControlPlaneAdminFailures.Count) ControlPlane admin(s) to the ControlPlane-Admins group of '$ServiceName': $($ControlPlaneAdminFailures -join '; ')"
         }

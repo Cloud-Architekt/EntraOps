@@ -212,7 +212,12 @@ function Invoke-EntraOpsReportingGeneration {
             Disconnect-EntraOps | Out-Null
         }
         if ($RemoveClassificationRepositoryAfterRun -and (Test-Path -LiteralPath $ResolvedClassificationRepositoryPath)) {
-            Remove-Item -LiteralPath $ResolvedClassificationRepositoryPath -Recurse -Force -ErrorAction SilentlyContinue
+            # Only a folder inside the working folder is removed
+            if (Test-EntraOpsPathWithinRoot -Path $ResolvedClassificationRepositoryPath -Root $EntraOpsBaseFolder) {
+                Remove-Item -LiteralPath $ResolvedClassificationRepositoryPath -Recurse -Force -ErrorAction SilentlyContinue
+            } else {
+                Write-Warning "Classification repository '$ResolvedClassificationRepositoryPath' is not inside the EntraOps working folder '$EntraOpsBaseFolder' and was not removed."
+            }
         }
     }
 }

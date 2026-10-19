@@ -64,7 +64,17 @@ jobs:
             Import-Module ./EntraOps
             # Reserve time for export and commit within the 75-minute job timeout.
             $TimeoutInSeconds = [Math]::Min([int]${env:StepTimeoutInSeconds}, 4200)
-            Invoke-EntraOpsTenantGovernanceSnapshot -ConfigFilePath ${env:ConfigFile} -AuthenticationType FederatedCredentials -Operation ${env:SnapshotOperation} -TimeoutInSeconds $TimeoutInSeconds -Force | Out-Host
+            try {
+              Invoke-EntraOpsTenantGovernanceSnapshot -ConfigFilePath ${env:ConfigFile} -AuthenticationType FederatedCredentials -Operation ${env:SnapshotOperation} -TimeoutInSeconds $TimeoutInSeconds -Force | Out-Host
+            } catch {
+              # Released job: failure recorded, pending job removed and nothing published
+              $SnapshotFolder = 'TenantGovernance/Snapshots'
+              $IsChanged = { param($Name) -not [string]::IsNullOrWhiteSpace((git status --porcelain -- "$SnapshotFolder/$Name" | Out-String)) }
+              if ((& $IsChanged '.LastAttemptManifest.json') -and -not (& $IsChanged '.SnapshotManifest.json') -and -not (Test-Path -LiteralPath "$SnapshotFolder/.PendingSnapshotJob.json")) {
+                "releasedJob=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+              }
+              throw
+            }
           azPSVersion: latest
       - name: Git - Commit and Push to repository
         if: env.EnableTenantGovernanceSnapshot == 'true' && steps.snapshot.outcome == 'success'
@@ -75,7 +85,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Persist released job state so the next checkout cannot restore the failed job.
       - name: Git - Commit and Push released snapshot job state
-        if: failure() && env.EnableTenantGovernanceSnapshot == 'true' && steps.snapshot.outcome == 'failure'
+        if: failure() && env.EnableTenantGovernanceSnapshot == 'true' && steps.snapshot.outputs.releasedJob == 'true'
         uses: ./.github/actions/Git-Push
         with:
           paths: TenantGovernance/Snapshots/.PendingSnapshotJob.json TenantGovernance/Snapshots/.LastAttemptManifest.json

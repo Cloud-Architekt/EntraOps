@@ -211,7 +211,8 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
         try {
             $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId $PendingJob.SnapshotJobId -ResourcesToInclude @($PendingJob.ResourcesToInclude) -SkipWaitForCompletion -SkipPrerequisiteCheck:$SkipPrerequisiteCheck
         } catch {
-            # Release terminal jobs to unblock later runs; retain pending state for transient failures.
+            # A job that can never be collected would block every later Start and Collect: record it as last attempt,
+            # release the pending job and fail. Transient polling errors keep the pending job.
             if ($_.FullyQualifiedErrorId -like 'EntraOpsTenantGovernanceSnapshotJobTerminal*') {
                 $TerminalMessage = $_.Exception.Message
                 [ordered]@{
@@ -377,11 +378,14 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
                 }
             }
         )
+        # Nothing published: keep the previous capture time, so the snapshot age isn't reset
+        $PublishedCapturedDateTime = if ($null -ne $PreviousManifest -and -not [string]::IsNullOrWhiteSpace("$($PreviousManifest.CapturedDateTime)")) { $PreviousManifest.CapturedDateTime } else { $Snapshot.CreatedDateTime }
         $AmbiguousPartialManifest = [ordered]@{
             SnapshotId                  = $Snapshot.SnapshotId
             SnapshotDisplayName         = $Snapshot.DisplayName
             SnapshotJobStatus           = $SnapshotJobStatus
-            CapturedDateTime            = $Snapshot.CreatedDateTime
+            CapturedDateTime            = $PublishedCapturedDateTime
+            AttemptDateTime             = $Snapshot.CreatedDateTime
             ResourcesToInclude          = @($Snapshot.ResourcesToInclude)
             CapturedResourceCount       = $Snapshot.ResourceCount
             AttemptResourceTypeCounts   = [ordered]@{}

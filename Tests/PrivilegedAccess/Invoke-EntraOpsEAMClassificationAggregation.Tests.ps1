@@ -132,6 +132,22 @@ Describe "Save-EntraOpsEAMRbacSystemJson export replacement" {
         $Aggregate.TrimStart() | Should -Match '^\['
         @(Get-ChildItem -LiteralPath $script:EntraOpsBaseFolder -Directory -Force | Where-Object Name -like '.*').Count | Should -Be 0
     }
+
+    It "resolves a relative export folder against the PowerShell location" {
+        # Set-Location doesn't move the process directory: the export must not be staged and swapped elsewhere
+        $NewData = @([pscustomobject]@{ ObjectId = "relative-object"; ObjectType = "user"; ObjectDisplayName = "Relative"; RoleAssignments = $null })
+        [System.IO.Directory]::GetCurrentDirectory() | Should -Not -Be $script:EntraOpsBaseFolder
+
+        Push-Location -LiteralPath $script:EntraOpsBaseFolder
+        try {
+            Save-EntraOpsEAMRbacSystemJson -ExportFolder "./EntraID" -RbacSystemName "EntraID" -EamData $NewData -AggregateFileName "EntraID.json" 6>$null
+        } finally {
+            Pop-Location
+        }
+
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder "user/relative-object.json") | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder "user/previous.json") | Should -BeFalse
+    }
 }
 
 Describe "Save-EntraOpsEAMRbacSystemJson assignment deduplication" {

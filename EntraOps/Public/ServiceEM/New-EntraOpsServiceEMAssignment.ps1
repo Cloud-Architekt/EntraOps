@@ -94,6 +94,7 @@ function New-EntraOpsServiceEMAssignment {
             $assignmentRequestsUri = "/v1.0/identityGovernance/entitlementManagement/assignmentRequests?`$expand=assignment(`$expand=target),accessPackage&`$filter=accessPackage/id eq '$($package.Id)'"
             try{
                 Write-Verbose "$logPrefix Looking up open assignment requests of $($package.DisplayName)"
+                # -ThrowOnFailure: a failed lookup must not look like "no open requests" and submit duplicate requests
                 $assignmentRequests += @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentRequestsUri -OutputType PSObject -DisableCache -ThrowOnFailure) | Where-Object { $_ -and "$($_.State)" -in $openStates }
             }catch{
                 Write-Verbose "$logPrefix Failed to find Assignment Requests"

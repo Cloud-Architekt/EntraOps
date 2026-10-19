@@ -60,10 +60,25 @@ Describe 'PrivilegedEAM parser data selection' {
         $Parser.YamlQuery | Should -Match "join kind=leftouter \(\s*\n\s*_GetWatchlist\('EntraOps_RoleClassifications'\)"
     }
 
-    It 'returns the latest custom table ingestion instead of a fixed one-day window' {
+    It 'returns the latest completed custom table ingestion instead of a fixed one-day window' {
         $Parser = Get-TestParserDefinition -Name 'CustomTable' -QueryProperty 'query'
         $Parser.YamlQuery | Should -Not -Match 'ago\(1d\)'
-        $Parser.YamlQuery | Should -Match 'LatestTimeGenerated = max\(TimeGenerated\) by RoleSystem'
-        $Parser.YamlQuery | Should -Match 'let IngestionWindow = 10m;'
+        # Runs are selected by their completion marker, exactly by the run timestamp or between two markers.
+        $Parser.YamlQuery | Should -Match 'LatestMarker = max\(MarkerTime\) by RoleSystem'
+        $Parser.YamlQuery | Should -Match 'TimeGenerated == LatestMarker'
+        $Parser.YamlQuery | Should -Match 'TimeGenerated > PreviousMarker and TimeGenerated <= LatestMarker'
+        # Marker records are bookkeeping and never returned as objects.
+        $Parser.YamlQuery | Should -Match 'where ObjectType != RunMarkerType'
+    }
+
+    It 'uses the completion marker type that Save-EntraOpsPrivilegedEAMInsightsCustomTable writes' {
+        $Parser = Get-TestParserDefinition -Name 'CustomTable' -QueryProperty 'query'
+        $Producer = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot 'EntraOps/Public/PrivilegedAccess/Save-EntraOpsPrivilegedEAMInsightsCustomTable.ps1') -Raw
+
+        $ParserMarker = [regex]::Match($Parser.YamlQuery, 'let RunMarkerType = "(?<Type>[^"]+)";').Groups['Type'].Value
+        $ProducerMarker = [regex]::Match($Producer, 'ObjectType\s*=\s*"(?<Type>[^"]+)"').Groups['Type'].Value
+
+        $ParserMarker | Should -Not -BeNullOrEmpty
+        $ProducerMarker | Should -Be $ParserMarker
     }
 }

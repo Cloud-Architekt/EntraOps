@@ -45,6 +45,20 @@ Describe 'Invoke-EntraOpsMsGraphQuery error details and cache' {
         $caught.Exception.Data['ErrorCode'] | Should -Be 'ResourceNotFoundInOriginSystem'
     }
 
+    It 'retries a transient Bad Gateway response' {
+        Mock Start-Sleep -ModuleName EntraOps {}
+        Mock Invoke-RestMethod -ModuleName EntraOps {
+            $script:Calls++
+            if ($script:Calls -eq 1) { throw (New-TestGraphError -StatusCode 502 -ErrorCode 'UnknownError') }
+            [pscustomobject]@{ results = @([pscustomobject]@{ ObjectId = 'a' }) }
+        }
+
+        $result = Invoke-EntraOpsMsGraphQuery -Method POST -Uri '/beta/security/runHuntingQuery' -Body '{}' -OutputType PSObject -ThrowOnFailure
+
+        $script:Calls | Should -Be 2
+        @($result.results).ObjectId | Should -Be @('a')
+    }
+
     It 'neither reads nor stores the cache with DisableCache' {
         Invoke-EntraOpsMsGraphQuery -Method GET -Uri '/v1.0/groups/a' -DisableCache | Out-Null
         Invoke-EntraOpsMsGraphQuery -Method GET -Uri '/v1.0/groups/a' | Out-Null

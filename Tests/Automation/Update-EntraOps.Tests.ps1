@@ -9,6 +9,33 @@ BeforeAll {
     $script:EntraOpsBaseFolder = $script:TestRepositoryRoot
     . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsRepositoryCheckout.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsRepositoryRoot.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsGitTrackedFile.ps1"
+
+    # NUL-delimited "git ls-files --stage -z" output for a fake checkout: every file on disk counts as tracked
+    function Get-TestTrackedFileList {
+        param([object[]]$Arguments)
+        $Root = $Arguments[[array]::IndexOf($Arguments, '-C') + 1]
+        $Separator = [array]::IndexOf($Arguments, '--')
+        $Pathspecs = @(if ($Separator -ge 0) { $Arguments[($Separator + 1)..($Arguments.Count - 1)] | ForEach-Object { "$_" -replace '^\./', '' } })
+        $Files = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Force | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') } |
+                Where-Object { $_ -notmatch '^\.git(/|$)' } |
+                Where-Object { $File = $_; $Pathspecs.Count -eq 0 -or @($Pathspecs | Where-Object { $File -eq $_ -or $File.StartsWith("$_/") }).Count -gt 0 })
+        (@($Files | ForEach-Object { "100644 0000000000000000000000000000000000000000 0`t$_" }) -join [char]0) + [char]0
+    }
+
+    function New-TestGitCandidate {
+        param([string]$Path, [hashtable]$TrackedFiles)
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+        & git -C $Path init --quiet
+        foreach ($File in $TrackedFiles.Keys) {
+            $FilePath = Join-Path $Path $File
+            [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($FilePath))
+            Set-Content -LiteralPath $FilePath -Value $TrackedFiles[$File]
+        }
+        & git -C $Path add --all
+        & git -C $Path -c user.name=EntraOps -c user.email=entraops@example.com -c commit.gpgsign=false commit --quiet -m candidate
+        (& git -C $Path rev-parse HEAD).Trim()
+    }
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Resolve-EntraOpsUpdateSource.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Test-EntraOpsUpdateContract.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Get-EntraOpsUpdateCandidate.ps1"
@@ -86,7 +113,8 @@ Describe 'Update-EntraOps update scope' {
     It 'validates the downloaded candidate before replacing any local target' {
         $Source = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot 'EntraOps/Public/Core/Update-EntraOps.ps1') -Raw
         $ValidationIndex = $Source.IndexOf('Validating update candidate')
-        $ReplacementIndex = $Source.IndexOf('foreach ($TargetUpdateFolder in $TargetUpdateFolders)')
+        # The files to install are listed before the validation; local targets are only removed after it
+        $ReplacementIndex = $Source.IndexOf('Remove-Item -LiteralPath $TargetPath')
 
         $ValidationIndex | Should -BeGreaterThan -1
         $ReplacementIndex | Should -BeGreaterThan $ValidationIndex
@@ -117,7 +145,7 @@ Describe 'Update-EntraOps update scope' {
 
     It 'never imports candidate module code in the updater process' {
         $Source = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot 'EntraOps/Public/Core/Update-EntraOps.ps1') -Raw
-        $ReplacementIndex = $Source.IndexOf('foreach ($TargetUpdateFolder in $TargetUpdateFolders)')
+        $ReplacementIndex = $Source.IndexOf('Remove-Item -LiteralPath $TargetPath')
         $AfterReplacement = $Source.Substring($ReplacementIndex)
 
         $AfterReplacement | Should -Match 'Updated module import deferred until a subsequent clean process or session'
@@ -213,6 +241,114 @@ Describe 'Update-EntraOps update scope' {
         }
     }
 
+    It 'rejects a candidate whose archive differs from its checkout (<Case>)' -ForEach @(
+        @{ Case = 'export-ignore in a folder'; AsGitCheckout = $false }
+        @{ Case = 'export-ignore in a git checkout'; AsGitCheckout = $true }
+    ) {
+        # The validation job tests a git archive, the apply job copies the checkout: export-ignore files would
+        # be installed without validation.
+        $CandidateRoot = Join-Path $TestDrive "gitattributes-$AsGitCheckout"
+        New-Item -ItemType Directory -Path (Join-Path $CandidateRoot 'EntraOps/Private') -Force | Out-Null
+        @{ SchemaVersion = 1; Product = 'EntraOps'; DistributionRepositories = @{ 'Cloud-Architekt/EntraOps' = @{ RequiresPersonalAccessToken = $false } }; SupportedUpdateTargets = @('./EntraOps'); RequiredValidationPaths = @() } |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $CandidateRoot 'EntraOpsUpdateContract.json')
+        Set-Content -LiteralPath (Join-Path $CandidateRoot 'EntraOps/Private/Unvalidated.ps1') -Value '# not in the validated archive'
+        Set-Content -LiteralPath (Join-Path $CandidateRoot 'EntraOps/.gitattributes') -Value 'Private/Unvalidated.ps1 export-ignore'
+        if ($AsGitCheckout) {
+            & git -C $CandidateRoot init --quiet
+            & git -C $CandidateRoot add --all
+        }
+
+        { Test-EntraOpsUpdateContract -CandidateRoot $CandidateRoot -Repository 'Cloud-Architekt/EntraOps' -TargetUpdateFolders @('./EntraOps') } |
+            Should -Throw '*export-ignore or export-subst*EntraOps/.gitattributes*'
+    }
+
+    It 'rejects archive attributes in a path that git quotes' {
+        # git quotes non-ASCII paths ("EntraOps/\303\244/.gitattributes") unless they are listed literally
+        $CandidateRoot = Join-Path $TestDrive 'quoted-gitattributes'
+        $Contract = @{ SchemaVersion = 1; Product = 'EntraOps'; DistributionRepositories = @{ 'Cloud-Architekt/EntraOps' = @{ RequiresPersonalAccessToken = $false } }; SupportedUpdateTargets = @('./EntraOps'); RequiredValidationPaths = @() } | ConvertTo-Json -Depth 5
+        $null = New-TestGitCandidate -Path $CandidateRoot -TrackedFiles @{
+            'EntraOpsUpdateContract.json'           = $Contract
+            "EntraOps/$([char]0x00E4)/.gitattributes" = 'Unvalidated.ps1 export-ignore'
+            "EntraOps/$([char]0x00E4)/Unvalidated.ps1" = '# not in the validated archive'
+        }
+
+        { Test-EntraOpsUpdateContract -CandidateRoot $CandidateRoot -Repository 'Cloud-Architekt/EntraOps' -TargetUpdateFolders @('./EntraOps') } |
+            Should -Throw "*export-ignore or export-subst*EntraOps/$([char]0x00E4)/.gitattributes*"
+    }
+
+    It 'rejects a candidate with a symbolic link' -Skip:$IsWindows {
+        # Copy-Item copies the content of the link target, e.g. a local token cache, into the deployment
+        $CandidateRoot = Join-Path $TestDrive 'symlink-candidate'
+        New-Item -ItemType Directory -Path (Join-Path $CandidateRoot 'EntraOps') -Force | Out-Null
+        @{ SchemaVersion = 1; Product = 'EntraOps'; DistributionRepositories = @{ 'Cloud-Architekt/EntraOps' = @{ RequiresPersonalAccessToken = $false } }; SupportedUpdateTargets = @('./EntraOps'); RequiredValidationPaths = @() } |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $CandidateRoot 'EntraOpsUpdateContract.json')
+        $LinkTarget = Join-Path $TestDrive 'outside-secret.json'
+        Set-Content -LiteralPath $LinkTarget -Value '{}'
+        New-Item -ItemType SymbolicLink -Path (Join-Path $CandidateRoot 'EntraOps/secret.json') -Target $LinkTarget | Out-Null
+
+        { Test-EntraOpsUpdateContract -CandidateRoot $CandidateRoot -Repository 'Cloud-Architekt/EntraOps' -TargetUpdateFolders @('./EntraOps') } |
+            Should -Throw '*symbolic link(s)*secret.json*'
+    }
+
+    It 'never clones into and removes an existing temporary update folder' {
+        $ExistingFolder = Join-Path $TestDrive 'existing-temp'
+        New-Item -ItemType Directory -Path $ExistingFolder -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $ExistingFolder 'keep.txt') -Value 'keep'
+        Mock git { $global:LASTEXITCODE = 0 }
+
+        { Update-EntraOps -UpstreamUrl 'https://git.example.invalid/EntraOps.git' -Branch 'v1.1.0' -ConfigFile (Join-Path $TestDrive 'no-config.json') -TemporaryUpdateFolder $ExistingFolder -WarningAction SilentlyContinue } |
+            Should -Throw '*already exists*'
+        Test-Path -LiteralPath (Join-Path $ExistingFolder 'keep.txt') | Should -BeTrue
+        Should -Invoke git -Times 0 -Exactly
+    }
+
+    It 'sends ENTRAOPS_PAT only to GitHub and never logs credentials of a custom upstream URL' -ForEach @(
+        @{ Case = 'custom host'; Url = 'https://user:url-secret@example.com/EntraOps.git'; ExplicitToken = $null; ExpectedHeaderKey = $null }
+        @{ Case = 'explicit token'; Url = 'https://example.com/EntraOps.git'; ExplicitToken = 'explicit-token'; ExpectedHeaderKey = 'http.https://example.com/.extraheader' }
+    ) {
+        $PreviousPat = $env:ENTRAOPS_PAT
+        $script:SeenHeaderKey = 'not-called'
+        $script:SeenHeaderValue = 'not-called'
+        Mock git {
+            if ($args[0] -eq 'clone') { $script:SeenHeaderKey = $env:GIT_CONFIG_KEY_0; $script:SeenHeaderValue = $env:GIT_CONFIG_VALUE_0 }
+            $global:LASTEXITCODE = 128
+        }
+        try {
+            $env:ENTRAOPS_PAT = 'environment-token'
+            $Output = [System.Collections.Generic.List[string]]::new()
+            $UpdateParameters = @{
+                UpstreamUrl           = $Url
+                Branch                = 'v1.1.0'
+                ConfigFile            = (Join-Path $TestDrive 'no-config.json')
+                TemporaryUpdateFolder = (Join-Path $TestDrive "clone-$($Case -replace '\W', '-')")
+            }
+            if ($ExplicitToken) { $UpdateParameters.PersonalAccessToken = $ExplicitToken }
+            $script:UpdateWarnings = $null
+            {
+                try {
+                    Update-EntraOps @UpdateParameters -WarningVariable UpdateWarnings -WarningAction SilentlyContinue | ForEach-Object { $Output.Add("$_") }
+                } finally {
+                    $script:UpdateWarnings = $UpdateWarnings
+                }
+            } | Should -Throw '*git clone failed*'
+
+            if ($ExpectedHeaderKey) {
+                $script:SeenHeaderKey | Should -Be $ExpectedHeaderKey
+                $script:SeenHeaderValue | Should -Match ([regex]::Escape([Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$ExplicitToken"))))
+            } else {
+                $script:SeenHeaderKey | Should -BeNullOrEmpty
+                "$script:SeenHeaderValue" | Should -Not -Match ([regex]::Escape([Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('x-access-token:environment-token'))))
+            }
+            ($Output -join "`n") | Should -Not -Match 'url-secret'
+            ($Output -join "`n") | Should -Match ([regex]::Escape(($Url -replace '//[^/@]+@', '//')))
+            if (-not $ExplicitToken) {
+                "$script:UpdateWarnings" | Should -Match 'ENTRAOPS_PAT is not sent'
+            }
+        } finally {
+            if ($null -eq $PreviousPat) { Remove-Item Env:ENTRAOPS_PAT -ErrorAction SilentlyContinue } else { $env:ENTRAOPS_PAT = $PreviousPat }
+        }
+    }
+
     # The contract must list the repository that serves it, or that repository can never be a valid
     # update source. Only meaningful in the distribution repositories, so skipped elsewhere.
     It 'declares the serving distribution repository in its contract' -Skip:(-not $IsDistributionRepository) -TestCases @(@{ ExpectedRepository = $CurrentRepositoryFullName }) {
@@ -286,6 +422,8 @@ Describe 'Update-EntraOps prepared candidate apply path' {
             # Only the commit of the prepared candidate may be resolved; cloning or fetching must not happen.
             Mock git {
                 if ($args -contains 'rev-parse') { $global:LASTEXITCODE = 0; return ('a' * 40) }
+                # The contract check and the install list the tracked files of the candidate (read-only)
+                if ($args -contains 'ls-files') { $global:LASTEXITCODE = 0; return (Get-TestTrackedFileList -Arguments $args) }
                 throw "git must not clone or fetch for a prepared candidate (called with: $($args -join ' '))"
             }
             $Output = Update-EntraOps -ConfigFile (Join-Path $Deployment 'missing.json') -Repository 'EntraOps' -PreparedCandidatePath 'TmpUpdate' `
@@ -307,6 +445,111 @@ Describe 'Update-EntraOps prepared candidate apply path' {
         $Manifest.ValidationIsolation | Should -Be 'SeparateJob'
         @($Manifest.TargetUpdateFolders) | Should -Be @('./Samples')
         ($Output -join "`n") | Should -Match 'Using prepared update candidate'
+    }
+
+    Context 'installed content' {
+        BeforeEach {
+            $script:Deployment = Join-Path $TestDrive "installed-$([guid]::NewGuid().ToString('N'))"
+            $script:Candidate = Join-Path $script:Deployment 'TmpUpdate'
+            $Contract = @{ SchemaVersion = 1; Product = 'EntraOps'; DistributionRepositories = @{ 'Cloud-Architekt/EntraOps' = @{ Channel = 'Release'; RequiresPersonalAccessToken = $false } }; SupportedUpdateTargets = @('./Samples'); RequiredValidationPaths = @() } | ConvertTo-Json -Depth 5
+            New-Item -ItemType Directory -Path (Join-Path $script:Deployment 'Samples') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $script:Deployment 'EntraOpsUpdateContract.json') -Value $Contract
+            Set-Content -LiteralPath (Join-Path $script:Deployment 'Samples/old.txt') -Value 'old'
+            $script:CandidateCommit = New-TestGitCandidate -Path $script:Candidate -TrackedFiles @{
+                'EntraOpsUpdateContract.json' = $Contract
+                'Samples/new.txt'             = 'new'
+                'Samples/nested/tracked.txt'  = 'tracked'
+            }
+
+            $script:InvokePreparedUpdate = {
+                param([string]$ValidatorScript)
+                $UpdateParameters = @{ ValidatedSourceCommit = $script:CandidateCommit }
+                if ($ValidatorScript) {
+                    # Local flow: the trusted validator of the deployment runs candidate code in the candidate folder
+                    New-Item -ItemType Directory -Path (Join-Path $script:Deployment '.github/scripts') -Force | Out-Null
+                    Set-Content -LiteralPath (Join-Path $script:Deployment '.github/scripts/Test-EntraOpsUpdateCandidate.ps1') -Value $ValidatorScript
+                    $UpdateParameters = @{}
+                }
+                $PreviousBaseFolder = $script:EntraOpsBaseFolder
+                $PreviousPat = $env:ENTRAOPS_PAT
+                $script:EntraOpsBaseFolder = $script:Deployment
+                Push-Location $script:Deployment
+                try {
+                    Remove-Item Env:ENTRAOPS_PAT -ErrorAction SilentlyContinue
+                    Update-EntraOps -ConfigFile (Join-Path $script:Deployment 'missing.json') -Repository 'EntraOps' -PreparedCandidatePath 'TmpUpdate' `
+                        -TargetUpdateFolders @('./Samples') @UpdateParameters -WarningAction SilentlyContinue | Out-Null
+                } finally {
+                    Pop-Location
+                    $script:EntraOpsBaseFolder = $PreviousBaseFolder
+                    if ($null -eq $PreviousPat) { Remove-Item Env:ENTRAOPS_PAT -ErrorAction SilentlyContinue } else { $env:ENTRAOPS_PAT = $PreviousPat }
+                }
+            }
+        }
+
+        It 'installs only the tracked files of the candidate' {
+            # e.g. written by candidate code during the validation in the same folder
+            Set-Content -LiteralPath (Join-Path $script:Candidate 'Samples/untracked.txt') -Value 'never validated'
+
+            & $script:InvokePreparedUpdate
+
+            Test-Path -LiteralPath (Join-Path $script:Deployment 'Samples/new.txt') | Should -BeTrue
+            Get-Content -LiteralPath (Join-Path $script:Deployment 'Samples/nested/tracked.txt') | Should -Be 'tracked'
+            Test-Path -LiteralPath (Join-Path $script:Deployment 'Samples/untracked.txt') | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $script:Deployment 'Samples/old.txt') | Should -BeFalse
+        }
+
+        It 'installs the files listed before the validation and runs no git command in the candidate afterwards' {
+            # Candidate code in the validation can change the index or the git configuration of the candidate,
+            # e.g. a core.fsmonitor command that git would run with the credentials of the updater process
+            $script:HookMarker = Join-Path $TestDrive "fsmonitor-$([guid]::NewGuid().ToString('N'))"
+            $Validator = @"
+param([string]`$CandidateRoot, [switch]`$RunBrowserTests)
+Set-Content -LiteralPath (Join-Path `$CandidateRoot 'Samples/added.txt') -Value 'added during validation'
+& git -C `$CandidateRoot add --all
+& git -C `$CandidateRoot config core.fsmonitor "echo hooked > '$($script:HookMarker)'"
+exit 0
+"@
+
+            & $script:InvokePreparedUpdate -ValidatorScript $Validator
+
+            Test-Path -LiteralPath (Join-Path $script:Deployment 'Samples/new.txt') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $script:Deployment 'Samples/added.txt') | Should -BeFalse
+            Test-Path -LiteralPath $script:HookMarker | Should -BeFalse
+        }
+
+        It 'stops before changing any local folder when a tracked file is missing' {
+            $Validator = @"
+param([string]`$CandidateRoot, [switch]`$RunBrowserTests)
+Remove-Item -LiteralPath (Join-Path `$CandidateRoot 'Samples/nested/tracked.txt')
+exit 0
+"@
+
+            { & $script:InvokePreparedUpdate -ValidatorScript $Validator } | Should -Throw '*missing tracked file(s)*Samples/nested/tracked.txt*No local folder was changed*'
+
+            Get-Content -LiteralPath (Join-Path $script:Deployment 'Samples/old.txt') | Should -Be 'old'
+        }
+
+        It 'stops before changing any local folder when the candidate contains a <Case>' -Skip:$IsWindows -ForEach @(
+            @{ Case = 'untracked symbolic link'; LinkPath = 'Samples/link.txt'; ReplaceFolder = $false }
+            @{ Case = 'tracked folder replaced by a link'; LinkPath = 'Samples/nested'; ReplaceFolder = $true }
+        ) {
+            # A link is copied as the content of its target, e.g. a local token cache
+            $Secret = Join-Path $TestDrive 'secret-outside'
+            New-Item -ItemType Directory -Path $Secret -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $Secret 'tracked.txt') -Value 'secret'
+            $LinkFullPath = Join-Path $script:Candidate $LinkPath
+            if ($ReplaceFolder) {
+                Remove-Item -LiteralPath $LinkFullPath -Recurse -Force
+                New-Item -ItemType SymbolicLink -Path $LinkFullPath -Target $Secret | Out-Null
+            } else {
+                New-Item -ItemType SymbolicLink -Path $LinkFullPath -Target (Join-Path $Secret 'tracked.txt') | Out-Null
+            }
+
+            { & $script:InvokePreparedUpdate } | Should -Throw '*symbolic link(s) or junction(s)*No local folder was changed*'
+
+            Get-Content -LiteralPath (Join-Path $script:Deployment 'Samples/old.txt') | Should -Be 'old'
+            Test-Path -LiteralPath (Join-Path $script:Deployment 'Samples/new.txt') | Should -BeFalse
+        }
     }
 
     It 'replaces targets in the repository root when run from another location' {
@@ -347,6 +590,8 @@ Describe 'Update-EntraOps prepared candidate apply path' {
             $env:SYSTEM_ACCESSTOKEN = 'must-not-reach-candidate-code'
             Mock git {
                 if ($args -contains 'rev-parse') { $global:LASTEXITCODE = 0; return ('a' * 40) }
+                # The contract check and the install list the tracked files of the candidate (read-only)
+                if ($args -contains 'ls-files') { $global:LASTEXITCODE = 0; return (Get-TestTrackedFileList -Arguments $args) }
                 throw "git must not clone or fetch for a prepared candidate (called with: $($args -join ' '))"
             }
             Update-EntraOps -ConfigFile 'EntraOpsConfig.json' -Repository 'EntraOps' -PreparedCandidatePath $Candidate `
@@ -781,7 +1026,8 @@ Describe 'Automated update defaults' {
         $ApplyJob.IndexOf('Stage trusted GitHub publisher') | Should -BeLessThan $ApplyJob.IndexOf('Apply candidate without update credentials')
         $ApplyJob | Should -Match 'Join-Path \$env:RUNNER_TEMP ''Publish-EntraOpsGitHubUpdate\.ps1'''
         $ApplyJob | Should -Match 'Detect updated workflow definitions'
-        $ApplyJob | Should -Match 'actions/create-github-app-token@[0-9a-f]{40}\s+# v3\.2\.0'
+        # Any Dependabot-updated release: only the full commit SHA pin is required
+        $ApplyJob | Should -Match 'actions/create-github-app-token@[0-9a-f]{40}\s+# v\d+\.\d+\.\d+'
         $ApplyJob | Should -Match 'permission-workflows:\s*write'
         $ApplyJob | Should -Match 'EntraOpsUpdateAppClientId'
         $ApplyJob | Should -Match 'EntraOpsUpdateAppPrivateKey'
@@ -946,6 +1192,7 @@ Describe 'Git-Push credential header' {
             }
             $Publisher | Should -Match '(?s)finally \{\s*foreach \(\$Name in \$ManagedEnvironment\)'
         }
+        # An open update pull request is checked before the branch is pushed, so reviewer commits are kept.
         $UpdatePublisher.IndexOf('& gh pr list') | Should -BeGreaterThan 0
         $UpdatePublisher.IndexOf('& gh pr list') | Should -BeLessThan $UpdatePublisher.IndexOf('& git ls-remote')
         $UpdatePublisher | Should -Match '\$LsRemoteExitCode -eq 0'
@@ -1029,8 +1276,10 @@ Describe 'Git-Push publisher behavior' {
     }
 
     It 'skips a missing pathspec when another pathspec matches' {
+        # E.g. Classification/<TenantName> does not exist while the automated classification update is disabled.
         $Clone = New-PublisherClone 'clone-partial-paths'
-        # Use a separate folder because later tests share this remote and create PrivilegedEAM themselves.
+        # The tests of this block share one remote: a folder of its own keeps PrivilegedEAM absent from the
+        # clones of the later tests, which create it themselves.
         New-Item -ItemType Directory -Path (Join-Path $Clone 'TenantGovernance') | Out-Null
         Set-Content -LiteralPath (Join-Path $Clone 'TenantGovernance/PartialPaths.json') -Value '[]'
         Push-Location $Clone

@@ -3,7 +3,9 @@ function Save-EntraOpsEAMRbacSystemJson {
     .SYNOPSIS
         Saves EAM data for a single RBAC system to JSON files.
     .DESCRIPTION
-        Validates and stages aggregate and per-object JSON files before replacing the previous export.
+        Shared helper that replaces the ~50-line save block duplicated 5 times in
+        Save-EntraOpsPrivilegedEAMJson. Handles cleanup, directory creation,
+        aggregate JSON export, and parallel per-object JSON writes.
     .PARAMETER ExportFolder
         The target export folder for this RBAC system.
     .PARAMETER RbacSystemName
@@ -42,8 +44,9 @@ function Save-EntraOpsEAMRbacSystemJson {
     )
 
     # --- Path safety: ensure ExportFolder is under the expected base directory ---
-    $ResolvedExportFolder = [System.IO.Path]::GetFullPath($ExportFolder)
-    $ResolvedBaseFolder = [System.IO.Path]::GetFullPath($EntraOpsBaseFolder)
+    # Resolved against the PowerShell location: GetFullPath would use the process directory
+    $ResolvedExportFolder = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ExportFolder)
+    $ResolvedBaseFolder = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EntraOpsBaseFolder)
 
     # Guard against misconfigured paths that could cause destructive deletion outside the workspace
     if (-not (Test-EntraOpsPathWithinRoot -Path $ExportFolder -Root $EntraOpsBaseFolder)) {
@@ -64,6 +67,7 @@ function Save-EntraOpsEAMRbacSystemJson {
         return
     }
 
+    # Pre-filter (before the previous export is touched, so invalid input can never replace it)
     $OriginalCount = @($EamData).Count
     $EamData = @($EamData | Where-Object { $null -ne $_.ObjectType -and $null -ne $_.ObjectId })
     $FilteredCount = $EamData.Count
@@ -183,7 +187,7 @@ function Save-EntraOpsEAMRbacSystemJson {
         $EamData = @($EamData | Select-Object -ExcludeProperty $ExcludeProperties)
     }
 
-    # Stage all files before replacing the previous export.
+    # Write to a staging folder and replace the previous export only after every file was written
     $ExportParentFolder = Split-Path -Path $ResolvedExportFolder -Parent
     $ExportFolderName = Split-Path -Path $ResolvedExportFolder -Leaf
     $OperationId = [guid]::NewGuid().ToString('N')
@@ -193,9 +197,10 @@ function Save-EntraOpsEAMRbacSystemJson {
     try {
         New-Item -Path $StagingFolder -ItemType Directory -Force | Out-Null
 
-        # Preserve the aggregate array shape for single-object exports.
+        # Save aggregate JSON; -InputObject keeps a single object as a one-element array
         ConvertTo-Json -InputObject $EamData -Depth 10 | Out-File -Path (Join-Path $StagingFolder $AggregateFileName) -Force -ErrorAction Stop
 
+        # Create subdirectories per object type
         $EamData | Group-Object ObjectType | ForEach-Object {
             New-Item -ItemType Directory -Force -Path (Join-Path $StagingFolder $_.Name) | Out-Null
         }

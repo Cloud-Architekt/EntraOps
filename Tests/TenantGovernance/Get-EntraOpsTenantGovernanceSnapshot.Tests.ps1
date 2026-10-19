@@ -204,6 +204,8 @@ Describe 'Get-EntraOpsTenantGovernanceSnapshot timeout handling' {
         $Result.SnapshotJobStatus | Should -Be 'succeeded'
         $Result.ResourceCount | Should -Be 1
         $Result.Resources[0].id | Should -Be 'resource-1'
+        # The snapshot age counts from the job creation, not from the later download of its results
+        $Result.CreatedDateTime | Should -Be ([datetime]::new(2026, 8, 30, 10, 11, 12, [System.DateTimeKind]::Utc).ToString('o'))
     }
 
     It 'marks a failed snapshot job as terminal' {
@@ -278,6 +280,7 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson pending state' {
     }
 
     It 'releases a pending job that can never be collected and records the failure' {
+        # A failed job would otherwise block every later Start ("already exists") and Collect (same failure).
         $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder 'TenantGovernance/SnapshotsTerminal'
         New-Item -ItemType Directory -Path $script:ExportFolder -Force | Out-Null
         $PendingJobPath = Join-Path $script:ExportFolder '.PendingSnapshotJob.json'
@@ -991,6 +994,28 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson collection ordering' {
         @($Manifest.StaleResourceTypes) | Should -Be @('microsoft.entra.namedlocationpolicy')
         @($Manifest.PublishedWithErrorsResourceTypes).Count | Should -Be 0
         $Manifest.ResourceTypeStates[0].Status | Should -Be 'PreservedStale'
+    }
+
+    It 'keeps the capture time of the published snapshot when a run publishes nothing' {
+        # Otherwise every partial run without parseable errors would reset the snapshot age
+        New-Item -ItemType Directory -Path $script:ExportFolder -Force | Out-Null
+        [ordered]@{ SnapshotId = 'job-published'; CapturedDateTime = '2026-09-01T06:00:00.0000000Z'; IsComplete = $true; ResourceTypeStates = @() } |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json')
+        Mock Get-EntraOpsTenantGovernanceSnapshot {
+            [PSCustomObject]@{
+                SnapshotId = 'job-nothing-published'; Status = 'Completed'; SnapshotJobStatus = 'partiallySuccessful'
+                DisplayName = 'Test Snapshot'; CreatedDateTime = '2026-09-20T06:00:00.0000000Z'
+                ResourcesToInclude = @('microsoft.entra.namedLocationPolicy'); ResourceCount = 1; ErrorDetails = @()
+                Resources = @([PSCustomObject]@{ resourceType = 'microsoft.entra.namedlocationpolicy'; displayName = 'Location'; properties = [PSCustomObject]@{ Id = 'loc-1' } })
+            }
+        }
+
+        Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('unused-by-mock') -SkipPrerequisiteCheck -WarningAction SilentlyContinue | Out-Null
+
+        $Manifest = Get-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') -Raw | ConvertFrom-Json
+        $Manifest.SnapshotId | Should -Be 'job-nothing-published'
+        ([datetime]$Manifest.CapturedDateTime).ToUniversalTime() | Should -Be ([datetime]::new(2026, 9, 1, 6, 0, 0, [System.DateTimeKind]::Utc))
+        ([datetime]$Manifest.AttemptDateTime).ToUniversalTime() | Should -Be ([datetime]::new(2026, 9, 20, 6, 0, 0, [System.DateTimeKind]::Utc))
     }
 
     It 'rejects duplicate canonical resource identities before publication' {

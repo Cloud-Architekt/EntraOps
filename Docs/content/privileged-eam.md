@@ -744,11 +744,34 @@ SensitiveEdges
     | project ObjectDisplayName = NodeName, ObjectType = NodeLabel, ObjectId, NodeId) on $left.SourceNodeId == $right.NodeId
 | where isnotempty(ObjectId)
   | extend ClassificationReason = bag_pack_columns(EdgeLabel, TargetNodeName)
-  | summarize by ObjectDisplayName, SourceNodeName, tolower(ObjectType), ObjectId, NodeId, tostring(ClassificationReason)
+  | summarize by ObjectDisplayName, SourceNodeName, ObjectType = tolower(ObjectType), ObjectId, NodeId, tostring(ClassificationReason)
 ```
 
 As described above, any Entra ID role assignment on the scope of critical assets in XSPM is
 classified as Control Plane.
+
+#### When Exposure Management is unavailable
+
+The hunting query can fail, for example with a temporary HTTP 502 or a missing `ThreatHunting.Read.All`
+permission or license. Dropping the XSPM objects would silently narrow the Control Plane scope, so EntraOps
+records each successful query in the `ExposureManagement` block of `ScopeReasoning_ControlPlane.json` (and of
+`ScopeReasoning_Azure.json` for critical Azure resources): status, date of the last successful query, tenant,
+`ExposureCriticalityLevel`, query version and the results. When a later query fails:
+
+- **Results of a previous successful query are available**: EntraOps uses them and shows a warning
+  (`ExposureManagementUnavailable`, or `ExposureManagementAccessDenied` for a missing permission or
+  license). The objects are resolved again, so deleted objects are removed and protection flags are
+  current. Carried forward entries are marked with `XspmLastSuccessfulQueryDate`, and the warning
+  becomes `ExposureManagementStale` when the results are 7 days or older. The next successful query
+  replaces them.
+- **No usable results, but the previous classification contains XSPM results** (e.g. a file from an
+  earlier EntraOps version, or a changed `ExposureCriticalityLevel`): the Control Plane scope isn't
+  updated and all previous classification files are kept (`ExposureManagementScopeNotUpdated`).
+- **No previous XSPM results** (first run, or the query never succeeded): the update continues without
+  XSPM and shows a warning.
+
+In GitHub Actions and Azure DevOps, these warnings also appear as annotations on the run. To stop using
+XSPM, remove `"PrivilegedEdgesFromExposureManagement"` from `PrivilegedObjectClassificationSource`.
 
 ### Adjusted Control Plane scope by using restricted management and role assignments
 

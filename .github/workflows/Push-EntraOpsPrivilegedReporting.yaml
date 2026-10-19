@@ -73,6 +73,8 @@ jobs:
           # Full history (not the default shallow clone) so the Privilege History feature can
           # walk every commit that changed PrivilegedEAM/ via New-EntraOpsPrivilegedEamPrivilegeHistoryData.
           fetch-depth: 0
+          # Releases use gh with GH_TOKEN: no write token in .git/config while npm and Playwright run
+          persist-credentials: false
 
       # Also checked out for the EAM Dashboard and Access Path Map generators: they resolve the
       # classified role catalogs (Classification/Classification_*.json) from this path
@@ -89,6 +91,7 @@ jobs:
           sparse-checkout-cone-mode: true
           # Only the optional Classification Explorer change history needs the complete git log.
           fetch-depth: ${{ env.ClassificationExplorerGenerateChangeHistory == 'true' && '0' || '1' }}
+          persist-credentials: false
 
       # Needed by the reporting generators that enrich their local export data through Microsoft Graph.
       - name: Connect Azure OIDC

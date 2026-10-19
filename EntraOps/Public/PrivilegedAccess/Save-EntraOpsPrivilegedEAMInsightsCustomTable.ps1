@@ -69,8 +69,15 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
         [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
     )
 
-    # Give every batch the same timestamp to identify the ingestion run.
+    # One TimeGenerated for the whole run: the PrivilegedEAM parser selects runs by it
     $IngestionTimeGenerated = (Get-Date).ToUniversalTime()
+
+    # A run limited to some object types writes no completion marker: the parser would hide the other types
+    $UploadedPrincipalTypes = @($PrincipalTypeFilter | ForEach-Object { "$_".ToLowerInvariant() })
+    $IsCompleteRun = @(@('user', 'group', 'serviceprincipal') | Where-Object { $_ -notin $UploadedPrincipalTypes }).Count -eq 0
+    if (-not $IsCompleteRun) {
+        Write-Warning "PrincipalTypeFilter '$($PrincipalTypeFilter -join ', ')' doesn't include all object types (user, group, serviceprincipal). No completion marker is written: the PrivilegedEAM parser keeps returning the last complete run, and the uploaded records are only available in $TableName."
+    }
 
     $OriginalAzContext = Get-AzContext
     try {
@@ -78,7 +85,8 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
 
         foreach ($RbacSystem in $RbacSystems) {
         Write-Host "Upload data for $($RbacSystem)"
-        foreach ($ObjectType in $PrincipalTypeFilter) {
+        # Export folders are lowercase (case-sensitive file systems)
+        foreach ($ObjectType in $UploadedPrincipalTypes) {
             $EamFiles = @()
             $ObjectTypePath = Join-Path -Path $ImportPath -ChildPath "$RbacSystem/$ObjectType"
 
@@ -124,6 +132,17 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
                     Write-Host "Processed batch ${CurrentBatch}/${TotalBatches}: $($EamSummary.Count) files (starting at index $i)"
                 }
             }
+        }
+
+        # Completion marker per collected RBAC system: the parser ignores runs without it (e.g. a failed batch)
+        if ($IsCompleteRun -and (Test-Path -LiteralPath (Join-Path -Path $ImportPath -ChildPath $RbacSystem) -PathType Container)) {
+            $RunMarker = ConvertTo-Json -InputObject @([ordered]@{
+                    ObjectId          = "EntraOpsIngestionRun"
+                    ObjectType        = "EntraOpsIngestionRun"
+                    ObjectDisplayName = "EntraOps ingestion run completed"
+                    RoleSystem        = $RbacSystem
+                }) -Depth 3
+            Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $RunMarker -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId -TimeGenerated $IngestionTimeGenerated
         }
         }
     } finally {

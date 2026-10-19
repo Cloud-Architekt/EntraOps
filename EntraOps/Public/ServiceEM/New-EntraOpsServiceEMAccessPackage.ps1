@@ -54,6 +54,7 @@ function New-EntraOpsServiceEMAccessPackage {
         Write-Verbose "$logPrefix Looking up Access Packages"
         try {
             # Use [object[]] so PSCustomObject or mixed typed entries can be appended with +=
+            # -ThrowOnFailure: a failed lookup must not look like "no access packages" and re-create existing ones
             [object[]]$ServiceAccessPackages = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $accessPackageUri -OutputType PSObject -DisableCache -ThrowOnFailure)
         } catch {
             Write-Verbose "$logPrefix Failed to find Access Packages"

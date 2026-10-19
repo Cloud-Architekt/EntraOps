@@ -133,6 +133,7 @@ function Register-EntraOpsTenantGovernanceServicePrincipal {
     }
     #endregion
 
+    # -ThrowOnFailure: a failed lookup must not look like a missing object
     Write-Verbose "Get Microsoft Graph API App Roles..."
     $MsGraph = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'" -OutputType PSObject -DisableCache -ThrowOnFailure) | Select-Object -First 1
 
@@ -178,6 +179,7 @@ function Register-EntraOpsTenantGovernanceServicePrincipal {
     $NonReadPermissions = @($RequiredUtcmPermissions | Where-Object { $_ -notmatch '\.Read(\.|$)' } | Sort-Object)
     if ($NonReadPermissions.Count -gt 0) {
         Write-Warning "The following permission(s) are NOT read-only and grant management capability to the Microsoft Tenant Configuration Management service principal: $($NonReadPermissions -join ', '). They are required by the resource type(s) selected in ResourcesToInclude."
+        # -WhatIf only reports the grant; a declined confirmation stops before anything is assigned.
         if (-not $PSCmdlet.ShouldProcess("Microsoft Tenant Configuration Management service principal ($($UtcmSp.id))", "Grant non-read permission(s): $($NonReadPermissions -join ', ')") -and -not $WhatIfPreference) {
             throw "Aborted by user: remove the resource type(s) requiring $($NonReadPermissions -join ', ') from ResourcesToInclude, or re-run and confirm the grant."
         }
