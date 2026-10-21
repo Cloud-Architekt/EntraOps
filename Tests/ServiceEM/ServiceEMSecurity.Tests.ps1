@@ -307,6 +307,22 @@ Describe 'ServiceEM workload plane admin and group ownership' {
             $script:CpRequests[0].Body.principalId | Should -Be 'id:cp@contoso.com'
         }
 
+        It 'completes the other steps and then fails when a ControlPlane admin can not be added' {
+            # Like the real helper: a failed lookup only throws with -ThrowOnFailure, otherwise it returns nothing.
+            Mock Invoke-EntraOpsMsGraphQuery {
+                if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
+                if ($Uri -like '/v1.0/groups/cp/members*') { if ($ThrowOnFailure) { throw 'simulated lookup failure' }; return @() }
+                if ($Method -eq 'POST') { $script:CpRequests.Add([pscustomobject]@{ Uri = $Uri; Body = ($Body | ConvertFrom-Json) }); return [pscustomobject]@{ Id = 'req' } }
+                return @()
+            }
+
+            { New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -AzureRegion 'westeurope' -SubscriptionId '11111111-1111-1111-1111-111111111111' -ServiceMembers @() `
+                    -ControlPlaneAdmins @('cp@contoso.com') -WarningAction SilentlyContinue 6>$null } | Should -Throw '*Failed to add 1 ControlPlane admin(s)*simulated lookup failure*'
+
+            $script:CpRequests.Count | Should -Be 0
+            Should -Invoke New-EntraOpsServiceAZContainer -Times 1 -Exactly
+        }
+
         It 'warns when no per-service ControlPlane-Admins group exists' {
             Mock New-EntraOpsServiceEntraGroup { @([pscustomobject]@{ Id = 'g1'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins' }) }
 
@@ -413,6 +429,17 @@ Describe 'ServiceEM workload plane admin and group ownership' {
 
         Should -Invoke New-EntraOpsServiceEntraGroup -Times 0 -Exactly
         Should -Invoke New-EntraOpsServiceEMCatalog -Times 0 -Exactly
+    }
+
+    It 'escapes guest user principal names in user lookups' {
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -like '/v1.0/users/*') { return [pscustomobject]@{ Id = "id:$($Uri -replace '^/v1.0/users/')" } }
+        }
+
+        New-EntraOpsServiceBootstrap -ServiceName 'Rg-X' -SkipAzureResourceGroup -WorkloadPlaneAdmin 'adele_fabrikam.com#EXT#@contoso.com' -ServiceMembers @('ben_fabrikam.com#EXT#@contoso.com') 6>$null | Out-Null
+
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -eq '/v1.0/users/adele_fabrikam.com%23EXT%23@contoso.com' }
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -eq '/v1.0/users/ben_fabrikam.com%23EXT%23@contoso.com' }
     }
 
     It 'forwards SkipCatalogOwnerAssignment to the catalog role assignment' {
@@ -1085,6 +1112,9 @@ Describe 'ServiceEM PIM for Groups eligible assignments' {
                 $script:EligibilityBodies.Add(($Body | ConvertFrom-Json))
                 return
             }
+            if ($Uri -like '/v1.0/policies/roleManagementPolicyAssignments?*') {
+                return @([pscustomobject]@{ policy = [pscustomobject]@{ rules = @($script:OwnerPolicyRules) } })
+            }
             if ($Uri -notlike '/v1.0/identityGovernance/privilegedAccess/group/eligibilitySchedules?*') { throw "Unexpected Graph URI: $Uri" }
             $groupId = [regex]::Match($Uri, "groupId eq '([^']+)'").Groups[1].Value
             return @(@($script:ExistingSchedules) + @($script:EligibilityBodies) | Where-Object { $_ -and $_.groupId -eq $groupId } | ForEach-Object {
@@ -1092,6 +1122,27 @@ Describe 'ServiceEM PIM for Groups eligible assignments' {
                 })
         }
         $script:ExistingSchedules = @()
+        $script:OwnerPolicyRules = @()
+    }
+
+    It 'requests the maximum duration when the owner policy does not allow permanent eligibility' {
+        $groups = @([pscustomobject]@{ Id = 'id:SG-Rg-X-WorkloadPlane-Admins'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins' })
+        $script:OwnerPolicyRules = @([pscustomobject]@{ id = 'Expiration_Admin_Eligibility'; isExpirationRequired = $true; maximumDuration = 'P180D' })
+
+        New-EntraOpsServicePIMAssignment -ServiceGroups $groups -WorkloadPlaneAdminPrincipalId 'admin-id' -EnableOwnerAssignment 6>$null | Out-Null
+
+        $script:EligibilityBodies[0].scheduleInfo.expiration.type | Should -Be 'afterDuration'
+        $script:EligibilityBodies[0].scheduleInfo.expiration.duration | Should -Be 'P180D'
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -like "*roleManagementPolicyAssignments*scopeId eq 'id:SG-Rg-X-WorkloadPlane-Admins'*roleDefinitionId eq 'owner'*" }
+    }
+
+    It 'keeps a permanent owner eligibility when the owner policy allows it' {
+        $groups = @([pscustomobject]@{ Id = 'id:SG-Rg-X-WorkloadPlane-Admins'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins' })
+        $script:OwnerPolicyRules = @([pscustomobject]@{ id = 'Expiration_Admin_Eligibility'; isExpirationRequired = $false; maximumDuration = 'P365D' })
+
+        New-EntraOpsServicePIMAssignment -ServiceGroups $groups -WorkloadPlaneAdminPrincipalId 'admin-id' -EnableOwnerAssignment 6>$null | Out-Null
+
+        $script:EligibilityBodies[0].scheduleInfo.expiration.type | Should -Be 'noExpiration'
     }
 
     It 'skips groups where the workload plane admin is already eligible owner' {
@@ -1519,6 +1570,44 @@ Describe 'ServiceEM access package resource roles' {
             @($warnings | Where-Object { "$_" -like '*Eligible Member is not added*' }).Count | Should -Be 1
         }
 
+        It 'does not add the active Member role next to Eligible Member on a re-run without PIM for Groups' {
+            # Otherwise every assignee would get standing membership and bypass the PIM activation
+            $existing = [pscustomobject]@{ Id = 'rrs-eligible'; Role = [pscustomobject]@{ OriginId = 'EligibleMember_ma' }; Scope = [pscustomobject]@{ OriginId = 'ma' } }
+            $script:ExistingScope = $existing
+            Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'GET' -and $Uri -like '*/accessPackages`?*' } -MockWith { @([pscustomobject]@{ ResourceRoleScopes = @($script:ExistingScope) }) }
+            $packages = @([pscustomobject]@{ Id = 'ap:mp'; DisplayName = 'AP-Rg-X-ManagementPlane-Admins'; ResourceRoleScopes = @($existing) })
+
+            New-EntraOpsServiceEMAccessPackageResourceAssignment -ServiceCatalogId 'cat' -ServiceName 'Rg-X' -ServiceGroups @($script:EligibleGroups[1]) -ServicePackages $packages -ServiceCatalogResources $script:EligibleResources -WarningVariable warnings -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            $script:RoleScopeBodies.Count | Should -Be 0
+            $script:DeletedUris.Count | Should -Be 0
+            @($warnings | Where-Object { "$_" -like '*active Member role is not added*' }).Count | Should -Be 1
+        }
+
+        It 'reports a group whose catalog resource roles cannot be read instead of skipping it' {
+            Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Uri -like '*/resourceRoles`?*' } -MockWith {
+                if (-not $ThrowOnFailure) { return $null }
+                throw 'Graph 503'
+            }
+            $packages = @([pscustomobject]@{ Id = 'ap:wa'; DisplayName = 'AP-Rg-X-WorkloadPlane-Admins'; ResourceRoleScopes = @() })
+
+            { New-EntraOpsServiceEMAccessPackageResourceAssignment -ServiceCatalogId 'cat' -ServiceName 'Rg-X' -ServiceGroups @($script:EligibleGroups[0]) -ServicePackages $packages -ServiceCatalogResources $script:EligibleResources 6>$null } |
+                Should -Throw "*catalog resource roles of 'SG-Rg-X-WorkloadPlane-Admins' could not be read: Graph 503*"
+        }
+
+        It 'matches the catalog resource of a group by object ID, not by display name' {
+            # A catalog resource with the same name but another object ID (e.g. a renamed or foreign group) is not used
+            $resources = @(
+                [pscustomobject]@{ Id = 'res-other'; DisplayName = 'SG-Rg-X-WorkloadPlane-Admins'; OriginSystem = 'AadGroup'; OriginId = 'other' }
+                [pscustomobject]@{ Id = 'res-wa'; DisplayName = 'SG-Old-Name'; OriginSystem = 'AadGroup'; OriginId = 'wa' }
+            )
+            $packages = @([pscustomobject]@{ Id = 'ap:wa'; DisplayName = 'AP-Rg-X-WorkloadPlane-Admins'; ResourceRoleScopes = @() })
+
+            New-EntraOpsServiceEMAccessPackageResourceAssignment -ServiceCatalogId 'cat' -ServiceName 'Rg-X' -ServiceGroups @($script:EligibleGroups[0]) -ServicePackages $packages -ServiceCatalogResources $resources 6>$null | Out-Null
+
+            $script:RoleScopeBodies.Body.role.resource.id | Should -Be 'res-wa'
+        }
+
         It 'never falls back to the active Member role when Eligible Member is not offered' {
             $script:OfferEligibleRole = $false
             $packages = @([pscustomobject]@{ Id = 'ap:mp'; DisplayName = 'AP-Rg-X-ManagementPlane-Admins'; ResourceRoleScopes = @() })
@@ -1890,6 +1979,40 @@ Describe 'ServiceEM assignment policy group references' {
         $adminPolicy.requestApprovalSettings.isApprovalRequiredForAdd | Should -BeFalse
         $adminPolicy.requestorSettings.enableTargetsToSelfAddAccess | Should -BeFalse
         $adminPolicy.requestorSettings.enableOnBehalfRequestorsToAddAccess | Should -BeFalse
+    }
+
+    It 'creates a missing main policy on re-run although the initial policy of the package exists' {
+        $groups = @('SG-Rg-X-CatalogPlane-Members', 'SG-Rg-X-WorkloadPlane-Admins', 'SG-Rg-X-ManagementPlane-Admins') | ForEach-Object { New-TestGroup $_ }
+        $package = New-TestPackage 'AP-Rg-X-WorkloadPlane-Users'
+        # First run: the main policy failed, the initial direct-assignment policy was created
+        $script:CreatedPolicies.Add([pscustomobject]@{ id = 'initial'; displayName = 'Initial Workload Users Policy'; accessPackage = [pscustomobject]@{ id = $package.Id } })
+
+        New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages @($package) | Out-Null
+
+        @($script:PolicyBodies.displayName) | Should -Be @('Workload Plane Users Policy')
+    }
+
+    It 'stops before creating any policy when the existing policies cannot be read' {
+        Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'GET' } -MockWith {
+            if (-not $ThrowOnFailure) { return $null }
+            throw 'Graph 503'
+        }
+        $groups = @('SG-Rg-X-CatalogPlane-Members', 'SG-Rg-X-ManagementPlane-Admins') | ForEach-Object { New-TestGroup $_ }
+
+        { New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages @(New-TestPackage 'AP-Rg-X-CatalogPlane-Members') } |
+            Should -Throw '*Failed to look up the assignment policies*no policy was created*Graph 503*'
+        $script:PolicyBodies.Count | Should -Be 0
+    }
+
+    It 'uses the WorkloadPlane-Admins group as approver of the initial membership without CatalogPlane group' {
+        # Custom roles example of New-EntraOpsServiceBootstrap: no CatalogPlane-Members group
+        $groups = @('SG-Rg-X-WorkloadPlane-Members', 'SG-Rg-X-WorkloadPlane-Admins', 'SG-Rg-X-ManagementPlane-Admins') | ForEach-Object { New-TestGroup $_ }
+
+        New-EntraOpsServiceEMAssignmentPolicy -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceGroups $groups -ServicePackages @(New-TestPackage 'AP-Rg-X-WorkloadPlane-Members') -WarningAction SilentlyContinue | Out-Null
+
+        $membershipPolicy = $script:PolicyBodies | Where-Object displayName -EQ 'Initial Workload Membership Policy'
+        $membershipPolicy.requestApprovalSettings.stages[0].fallbackPrimaryApprovers.groupId | Should -Be 'id:SG-Rg-X-WorkloadPlane-Admins'
+        $membershipPolicy.requestApprovalSettings.stages[1].primaryApprovers.groupId | Should -Be 'id:SG-Rg-X-WorkloadPlane-Admins'
     }
 
     Context 'Management Plane Policy' {

@@ -197,7 +197,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
-    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/ConfigurationAnalyzer' }
+    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepoRoot 'Reports/ConfigurationAnalyzer' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
         throw "Configuration Analyzer app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/ConfigurationAnalyzer, or run Install-EntraOpsReportingFolder to download the Reports folder."
     }
@@ -616,7 +616,8 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
 
             foreach ($PolicyId in $AssignmentPolicyIds) {
                 try {
-                    $Policy = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies/$PolicyId" -OutputType PSObject -ThrowOnFailure
+                    # A deleted policy is reported once by the catch below, not again by the Graph helper
+                    $Policy = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies/$PolicyId" -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
                     $PolicyGroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
                     $UserSets = @($Policy.requestorSettings.allowedRequestors) + @($Policy.requestApprovalSettings.approvalStages | ForEach-Object { $_.primaryApprovers })
                     foreach ($UserSet in $UserSets) {

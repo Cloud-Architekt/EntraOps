@@ -208,7 +208,44 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
         }
 
         Write-Output "Checking pending snapshot job $($PendingJob.SnapshotJobId) started at $($PendingJob.CreatedDateTime)..."
-        $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId $PendingJob.SnapshotJobId -ResourcesToInclude @($PendingJob.ResourcesToInclude) -SkipWaitForCompletion -SkipPrerequisiteCheck:$SkipPrerequisiteCheck
+        try {
+            $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId $PendingJob.SnapshotJobId -ResourcesToInclude @($PendingJob.ResourcesToInclude) -SkipWaitForCompletion -SkipPrerequisiteCheck:$SkipPrerequisiteCheck
+        } catch {
+            # A job that can never be collected would block every later Start and Collect: record it as last attempt,
+            # release the pending job and fail. Transient polling errors keep the pending job.
+            if ($_.FullyQualifiedErrorId -like 'EntraOpsTenantGovernanceSnapshotJobTerminal*') {
+                $TerminalMessage = $_.Exception.Message
+                [ordered]@{
+                    SnapshotId                  = $PendingJob.SnapshotJobId
+                    SnapshotDisplayName         = $PendingJob.SnapshotDisplayName
+                    SnapshotJobStatus           = 'failed'
+                    CapturedDateTime            = $PendingJob.CreatedDateTime
+                    ResourcesToInclude          = @($PendingJob.ResourcesToInclude)
+                    CapturedResourceCount       = 0
+                    AttemptResourceTypeCounts   = [ordered]@{}
+                    PublishedResourceTypeCounts = [ordered]@{}
+                    ResourceTypeFileCounts      = [ordered]@{}
+                    PublishedResourceTypes      = @()
+                    StaleResourceTypes          = @($PendingJob.ResourcesToInclude | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
+                    ResourceTypeStates          = @()
+                    Diagnostics                 = @(
+                        [PSCustomObject][ordered]@{
+                            ResourceType    = $null
+                            ErrorCategory   = 'SnapshotJobFailed'
+                            ErrorCode       = 'SnapshotJobNotCollectable'
+                            Occurrences     = 1
+                            Message         = $TerminalMessage
+                            RemediationHint = 'The snapshot job failed or returned no resources and is not retried. The next run starts a new snapshot job.'
+                        }
+                    )
+                    ErrorDetailsUnavailable     = $false
+                    IsComplete                  = $false
+                } | ConvertTo-Json -Depth 10 | Set-Content -Path $LastAttemptManifestFilePath -Encoding utf8
+                Remove-Item -LiteralPath $PendingJobFilePath -Force
+                Write-Warning "Snapshot job $($PendingJob.SnapshotJobId) can't be collected and was released. The next run starts a new snapshot job; the published snapshot is unchanged."
+            }
+            throw
+        }
     } else {
         if ($HasPendingJob) {
             throw "Pending snapshot job $($PendingJob.SnapshotJobId) already exists. Run -Operation Collect before starting another job."
@@ -341,11 +378,14 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
                 }
             }
         )
+        # Nothing published: keep the previous capture time, so the snapshot age isn't reset
+        $PublishedCapturedDateTime = if ($null -ne $PreviousManifest -and -not [string]::IsNullOrWhiteSpace("$($PreviousManifest.CapturedDateTime)")) { $PreviousManifest.CapturedDateTime } else { $Snapshot.CreatedDateTime }
         $AmbiguousPartialManifest = [ordered]@{
             SnapshotId                  = $Snapshot.SnapshotId
             SnapshotDisplayName         = $Snapshot.DisplayName
             SnapshotJobStatus           = $SnapshotJobStatus
-            CapturedDateTime            = $Snapshot.CreatedDateTime
+            CapturedDateTime            = $PublishedCapturedDateTime
+            AttemptDateTime             = $Snapshot.CreatedDateTime
             ResourcesToInclude          = @($Snapshot.ResourcesToInclude)
             CapturedResourceCount       = $Snapshot.ResourceCount
             AttemptResourceTypeCounts   = [ordered]@{}

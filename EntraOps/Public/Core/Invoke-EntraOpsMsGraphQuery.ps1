@@ -364,15 +364,13 @@ function Invoke-EntraOpsMsGraphQuery {
                                 } catch {
                                     $PageStatusCode = $_.Exception.Response.StatusCode.value__
                                     
-                                    if ($PageStatusCode -in @(429, 503, 504) -and $PageRetryCount -lt 3) {
+                                    if ($PageStatusCode -in @(429, 502, 503, 504) -and $PageRetryCount -lt 3) {
                                         $PageRetryCount++
                                         
                                         # Try to extract Retry-After from pagination response
                                         $PageRetryAfter = $null
                                         try {
-                                            if ($_.Exception.Response.Headers -and $_.Exception.Response.Headers['Retry-After']) {
-                                                $PageRetryAfter = [int]$_.Exception.Response.Headers['Retry-After']
-                                            }
+                                            $PageRetryAfter = Get-EntraOpsRetryAfterSeconds -Response $_.Exception.Response
                                         } catch { Write-Verbose "Ignoring unreadable Retry-After header, using exponential backoff: $($_.Exception.Message)" }
                                         
                                         if ($null -ne $PageRetryAfter -and $PageRetryAfter -gt 0) {
@@ -383,7 +381,7 @@ function Invoke-EntraOpsMsGraphQuery {
                                         }
                                         
                                         # Add jitter for pagination
-                                        $PageJitter = $PageDelay * 0.2 * (Get-Random -Minimum -1.0 -Maximum 1.0)
+                                        $PageJitter = $PageDelay * 0.2 * (Get-Random -Minimum $(if ($PageRetryAfter -gt 0) { 0.0 } else { -1.0 }) -Maximum 1.0)
                                         $PageDelay = [Math]::Max(1, $PageDelay + $PageJitter)
                                         
                                         # Track pagination retry (silent)
@@ -437,7 +435,7 @@ function Invoke-EntraOpsMsGraphQuery {
                     $IsTokenRefreshable = ($StatusCode -eq 401 -and -not $HasStaticToken)
 
                     # Retry logic for rate limiting, transient errors, and network errors
-                    if (($StatusCode -in @(429, 503, 504) -or $IsNetworkError -or $IsTokenRefreshable) -and $RetryCount -lt $MaxRetries) {
+                    if (($StatusCode -in @(429, 502, 503, 504) -or $IsNetworkError -or $IsTokenRefreshable) -and $RetryCount -lt $MaxRetries) {
                         $RetryCount++
 
                         if ($IsTokenRefreshable) {
@@ -453,10 +451,8 @@ function Invoke-EntraOpsMsGraphQuery {
                         # Try to extract Retry-After header from response
                         $RetryAfter = $null
                         try {
-                            if ($_.Exception.Response.Headers -and $_.Exception.Response.Headers['Retry-After']) {
-                                $RetryAfter = [int]$_.Exception.Response.Headers['Retry-After']
-                                Write-Verbose "Graph API provided Retry-After: ${RetryAfter}s"
-                            }
+                            $RetryAfter = Get-EntraOpsRetryAfterSeconds -Response $_.Exception.Response
+                            if ($null -ne $RetryAfter) { Write-Verbose "Graph API provided Retry-After: ${RetryAfter}s" }
                         } catch {
                             Write-Verbose "Could not extract Retry-After header: $_"
                         }
@@ -470,7 +466,7 @@ function Invoke-EntraOpsMsGraphQuery {
                         }
                         
                         # Add jitter (±20%) to prevent thundering herd
-                        $Jitter = $RetryDelay * 0.2 * (Get-Random -Minimum -1.0 -Maximum 1.0)
+                        $Jitter = $RetryDelay * 0.2 * (Get-Random -Minimum $(if ($RetryAfter -gt 0) { 0.0 } else { -1.0 }) -Maximum 1.0)
                         $RetryDelay = [Math]::Max(1, $RetryDelay + $Jitter)
                         
                         # Track retry statistics (silent - no warning spam)
@@ -569,15 +565,13 @@ function Invoke-EntraOpsMsGraphQuery {
                                         $PageStatusCode = 429
                                     }
                                     
-                                    if ($PageStatusCode -in @(429, 503, 504) -and $PageRetryCount -lt 3) {
+                                    if ($PageStatusCode -in @(429, 502, 503, 504) -and $PageRetryCount -lt 3) {
                                         $PageRetryCount++
                                         
                                         # Try to extract Retry-After from pagination response
                                         $PageRetryAfter = $null
                                         try {
-                                            if ($_.Exception.Response.Headers -and $_.Exception.Response.Headers['Retry-After']) {
-                                                $PageRetryAfter = [int]$_.Exception.Response.Headers['Retry-After']
-                                            }
+                                            $PageRetryAfter = Get-EntraOpsRetryAfterSeconds -Response $_.Exception.Response
                                         } catch { Write-Verbose "Ignoring unreadable Retry-After header, using exponential backoff: $($_.Exception.Message)" }
                                         
                                         if ($null -ne $PageRetryAfter -and $PageRetryAfter -gt 0) {
@@ -588,7 +582,7 @@ function Invoke-EntraOpsMsGraphQuery {
                                         }
                                         
                                         # Add jitter for pagination
-                                        $PageJitter = $PageDelay * 0.2 * (Get-Random -Minimum -1.0 -Maximum 1.0)
+                                        $PageJitter = $PageDelay * 0.2 * (Get-Random -Minimum $(if ($PageRetryAfter -gt 0) { 0.0 } else { -1.0 }) -Maximum 1.0)
                                         $PageDelay = [Math]::Max(1, $PageDelay + $PageJitter)
                                         
                                         # Track pagination retry (silent)
@@ -621,6 +615,8 @@ function Invoke-EntraOpsMsGraphQuery {
                         $StatusCode = $_.Exception.Response.StatusCode.value__
                     } elseif ($_.Exception.Message -match 'TooManyRequests|429') {
                         $StatusCode = 429
+                    } elseif ($_.Exception.Message -match 'BadGateway|502') {
+                        $StatusCode = 502
                     } elseif ($_.Exception.Message -match 'ServiceUnavailable|503') {
                         $StatusCode = 503
                     } elseif ($_.Exception.Message -match 'GatewayTimeout|504') {
@@ -630,16 +626,14 @@ function Invoke-EntraOpsMsGraphQuery {
                     }
                     
                     # Retry logic for rate limiting, transient errors, and network errors
-                    if (($StatusCode -in @(429, 503, 504) -or $IsNetworkError) -and $RetryCount -lt $MaxRetries) {
+                    if (($StatusCode -in @(429, 502, 503, 504) -or $IsNetworkError) -and $RetryCount -lt $MaxRetries) {
                         $RetryCount++
                         
                         # Try to extract Retry-After header from response
                         $RetryAfter = $null
                         try {
-                            if ($_.Exception.Response.Headers -and $_.Exception.Response.Headers['Retry-After']) {
-                                $RetryAfter = [int]$_.Exception.Response.Headers['Retry-After']
-                                Write-Verbose "Graph API provided Retry-After: ${RetryAfter}s"
-                            }
+                            $RetryAfter = Get-EntraOpsRetryAfterSeconds -Response $_.Exception.Response
+                            if ($null -ne $RetryAfter) { Write-Verbose "Graph API provided Retry-After: ${RetryAfter}s" }
                         } catch {
                             Write-Verbose "Could not extract Retry-After header: $_"
                         }
@@ -655,7 +649,7 @@ function Invoke-EntraOpsMsGraphQuery {
                         }
                         
                         # Add jitter (±20%) to prevent thundering herd
-                        $Jitter = $RetryDelay * 0.2 * (Get-Random -Minimum -1.0 -Maximum 1.0)
+                        $Jitter = $RetryDelay * 0.2 * (Get-Random -Minimum $(if ($RetryAfter -gt 0) { 0.0 } else { -1.0 }) -Maximum 1.0)
                         $RetryDelay = [Math]::Max(1, $RetryDelay + $Jitter)
                         
                         # Track retry statistics (silent - no warning spam)

@@ -74,6 +74,21 @@ Describe 'Import-EntraOpsObjectClassificationFile' {
         $Entries.Count | Should -Be 0
     }
 
+    It 'warns about a missing file once per shared session, also across module instances' {
+        $script:__EntraOpsSession = [hashtable]::Synchronized(@{})
+        try {
+            $null = Import-EntraOpsObjectClassificationFile -FilePath './Classification/Missing.json' -RootFolder $script:Root -WarningVariable FirstWarnings -WarningAction SilentlyContinue
+            # A parallel runspace starts with an empty script-scope cache but shares the session.
+            $Script:ObjectClassificationFileCache = $null
+            $null = Import-EntraOpsObjectClassificationFile -FilePath './Classification/Missing.json' -RootFolder $script:Root -WarningVariable SecondWarnings -WarningAction SilentlyContinue
+
+            @($FirstWarnings).Count | Should -Be 1
+            @($SecondWarnings).Count | Should -Be 0
+        } finally {
+            Remove-Variable -Name __EntraOpsSession -Scope Script -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'rejects paths outside the EntraOps root and unsupported file types' {
         { Import-EntraOpsObjectClassificationFile -FilePath '../outside.json' -RootFolder $script:Root } | Should -Throw '*outside the EntraOps root folder*'
         { Import-EntraOpsObjectClassificationFile -FilePath './Classification/file.ps1' -RootFolder $script:Root } | Should -Throw '*must be a .json or .csv file*'
@@ -143,6 +158,19 @@ Describe 'Get-EntraOpsPrivilegedEntraObject with Object Classification File' {
 
         $Result = Get-EntraOpsPrivilegedEntraObject -AadObjectId $script:UserId -TenantId $global:TenantIdContext -CustomSecurityUserAttribute 'privilegedUser' -ObjectClassificationFile $Disabled -WarningAction SilentlyContinue
 
+        $Result.AdminTierLevelName | Should -Be 'ControlPlane'
+    }
+
+    It 'completes a custom security attribute tier pair where only <Set> is set' -ForEach @(
+        @{ Set = 'the name'; Csa = @{ adminTierLevelName = 'ControlPlane' } }
+        @{ Set = 'the level'; Csa = @{ adminTierLevel = '0' } }
+    ) {
+        $script:UserCsa = [pscustomobject]@{ privilegedUser = [pscustomobject]$Csa }
+        $Disabled = [pscustomobject]@{ Enabled = $false; FilePath = './Classification/ObjectClassification.json' }
+
+        $Result = Get-EntraOpsPrivilegedEntraObject -AadObjectId $script:UserId -TenantId $global:TenantIdContext -CustomSecurityUserAttribute 'privilegedUser' -ObjectClassificationFile $Disabled -WarningAction SilentlyContinue
+
+        $Result.AdminTierLevel | Should -Be '0'
         $Result.AdminTierLevelName | Should -Be 'ControlPlane'
     }
 

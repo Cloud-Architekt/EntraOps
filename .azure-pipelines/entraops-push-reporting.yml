@@ -26,8 +26,8 @@ resources:
       trigger: true
 
 # BEGIN EntraOps managed schedules
+# Schedules are added by Update-EntraOpsAzureDevOpsSchedules from EntraOpsConfig.json.
 # END EntraOps managed schedules
-
 variables:
   ConfigFile: ./EntraOpsConfig.json
 

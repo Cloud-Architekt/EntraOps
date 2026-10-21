@@ -118,9 +118,13 @@ function Remove-EntraOpsData {
     if ($Content -contains 'Reports') {
         $ReportsFolder = Join-Path $Path 'Reports'
         if (Test-Path -LiteralPath $ReportsFolder -PathType Container) {
-            $RemovedReportData = @(Remove-EntraOpsReportingData -EntraOpsRoot $Path -PassThru -WhatIf:$WhatIfPreference -Confirm:$false)
-            foreach ($Item in $RemovedReportData) {
-                $Results.Add([pscustomobject]@{ Content = 'Reports'; Path = "$($Item.Path)"; Removed = $Item.Removed; Reason = $Item.Reason })
+            # Confirm once for the report data like for the other content; -WhatIf still lists the individual files.
+            $RemoveReportData = $PSCmdlet.ShouldProcess($ReportsFolder, "Remove EntraOps Reports data")
+            if ($RemoveReportData -or $WhatIfPreference) {
+                $RemovedReportData = @(Remove-EntraOpsReportingData -EntraOpsRoot $Path -PassThru -WhatIf:$WhatIfPreference -Confirm:$false)
+                foreach ($Item in $RemovedReportData) {
+                    $Results.Add([pscustomobject]@{ Content = 'Reports'; Path = "$($Item.Path)"; Removed = $Item.Removed; Reason = $Item.Reason })
+                }
             }
         } else {
             $Results.Add([pscustomobject]@{ Content = 'Reports'; Path = $ReportsFolder; Removed = $false; Reason = 'NotFound' })

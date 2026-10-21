@@ -378,42 +378,55 @@ function New-EntraOpsWorkloadIdentity {
                 Add-EntraOpsProvisioningFailure -Message "Cannot create required Administrative Unit '$AdminUnitName'. Error: $($_.Exception.Message)"
             }
 
-            # Check if AU has been created successfully, wait for delay and retry if not available yet
-            Try {
-                Do { Start-Sleep -Seconds 1 }
-                Until ($AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($NewAdminUnitId)" -DisableCache).Id)
-                Write-Host "$($AdminUnitName) - $($AdminUnitId) has been created successfully" -f Green
-            } Catch {
-                Add-EntraOpsProvisioningFailure -Message "Required Administrative Unit '$AdminUnitName' is not available after creation. Error: $($_.Exception.Message)"
+            # Bounded wait for the new AU (replication delay); an empty id would query the AU list instead
+            if (-not [string]::IsNullOrWhiteSpace($NewAdminUnitId)) {
+                $MaxAdminUnitPollAttempts = 60
+                for ($Attempt = 1; $Attempt -le $MaxAdminUnitPollAttempts -and -not $AdminUnitId; $Attempt++) {
+                    Start-Sleep -Seconds 1
+                    try {
+                        $AdminUnitId = (Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/administrativeUnits/$($NewAdminUnitId)" -OutputType PSObject -DisableCache -SuppressNotFoundWarning).id
+                    } catch {
+                        Write-Verbose "Administrative Unit $NewAdminUnitId not readable yet (attempt $Attempt): $($_.Exception.Message)"
+                    }
+                }
+                if ($AdminUnitId) {
+                    Write-Host "$($AdminUnitName) - $($AdminUnitId) has been created successfully" -f Green
+                } else {
+                    Add-EntraOpsProvisioningFailure -Message "Required Administrative Unit '$AdminUnitName' ($NewAdminUnitId) is not available $MaxAdminUnitPollAttempts seconds after creation."
+                }
             }
         } else {
             Write-Host "Administrative Unit $($AdminUnitName) - $($AdminUnitId) already exists"
         }
 
-        # Add scoped permissions as Group Administrator to the Administrative Unit
-        $ScopedGroupAdminRoleParams = @{
-            '@odata.type'    = "#microsoft.graph.unifiedRoleAssignment"
-            principalId      = $($SpObject.Id)
-            roleDefinitionId = "fdd7a751-b60b-444a-984c-02652fe8fa1c" # Group Administrator
-            directoryScopeId = "/administrativeUnits/$($AdminUnitId)"
-        }
-
-        try {
-            $ExistingScopedRoleAssignments = @(Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/roleManagement/directory/roleAssignments?`$filter=principalId eq '$($SpObject.Id)'" -OutputType PSObject -DisableCache)
-            $ExistingScopedGroupAdminRole = $ExistingScopedRoleAssignments | Where-Object {
-                $_.roleDefinitionId -eq $ScopedGroupAdminRoleParams.roleDefinitionId -and
-                $_.directoryScopeId -eq $ScopedGroupAdminRoleParams.directoryScopeId
-            } | Select-Object -First 1
-
-            if ($ExistingScopedGroupAdminRole) {
-                Write-Host "The scoped Group Administrator role on Administrative Unit $AdminUnitName is already assigned to $($SpObject.Id)." -f Green
-            } else {
-                $Body = $ScopedGroupAdminRoleParams | ConvertTo-Json -Depth 10
-                $DirectoryRoleAssignmentId = (Invoke-MgGraphRequest -Method "POST" -Body $Body -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleAssignments").id
-                Write-Host "Assigned permissions to Administrative Unit $($AdminUnitName) for $($SpObject.Id) - $($DirectoryRoleAssignmentId)" -f Green
+        # Add scoped permissions as Group Administrator to the Administrative Unit (skipped without AU id)
+        if ([string]::IsNullOrWhiteSpace($AdminUnitId)) {
+            Write-Warning "Skipping the scoped Group Administrator role: Administrative Unit '$AdminUnitName' is not available."
+        } else {
+            $ScopedGroupAdminRoleParams = @{
+                '@odata.type'    = "#microsoft.graph.unifiedRoleAssignment"
+                principalId      = $($SpObject.Id)
+                roleDefinitionId = "fdd7a751-b60b-444a-984c-02652fe8fa1c" # Group Administrator
+                directoryScopeId = "/administrativeUnits/$($AdminUnitId)"
             }
-        } catch {
-            Add-EntraOpsProvisioningFailure -Message "Cannot verify or assign the required scoped Group Administrator role on Administrative Unit '$AdminUnitName' to '$($SpObject.Id)'. Error: $($_.Exception.Message)"
+
+            try {
+                $ExistingScopedRoleAssignments = @(Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/roleManagement/directory/roleAssignments?`$filter=principalId eq '$($SpObject.Id)'" -OutputType PSObject -DisableCache)
+                $ExistingScopedGroupAdminRole = $ExistingScopedRoleAssignments | Where-Object {
+                    $_.roleDefinitionId -eq $ScopedGroupAdminRoleParams.roleDefinitionId -and
+                    $_.directoryScopeId -eq $ScopedGroupAdminRoleParams.directoryScopeId
+                } | Select-Object -First 1
+
+                if ($ExistingScopedGroupAdminRole) {
+                    Write-Host "The scoped Group Administrator role on Administrative Unit $AdminUnitName is already assigned to $($SpObject.Id)." -f Green
+                } else {
+                    $Body = $ScopedGroupAdminRoleParams | ConvertTo-Json -Depth 10
+                    $DirectoryRoleAssignmentId = (Invoke-MgGraphRequest -Method "POST" -Body $Body -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleAssignments").id
+                    Write-Host "Assigned permissions to Administrative Unit $($AdminUnitName) for $($SpObject.Id) - $($DirectoryRoleAssignmentId)" -f Green
+                }
+            } catch {
+                Add-EntraOpsProvisioningFailure -Message "Cannot verify or assign the required scoped Group Administrator role on Administrative Unit '$AdminUnitName' to '$($SpObject.Id)'. Error: $($_.Exception.Message)"
+            }
         }
 
     } else {

@@ -102,7 +102,7 @@ function New-EntraOpsPrivilegedAssetsData {
     $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
-    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/PrivilegedAssets' }
+    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepoRoot 'Reports/PrivilegedAssets' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
         throw "Privileged Assets app folder not found: $AppRoot. Run Initialize-EntraOpsWorkspace -Content Reports -Force or Install-EntraOpsReportingFolder -Force to install or repair the reporting apps in the working folder (use -Ref to match the module version). Generated report data is preserved. If you passed -AppRoot, check that path instead."
     }

@@ -113,6 +113,16 @@ function Get-EntraOpsTenantGovernanceSnapshot {
 
     $ErrorActionPreference = "Stop"
 
+    # Job failures never succeed on a later collect: their error id lets callers release the pending job
+    $NewTerminalSnapshotJobError = {
+        param([string]$Message)
+        [System.Management.Automation.ErrorRecord]::new(
+            [System.InvalidOperationException]::new($Message),
+            'EntraOpsTenantGovernanceSnapshotJobTerminal',
+            [System.Management.Automation.ErrorCategory]::InvalidResult,
+            $SnapshotJobId)
+    }
+
     # Filter out any null values resulting from PowerShell array wrapping of $null
     $ResourcesToInclude = @($ResourcesToInclude) | Where-Object { $null -ne $_ }
 
@@ -201,7 +211,7 @@ function Get-EntraOpsTenantGovernanceSnapshot {
         }
 
         if ($SnapshotJob.status -eq "failed") {
-            throw "Tenant Governance snapshot job $SnapshotJobId failed. Error: $($SnapshotJob.error | Out-String)"
+            throw (& $NewTerminalSnapshotJobError "Tenant Governance snapshot job $SnapshotJobId failed. Error: $($SnapshotJob.error | Out-String)")
         }
         if ($SnapshotJob.status -notin @("succeeded", "completed", "partiallySuccessful")) {
             Write-Verbose "Snapshot job $SnapshotJobId has not completed yet (status: $($SnapshotJob.status)). Complete it later with: Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId $SnapshotJobId"
@@ -242,7 +252,7 @@ function Get-EntraOpsTenantGovernanceSnapshot {
         $StopWatch.Stop()
 
         if ($SnapshotJob.status -eq "failed") {
-            throw "Tenant Governance snapshot job $SnapshotJobId failed. Error: $($SnapshotJob.error | Out-String)"
+            throw (& $NewTerminalSnapshotJobError "Tenant Governance snapshot job $SnapshotJobId failed. Error: $($SnapshotJob.error | Out-String)")
         }
         if ($SnapshotJob.status -notin @("succeeded", "completed", "partiallySuccessful")) {
             # The local wait does not cancel the Graph job, so return a resumable pending result
@@ -275,7 +285,7 @@ function Get-EntraOpsTenantGovernanceSnapshot {
     #region Retrieve the captured resources from the snapshot
     $ResourceLocation = $SnapshotJob.resourceLocation
     if ([string]::IsNullOrEmpty($ResourceLocation)) {
-        throw "Snapshot job $SnapshotJobId completed but no resourceLocation was returned."
+        throw (& $NewTerminalSnapshotJobError "Snapshot job $SnapshotJobId completed but no resourceLocation was returned.")
     }
 
     # resourceLocation can be returned as a fully qualified Graph URL or a relative path.
@@ -291,9 +301,20 @@ function Get-EntraOpsTenantGovernanceSnapshot {
 
     $SnapshotResources = @($SnapshotResult.resources)
     if ($null -eq $SnapshotResult -or $SnapshotResources.Count -eq 0) {
-        throw "Snapshot job $SnapshotJobId completed, but its resourceLocation returned no snapshot resources. Refusing to publish an empty snapshot."
+        throw (& $NewTerminalSnapshotJobError "Snapshot job $SnapshotJobId completed, but its resourceLocation returned no snapshot resources. Refusing to publish an empty snapshot.")
     }
     #endregion
+
+    # The snapshot age counts from the job creation, not from the download of its results
+    $CapturedDateTime = (Get-Date).ToUniversalTime().ToString("o")
+    if ($null -ne $SnapshotJob.createdDateTime -and -not [string]::IsNullOrWhiteSpace("$($SnapshotJob.createdDateTime)")) {
+        $JobCreatedDateTime = [datetimeoffset]::MinValue
+        if ($SnapshotJob.createdDateTime -is [datetime]) {
+            $CapturedDateTime = $SnapshotJob.createdDateTime.ToUniversalTime().ToString("o")
+        } elseif ([datetimeoffset]::TryParse("$($SnapshotJob.createdDateTime)", [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$JobCreatedDateTime)) {
+            $CapturedDateTime = $JobCreatedDateTime.UtcDateTime.ToString("o")
+        }
+    }
 
     [PSCustomObject]@{
         SnapshotId         = $SnapshotJobId
@@ -301,7 +322,7 @@ function Get-EntraOpsTenantGovernanceSnapshot {
         SnapshotJobStatus  = $SnapshotJob.status
         DisplayName        = $SnapshotResult.displayName
         Description        = $SnapshotResult.description
-        CreatedDateTime    = (Get-Date).ToUniversalTime().ToString("o")
+        CreatedDateTime    = $CapturedDateTime
         ResourcesToInclude = @($ResourcesToInclude)
         ResourceCount      = $SnapshotResources.Count
         Resources          = $SnapshotResources

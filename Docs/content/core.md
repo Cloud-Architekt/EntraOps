@@ -577,6 +577,9 @@ the update continues under its original definition; the updated templates apply 
 > `entraops/update-<12-character source SHA prefix>` branch and records the validation outcome as the
 > `EntraOps / Update candidate validation` commit status on that branch. When the update contains no
 > workflow diff, `Test-EntraOps.yaml` also runs on the pull request through its `pull_request` trigger.
+> Because GitHub Actions opened the pull request, GitHub may hold that run until a maintainer selects
+> **Approve and run workflows** on the pull request; a run that is never approved ends without jobs.
+> While the pull request is open, later runs for the same source commit leave its branch unchanged.
 > When the optional GitHub App publishes changed workflow definitions, the commit carries
 > `[skip actions]` and no repository workflow runs on the branch before review, because otherwise the
 > App-authenticated push could execute candidate-controlled workflow files with repository credentials;

@@ -50,6 +50,11 @@
     the dynamically-scoped entry and re-add it under the overwrite's own scope - a console warning is printed
     when this happens.
     Azure RBAC is always processed last to ensure managed identity EAM data from the other scopes is already available.
+    When an Exposure Management query fails, the results of the last successful query recorded in
+    ScopeReasoning_ControlPlane.json or ScopeReasoning_Azure.json ("ExposureManagement" block) are used and a
+    warning is shown; carried forward entries are marked with XspmLastSuccessfulQueryDate. Without usable results
+    of a previous query, all previous classification files are kept unless they contain no Exposure Management
+    results (e.g. first run).
 
 .PARAMETER EntraIdClassificationParameterFile
     Path to the classification parameter file for Microsoft Entra ID. Default is ./Classification/Templates/Classification_AadResources.Param.json.
@@ -313,19 +318,77 @@ function Update-EntraOpsClassificationControlPlaneScope {
         $HomeTenantId = Get-EntraOpsAzContextValue -Property TenantId
     }
 
+    # The previous scope reasoning files hold the Exposure Management baseline
+    $ControlPlaneScopeReasoningFolder = Join-Path -Path $DefaultFolderClassification -ChildPath $TenantNameContext
+    $ControlPlaneScopeReasoningFile = Join-Path -Path $ControlPlaneScopeReasoningFolder -ChildPath "ScopeReasoning_ControlPlane.json"
+    $AzureResourceScopeReasoningFile = Join-Path -Path (Split-Path $AzureCustomizedClassificationFile -Parent) -ChildPath "ScopeReasoning_Azure.json"
+    $ExposureManagementResult = @{}
+    $Parameters.ExposureManagementBaselineFile = $ControlPlaneScopeReasoningFile
+    $Parameters.ExposureManagementResult = $ExposureManagementResult
+
     $PrivilegedObjects = Get-EntraOpsClassificationControlPlaneObjects @Parameters -WarningVariable CollectedObjectWarnings -WarningAction SilentlyContinue
 
     # Classify and collect warnings from object resolution phase into the summary
+    $ExposureManagementWarningTexts = @($ExposureManagementResult['Warnings'] | ForEach-Object { $_.Message })
     foreach ($Warn in $CollectedObjectWarnings) {
         $WarnText = $Warn.Message
-        if ($WarnText -match 'No privileged objects found for .+ in EntraOps') {
+        if ($ExposureManagementWarningTexts -contains $WarnText) {
+            # Added with their own type together with the Azure resource scope warnings below
+            continue
+        } elseif ($WarnText -match 'No privileged objects found for .+ in EntraOps') {
             $WarningMessages.Add([PSCustomObject]@{ Type = "MissingEamData"; Message = $WarnText })
-        } elseif ($WarnText -match 'not found|non-retryable|NotFound') {
+        } elseif ($WarnText -match 'not found|NotFound') {
             $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = $WarnText })
+        } elseif ($WarnText -match 'non-retryable') {
+            $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $WarnText })
         } else {
             $WarningMessages.Add([PSCustomObject]@{ Type = "CollectedWarning"; Message = $WarnText })
         }
     }
+
+    #region Shared Azure Resource/Subscription Scope (reused by Defender, Azure and IdentityGovernance RBAC parameterization)
+    # Computed once so that Defender, Azure and IdentityGovernance RBAC parameterization below reuse the same
+    # Exposure Management and Azure Resource Graph managed-identity discovery, instead of issuing duplicate queries.
+    # IdentityGovernance needs the Tier0/Tier1 resource scope buckets to classify Azure resources (subscriptions,
+    # resource groups, ...) that have been onboarded to access package catalogs.
+    # Resolved before any classification file is written (see Exposure Management availability)
+    $SharedAzureResourceScope = $null
+    if ($ClassificationParameterScope -contains "Defender" -or $ClassificationParameterScope -contains "Azure" -or $ClassificationParameterScope -contains "IdentityGovernance") {
+        Write-Host ""
+        Write-Host "=========================================================" -ForegroundColor Cyan
+        Write-Host " Resolving Shared Azure Resource/Subscription Scope" -ForegroundColor Cyan
+        Write-Host " (reused by Defender and Azure RBAC parameterization)" -ForegroundColor Cyan
+        Write-Host "=========================================================" -ForegroundColor Cyan
+        $SharedAzureResourceScope = Get-EntraOpsClassificationAzureResourceScope -EntraOpsEamFolder $EntraOpsEamFolder -EntraOpsScopes $EntraOpsScopes -ExposureCriticalityLevel $ExposureCriticalityLevel -WarningMessages $WarningMessages -ExposureManagementBaselineFile $AzureResourceScopeReasoningFile
+        Write-Host "  Tier 0 (ControlPlane) resources    : $($SharedAzureResourceScope.Tier0ResourceScope.Count) scope path(s)" -ForegroundColor Gray
+        Write-Host "  Tier 1 (ManagementPlane) resources : $($SharedAzureResourceScope.Tier1ResourceScope.Count) scope path(s)" -ForegroundColor Gray
+        Write-Host "  All subscriptions                  : $($SharedAzureResourceScope.AllSubscriptionScope.Count)" -ForegroundColor Gray
+        Write-Host ""
+    }
+    #endregion
+
+    #region Exposure Management availability
+    # Without a usable baseline, keep all previous classification files if they contain Exposure Management
+    # results; without previous results (first run) the update continues without them.
+    $ExposureManagementOutcomes = @(
+        if ($ExposureManagementResult.ContainsKey('Status')) { [PSCustomObject]$ExposureManagementResult }
+        if ($null -ne $SharedAzureResourceScope -and $null -ne $SharedAzureResourceScope.ExposureManagement) { $SharedAzureResourceScope.ExposureManagement }
+    )
+    foreach ($ExposureManagementOutcome in $ExposureManagementOutcomes) {
+        foreach ($ExposureManagementWarning in @($ExposureManagementOutcome.Warnings)) {
+            $WarningMessages.Add([PSCustomObject]@{ Type = $ExposureManagementWarning.Type; Message = $ExposureManagementWarning.Message })
+            Write-EntraOpsPipelineWarning -Title "EntraOps Exposure Management" -Message $ExposureManagementWarning.Message
+        }
+    }
+    if (@($ExposureManagementOutcomes | Where-Object { $_.Status -eq 'Failed' -and $_.HasUnusablePreviousResults }).Count -gt 0) {
+        $ScopeNotUpdatedMessage = "Control Plane scope was not updated: Exposure Management is unavailable and the previous classification contains Exposure Management results that can't be carried forward. The previous classification files are kept until an Exposure Management query succeeds."
+        Write-Warning $ScopeNotUpdatedMessage
+        $WarningMessages.Add([PSCustomObject]@{ Type = "ExposureManagementScopeNotUpdated"; Message = $ScopeNotUpdatedMessage })
+        Write-EntraOpsPipelineWarning -Title "EntraOps Exposure Management" -Message $ScopeNotUpdatedMessage
+        Show-EntraOpsWarningSummary -WarningMessages $WarningMessages -IncludeObjectDetails $IncludeObjectDetails
+        return
+    }
+    #endregion
 
     #region Get classification file and filter for unique privileged objects
     $DirectoryLevelAssignmentScope = @("/")
@@ -385,36 +448,12 @@ function Update-EntraOpsClassificationControlPlaneScope {
     #region Persist WHY each privileged object was identified/protected (ControlPlaneScopeReasoning.json)
     # This mirrors the "Identified privileged objects by source" console summary above so it is available for
     # later auditing instead of only being visible in the console/job log at generation time.
-    $ControlPlaneScopeReasoningFolder = Join-Path -Path $DefaultFolderClassification -ChildPath $TenantNameContext
     if (-not (Test-Path -Path $ControlPlaneScopeReasoningFolder)) {
         New-Item -Path $ControlPlaneScopeReasoningFolder -ItemType Directory -Force | Out-Null
     }
-    $ControlPlaneScopeReasoningFile = Join-Path -Path $ControlPlaneScopeReasoningFolder -ChildPath "ScopeReasoning_ControlPlane.json"
-    $ControlPlaneScopeReasoningPayload = [PSCustomObject]@{
-        PrivilegedObjectClassificationSource = $PrivilegedObjectClassificationSource
-        ClassificationParameterScope         = $ClassificationParameterScope
-        AzureResourceGraphCriteria           = [PSCustomObject]@{
-            SourceEnabled        = [bool]($PrivilegedObjectClassificationSource -eq "All" -or $PrivilegedObjectClassificationSource -contains "PrivilegedRolesFromAzGraph")
-            HighPrivilegedRoles  = @($AzureHighPrivilegedRoles)
-            HighPrivilegedScopes = @($AzureHighPrivilegedScopes)
-            ScopeMatch           = "Exact assignment scope; child scopes are not included unless listed explicitly."
-            WildcardScopeMatch   = "All assignment scopes"
-        }
-        # ObjectId breaks ties for objects sharing the same ObjectType/ObjectDisplayName (duplicate display names are allowed in Entra ID).
-        PrivilegedObjects                    = @($PrivilegedObjects | Sort-Object ObjectType, ObjectDisplayName, ObjectId | ForEach-Object {
-                [PSCustomObject]@{
-                    ObjectId                      = $_.ObjectId
-                    ObjectDisplayName             = $_.ObjectDisplayName
-                    ObjectType                    = $_.ObjectType
-                    ObjectSubType                 = $_.ObjectSubType
-                    ClassificationSource          = @($_.Classification.ClassificationSource | Select-Object -Unique | Sort-Object)
-                    ClassificationReason          = $_.Classification.ClassificationReason
-                    RestrictedManagementByRAG     = [bool]$_.RestrictedManagementByRAG
-                    RestrictedManagementByAadRole = [bool]$_.RestrictedManagementByAadRole
-                    RestrictedManagementByRMAU    = [bool]$_.RestrictedManagementByRMAU
-                }
-            })
-    }
+    $ControlPlaneScopeReasoningPayload = ConvertTo-EntraOpsControlPlaneScopeReasoning -PrivilegedObjects $PrivilegedObjects `
+        -PrivilegedObjectClassificationSource $PrivilegedObjectClassificationSource -ClassificationParameterScope $ClassificationParameterScope `
+        -AzureHighPrivilegedRoles $AzureHighPrivilegedRoles -AzureHighPrivilegedScopes $AzureHighPrivilegedScopes -ExposureManagementResult $ExposureManagementResult
     $ControlPlaneScopeReasoningPayload | ConvertTo-Json -Depth 6 | Out-File -FilePath $ControlPlaneScopeReasoningFile -Force
     Write-Host "  Control Plane scope reasoning file: $ControlPlaneScopeReasoningFile" -ForegroundColor Cyan
     Write-Host ""
@@ -1548,26 +1587,6 @@ function Update-EntraOpsClassificationControlPlaneScope {
     }
     #endregion
 
-    #region Shared Azure Resource/Subscription Scope (reused by Defender, Azure and IdentityGovernance RBAC parameterization)
-    # Computed once so that Defender, Azure and IdentityGovernance RBAC parameterization below reuse the same
-    # Exposure Management and Azure Resource Graph managed-identity discovery, instead of issuing duplicate queries.
-    # IdentityGovernance needs the Tier0/Tier1 resource scope buckets to classify Azure resources (subscriptions,
-    # resource groups, ...) that have been onboarded to access package catalogs.
-    $SharedAzureResourceScope = $null
-    if ($ClassificationParameterScope -contains "Defender" -or $ClassificationParameterScope -contains "Azure" -or $ClassificationParameterScope -contains "IdentityGovernance") {
-        Write-Host ""
-        Write-Host "=========================================================" -ForegroundColor Cyan
-        Write-Host " Resolving Shared Azure Resource/Subscription Scope" -ForegroundColor Cyan
-        Write-Host " (reused by Defender and Azure RBAC parameterization)" -ForegroundColor Cyan
-        Write-Host "=========================================================" -ForegroundColor Cyan
-        $SharedAzureResourceScope = Get-EntraOpsClassificationAzureResourceScope -EntraOpsEamFolder $EntraOpsEamFolder -EntraOpsScopes $EntraOpsScopes -ExposureCriticalityLevel $ExposureCriticalityLevel -WarningMessages $WarningMessages
-        Write-Host "  Tier 0 (ControlPlane) resources    : $($SharedAzureResourceScope.Tier0ResourceScope.Count) scope path(s)" -ForegroundColor Gray
-        Write-Host "  Tier 1 (ManagementPlane) resources : $($SharedAzureResourceScope.Tier1ResourceScope.Count) scope path(s)" -ForegroundColor Gray
-        Write-Host "  All subscriptions                  : $($SharedAzureResourceScope.AllSubscriptionScope.Count)" -ForegroundColor Gray
-        Write-Host ""
-    }
-    #endregion
-
     #region IdentityGovernance RBAC Classification Parameter Scope
     if ($ClassificationParameterScope -contains "IdentityGovernance") {
         Write-Host ""
@@ -1594,7 +1613,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
             # Reuse the shared Azure resource/subscription scope resolved earlier (needed to classify Azure
             # resources onboarded to catalogs); resolve it lazily if the shared block did not run.
             if ($null -eq $SharedAzureResourceScope) {
-                $SharedAzureResourceScope = Get-EntraOpsClassificationAzureResourceScope -EntraOpsEamFolder $EntraOpsEamFolder -EntraOpsScopes $EntraOpsScopes -ExposureCriticalityLevel $ExposureCriticalityLevel -WarningMessages $WarningMessages
+                $SharedAzureResourceScope = Get-EntraOpsClassificationAzureResourceScope -EntraOpsEamFolder $EntraOpsEamFolder -EntraOpsScopes $EntraOpsScopes -ExposureCriticalityLevel $ExposureCriticalityLevel -WarningMessages $WarningMessages -ExposureManagementBaselineFile $AzureResourceScopeReasoningFile
             }
 
             Write-Host "---------------------------------------------------------" -ForegroundColor DarkCyan
@@ -1886,7 +1905,7 @@ function Update-EntraOpsClassificationControlPlaneScope {
         # Reuse the shared Azure resource/subscription scope resolved earlier (avoids duplicate Exposure
         # Management / Azure Resource Graph queries when Defender parameterization also ran in this invocation).
         if ($null -eq $SharedAzureResourceScope) {
-            $SharedAzureResourceScope = Get-EntraOpsClassificationAzureResourceScope -EntraOpsEamFolder $EntraOpsEamFolder -EntraOpsScopes $EntraOpsScopes -ExposureCriticalityLevel $ExposureCriticalityLevel -WarningMessages $WarningMessages
+            $SharedAzureResourceScope = Get-EntraOpsClassificationAzureResourceScope -EntraOpsEamFolder $EntraOpsEamFolder -EntraOpsScopes $EntraOpsScopes -ExposureCriticalityLevel $ExposureCriticalityLevel -WarningMessages $WarningMessages -ExposureManagementBaselineFile $AzureResourceScopeReasoningFile
         }
         $AzureResourceScopeDetails = $SharedAzureResourceScope.ResourceScopeDetails
 
@@ -2036,8 +2055,15 @@ function Update-EntraOpsClassificationControlPlaneScope {
                     if ($_.PSObject.Properties.Name -contains 'ExpandedScopePaths') {
                         $ScopeDetail['ExpandedScopePaths'] = @($_.ExpandedScopePaths)
                     }
+                    if ($_.PSObject.Properties.Name -contains 'XspmLastSuccessfulQueryDate') {
+                        $ScopeDetail['XspmLastSuccessfulQueryDate'] = $_.XspmLastSuccessfulQueryDate
+                    }
                     [PSCustomObject]$ScopeDetail
                 })
+        }
+        # Exposure Management query outcome and its critical resources, used as baseline when a later query fails
+        if ($null -ne $SharedAzureResourceScope.ExposureManagement -and $null -ne $SharedAzureResourceScope.ExposureManagement.Metadata) {
+            Add-EntraOpsExposureManagementBlock -Payload $AzureResourceScopeReasoningPayload -Metadata $SharedAzureResourceScope.ExposureManagement.Metadata -Results $SharedAzureResourceScope.ExposureManagement.Results
         }
         $AzureResourceScopeReasoningPayload | ConvertTo-Json -Depth 5 | Out-File -FilePath $AzureResourceScopeReasoningFile -Force
         Write-Host "  Resource scope reasoning file: $AzureResourceScopeReasoningFile" -ForegroundColor Cyan

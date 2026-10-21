@@ -76,9 +76,10 @@ function New-EntraOpsServiceEMAssignmentPolicy {
         $assignmentPolicyUri = "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies?`$filter=catalog/id eq '$encodedServiceCatalogId'&`$expand=accessPackage,catalog"
         try{
             Write-Verbose "$logPrefix Looking up Assignment Policy"
-            $policies += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentPolicyUri -OutputType PSObject -DisableCache
+            # -ThrowOnFailure: a failed lookup must not look like "no policies" and create every policy again
+            $policies += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentPolicyUri -OutputType PSObject -DisableCache -ThrowOnFailure
         }catch{
-            Write-Error $_
+            throw "$logPrefix Failed to look up the assignment policies of catalog ${ServiceCatalogId}; no policy was created: $($_.Exception.Message)"
         }
         $catalogPlaneMembersGroupId = ($ServiceGroups|Where-Object{$_.DisplayName -like "*CatalogPlane-Members"}).Id
         # Delegated (tenant-wide or other landing zone) groups are injected by name into ServiceGroups
@@ -86,6 +87,9 @@ function New-EntraOpsServiceEMAssignmentPolicy {
         $controlPlaneApproverId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*ControlPlane-Admins" } | Select-Object -First 1).Id
         $wlUsersApproverId = ($ServiceGroups | Where-Object { $_.DisplayName -like "*WorkloadPlane-Admins" } | Select-Object -First 1).Id
         if (-not $wlUsersApproverId) { $wlUsersApproverId = $mgmtApproverGroupId }
+        # Approver of the initial WorkloadPlane-Members requests; services without CatalogPlane group (custom roles)
+        # use their WorkloadPlane-Admins or ManagementPlane-Admins group
+        $membershipApproverGroupId = if ($catalogPlaneMembersGroupId) { $catalogPlaneMembersGroupId } else { $wlUsersApproverId }
         # Same package choice as New-EntraOpsServiceEMAssignment for the admin's initial assignment
         $initialAdminPolicyName = if ($ServicePackages | Where-Object { $_.DisplayName -like "*ManagementPlane-Admins" }) { 'Initial Management Admin Policy' } else { 'Initial Workload Admin Policy' }
         $setInitialAdminTarget = {
@@ -331,7 +335,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         fallbackPrimaryApprovers = @(
                             @{
                                 "@odata.type" = "#microsoft.graph.groupMembers"
-                                groupId = $(($ServiceGroups|Where-Object{$_.DisplayName -like "*CatalogPlane-Members"}).Id)
+                                groupId = $membershipApproverGroupId
                             }
                         )
                     },
@@ -343,7 +347,7 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         primaryApprovers = @(
                             @{
                                 "@odata.type" = "#microsoft.graph.groupMembers"
-                                groupId = $(($ServiceGroups|Where-Object{$_.DisplayName -like "*CatalogPlane-Members"}).Id)
+                                groupId = $membershipApproverGroupId
                             }
                         )
                     }
@@ -413,10 +417,16 @@ function New-EntraOpsServiceEMAssignmentPolicy {
         $policyFailures = [System.Collections.Generic.List[string]]::new()
         foreach($package in $ServicePackages){
             $policyParams.accessPackage.id = $package.Id
-            if($package.Id -notin $policies.AccessPackage.Id){
+            # Check the main policy by name: a missing one is created on re-run even when secondary policies exist
+            $secondaryPolicyNames = @('Management Plane Policy') + @($initialDirectPolicies | Where-Object { $package.DisplayName -like $_.PackageFilter } | ForEach-Object { $_.DisplayName })
+            $hasMainPolicy = @($policies | Where-Object { $_.AccessPackage.Id -eq $package.Id -and $_.DisplayName -notin $secondaryPolicyNames }).Count -gt 0
+            if(-not $hasMainPolicy){
                 try{
                     Write-Verbose "$logPrefix Assigning Policy for Access Package ID: $($package.Id)"
                     if($package.DisplayName -like "*WorkloadPlane-Members"){
+                        if (-not $membershipApproverGroupId) {
+                            throw "No CatalogPlane-Members, WorkloadPlane-Admins or ManagementPlane-Admins group in this scope approves the requests."
+                        }
                         $params = $policyParams + $initialPolicyParams
                         $params.displayName = "Initial Workload Membership Policy"
                         & $setReviewSettings $params 'InitialWorkloadMembership'
@@ -475,6 +485,9 @@ function New-EntraOpsServiceEMAssignmentPolicy {
                         & $setReviewSettings $params 'WorkloadPlaneUsers'
                         $policies += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies" -Body ($params | ConvertTo-Json -Depth 20) -OutputType PSObject -ThrowOnFailure
                     }else{
+                        if (-not $catalogPlaneMembersGroupId) {
+                            throw "The Baseline Policy requires a CatalogPlane-Members group in this scope as requestor and approver group."
+                        }
                         $params = $policyParams + $baselinePolicyParams
                         & $setExtension $params 'BaselinePolicy'
                         & $setReviewSettings $params 'BaselinePolicy'

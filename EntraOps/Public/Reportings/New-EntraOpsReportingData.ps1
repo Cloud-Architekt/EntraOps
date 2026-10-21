@@ -433,7 +433,8 @@ function New-EntraOpsReportingData {
     }
 
     # Module-only installations (e.g. PowerShell Gallery) ship neither the reporting apps nor the classification templates.
-    $ReportingFolder = Join-Path $RepositoryRoot 'Reports'
+    # Same root the generators write to (RepoRoot = $EntraOpsRoot), so an explicit -EntraOpsRoot is checked and installed there.
+    $ReportingFolder = Join-Path $EntraOpsRoot 'Reports'
     $ClassificationTemplatesFolder = Join-Path $EntraOpsRoot 'Classification/Templates'
     $HasCustomAppRoot = @($PSBoundParameters.Keys | Where-Object { $_ -like '*AppRoot' }).Count -gt 0
     # Check each selected app, even when Reports/index.html exists or another app uses a custom path.

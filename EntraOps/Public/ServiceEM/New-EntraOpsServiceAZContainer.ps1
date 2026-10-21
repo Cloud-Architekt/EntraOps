@@ -105,6 +105,11 @@ function New-EntraOpsServiceAZContainer {
             try {
                 Write-Verbose "$logPrefix Looking up Azure Resource Group"
                 $resourceGroup = Get-AzResourceGroup -Name $rgName -ErrorAction Stop
+                # Warn when using a resource group that ServiceEM didn't create
+                $resourceGroupTag = if ($null -ne $resourceGroup -and $null -ne $resourceGroup.Tags) { "$($resourceGroup.Tags['EntraOpsServiceEM'])" }
+                if ($null -ne $resourceGroup -and $resourceGroupTag -ne $ServiceName) {
+                    Write-Warning "$logPrefix Resource group '$rgName' exists and is not tagged 'EntraOpsServiceEM = $ServiceName'. It is used as landing zone: the service groups get eligible Contributor and RBAC Administrator access to all of its existing resources."
+                }
             } catch {
                 if ($_.Exception.Message -like "*not exist*" -or $_.Exception.Message -like "*ResourceGroupNotFound*") {
                     Write-Verbose "$logPrefix Azure Resource Group not found, creating"
@@ -409,7 +414,8 @@ function New-EntraOpsServiceAZContainer {
             # Use @() to handle both Array (legacy) and List (Az.Resources 9+) rule collections
             $policyRules = @($policy.Rule)
             if (($policyRules | Where-Object { $_.Id -eq "Expiration_Admin_Eligibility" }).IsExpirationRequired) {
-                Write-Verbose "$logPrefix Policy requires eligible expiration, updating"
+                # The role management policy applies to every principal of the scope, not only to the service groups
+                Write-Warning "$logPrefix The PIM policy of role '$($add.RoleId)' on '$scopeId' requires an expiration of eligible assignments. It is changed to allow permanent eligible assignments, which applies to all eligible assignments of this role on the scope."
                 $roleManagementPolicySplat = @{
                     Scope = $scopeId
                     Name  = $add.RoleId

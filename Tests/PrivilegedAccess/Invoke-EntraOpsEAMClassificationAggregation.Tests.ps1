@@ -103,6 +103,53 @@ Describe "New-EntraOpsEAMOutputObject tier-pair validation" {
     }
 }
 
+Describe "Save-EntraOpsEAMRbacSystemJson export replacement" {
+    BeforeEach {
+        $script:EntraOpsBaseFolder = Join-Path $TestDrive "replace-$([guid]::NewGuid().ToString('N'))"
+        $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder "EntraID"
+        New-Item -ItemType Directory -Path (Join-Path $script:ExportFolder "user") -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:ExportFolder "EntraID.json") -Value '[{"ObjectId":"previous"}]'
+        Set-Content -LiteralPath (Join-Path $script:ExportFolder "user/previous.json") -Value '{"ObjectId":"previous"}'
+    }
+
+    It "keeps the previous export when no object passes validation" {
+        $InvalidData = @([pscustomobject]@{ ObjectId = "../escape"; ObjectType = "user"; ObjectDisplayName = "Invalid" })
+
+        Save-EntraOpsEAMRbacSystemJson -ExportFolder $script:ExportFolder -RbacSystemName "EntraID" -EamData $InvalidData -AggregateFileName "EntraID.json" -WarningAction SilentlyContinue
+
+        Get-Content -LiteralPath (Join-Path $script:ExportFolder "EntraID.json") -Raw | Should -Match 'previous'
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder "user/previous.json") | Should -BeTrue
+    }
+
+    It "replaces the previous export and leaves no temporary folders" {
+        $NewData = @([pscustomobject]@{ ObjectId = "new-object"; ObjectType = "user"; ObjectDisplayName = "New"; RoleAssignments = $null })
+
+        Save-EntraOpsEAMRbacSystemJson -ExportFolder $script:ExportFolder -RbacSystemName "EntraID" -EamData $NewData -AggregateFileName "EntraID.json" 6>$null
+
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder "user/previous.json") | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder "user/new-object.json") | Should -BeTrue
+        $Aggregate = Get-Content -LiteralPath (Join-Path $script:ExportFolder "EntraID.json") -Raw
+        $Aggregate.TrimStart() | Should -Match '^\['
+        @(Get-ChildItem -LiteralPath $script:EntraOpsBaseFolder -Directory -Force | Where-Object Name -like '.*').Count | Should -Be 0
+    }
+
+    It "resolves a relative export folder against the PowerShell location" {
+        # Set-Location doesn't move the process directory: the export must not be staged and swapped elsewhere
+        $NewData = @([pscustomobject]@{ ObjectId = "relative-object"; ObjectType = "user"; ObjectDisplayName = "Relative"; RoleAssignments = $null })
+        [System.IO.Directory]::GetCurrentDirectory() | Should -Not -Be $script:EntraOpsBaseFolder
+
+        Push-Location -LiteralPath $script:EntraOpsBaseFolder
+        try {
+            Save-EntraOpsEAMRbacSystemJson -ExportFolder "./EntraID" -RbacSystemName "EntraID" -EamData $NewData -AggregateFileName "EntraID.json" 6>$null
+        } finally {
+            Pop-Location
+        }
+
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder "user/relative-object.json") | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder "user/previous.json") | Should -BeFalse
+    }
+}
+
 Describe "Save-EntraOpsEAMRbacSystemJson assignment deduplication" {
     It "removes exact duplicate rows but preserves a distinct nesting path" {
         $script:EntraOpsBaseFolder = $TestDrive
@@ -193,7 +240,8 @@ Describe "Save-EntraOpsEAMRbacSystemJson assignment deduplication" {
         Save-EntraOpsEAMRbacSystemJson -ExportFolder $ExportFolder -RbacSystemName "DeviceManagement" -EamData $EamData -AggregateFileName "DeviceManagement.json"
 
         $Json = Get-Content -LiteralPath (Join-Path $ExportFolder "DeviceManagement.json") -Raw
-        $Saved = $Json | ConvertFrom-Json -Depth 20
+        $Json.TrimStart() | Should -Match '^\[' -Because 'the aggregate is an array even for a single object'
+        $Saved = ($Json | ConvertFrom-Json -Depth 20 -NoEnumerate)[0]
         $Saved.Classification -is [array] | Should -BeTrue
         $Saved.Classification[0].MatchedActions -is [array] | Should -BeTrue
         $Saved.Classification[0].ScopedObjects -is [array] | Should -BeTrue

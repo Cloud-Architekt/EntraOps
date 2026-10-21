@@ -590,7 +590,8 @@ function Connect-EntraOps {
         # Recommendation 3: Optimize context retrieval and verbose output generation
         Write-Verbose -Message "Connected to Azure Management"
         $AzContextRaw = Get-AzContext
-        $AzContext = $AzContextRaw | Select-Object Account, Tenant, TokenCache
+        # Account and tenant only - the token cache has no diagnostic value and doesn't belong in logs
+        $AzContext = $AzContextRaw | Select-Object Account, Tenant
         Write-Verbose ($AzContext | Out-String)
 
         # Retrieve MG context once (skipped when Connect-MgGraph was itself skipped in REST-only mode)

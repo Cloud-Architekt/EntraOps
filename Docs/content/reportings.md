@@ -445,6 +445,21 @@ enabled ingestion to both targets):
 - [Deploy the Custom Table parser to Azure](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FParsers%2FPrivilegedEAM_CustomTable.json)
 - [Deploy the WatchLists parser to Azure](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FParsers%2FPrivilegedEAM_WatchLists.json)
 
+The Custom Table parser returns the latest completed ingestion run of each RBAC system within the last
+14 days, so objects stay visible between weekly collections and objects removed in the latest run don't
+reappear. `Save-EntraOpsPrivilegedEAMInsightsCustomTable` writes the same `TimeGenerated` for all records
+of a run and, after the last record of each RBAC system, a completion marker (a record with `ObjectType`
+`EntraOpsIngestionRun`). A run that failed part-way has no marker and never replaces the last complete run.
+A run limited with `-PrincipalTypeFilter` to some object types writes no marker either, so the parser keeps
+returning the last run with all object types.
+The parser doesn't return the marker records; exclude them when you query `PrivilegedEAM_CL` directly.
+If your data collection rule sets `TimeGenerated` itself (e.g. `extend TimeGenerated = now()`), the records
+between the previous and the latest marker belong to the latest run, which can include the records of a
+failed run in between. Until the first run with markers, the parser returns the latest ingestion.
+For a collection interval longer than 14 days, increase `LookbackPeriod` in the parser. The WatchLists
+parser also returns role assignments without classification, with an empty `Classification`.
+Redeploy the parser after updating EntraOps when the changelog lists parser changes.
+
 ### Ingest classification and enrichment data
 
 - `Save-EntraOpsPrivilegedEAMInsightsCustomTable` ingests classified Privileged EAM data into a Log Analytics/Sentinel custom table (`IngestToLogAnalytics` in `EntraOpsConfig.json`).

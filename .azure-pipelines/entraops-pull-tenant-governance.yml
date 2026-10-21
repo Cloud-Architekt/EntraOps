@@ -24,8 +24,8 @@ parameters:
     default: 3300
 
 # BEGIN EntraOps managed schedules
+# Schedules are added by Update-EntraOpsAzureDevOpsSchedules from EntraOpsConfig.json.
 # END EntraOps managed schedules
-
 variables:
   ConfigFile: ./EntraOpsConfig.json
 
@@ -53,7 +53,17 @@ steps:
         if ($env:BUILD_REASON -eq 'Schedule') {
           $Operation = if ($env:BUILD_CRONSCHEDULE_DISPLAYNAME -eq 'EntraOps Tenant Governance start') { 'Start' } else { 'Collect' }
         }
-        Invoke-EntraOpsTenantGovernanceSnapshot -ConfigFilePath '$(ConfigFile)' -AuthenticationType FederatedCredentials -Operation $Operation -TimeoutInSeconds ${{ parameters.timeoutInSeconds }} -Force | Out-Host
+        try {
+          Invoke-EntraOpsTenantGovernanceSnapshot -ConfigFilePath '$(ConfigFile)' -AuthenticationType FederatedCredentials -Operation $Operation -TimeoutInSeconds ${{ parameters.timeoutInSeconds }} -Force | Out-Host
+        } catch {
+          # Released job: failure recorded, pending job removed and nothing published
+          $SnapshotFolder = 'TenantGovernance/Snapshots'
+          $IsChanged = { param($Name) -not [string]::IsNullOrWhiteSpace((git status --porcelain -- "$SnapshotFolder/$Name" | Out-String)) }
+          if ((& $IsChanged '.LastAttemptManifest.json') -and -not (& $IsChanged '.SnapshotManifest.json') -and -not (Test-Path -LiteralPath "$SnapshotFolder/.PendingSnapshotJob.json")) {
+            Write-Host '##vso[task.setvariable variable=EntraOpsReleasedSnapshotJob]true'
+          }
+          throw
+        }
       pwsh: true
       azurePowerShellVersion: LatestVersion
 
@@ -63,6 +73,18 @@ steps:
       targetType: filePath
       filePath: "./.azure-pipelines/scripts/Ado-GitPush.ps1"
       arguments: '-CommitMessage "EntraOps Tenant Governance snapshot"'
+      pwsh: true
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  # Commit the released job, so the next run doesn't restore it; the run stays failed
+  - task: PowerShell@2
+    displayName: "Git Commit & Push released snapshot job state"
+    condition: and(failed(), eq(variables['EntraOpsReleasedSnapshotJob'], 'true'))
+    inputs:
+      targetType: filePath
+      filePath: "./.azure-pipelines/scripts/Ado-GitPush.ps1"
+      arguments: '-CommitMessage "EntraOps Tenant Governance snapshot job released" -Paths "TenantGovernance/Snapshots/.PendingSnapshotJob.json","TenantGovernance/Snapshots/.LastAttemptManifest.json"'
       pwsh: true
     env:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)

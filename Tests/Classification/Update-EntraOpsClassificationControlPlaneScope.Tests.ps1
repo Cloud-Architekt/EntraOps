@@ -58,6 +58,47 @@ Describe 'Update-EntraOpsClassificationControlPlaneScope empty scopes' {
     }
 }
 
+Describe 'Update-EntraOpsClassificationControlPlaneScope during an Exposure Management outage' {
+    BeforeAll {
+        $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        Import-Module (Join-Path $script:TestRepositoryRoot 'EntraOps') -Force
+        $script:PreviousDefaultFolderClassification = $Global:DefaultFolderClassification
+        $script:PreviousTenantNameContext = $Global:TenantNameContext
+    }
+
+    AfterAll {
+        $Global:DefaultFolderClassification = $script:PreviousDefaultFolderClassification
+        $Global:TenantNameContext = $script:PreviousTenantNameContext
+    }
+
+    BeforeEach {
+        $Global:DefaultFolderClassification = Join-Path $TestDrive 'Classification'
+        $Global:TenantNameContext = 'contoso.onmicrosoft.com'
+        $script:TenantFolder = Join-Path $Global:DefaultFolderClassification $Global:TenantNameContext
+        New-Item -Path $script:TenantFolder -ItemType Directory -Force | Out-Null
+        $script:PreviousReasoning = '{ "PrivilegedObjects": [ { "ObjectId": "a", "ClassificationSource": [ "XSPM" ] } ] }'
+        Set-Content -LiteralPath (Join-Path $script:TenantFolder 'ScopeReasoning_ControlPlane.json') -Value $script:PreviousReasoning
+        Mock -ModuleName EntraOps Get-EntraOpsAzContextValue { '99999999-9999-9999-9999-999999999999' }
+    }
+
+    It 'keeps all previous classification files when Exposure Management results cannot be carried forward' {
+        Mock -ModuleName EntraOps Get-EntraOpsClassificationControlPlaneObjects {
+            param([hashtable]$ExposureManagementResult)
+            $ExposureManagementResult['Status'] = 'Failed'
+            $ExposureManagementResult['HasUnusablePreviousResults'] = $true
+            $ExposureManagementResult['Warnings'] = @([pscustomobject]@{ Type = 'ExposureManagementUnavailable'; Message = 'Exposure Management query for Control Plane objects failed' })
+            Write-Warning 'Exposure Management query for Control Plane objects failed'
+        }
+
+        $Output = Update-EntraOpsClassificationControlPlaneScope -ClassificationParameterScope 'EntraID' -WarningAction SilentlyContinue 6>&1 | Out-String
+
+        $Output | Should -Match 'ExposureManagementScopeNotUpdated'
+        $Output | Should -Match 'ExposureManagementUnavailable'
+        Get-Content -LiteralPath (Join-Path $script:TenantFolder 'ScopeReasoning_ControlPlane.json') -Raw | Should -Be ($script:PreviousReasoning + [Environment]::NewLine)
+        @(Get-ChildItem -LiteralPath $script:TenantFolder).Name | Should -Be @('ScopeReasoning_ControlPlane.json')
+    }
+}
+
 Describe 'Intune device scope selection gaps' {
     BeforeAll {
         $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path

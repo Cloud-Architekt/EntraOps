@@ -134,12 +134,15 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
             $group = $pair.Group
             $package = $pair.Package
 
-            $resource = $ServiceCatalogResources | Where-Object {`
-                    $_.DisplayName -eq $group.DisplayName -and `
-                    $_.OriginSystem -eq "AadGroup"
-            }
+            # Matched by object ID: a display name can be shared or changed (e.g. another GroupPrefix)
+            $resource = $ServiceCatalogResources | Where-Object {
+                $_.OriginSystem -eq "AadGroup" -and (
+                    ($group.Id -and $_.OriginId -eq $group.Id) -or
+                    (-not $group.Id -and $_.DisplayName -eq $group.DisplayName))
+            } | Select-Object -First 1
+            # A skipped group leaves its access package without access: report it instead of completing successfully
             if (-not $resource) {
-                Write-Verbose "$logPrefix No catalog resource found for group '$($group.DisplayName)' — skipping"
+                $roleScopeFailures.Add("'$($group.DisplayName)' is not a resource of the catalog, so '$($package.DisplayName)' grants no access to it")
                 continue
             }
             Write-Verbose "$logPrefix Processing Access Package Resource ID: $($resource.Id)"
@@ -150,16 +153,16 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
             if (-not $resourceRolesByResource.ContainsKey($resource.Id)) {
                 try {
                     Write-Verbose "$logPrefix Getting Catalog Resource Roles for Resource ID: $($resource.id)"
-                    $resourceRolesByResource[$resource.Id] = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$ServiceCatalogId/resourceRoles?`$filter=originSystem eq 'AadGroup' and resource/id eq '$($resource.id)'&`$expand=resource" -OutputType PSObject
+                    # -ThrowOnFailure: a failed lookup must not look like a resource without roles
+                    $resourceRolesByResource[$resource.Id] = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs/$ServiceCatalogId/resourceRoles?`$filter=originSystem eq 'AadGroup' and resource/id eq '$($resource.id)'&`$expand=resource" -OutputType PSObject -ThrowOnFailure
                 } catch {
-                    Write-Verbose "$logPrefix Failed to get Catalog Resource Roles — skipping group '$($group.DisplayName)'"
-                    Write-Error $_
+                    $roleScopeFailures.Add("catalog resource roles of '$($group.DisplayName)' could not be read: $($_.Exception.Message)")
                     continue
                 }
             }
             $resourceRoles = $resourceRolesByResource[$resource.Id]
             if (-not $resourceRoles) {
-                Write-Verbose "$logPrefix No catalog resource roles returned for '$($group.DisplayName)' (transient?) — skipping"
+                $roleScopeFailures.Add("the catalog returned no resource roles for '$($group.DisplayName)' (resource not yet indexed?); run the deployment again")
                 continue
             }
             Write-Verbose "$logPrefix Found Catalog Resource Roles: $($resourceRoles.OriginId|ConvertTo-Json -Compress)"
@@ -172,7 +175,7 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
                 if ($eligible) {
                     Write-Warning "$logPrefix Eligible Member role not found for '$($group.DisplayName)' in the catalog (group not yet managed by PIM for Groups, or no Microsoft Entra ID Governance license). No resource role is added to the access package, run the deployment again later."
                 } else {
-                    Write-Verbose "$logPrefix Member role not found for '$($group.DisplayName)' (resource not fully indexed?) — skipping"
+                    $roleScopeFailures.Add("the Member role of '$($group.DisplayName)' was not found in the catalog (resource not yet indexed?); run the deployment again")
                 }
                 continue
             }
@@ -195,6 +198,17 @@ function New-EntraOpsServiceEMAccessPackageResourceAssignment {
             # A package is paired with several groups; roles removed for an earlier group must not return from its stale snapshot
             $ex = @($package.ResourceRoleScopes | ForEach-Object { "$($_.Role.OriginId)_$($_.Scope.OriginId)" } | Where-Object { $_ -notin $removedRoles })
             $packageRoles += $ex
+            if (-not $eligible) {
+                # No active Member next to Eligible Member: it would bypass the PIM activation
+                $eligibleScope = @($package.ResourceRoleScopes | Where-Object {
+                        "$($_.Role.OriginId)" -like 'EligibleMember_*' -and $_.Scope.OriginId -eq $resource.OriginId -and
+                        "$($_.Role.OriginId)_$($_.Scope.OriginId)" -notin $removedRoles
+                    })
+                if ($eligibleScope.Count -gt 0) {
+                    Write-Warning "$logPrefix '$($package.DisplayName)' delivers '$($group.DisplayName)' as Eligible Member (PIM for Groups). The active Member role is not added, so membership still requires PIM activation. Run the deployment with PIM for Groups enabled for this group, or remove the Eligible Member role from the access package to switch to active membership."
+                    continue
+                }
+            }
             $activeRemovalFailed = $false
             if ($eligible) {
                 # An active Member role (e.g. deployed without PIM for Groups) would bypass the PIM activation

@@ -136,6 +136,43 @@ Describe 'Ado-CheckoutLatest' -Skip:(-not $HasAdoScripts -or -not $HasGit) {
     }
 }
 
+Describe 'Ado-GitPush selected paths' -Skip:(-not $HasAdoScripts -or -not $HasGit) {
+    BeforeEach {
+        $env:SYSTEM_COLLECTIONURI = 'https://dev.azure.com/contoso/'
+        $env:BUILD_SOURCEBRANCH = 'refs/heads/main'
+        Remove-Item -LiteralPath Env:SYSTEM_TEAMPROJECTID -ErrorAction SilentlyContinue
+    }
+
+    It 'publishes only the released snapshot job state after a failed run' {
+        $Repository = New-TestRepository -Root (Join-Path $TestDrive 'released-job')
+        $Snapshots = Join-Path $Repository.Clone 'TenantGovernance/Snapshots'
+        New-Item -ItemType Directory -Path $Snapshots -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $Snapshots '.PendingSnapshotJob.json') -Value '{"SnapshotJobId":"job-failed"}'
+        Invoke-TestGit -Path $Repository.Clone add --all | Out-Null
+        Invoke-TestGit -Path $Repository.Clone commit -m 'pending job' | Out-Null
+        Invoke-TestGit -Path $Repository.Clone push origin HEAD:refs/heads/main | Out-Null
+
+        # The failed run released the job and left an unrelated change that must not be published.
+        # -Force: dot files count as hidden on Linux and macOS
+        Remove-Item -LiteralPath (Join-Path $Snapshots '.PendingSnapshotJob.json') -Force
+        Set-Content -LiteralPath (Join-Path $Snapshots '.LastAttemptManifest.json') -Value '{"SnapshotId":"job-failed"}'
+        Set-Content -LiteralPath (Join-Path $Repository.Clone 'README.md') -Value 'partial output'
+
+        Push-Location -LiteralPath $Repository.Clone
+        try {
+            # A comma-separated string, as passed by pwsh -File, is accepted as well
+            & (Join-Path $script:ScriptRoot 'Ado-GitPush.ps1') -AccessToken 'secret-token' -CommitMessage 'released' -Paths 'TenantGovernance/Snapshots/.PendingSnapshotJob.json,TenantGovernance/Snapshots/.LastAttemptManifest.json' *> $null
+        } finally {
+            Pop-Location
+        }
+
+        $RemoteFiles = @(Invoke-TestBareGit -Path $Repository.Remote ls-tree -r --name-only main)
+        $RemoteFiles | Should -Not -Contain 'TenantGovernance/Snapshots/.PendingSnapshotJob.json'
+        $RemoteFiles | Should -Contain 'TenantGovernance/Snapshots/.LastAttemptManifest.json'
+        ([string](Invoke-TestBareGit -Path $Repository.Remote show main:README.md)).Trim() | Should -Be 'v1'
+    }
+}
+
 Describe 'Azure DevOps update entry scripts' -Skip:(-not $HasAdoScripts) {
     BeforeAll {
         function Get-EntraOpsUpdateCandidate { param($ConfigFile, $DestinationPath, $ExpectedSourceCommit) }
