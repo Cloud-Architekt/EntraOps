@@ -101,6 +101,24 @@ Describe 'Update-EntraOpsRequiredWorkflowParameters' -Skip:(-not [bool](Get-Modu
         $ReportingWorkflow | Should -Match 'ClassificationExplorerGenerateChangeHistory:\s*false'
     }
 
+    It 'maps every shipped deployment workflow environment setting in the updater' {
+        $Updater = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot 'EntraOps/Public/Configuration/Update-EntraOpsRequiredWorkflowParameters.ps1') -Raw
+        $WorkflowOwners = @{
+            'Pull-EntraOpsPrivilegedEAM' = 'PullWorkflowObject'
+            'Pull-EntraOpsTenantGovernance' = 'TenantGovernanceWorkflowObject'
+            'Push-EntraOpsPrivilegedEAM' = 'PushWorkflowObject'
+            'Push-EntraOpsPrivilegedReporting' = 'ReportingWorkflowObject'
+            'Update-EntraOps' = 'UpdateWorkflowObject'
+        }
+        foreach ($Name in $WorkflowOwners.Keys) {
+            $Workflow = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot ".github/workflows/$Name.yaml") -Raw | ConvertFrom-Yaml
+            foreach ($Key in $Workflow.env.Keys) {
+                $Pattern = '\$(?:WorkflowContent|' + $WorkflowOwners[$Name] + ')\.env\.' + [regex]::Escape($Key) + '\s*='
+                $Updater | Should -Match $Pattern -Because "$Name must reconcile $Key from configuration"
+            }
+        }
+    }
+
     It 'materializes an enabled Classification Explorer history setting for checkout depth' {
         $FixtureRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -Path $FixtureRoot -ItemType Directory -Force | Out-Null
@@ -321,6 +339,34 @@ Describe 'Update-EntraOpsRequiredWorkflowParameters' -Skip:(-not [bool](Get-Modu
         $ReportingWorkflow | Should -Match 'ApplyAutomatedReportingGeneration:\s*false'
         $ReportingWorkflow | Should -Match 'PublishReportsAsRelease:\s*false'
         $PushWorkflow | Should -Match 'ApplyPrivilegedElmCatalogProtection:\s*false'
+    }
+
+    It 'materializes report testing as <Expected> for a <Setting> config setting' -ForEach @(
+        @{ Setting = 'missing'; Expected = 'false' }
+        @{ Setting = 'false'; Expected = 'false' }
+        @{ Setting = 'true'; Expected = 'true' }
+    ) {
+        $FixtureRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -Path $FixtureRoot -ItemType Directory -Force | Out-Null
+        $ConfigPath = New-WorkflowFixture -Root $FixtureRoot
+        $ReportingWorkflowPath = Join-Path $FixtureRoot '.github/workflows/Push-EntraOpsPrivilegedReporting.yaml'
+        $Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        if ($Setting -ne 'missing') {
+            $Config.AutomatedReportingGeneration | Add-Member -NotePropertyName RunGeneratedReportTests -NotePropertyValue ($Setting -eq 'true')
+        }
+        $Config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+        (Get-Content -LiteralPath $ReportingWorkflowPath -Raw) -replace '(?m)^(\s*RunGeneratedReportTests:\s*)false(?=\r?$)', '${1}true' |
+            Set-Content -LiteralPath $ReportingWorkflowPath -Encoding UTF8
+
+        Push-Location $FixtureRoot
+        try {
+            Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigPath -ErrorAction Stop
+        } finally {
+            Pop-Location
+        }
+
+        $Workflow = Get-Content -LiteralPath $ReportingWorkflowPath -Raw | ConvertFrom-Yaml
+        [string]$Workflow.env.RunGeneratedReportTests | Should -Be $Expected
     }
 
     It 'restores workflow_run triggers after they were disabled' {

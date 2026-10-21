@@ -97,8 +97,7 @@ function New-EntraOpsServiceEMAssignment {
                 # -ThrowOnFailure: a failed lookup must not look like "no open requests" and submit duplicate requests
                 $assignmentRequests += @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $assignmentRequestsUri -OutputType PSObject -DisableCache -ThrowOnFailure) | Where-Object { $_ -and "$($_.State)" -in $openStates }
             }catch{
-                Write-Verbose "$logPrefix Failed to find Assignment Requests"
-                Write-Error $_
+                throw "$logPrefix Failed to look up the open assignment requests of $($package.DisplayName); no assignment request was submitted: $($_.Exception.Message)"
             }
         }
 
@@ -120,8 +119,8 @@ function New-EntraOpsServiceEMAssignment {
                 Write-Verbose "$logPrefix Found Access Package Assignment IDs: $($assignments.Id|ConvertTo-Json -Compress)"
             }
         }catch{
-            Write-Verbose "$logPrefix Failed to find Assignments"
-            Write-Error $_
+            # A failed lookup must not look like "no assignments" and submit duplicate requests
+            throw "$logPrefix Failed to look up the access package assignments of catalog ${ServiceCatalogId}; no assignment request was submitted: $($_.Exception.Message)"
         }
 
         # A user may hold one package and still need another, so existing access is keyed per target and package

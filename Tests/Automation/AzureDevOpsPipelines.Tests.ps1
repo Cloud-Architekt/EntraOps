@@ -117,7 +117,7 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
             $Parameter[0].default | Should -Be 'EntraOps-ServiceConnection'
             $Content | Should -Match '(?m)^\s*# BEGIN EntraOps managed service connection\r?$'
             $Content | Should -Not -Match 'AzureServiceConnection'
-            $AzureSteps = @($Pipeline.steps | Where-Object task -Like 'AzurePowerShell@*')
+            $AzureSteps = @(@($Pipeline.steps) + @($Pipeline.jobs | ForEach-Object { $_.steps }) | Where-Object task -Like 'AzurePowerShell@*')
             $AzureSteps.Count | Should -BeGreaterThan 0
             foreach ($Step in $AzureSteps) {
                 $Step.inputs.azureSubscription | Should -Be '${{ parameters.serviceConnection }}' -Because $PipelineName
@@ -135,7 +135,8 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
     It 'processes the latest branch commit in pipelines triggered by the pull pipeline' -Skip:$IsConfiguredDeployment {
         foreach ($PipelineName in @('entraops-push.yml', 'entraops-push-reporting.yml')) {
             $Pipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw | ConvertFrom-Yaml
-            $Steps = @($Pipeline.steps)
+            $Steps = @($Pipeline.steps) + @($Pipeline.jobs | ForEach-Object { $_.steps })
+            $Steps = @($Steps | Where-Object { $null -ne $_ })
             $LatestIndex = [array]::FindIndex($Steps, [Predicate[object]] { param($Step) $Step.inputs.filePath -eq './.azure-pipelines/scripts/Ado-CheckoutLatest.ps1' })
             $AzureIndex = [array]::FindIndex($Steps, [Predicate[object]] { param($Step) $Step.task -like 'AzurePowerShell@*' })
             $LatestIndex | Should -Be 1 -Because "$PipelineName must switch to the latest commit right after checkout"
@@ -290,8 +291,78 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
         $ReportingContent | Should -Match 'Invoke-EntraOpsReportingGeneration'
         $ReportingContent | Should -Match 'npm run test:reports'
         $ReportingContent | Should -Match 'PublishPipelineArtifact@1'
-        $ReportingContent | Should -Match "eq\(variables.ProjectIsPrivate, 'true'\)"
+        $ReportingContent | Should -Match "eq\(dependencies.Generate.outputs\['visibility.ProjectIsPrivate'\], 'true'\)"
         $ReportingContent | Should -Match '_apis/projects/'
+        $ReportingPipeline = $ReportingContent | ConvertFrom-Yaml
+        $ReportingPipeline.variables.ContainsKey('RunGeneratedReportTests') | Should -BeFalse
+        @($ReportingPipeline.jobs.job) | Should -Be @('Generate', 'Test', 'Publish')
+        $Generate, $Test, $Publish = $ReportingPipeline.jobs
+        $GenerationStep = $Generate.steps | Where-Object { $_.displayName -eq 'Generate configured reports' }
+        $GenerationStep.inputs.Inline | Should -Match '\$Config\.AutomatedReportingGeneration\.RunGeneratedReportTests -eq \$true'
+        $GenerationStep.inputs.Inline | Should -Match 'task.setvariable variable=RunGeneratedReportTests;isOutput=true'
+        $Test.dependsOn | Should -Be 'Generate'
+        $Test.condition | Should -Match "eq\(dependencies.Generate.outputs\['generate.RunGeneratedReportTests'\], 'true'\)"
+        $Test.condition | Should -Match "eq\(dependencies.Generate.outputs\['visibility.ProjectIsPrivate'\], 'true'\)"
+        $Test.steps[0].checkout | Should -Be 'none'
+        $Publish.steps[0].checkout | Should -Be 'none'
+        ($Test | ConvertTo-Yaml) | Should -Not -Match 'AzurePowerShell|azureSubscription|SYSTEM_ACCESSTOKEN|System.AccessToken'
+        ($Publish | ConvertTo-Yaml) | Should -Not -Match 'AzurePowerShell|azureSubscription|npm|npx'
+        @($Generate.steps | Where-Object { $_.script -match 'npm|npx' }).Count | Should -Be 0
+        $TestSteps = @($Test.steps | Where-Object { $_.task -eq 'UseNode@1' -or $_.script -match 'npm|npx' })
+        $TestSteps.Count | Should -Be 4
+        @($Publish.dependsOn) | Should -Be @('Generate', 'Test')
+        $Publish.condition | Should -Match "eq\(dependencies.Generate.result, 'Succeeded'\)"
+        $Publish.condition | Should -Match "eq\(dependencies.Test.result, 'Succeeded'\)"
+        $Publish.condition | Should -Match "ne\(dependencies.Generate.outputs\['generate.RunGeneratedReportTests'\], 'true'\), eq\(dependencies.Test.result, 'Skipped'\)"
+        $Publish.steps[1].inputs.artifactName | Should -Be 'EntraOps-Reporting-Untested'
+        @($Test.steps | Where-Object { $_.task -eq 'PublishPipelineArtifact@1' }).Count | Should -Be 0
+    }
+
+    It 'hands over only report assets and a minimal test harness' -Skip:$IsConfiguredDeployment {
+        $Pipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-push-reporting.yml') -Raw | ConvertFrom-Yaml
+        $Prepare = $Pipeline.jobs[0].steps | Where-Object { $_.displayName -eq 'Prepare report handover' }
+        $Fixture = Join-Path $TestDrive 'ReportingHandover'
+        $Staging = Join-Path $TestDrive 'ReportingStaging'
+        New-Item -Path "$Fixture/Reports/Nested", $Staging -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath "$Fixture/Reports/index.html" -Value '<html>Tenant report</html>'
+        Set-Content -LiteralPath "$Fixture/Reports/Nested/report.spec.mjs" -Value 'test harness'
+        Set-Content -LiteralPath "$Fixture/EntraOpsConfig.json" -Value 'private config'
+        foreach ($Name in 'package.json', 'package-lock.json', 'playwright.config.mjs') {
+            Copy-Item -LiteralPath (Join-Path $script:TestRepositoryRoot $Name) -Destination $Fixture
+        }
+
+        Push-Location $Fixture
+        try {
+            $ScriptText = $Prepare.inputs.script.Replace('$(Build.ArtifactStagingDirectory)', $Staging).Replace('$(generate.RunGeneratedReportTests)', 'true')
+            & ([scriptblock]::Create($ScriptText))
+        } finally {
+            Pop-Location
+        }
+
+        Test-Path "$Staging/Reports/index.html" | Should -BeTrue
+        @(Get-ChildItem "$Staging/Reports" -Recurse -Filter '*.spec.mjs').Count | Should -Be 0
+        Test-Path "$Staging/ReportTests/Reports/Nested/report.spec.mjs" | Should -BeTrue
+        @(Get-ChildItem "$Staging/ReportTests" -Recurse -File).Count | Should -Be 4
+        Test-Path "$Staging/ReportTests/EntraOpsConfig.json" | Should -BeFalse
+    }
+
+    It 'uses configured partial snapshot policy unless explicitly overridden' -Skip:$IsConfiguredDeployment -ForEach @(
+        @{ Configured = $false; Override = 'Configured'; Expected = $false }
+        @{ Configured = $true; Override = 'Configured'; Expected = $true }
+        @{ Configured = $null; Override = 'Configured'; Expected = $true }
+        @{ Configured = $false; Override = 'true'; Expected = $true }
+        @{ Configured = $true; Override = 'false'; Expected = $false }
+    ) {
+        $Pipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-push-reporting.yml') -Raw | ConvertFrom-Yaml
+        $Parameter = $Pipeline.parameters | Where-Object name -EQ 'allowPartialTenantGovernance'
+        $Parameter.default | Should -Be 'Configured'
+        $Generate = $Pipeline.jobs[0].steps | Where-Object name -EQ 'generate'
+        $Policy = [regex]::Match($Generate.inputs.Inline, '(?s)\$ReportingParameters = @\{.*?(?=\s*if \(\[bool\]::Parse)').Value
+        $Policy | Should -Not -BeNullOrEmpty
+        $Policy = $Policy.Replace('${{ parameters.allowPartialTenantGovernance }}', $Override)
+        $Config = @{ ConfigurationAnalyzer = @{ AllowPartialTenantGovernanceSnapshot = $Configured } }
+        . ([scriptblock]::Create($Policy))
+        $ReportingParameters.AllowPartialTenantGovernanceSnapshot | Should -Be $Expected
     }
 
     It 'runs repository, cross-platform Pester, and browser validation in ADO' -Skip:$IsConfiguredDeployment {

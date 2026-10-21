@@ -1140,6 +1140,24 @@ Describe 'Deployment browser validation' {
         }
     }
 
+    It 'disables tenant report npm testing by default and gates publication on opted-in test success' {
+        $Workflow = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/workflows/Push-EntraOpsPrivilegedReporting.yaml') -Raw
+        $TestJob = ($Workflow -split '(?m)^  Test-EntraOpsPrivilegedReporting:\s*$')[1] -split '(?m)^  Publish-EntraOpsPrivilegedReporting:\s*$' | Select-Object -First 1
+        $PublishJob = ($Workflow -split '(?m)^  Publish-EntraOpsPrivilegedReporting:\s*$')[1]
+
+        # Deployed workflows carry the tenant's opt-in from EntraOpsConfig.json, so the default is asserted on the config generator.
+        $Workflow | Should -Match '(?m)^\s*RunGeneratedReportTests:\s*(true|false)\s*$'
+        $ConfigGenerator = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot 'EntraOps/Public/Configuration/New-EntraOpsConfigFile.ps1') -Raw
+        $ConfigGenerator | Should -Match '\[boolean\]\$RunGeneratedReportTests\s*=\s*\$false'
+        $Workflow | Should -Match 'runGeneratedReportTests:\s*\$\{\{ env\.RunGeneratedReportTests \}\}'
+        $TestJob | Should -Match "if: needs\.Push-EntraOpsPrivilegedReporting\.outputs\.private == 'true' && needs\.Push-EntraOpsPrivilegedReporting\.outputs\.runGeneratedReportTests == 'true'"
+        $TestJob | Should -Match 'npm ci'
+        $TestJob | Should -Match 'contents:\s*read'
+        $TestJob | Should -Not -Match 'id-token:|contents:\s*write'
+        $PublishJob | Should -Match 'needs: \[Push-EntraOpsPrivilegedReporting, Test-EntraOpsPrivilegedReporting\]'
+        $PublishJob | Should -Match "!cancelled\(\) &&\s+needs\.Push-EntraOpsPrivilegedReporting\.result == 'success' &&\s+needs\.Push-EntraOpsPrivilegedReporting\.outputs\.private == 'true' &&\s+\(needs\.Test-EntraOpsPrivilegedReporting\.result == 'success' \|\|\s+\(needs\.Push-EntraOpsPrivilegedReporting\.outputs\.runGeneratedReportTests != 'true' &&\s+needs\.Test-EntraOpsPrivilegedReporting\.result == 'skipped'\)\)"
+    }
+
     It 'uses Classification Explorer history configuration only to select checkout depth' {
         $Workflow = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/workflows/Push-EntraOpsPrivilegedReporting.yaml') -Raw
 

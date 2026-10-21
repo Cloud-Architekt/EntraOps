@@ -73,6 +73,20 @@ Describe "Mutation configuration workflow splatting" {
         $Config.ConsoleOutput.IncludeObjectDetails | Should -BeFalse
     }
 
+    It 'disables tenant report tests by default for <Platform> and permits explicit opt-in' -ForEach @(
+        @{ Platform = 'GitHub' }
+        @{ Platform = 'AzureDevOps' }
+    ) {
+        $ConfigPath = Join-Path $TestDrive 'ReportTestingConfig.json'
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -DevOpsPlatform $Platform -ConfigFilePath $ConfigPath | Out-Null
+        $Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        $Config.AutomatedReportingGeneration.RunGeneratedReportTests | Should -BeFalse
+
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -DevOpsPlatform $Platform -RunGeneratedReportTests $true -ConfigFilePath $ConfigPath | Out-Null
+        $Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        $Config.AutomatedReportingGeneration.RunGeneratedReportTests | Should -BeTrue
+    }
+
     It "generates safe automated-update validation defaults" {
         $ConfigPath = Join-Path $TestDrive 'EntraOpsConfig.json'
         New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -ConfigFilePath $ConfigPath | Out-Null

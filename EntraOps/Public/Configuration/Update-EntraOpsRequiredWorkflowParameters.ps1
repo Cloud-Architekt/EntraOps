@@ -166,6 +166,7 @@ function Update-EntraOpsRequiredWorkflowParameters {
         # Always persist master/publication switches, including $false. Older configs did not expose
         # release publishing; keep that safely disabled until the operator opts in explicitly.
         $ReportingWorkflowObject.env.ApplyAutomatedReportingGeneration = [bool]$Config.AutomatedReportingGeneration.ApplyAutomatedReportingGeneration
+        $ReportingWorkflowObject.env.RunGeneratedReportTests = [bool]$Config.AutomatedReportingGeneration.RunGeneratedReportTests
         $ReportingWorkflowObject.env.PublishReportsAsRelease = if ($null -ne $Config.AutomatedReportingGeneration.PublishReportsAsRelease) {
             [bool]$Config.AutomatedReportingGeneration.PublishReportsAsRelease
         } else {

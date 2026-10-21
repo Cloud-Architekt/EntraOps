@@ -20,6 +20,7 @@ env:
   GenerateAccessPackageFlow: true
   AllowPartialTenantGovernanceSnapshot: true
   PublishReportsAsRelease: false
+  RunGeneratedReportTests: false
   # Number of reporting-* releases to keep. Each release contains a full tenant snapshot
   # (object IDs, UPNs, role assignments), so unpruned releases accumulate tenant data
   # indefinitely with only repository visibility as a control. Set to '' to disable pruning.
@@ -51,9 +52,11 @@ on:
   # WorkflowTrigger.PushReportingScheduledCron. Shipping a placeholder cron would make
   # GitHub reject this workflow file before the repository is configured.
 
+# Each job requests only what it needs: the OIDC token stays in the generation job, third-party
+# npm packages and the Playwright browser download run in a read-only job, and contents: write
+# is granted to the publishing job after generation and any opted-in tests succeed.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: entraops-reporting
@@ -66,6 +69,13 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      # Only set when generation is enabled; the generated reports leave this job only on private repositories
+      private: ${{ steps.repo-visibility.outputs.private }}
+      runGeneratedReportTests: ${{ env.RunGeneratedReportTests }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -73,7 +83,6 @@ jobs:
           # Full history (not the default shallow clone) so the Privilege History feature can
           # walk every commit that changed PrivilegedEAM/ via New-EntraOpsPrivilegedEamPrivilegeHistoryData.
           fetch-depth: 0
-          # Releases use gh with GH_TOKEN: no write token in .git/config while npm and Playwright run
           persist-credentials: false
 
       # Also checked out for the EAM Dashboard and Access Path Map generators: they resolve the
@@ -126,26 +135,10 @@ jobs:
           inlineScript: ./.github/scripts/Invoke-EntraOpsGitHubReportingGeneration.ps1
           azPSVersion: latest
 
-      - name: Set up Node for generated report tests
-        if: env.ApplyAutomatedReportingGeneration == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-      - name: Install report test dependencies
-        if: env.ApplyAutomatedReportingGeneration == 'true'
-        run: npm ci
-      - name: Install Chromium for generated report tests
-        if: env.ApplyAutomatedReportingGeneration == 'true'
-        run: npx playwright install --with-deps chromium
-      - name: Test generated reports before publication
-        if: env.ApplyAutomatedReportingGeneration == 'true'
-        run: npm run test:reports
-
       # Artifacts and releases on a public repository are downloadable by anyone, and the generated
-      # reports contain tenant data (object IDs, UPNs, role assignments). Publishing is therefore
-      # gated on the repository being private. Checked via API instead of github.event.repository
-      # because the schedule trigger has no repository payload.
+      # reports contain tenant data (object IDs, UPNs, role assignments). Passing them to the test and
+      # publishing jobs is therefore gated on the repository being private. Checked via API instead of
+      # github.event.repository because the schedule trigger has no repository payload.
       - name: Check repository visibility
         id: repo-visibility
         if: env.ApplyAutomatedReportingGeneration == 'true'
@@ -154,8 +147,74 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./.github/scripts/Get-EntraOpsGitHubRepositoryVisibility.ps1 | Out-Host
 
-      - name: Upload EntraOps Reporting artifact
+      - name: Hand over generated reports
         if: env.ApplyAutomatedReportingGeneration == 'true' && steps.repo-visibility.outputs.private == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: EntraOps-Reporting-Untested
+          path: |
+            Reports/**
+            !Reports/**/*.spec.mjs
+          retention-days: 1
+          if-no-files-found: error
+
+  Test-EntraOpsPrivilegedReporting:
+    needs: Push-EntraOpsPrivilegedReporting
+    if: needs.Push-EntraOpsPrivilegedReporting.outputs.private == 'true' && needs.Push-EntraOpsPrivilegedReporting.outputs.runGeneratedReportTests == 'true'
+    runs-on: ubuntu-latest
+    # No OIDC token and no write access while third-party npm packages and the browser download run
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download generated reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: EntraOps-Reporting-Untested
+          path: Reports
+
+      - name: Set up Node for generated report tests
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install report test dependencies
+        run: npm ci
+      - name: Install Chromium for generated report tests
+        run: npx playwright install --with-deps chromium
+      - name: Test generated reports before publication
+        run: npm run test:reports
+
+  Publish-EntraOpsPrivilegedReporting:
+    needs: [Push-EntraOpsPrivilegedReporting, Test-EntraOpsPrivilegedReporting]
+    if: >-
+      !cancelled() &&
+      needs.Push-EntraOpsPrivilegedReporting.result == 'success' &&
+      needs.Push-EntraOpsPrivilegedReporting.outputs.private == 'true' &&
+      (needs.Test-EntraOpsPrivilegedReporting.result == 'success' ||
+      (needs.Push-EntraOpsPrivilegedReporting.outputs.runGeneratedReportTests != 'true' &&
+      needs.Test-EntraOpsPrivilegedReporting.result == 'skipped'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The release script resolves the target commit with git and runs from .github/scripts
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download generated reports for publication
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: EntraOps-Reporting-Untested
+          path: Reports
+
+      - name: Upload EntraOps Reporting artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: EntraOps-Reporting
@@ -166,7 +225,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Publish and prune EntraOps Reporting releases
-        if: env.ApplyAutomatedReportingGeneration == 'true' && env.PublishReportsAsRelease == 'true' && steps.repo-visibility.outputs.private == 'true'
+        if: env.PublishReportsAsRelease == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
