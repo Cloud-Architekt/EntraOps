@@ -92,7 +92,7 @@
       (everything after its first "-"), e.g. "Legacy 1 - Block legacy auth.json". Human-readable, but
       the file is effectively renamed/re-created if the resource's displayName changes.
     - "ResourceId": the file is named after the resource's underlying Id (typically a GUID), e.g.
-      "e9f699a0-fb3f-48da-84c6-6351163b2109.json". Stable across renames, so Git history tracks
+      "33333333-3333-3333-3333-333333333333.json". Stable across renames, so Git history tracks
       changes to the same resource as diffs to the same file instead of a rename. Falls back to
       DisplayName-based naming for resource types that don't expose an Id.
 

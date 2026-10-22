@@ -7,7 +7,7 @@
 .DESCRIPTION
     Helps troubleshoot runs of Save-EntraOpsTenantGovernanceSnapshotJson that reported a
     'partiallySuccessful' (or 'failed') snapshot job, e.g.:
-      WARNING: Snapshot job 224f12bf-0057-4817-916b-71a297abada1 completed as 'partiallySuccessful' -
+      WARNING: Snapshot job 22222222-2222-2222-2222-222222222222 completed as 'partiallySuccessful' -
       one or more resource types may have failed to capture. Check the snapshot job details in the
       Microsoft Entra admin center for more information.
 
@@ -63,7 +63,7 @@
 
 .EXAMPLE
     Analyze the snapshot job referenced in a 'partiallySuccessful' warning message.
-    Get-EntraOpsTenantGovernanceSnapshotReport -SnapshotJobId "224f12bf-0057-4817-916b-71a297abada1"
+    Get-EntraOpsTenantGovernanceSnapshotReport -SnapshotJobId "22222222-2222-2222-2222-222222222222"
 
 .EXAMPLE
     Check the 10 most recent snapshot jobs and compare them against the local snapshot folder.

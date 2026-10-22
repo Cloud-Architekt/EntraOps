@@ -73,7 +73,7 @@
 
 .EXAMPLE
     Return objects holding high-privileged Azure RBAC roles on specific management group or subscription scopes queried via Azure Resource Graph.
-    Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource "PrivilegedRolesFromAzGraph" -AzureHighPrivilegedRoles ("Owner", "Role Based Access Control Administrator", "User Access Administrator") -AzureHighPrivilegedScopes ("/", "/providers/microsoft.management/managementgroups/8693dc7e-63c1-47ab-a7ee-acfe488bf52a")
+    Get-EntraOpsClassificationControlPlaneObjects -PrivilegedObjectClassificationSource "PrivilegedRolesFromAzGraph" -AzureHighPrivilegedRoles ("Owner", "Role Based Access Control Administrator", "User Access Administrator") -AzureHighPrivilegedScopes ("/", "/providers/microsoft.management/managementgroups/11111111-1111-1111-1111-111111111111")
 
 .EXAMPLE
     Return a merged and deduplicated list of Control Plane objects from all supported classification sources.
