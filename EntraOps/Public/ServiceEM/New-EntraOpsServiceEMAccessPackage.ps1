@@ -57,8 +57,7 @@ function New-EntraOpsServiceEMAccessPackage {
             # -ThrowOnFailure: a failed lookup must not look like "no access packages" and re-create existing ones
             [object[]]$ServiceAccessPackages = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $accessPackageUri -OutputType PSObject -DisableCache -ThrowOnFailure)
         } catch {
-            Write-Verbose "$logPrefix Failed to find Access Packages"
-            Write-Error $_
+            throw "$logPrefix Failed to look up the access packages of catalog ${ServiceCatalogId}; no access package was created: $($_.Exception.Message)"
         }
     }
 

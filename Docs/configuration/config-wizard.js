@@ -293,6 +293,8 @@
 
             ApplyAutomatedReportingGeneration: false,
             PublishReportsAsRelease: false,
+            RunGeneratedReportTests: false,
+            UploadReportTestDiagnostics: false,
             ReportingReleasesToKeep: 10,
             GenerateClassificationExplorer: true,
             GenerateTierBreachAnalyzer: true,
@@ -626,6 +628,8 @@
                     fields: [
                         { key: "ApplyAutomatedReportingGeneration", label: "Apply automated reporting generation", type: "checkbox", default: false, usedIn: "Push-EntraOpsPrivilegedReporting workflow" },
                         { key: "PublishReportsAsRelease", label: "Publish reports as private GitHub Releases", type: "checkbox", default: false, help: "Off by default. Each release contains a full tenant-data snapshot and remains available until pruned. Workflow artifacts are still retained for 30 days when reporting generation is enabled." },
+                        { key: "RunGeneratedReportTests", label: "Test generated reports before publishing", type: "checkbox", default: false, help: "Off by default. Runs the browser smoke tests against the generated reports in a separate job without the workload identity and publishes the report artifact (and GitHub Release) only after they pass." },
+                        { key: "UploadReportTestDiagnostics", label: "Upload diagnostics of failed report tests", type: "checkbox", default: false, help: "Off by default. Used only with report tests: uploads the Playwright traces of failed tests as a 1-day artifact (EntraOps-Reporting-TestDiagnostics). The traces contain tenant report data." },
                         { key: "ReportingReleasesToKeep", label: "Reporting releases to keep", type: "number", default: 10, min: 1, max: 1000, help: "Used only when release publishing is enabled. The workflow deletes older reporting-* releases and their tags. Leave empty to disable pruning; otherwise use a value from 1 to 1000. A value of 0 is rejected so the newly published release cannot be deleted." },
                         { key: "GenerateClassificationExplorer", label: "Generate Classification Explorer", type: "checkbox", default: true },
                         { key: "GenerateTierBreachAnalyzer", label: "Generate Tier Breach Analyzer", type: "checkbox", default: true },
@@ -1590,6 +1594,8 @@
             AutomatedReportingGeneration: {
                 ApplyAutomatedReportingGeneration: state.ApplyAutomatedReportingGeneration,
                 PublishReportsAsRelease: state.PublishReportsAsRelease,
+                RunGeneratedReportTests: state.RunGeneratedReportTests,
+                UploadReportTestDiagnostics: state.UploadReportTestDiagnostics,
                 ReportingReleasesToKeep: state.ReportingReleasesToKeep === "" ? "" : (Number(state.ReportingReleasesToKeep) >= 1 ? Math.round(Number(state.ReportingReleasesToKeep)) : 10),
                 GenerateClassificationExplorer: state.GenerateClassificationExplorer,
                 GenerateTierBreachAnalyzer: state.GenerateTierBreachAnalyzer,
@@ -1889,6 +1895,8 @@
         var reporting = cfg.AutomatedReportingGeneration || pick(cfg, "AutomatedRmauAssignmentsForUnprotectedObjects.AutomatedReportingGeneration", {});
         state.ApplyAutomatedReportingGeneration = reporting.ApplyAutomatedReportingGeneration !== undefined ? reporting.ApplyAutomatedReportingGeneration : state.ApplyAutomatedReportingGeneration;
         state.PublishReportsAsRelease = reporting.PublishReportsAsRelease !== undefined ? reporting.PublishReportsAsRelease : state.PublishReportsAsRelease;
+        state.RunGeneratedReportTests = reporting.RunGeneratedReportTests !== undefined ? reporting.RunGeneratedReportTests : state.RunGeneratedReportTests;
+        state.UploadReportTestDiagnostics = reporting.UploadReportTestDiagnostics !== undefined ? reporting.UploadReportTestDiagnostics : state.UploadReportTestDiagnostics;
         state.ReportingReleasesToKeep = reporting.ReportingReleasesToKeep !== undefined ? reporting.ReportingReleasesToKeep : state.ReportingReleasesToKeep;
         state.GenerateClassificationExplorer = reporting.GenerateClassificationExplorer !== undefined ? reporting.GenerateClassificationExplorer : state.GenerateClassificationExplorer;
         state.GenerateTierBreachAnalyzer = reporting.GenerateTierBreachAnalyzer !== undefined ? reporting.GenerateTierBreachAnalyzer : state.GenerateTierBreachAnalyzer;

@@ -19,7 +19,6 @@ env:
   GenerateConfigurationAnalyzer: true
   GenerateAccessPackageFlow: true
   AllowPartialTenantGovernanceSnapshot: true
-  PublishReportsAsRelease: false
   # Number of reporting-* releases to keep. Each release contains a full tenant snapshot
   # (object IDs, UPNs, role assignments), so unpruned releases accumulate tenant data
   # indefinitely with only repository visibility as a control. Set to '' to disable pruning.
@@ -42,6 +41,15 @@ on:
         required: false
         type: boolean
         default: true
+      runGeneratedReportTests:
+        description: "Test the generated reports before publishing them (Configured uses AutomatedReportingGeneration.RunGeneratedReportTests)"
+        required: false
+        type: choice
+        default: Configured
+        options:
+          - Configured
+          - "true"
+          - "false"
   # Allows to run this workflow automatically after the completion of pull pipeline
   workflow_run:
     workflows: [Pull-EntraOpsPrivilegedEAM]
@@ -51,9 +59,12 @@ on:
   # WorkflowTrigger.PushReportingScheduledCron. Shipping a placeholder cron would make
   # GitHub reject this workflow file before the repository is configured.
 
+# Each job requests only what it needs: the OIDC token stays in the generation job, third-party
+# npm packages and the Playwright browser download run in a read-only job, the tested artifact is
+# published by a read-only job, contents: write is granted only to the release job, and
+# actions: write only to the job that deletes the untested hand-over artifact.
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: entraops-reporting
@@ -66,6 +77,16 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      # Only set when generation is enabled; the generated reports leave this job only on private repositories
+      private: ${{ steps.repo-visibility.outputs.private }}
+      runGeneratedReportTests: ${{ steps.automation-settings.outputs.runGeneratedReportTests }}
+      publishReportsAsRelease: ${{ steps.automation-settings.outputs.publishReportsAsRelease }}
+      uploadReportTestDiagnostics: ${{ steps.automation-settings.outputs.uploadReportTestDiagnostics }}
+      reportsDigest: ${{ steps.stage-reports.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -73,7 +94,6 @@ jobs:
           # Full history (not the default shallow clone) so the Privilege History feature can
           # walk every commit that changed PrivilegedEAM/ via New-EntraOpsPrivilegedEamPrivilegeHistoryData.
           fetch-depth: 0
-          # Releases use gh with GH_TOKEN: no write token in .git/config while npm and Playwright run
           persist-credentials: false
 
       # Also checked out for the EAM Dashboard and Access Path Map generators: they resolve the
@@ -126,26 +146,10 @@ jobs:
           inlineScript: ./.github/scripts/Invoke-EntraOpsGitHubReportingGeneration.ps1
           azPSVersion: latest
 
-      - name: Set up Node for generated report tests
-        if: env.ApplyAutomatedReportingGeneration == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-      - name: Install report test dependencies
-        if: env.ApplyAutomatedReportingGeneration == 'true'
-        run: npm ci
-      - name: Install Chromium for generated report tests
-        if: env.ApplyAutomatedReportingGeneration == 'true'
-        run: npx playwright install --with-deps chromium
-      - name: Test generated reports before publication
-        if: env.ApplyAutomatedReportingGeneration == 'true'
-        run: npm run test:reports
-
       # Artifacts and releases on a public repository are downloadable by anyone, and the generated
-      # reports contain tenant data (object IDs, UPNs, role assignments). Publishing is therefore
-      # gated on the repository being private. Checked via API instead of github.event.repository
-      # because the schedule trigger has no repository payload.
+      # reports contain tenant data (object IDs, UPNs, role assignments). Passing them to the test and
+      # publishing jobs is therefore gated on the repository being private. Checked via API instead of
+      # github.event.repository because the schedule trigger has no repository payload.
       - name: Check repository visibility
         id: repo-visibility
         if: env.ApplyAutomatedReportingGeneration == 'true'
@@ -154,20 +158,234 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./.github/scripts/Get-EntraOpsGitHubRepositoryVisibility.ps1 | Out-Host
 
-      - name: Upload EntraOps Reporting artifact
+      # Read at runtime so the job gates follow EntraOpsConfig.json without re-materializing this workflow.
+      - name: Read reporting automation settings
+        id: automation-settings
+        if: env.ApplyAutomatedReportingGeneration == 'true'
+        shell: pwsh
+        env:
+          ManualRunGeneratedReportTests: ${{ inputs.runGeneratedReportTests }}
+        run: |
+          $Settings = (Get-Content -LiteralPath $env:ConfigFile -Raw | ConvertFrom-Json -Depth 20).AutomatedReportingGeneration
+          $RunTests = $Settings.RunGeneratedReportTests -eq $true
+          if ($env:ManualRunGeneratedReportTests -in @('true', 'false')) { $RunTests = $env:ManualRunGeneratedReportTests -eq 'true' }
+          "runGeneratedReportTests=$($RunTests.ToString().ToLowerInvariant())" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "publishReportsAsRelease=$(($Settings.PublishReportsAsRelease -eq $true).ToString().ToLowerInvariant())" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "uploadReportTestDiagnostics=$(($Settings.UploadReportTestDiagnostics -eq $true).ToString().ToLowerInvariant())" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # The staged bundle is exactly what the artifacts contain, so later jobs can verify its content digest.
+      - name: Stage generated reports
+        id: stage-reports
         if: env.ApplyAutomatedReportingGeneration == 'true' && steps.repo-visibility.outputs.private == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        shell: pwsh
+        env:
+          RunGeneratedReportTests: ${{ steps.automation-settings.outputs.runGeneratedReportTests }}
+        run: |
+          $Staging = Join-Path $env:RUNNER_TEMP 'EntraOps-Reporting'
+          Copy-Item -LiteralPath ./Reports -Destination $Staging -Recurse
+          Get-ChildItem -LiteralPath $Staging -Filter '*.spec.mjs' -Recurse -Force | Remove-Item
+          $Digest = ./.github/scripts/Get-EntraOpsReportDigest.ps1 -Path $Staging
+          "digest=$Digest" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $State = if ($env:RunGeneratedReportTests -eq 'true') { 'enabled: `EntraOps-Reporting` is published only after the report tests pass' } else { 'disabled: `EntraOps-Reporting` is published untested' }
+          "### EntraOps Reporting`n`n- Report tests $State`n- Report bundle digest: ``$Digest``" | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload EntraOps Reporting artifact
+        if: steps.stage-reports.outcome == 'success' && steps.automation-settings.outputs.runGeneratedReportTests != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: EntraOps-Reporting
-          path: |
-            Reports/**
-            !Reports/**/*.spec.mjs
+          path: ${{ runner.temp }}/EntraOps-Reporting
+          include-hidden-files: true
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: error
+
+      # With opted-in tests, the reports reach the isolated test job through a short-lived hand-over
+      # artifact; the 30-day EntraOps-Reporting artifact is only created after the tests pass.
+      - name: Hand over untested reports
+        if: steps.stage-reports.outcome == 'success' && steps.automation-settings.outputs.runGeneratedReportTests == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: EntraOps-Reporting-Untested
+          path: ${{ runner.temp }}/EntraOps-Reporting
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
+
+  Test-EntraOpsPrivilegedReporting:
+    needs: Push-EntraOpsPrivilegedReporting
+    if: needs.Push-EntraOpsPrivilegedReporting.outputs.private == 'true' && needs.Push-EntraOpsPrivilegedReporting.outputs.runGeneratedReportTests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      ENTRAOPS_REPORT_TEST_TRACE: ${{ needs.Push-EntraOpsPrivilegedReporting.outputs.uploadReportTestDiagnostics }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download untested reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: EntraOps-Reporting-Untested
+          path: Reports
+          digest-mismatch: error
+
+      # No dependency cache: a cache saved by this job could carry changes made by the installed packages
+      # into later workflows on the same branch.
+      - name: Set up Node for generated report tests
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Install report test dependencies
+        run: npm ci --ignore-scripts
+      - name: Install Chromium for generated report tests
+        run: npx playwright install --with-deps chromium
+      - name: Test generated reports
+        run: npm run test:reports
+
+      # Traces contain tenant data; uploaded only when UploadReportTestDiagnostics is enabled.
+      - name: Upload report test diagnostics
+        if: failure() && needs.Push-EntraOpsPrivilegedReporting.outputs.uploadReportTestDiagnostics == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: EntraOps-Reporting-TestDiagnostics
+          path: test-results
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - name: Report test failure
+        if: failure()
+        shell: pwsh
+        run: |
+          "### EntraOps Reporting`n`n- Report tests failed: neither ``EntraOps-Reporting`` nor a release is published for this run." | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  # Read-only: publishes the tested artifact from the hand-over after verifying its content digest.
+  Publish-EntraOpsPrivilegedReporting:
+    needs: [Push-EntraOpsPrivilegedReporting, Test-EntraOpsPrivilegedReporting]
+    if: >-
+      !cancelled() &&
+      needs.Push-EntraOpsPrivilegedReporting.result == 'success' &&
+      needs.Push-EntraOpsPrivilegedReporting.outputs.private == 'true' &&
+      needs.Push-EntraOpsPrivilegedReporting.outputs.runGeneratedReportTests == 'true' &&
+      needs.Test-EntraOpsPrivilegedReporting.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout digest script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Download tested reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: EntraOps-Reporting-Untested
+          path: ${{ runner.temp }}/EntraOps-Reporting
+          digest-mismatch: error
+
+      - name: Verify report bundle digest
+        shell: pwsh
+        env:
+          ExpectedDigest: ${{ needs.Push-EntraOpsPrivilegedReporting.outputs.reportsDigest }}
+        run: |
+          $Digest = ./.github/scripts/Get-EntraOpsReportDigest.ps1 -Path (Join-Path $env:RUNNER_TEMP 'EntraOps-Reporting')
+          if ([string]::IsNullOrWhiteSpace($env:ExpectedDigest) -or $Digest -ne $env:ExpectedDigest) {
+            throw "Report bundle digest '$Digest' does not match the generated bundle '$env:ExpectedDigest'."
+          }
+
+      - name: Upload tested EntraOps Reporting artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: EntraOps-Reporting
+          path: ${{ runner.temp }}/EntraOps-Reporting
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Report published artifact
+        shell: pwsh
+        run: |
+          "- Report tests passed: tested ``EntraOps-Reporting`` artifact published." | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  Release-EntraOpsPrivilegedReporting:
+    needs:
+      [
+        Push-EntraOpsPrivilegedReporting,
+        Test-EntraOpsPrivilegedReporting,
+        Publish-EntraOpsPrivilegedReporting,
+      ]
+    # Releases the final EntraOps-Reporting artifact: after passed opted-in tests, or directly when tests are off.
+    if: >-
+      !cancelled() &&
+      needs.Push-EntraOpsPrivilegedReporting.result == 'success' &&
+      needs.Push-EntraOpsPrivilegedReporting.outputs.private == 'true' &&
+      needs.Push-EntraOpsPrivilegedReporting.outputs.publishReportsAsRelease == 'true' &&
+      ((needs.Push-EntraOpsPrivilegedReporting.outputs.runGeneratedReportTests == 'true' &&
+      needs.Publish-EntraOpsPrivilegedReporting.result == 'success') ||
+      (needs.Push-EntraOpsPrivilegedReporting.outputs.runGeneratedReportTests != 'true' &&
+      needs.Test-EntraOpsPrivilegedReporting.result == 'skipped'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The release script resolves the target commit with git and runs from .github/scripts.
+      # Sparse, so ./Reports holds only the downloaded bundle and not the tracked *.spec.mjs files.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Download reports for release
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: EntraOps-Reporting
+          path: Reports
+          digest-mismatch: error
+
+      - name: Verify report bundle digest
+        shell: pwsh
+        env:
+          ExpectedDigest: ${{ needs.Push-EntraOpsPrivilegedReporting.outputs.reportsDigest }}
+        run: |
+          $Digest = ./.github/scripts/Get-EntraOpsReportDigest.ps1 -Path ./Reports
+          if ([string]::IsNullOrWhiteSpace($env:ExpectedDigest) -or $Digest -ne $env:ExpectedDigest) {
+            throw "Report bundle digest '$Digest' does not match the generated bundle '$env:ExpectedDigest'."
+          }
 
       - name: Publish and prune EntraOps Reporting releases
-        if: env.ApplyAutomatedReportingGeneration == 'true' && env.PublishReportsAsRelease == 'true' && steps.repo-visibility.outputs.private == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./.github/scripts/Publish-EntraOpsGitHubReportingRelease.ps1 -ReleasesToKeep ${env:ReportingReleasesToKeep}
+
+  # Deletes the untested hand-over artifact once it is no longer needed, also after failed or cancelled runs.
+  Remove-EntraOpsReportingHandover:
+    needs:
+      [
+        Push-EntraOpsPrivilegedReporting,
+        Test-EntraOpsPrivilegedReporting,
+        Publish-EntraOpsPrivilegedReporting,
+      ]
+    if: always() && needs.Push-EntraOpsPrivilegedReporting.outputs.runGeneratedReportTests == 'true' && needs.Push-EntraOpsPrivilegedReporting.outputs.private == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete untested hand-over artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $Ids = @(gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/artifacts?per_page=100" --jq '.artifacts[] | select(.name == "EntraOps-Reporting-Untested") | .id')
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list the artifacts of this run.' }
+          foreach ($Id in $Ids | Where-Object { $_ }) {
+            gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$Id" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not delete hand-over artifact $Id." }
+            Write-Host "Deleted untested hand-over artifact $Id."
+          }

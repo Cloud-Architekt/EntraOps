@@ -18,8 +18,8 @@ BeforeAll {
         $Separator = [array]::IndexOf($Arguments, '--')
         $Pathspecs = @(if ($Separator -ge 0) { $Arguments[($Separator + 1)..($Arguments.Count - 1)] | ForEach-Object { "$_" -replace '^\./', '' } })
         $Files = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Force | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') } |
-                Where-Object { $_ -notmatch '^\.git(/|$)' } |
-                Where-Object { $File = $_; $Pathspecs.Count -eq 0 -or @($Pathspecs | Where-Object { $File -eq $_ -or $File.StartsWith("$_/") }).Count -gt 0 })
+            Where-Object { $_ -notmatch '^\.git(/|$)' } |
+            Where-Object { $File = $_; $Pathspecs.Count -eq 0 -or @($Pathspecs | Where-Object { $File -eq $_ -or $File.StartsWith("$_/") }).Count -gt 0 })
         (@($Files | ForEach-Object { "100644 0000000000000000000000000000000000000000 0`t$_" }) -join [char]0) + [char]0
     }
 
@@ -259,7 +259,7 @@ Describe 'Update-EntraOps update scope' {
         }
 
         { Test-EntraOpsUpdateContract -CandidateRoot $CandidateRoot -Repository 'Cloud-Architekt/EntraOps' -TargetUpdateFolders @('./EntraOps') } |
-            Should -Throw '*export-ignore or export-subst*EntraOps/.gitattributes*'
+        Should -Throw '*export-ignore or export-subst*EntraOps/.gitattributes*'
     }
 
     It 'rejects archive attributes in a path that git quotes' {
@@ -267,13 +267,13 @@ Describe 'Update-EntraOps update scope' {
         $CandidateRoot = Join-Path $TestDrive 'quoted-gitattributes'
         $Contract = @{ SchemaVersion = 1; Product = 'EntraOps'; DistributionRepositories = @{ 'Cloud-Architekt/EntraOps' = @{ RequiresPersonalAccessToken = $false } }; SupportedUpdateTargets = @('./EntraOps'); RequiredValidationPaths = @() } | ConvertTo-Json -Depth 5
         $null = New-TestGitCandidate -Path $CandidateRoot -TrackedFiles @{
-            'EntraOpsUpdateContract.json'           = $Contract
-            "EntraOps/$([char]0x00E4)/.gitattributes" = 'Unvalidated.ps1 export-ignore'
+            'EntraOpsUpdateContract.json'              = $Contract
+            "EntraOps/$([char]0x00E4)/.gitattributes"  = 'Unvalidated.ps1 export-ignore'
             "EntraOps/$([char]0x00E4)/Unvalidated.ps1" = '# not in the validated archive'
         }
 
         { Test-EntraOpsUpdateContract -CandidateRoot $CandidateRoot -Repository 'Cloud-Architekt/EntraOps' -TargetUpdateFolders @('./EntraOps') } |
-            Should -Throw "*export-ignore or export-subst*EntraOps/$([char]0x00E4)/.gitattributes*"
+        Should -Throw "*export-ignore or export-subst*EntraOps/$([char]0x00E4)/.gitattributes*"
     }
 
     It 'rejects a candidate with a symbolic link' -Skip:$IsWindows {
@@ -287,7 +287,7 @@ Describe 'Update-EntraOps update scope' {
         New-Item -ItemType SymbolicLink -Path (Join-Path $CandidateRoot 'EntraOps/secret.json') -Target $LinkTarget | Out-Null
 
         { Test-EntraOpsUpdateContract -CandidateRoot $CandidateRoot -Repository 'Cloud-Architekt/EntraOps' -TargetUpdateFolders @('./EntraOps') } |
-            Should -Throw '*symbolic link(s)*secret.json*'
+        Should -Throw '*symbolic link(s)*secret.json*'
     }
 
     It 'never clones into and removes an existing temporary update folder' {
@@ -297,7 +297,7 @@ Describe 'Update-EntraOps update scope' {
         Mock git { $global:LASTEXITCODE = 0 }
 
         { Update-EntraOps -UpstreamUrl 'https://git.example.invalid/EntraOps.git' -Branch 'v1.1.0' -ConfigFile (Join-Path $TestDrive 'no-config.json') -TemporaryUpdateFolder $ExistingFolder -WarningAction SilentlyContinue } |
-            Should -Throw '*already exists*'
+        Should -Throw '*already exists*'
         Test-Path -LiteralPath (Join-Path $ExistingFolder 'keep.txt') | Should -BeTrue
         Should -Invoke git -Times 0 -Exactly
     }
@@ -1129,15 +1129,185 @@ Describe 'Deployment browser validation' {
         $BrowserJob | Should -Match 'npm run test:browser'
     }
 
-    It 'tests generated reports before artifacts are uploaded' {
+    It 'runs generated report browser validation' {
         $Workflow = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/workflows/Push-EntraOpsPrivilegedReporting.yaml') -Raw
 
-        $Workflow.IndexOf('Test generated reports before publication') | Should -BeLessThan $Workflow.IndexOf('Upload EntraOps Reporting artifact')
         $Workflow | Should -Match 'npm run test:reports'
         if ($Workflow -match 'Preserve report test diagnostics') {
             $Workflow | Should -Match "failure\(\).*steps\.repo-visibility\.outputs\.private == 'true'"
             $Workflow.IndexOf('Check repository visibility') | Should -BeLessThan $Workflow.IndexOf('Preserve report test diagnostics')
         }
+    }
+
+    It 'publishes the report artifact and releases only after opted-in tests pass' -Skip:(-not $IsDistributionRepository -or -not (Get-Module -ListAvailable -Name powershell-yaml)) {
+        Import-Module powershell-yaml -ErrorAction Stop
+        $Workflow = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/workflows/Push-EntraOpsPrivilegedReporting.yaml') -Raw
+        $Jobs = ($Workflow | ConvertFrom-Yaml).jobs
+        $Generation = $Jobs['Push-EntraOpsPrivilegedReporting']
+        $TestJob = $Jobs['Test-EntraOpsPrivilegedReporting']
+        $PublishJob = $Jobs['Publish-EntraOpsPrivilegedReporting']
+        $ReleaseJob = $Jobs['Release-EntraOpsPrivilegedReporting']
+        $CleanupJob = $Jobs['Remove-EntraOpsReportingHandover']
+        $Needs = 'needs.Push-EntraOpsPrivilegedReporting'
+        function Get-Uploads ($Job) { @($Job.steps | Where-Object { "$($_.uses)" -like 'actions/upload-artifact@*' }) }
+        function Get-Downloads ($Job) { @($Job.steps | Where-Object { "$($_.uses)" -like 'actions/download-artifact@*' }) }
+
+        $Workflow | Should -Not -Match '(?m)^  (RunGeneratedReportTests|PublishReportsAsRelease|UploadReportTestDiagnostics):'
+        $Workflow | Should -Not -Match 'env\.PublishReportsAsRelease'
+        $Generation.outputs.reportsDigest | Should -Be '${{ steps.stage-reports.outputs.digest }}'
+
+        # Generation stages the exact bundle, records its digest and uploads either the final artifact or the 1-day hand-over.
+        $Stage = $Generation.steps | Where-Object { $_.id -eq 'stage-reports' }
+        $Stage.if | Should -Be "env.ApplyAutomatedReportingGeneration == 'true' && steps.repo-visibility.outputs.private == 'true'"
+        $Stage.run | Should -Match 'Get-EntraOpsReportDigest\.ps1'
+        $Uploads = Get-Uploads $Generation
+        $Uploads.Count | Should -Be 2
+        foreach ($Upload in $Uploads) {
+            $Upload.with.path | Should -Be '${{ runner.temp }}/EntraOps-Reporting'
+            $Upload.with['include-hidden-files'] | Should -BeTrue
+        }
+        $Final = $Uploads | Where-Object { $_.with.name -eq 'EntraOps-Reporting' }
+        $Final.if | Should -Be "steps.stage-reports.outcome == 'success' && steps.automation-settings.outputs.runGeneratedReportTests != 'true'"
+        $Final.with['retention-days'] | Should -Be 30
+        $Handover = $Uploads | Where-Object { $_.with.name -eq 'EntraOps-Reporting-Untested' }
+        $Handover.if | Should -Be "steps.stage-reports.outcome == 'success' && steps.automation-settings.outputs.runGeneratedReportTests == 'true'"
+        $Handover.with['retention-days'] | Should -Be 1
+
+        # The test job runs third-party packages: read-only, no install scripts, no dependency cache, bounded runtime.
+        $TestJob.if | Should -Be "$Needs.outputs.private == 'true' && $Needs.outputs.runGeneratedReportTests == 'true'"
+        $TestJob.permissions.Keys | Should -Be @('contents')
+        $TestJob.permissions.contents | Should -Be 'read'
+        $TestJob['timeout-minutes'] | Should -Be 30
+        (Get-Downloads $TestJob).with.name | Should -Be 'EntraOps-Reporting-Untested'
+        (Get-Downloads $TestJob).with['digest-mismatch'] | Should -Be 'error'
+        @($TestJob.steps.run) | Should -Contain 'npm ci --ignore-scripts'
+        ($TestJob.steps | Where-Object { "$($_.uses)" -like 'actions/setup-node@*' }).with.Contains('cache') | Should -BeFalse
+        $Diagnostics = @(Get-Uploads $TestJob)
+        $Diagnostics.Count | Should -Be 1
+        $Diagnostics[0].with.name | Should -Be 'EntraOps-Reporting-TestDiagnostics'
+        $Diagnostics[0].if | Should -Be "failure() && $Needs.outputs.uploadReportTestDiagnostics == 'true'"
+        $Diagnostics[0].with['retention-days'] | Should -Be 1
+        $TestJob.env.ENTRAOPS_REPORT_TEST_TRACE | Should -Be "`${{ $Needs.outputs.uploadReportTestDiagnostics }}"
+
+        # The tested artifact is published read-only from the verified hand-over.
+        $PublishJob.permissions.Keys | Should -Be @('contents')
+        $PublishJob.permissions.contents | Should -Be 'read'
+        ($PublishJob.if -replace '\s+', ' ') | Should -Be "!cancelled() && $Needs.result == 'success' && $Needs.outputs.private == 'true' && $Needs.outputs.runGeneratedReportTests == 'true' && needs.Test-EntraOpsPrivilegedReporting.result == 'success'"
+        (Get-Downloads $PublishJob).with.name | Should -Be 'EntraOps-Reporting-Untested'
+        ($PublishJob.steps | Where-Object { "$($_.run)" -match 'Get-EntraOpsReportDigest' }).env.ExpectedDigest | Should -Be "`${{ $Needs.outputs.reportsDigest }}"
+        (Get-Uploads $PublishJob).with.name | Should -Be 'EntraOps-Reporting'
+        [array]::IndexOf(@($PublishJob.steps.name), 'Verify report bundle digest') | Should -BeLessThan ([array]::IndexOf(@($PublishJob.steps.name), 'Upload tested EntraOps Reporting artifact'))
+
+        # Only the release job can write repository contents, and it releases the verified final artifact.
+        $ReleaseJob.permissions.contents | Should -Be 'write'
+        $ReleaseCondition = $ReleaseJob.if -replace '\s+', ' '
+        $ReleaseCondition | Should -Match ([regex]::Escape("$Needs.outputs.publishReportsAsRelease == 'true'"))
+        $ReleaseCondition | Should -Match ([regex]::Escape("($Needs.outputs.runGeneratedReportTests == 'true' && needs.Publish-EntraOpsPrivilegedReporting.result == 'success')"))
+        $ReleaseCondition | Should -Match ([regex]::Escape("($Needs.outputs.runGeneratedReportTests != 'true' && needs.Test-EntraOpsPrivilegedReporting.result == 'skipped')"))
+        (Get-Downloads $ReleaseJob).with.name | Should -Be 'EntraOps-Reporting'
+        ($ReleaseJob.steps | Where-Object { "$($_.run)" -match 'Get-EntraOpsReportDigest' }) | Should -Not -BeNullOrEmpty
+        @(Get-Uploads $ReleaseJob).Count | Should -Be 0
+        foreach ($Job in $Generation, $TestJob, $PublishJob, $CleanupJob) {
+            "$($Job.permissions.contents)" | Should -Not -Be 'write'
+        }
+
+        # The hand-over is deleted after every run that created it, including failed and cancelled ones.
+        $CleanupJob.if | Should -Be "always() && $Needs.outputs.runGeneratedReportTests == 'true' && $Needs.outputs.private == 'true'"
+        $CleanupJob.permissions.Keys | Should -Be @('actions')
+        $CleanupJob.permissions.actions | Should -Be 'write'
+        @($CleanupJob.needs) | Should -Contain 'Publish-EntraOpsPrivilegedReporting'
+        $CleanupJob.steps[0].run | Should -Match 'select\(\.name == "EntraOps-Reporting-Untested"\)'
+        $CleanupJob.steps[0].run | Should -Match '--method DELETE'
+    }
+
+    It 'reads report job switches from the config at runtime (<Setting>, manual <Manual>)' -Skip:(-not $IsDistributionRepository -or -not (Get-Module -ListAvailable -Name powershell-yaml)) -ForEach @(
+        @{ Setting = 'missing'; Manual = ''; Expected = 'false'; ExpectedTests = 'false' }
+        @{ Setting = 'false'; Manual = 'Configured'; Expected = 'false'; ExpectedTests = 'false' }
+        @{ Setting = 'true'; Manual = ''; Expected = 'true'; ExpectedTests = 'true' }
+        @{ Setting = 'false'; Manual = 'true'; Expected = 'false'; ExpectedTests = 'true' }
+        @{ Setting = 'true'; Manual = 'false'; Expected = 'true'; ExpectedTests = 'false' }
+    ) {
+        Import-Module powershell-yaml -ErrorAction Stop
+        $Workflow = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/workflows/Push-EntraOpsPrivilegedReporting.yaml') -Raw | ConvertFrom-Yaml
+        $Workflow.on.workflow_dispatch.inputs.runGeneratedReportTests.options | Should -Be @('Configured', 'true', 'false')
+        $Step = $Workflow.jobs['Push-EntraOpsPrivilegedReporting'].steps | Where-Object { $_.id -eq 'automation-settings' }
+        $Step.if | Should -Be "env.ApplyAutomatedReportingGeneration == 'true'"
+        $Step.env.ManualRunGeneratedReportTests | Should -Be '${{ inputs.runGeneratedReportTests }}'
+        $Settings = @{}
+        if ($Setting -ne 'missing') {
+            $Settings = @{ RunGeneratedReportTests = $Setting -eq 'true'; PublishReportsAsRelease = $Setting -eq 'true'; UploadReportTestDiagnostics = $Setting -eq 'true' }
+        }
+        $ConfigPath = Join-Path $TestDrive "config-$Setting-$Manual.json"
+        $OutputPath = Join-Path $TestDrive "output-$Setting-$Manual.txt"
+        @{ AutomatedReportingGeneration = $Settings } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ConfigPath
+
+        $Previous = @{ ConfigFile = $env:ConfigFile; GITHUB_OUTPUT = $env:GITHUB_OUTPUT; Manual = $env:ManualRunGeneratedReportTests }
+        try {
+            $env:ConfigFile = $ConfigPath
+            $env:GITHUB_OUTPUT = $OutputPath
+            $env:ManualRunGeneratedReportTests = $Manual
+            & ([scriptblock]::Create($Step.run))
+        } finally {
+            $env:ConfigFile = $Previous.ConfigFile
+            $env:GITHUB_OUTPUT = $Previous.GITHUB_OUTPUT
+            $env:ManualRunGeneratedReportTests = $Previous.Manual
+        }
+
+        $Outputs = @(Get-Content -LiteralPath $OutputPath)
+        $Outputs | Should -Contain "runGeneratedReportTests=$ExpectedTests"
+        $Outputs | Should -Contain "publishReportsAsRelease=$Expected"
+        $Outputs | Should -Contain "uploadReportTestDiagnostics=$Expected"
+    }
+
+    It 'computes an order-independent report bundle digest that detects any change' {
+        $Script = Join-Path $script:TestRepositoryRoot '.github/scripts/Get-EntraOpsReportDigest.ps1'
+        $Bundle = Join-Path $TestDrive 'DigestBundle'
+        New-Item -Path "$Bundle/App/data" -ItemType Directory -Force | Out-Null
+        Set-Content -LiteralPath "$Bundle/index.html" -Value '<html>Tenant report</html>'
+        Set-Content -LiteralPath "$Bundle/App/data/data.js" -Value 'window.DATA = {};'
+        $Digest = & $Script -Path $Bundle
+
+        $Digest | Should -Match '^[0-9a-f]{64}$'
+        & $Script -Path $Bundle | Should -Be $Digest
+        Add-Content -LiteralPath "$Bundle/App/data/data.js" -Value '// tampered'
+        & $Script -Path $Bundle | Should -Not -Be $Digest
+        { & $Script -Path (New-Item -Path (Join-Path $TestDrive 'EmptyBundle') -ItemType Directory -Force).FullName } | Should -Throw '*No report files*'
+    }
+
+    It 'stages the report bundle and verifies the hand-over against its digest' -Skip:(-not $IsDistributionRepository -or -not (Get-Module -ListAvailable -Name powershell-yaml)) {
+        Import-Module powershell-yaml -ErrorAction Stop
+        $Jobs = (Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/workflows/Push-EntraOpsPrivilegedReporting.yaml') -Raw | ConvertFrom-Yaml).jobs
+        $Stage = $Jobs['Push-EntraOpsPrivilegedReporting'].steps | Where-Object { $_.id -eq 'stage-reports' }
+        $Verify = $Jobs['Publish-EntraOpsPrivilegedReporting'].steps | Where-Object { $_.name -eq 'Verify report bundle digest' }
+        $Workspace = Join-Path $TestDrive 'StageWorkspace'
+        $RunnerTemp = Join-Path $TestDrive 'RunnerTemp'
+        New-Item -Path "$Workspace/Reports/App", "$Workspace/.github/scripts", $RunnerTemp -ItemType Directory -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $script:TestRepositoryRoot '.github/scripts/Get-EntraOpsReportDigest.ps1') -Destination "$Workspace/.github/scripts"
+        Set-Content -LiteralPath "$Workspace/Reports/App/index.html" -Value '<html>Tenant report</html>'
+        Set-Content -LiteralPath "$Workspace/Reports/reports.smoke.spec.mjs" -Value 'test harness'
+        $Previous = @{ RUNNER_TEMP = $env:RUNNER_TEMP; GITHUB_OUTPUT = $env:GITHUB_OUTPUT; GITHUB_STEP_SUMMARY = $env:GITHUB_STEP_SUMMARY; RunGeneratedReportTests = $env:RunGeneratedReportTests; ExpectedDigest = $env:ExpectedDigest }
+
+        Push-Location $Workspace
+        try {
+            $env:RUNNER_TEMP = $RunnerTemp
+            $env:GITHUB_OUTPUT = Join-Path $TestDrive 'stage-output.txt'
+            $env:GITHUB_STEP_SUMMARY = Join-Path $TestDrive 'stage-summary.md'
+            $env:RunGeneratedReportTests = 'true'
+            & ([scriptblock]::Create($Stage.run))
+            $Digest = (@(Get-Content -LiteralPath $env:GITHUB_OUTPUT) -match '^digest=') -replace '^digest=', ''
+
+            $env:ExpectedDigest = $Digest
+            { & ([scriptblock]::Create($Verify.run)) } | Should -Not -Throw
+            Add-Content -LiteralPath "$RunnerTemp/EntraOps-Reporting/App/index.html" -Value '<script>tampered</script>'
+            { & ([scriptblock]::Create($Verify.run)) } | Should -Throw '*does not match*'
+        } finally {
+            Pop-Location
+            foreach ($Name in $Previous.Keys) { [Environment]::SetEnvironmentVariable($Name, $Previous[$Name]) }
+        }
+
+        $Digest | Should -Match '^[0-9a-f]{64}$'
+        Test-Path "$RunnerTemp/EntraOps-Reporting/reports.smoke.spec.mjs" | Should -BeFalse
+        Get-Content -LiteralPath (Join-Path $TestDrive 'stage-summary.md') -Raw | Should -Match 'published only after the report tests pass'
     }
 
     It 'uses Classification Explorer history configuration only to select checkout depth' {

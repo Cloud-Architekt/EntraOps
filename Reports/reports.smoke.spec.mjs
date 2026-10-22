@@ -1,6 +1,21 @@
-import { expect, test } from "@playwright/test";
+import { expect, test as base } from "@playwright/test";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+// Reports must work fully offline and must not send tenant data anywhere: every request that does not
+// stay on the local file system fails the test.
+const localProtocols = new Set(["file:", "data:", "blob:", "about:"]);
+const test = base.extend({
+    context: async ({ context }, use) => {
+        const blockedRequests = [];
+        await context.route((url) => !localProtocols.has(url.protocol), (route) => {
+            blockedRequests.push(route.request().url());
+            return route.abort("blockedbyclient");
+        });
+        await use(context);
+        expect(blockedRequests, "Report pages must not request network resources").toEqual([]);
+    }
+});
 
 const reportsRoot = fileURLToPath(new URL(".", import.meta.url));
 const reportApps = [

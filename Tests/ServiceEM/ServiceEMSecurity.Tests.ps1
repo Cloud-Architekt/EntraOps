@@ -695,6 +695,34 @@ Describe 'ServiceEM access package assignment fulfillment' {
         Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly -ParameterFilter { $Uri -like '*/assignmentPolicies/*' }
     }
 
+    It 'submits no request when the open assignment requests cannot be read' {
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'POST') { throw 'Unexpected POST' }
+            if ($Uri -like '*/assignmentRequests?*') { throw 'Graph 503' }
+            return @()
+        }
+
+        { New-EntraOpsServiceEMAssignment -ServiceCatalogId 'cat' -ServiceMembers @([pscustomobject]@{ Id = 'member' }) `
+                -ServiceAssignmentPolicies $script:Policies -ServicePackages $script:Packages 6>$null } |
+        Should -Throw '*Failed to look up the open assignment requests of AP-Rg-X-WorkloadPlane-Users*no assignment request was submitted*Graph 503*'
+
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly -ParameterFilter { $Method -eq 'POST' }
+    }
+
+    It 'submits no request when the delivered assignments cannot be read' {
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Method -eq 'POST') { throw 'Unexpected POST' }
+            if ($Uri -like '*/assignments?*') { throw 'Graph 503' }
+            return @()
+        }
+
+        { New-EntraOpsServiceEMAssignment -ServiceCatalogId 'cat' -ServiceMembers @([pscustomobject]@{ Id = 'member' }) `
+                -ServiceAssignmentPolicies $script:Policies -ServicePackages $script:Packages 6>$null } |
+        Should -Throw '*Failed to look up the access package assignments of catalog cat*no assignment request was submitted*Graph 503*'
+
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly -ParameterFilter { $Method -eq 'POST' }
+    }
+
     It 'stops waiting for requests that need approval or failed' {
         $script:NextState = { param($id) if ($id -eq 'req-admin') { 'pendingApproval' } else { 'deliveryFailed' } }
 
@@ -2937,6 +2965,19 @@ Describe 'ServiceEM create failures' {
         Should -Throw '*Failed to create 1 access package(s)*AP-Rg-X-WorkloadPlane-Admins*Graph 400*'
 
         @($script:Created.displayName) | Should -Be @('AP-Rg-X-WorkloadPlane-Users', 'AP-Rg-X-ManagementPlane-Admins')
+    }
+
+    It 'stops before creating any access package when the existing packages cannot be read' {
+        Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'GET' } -MockWith {
+            if (-not $ThrowOnFailure) { return $null }
+            throw 'Graph 503'
+        }
+        $roles = @('WorkloadPlane,Users', 'WorkloadPlane,Admins') | ForEach-Object { $a, $n = $_ -split ','; [pscustomobject]@{ accessLevel = $a; name = $n; groupType = '' } }
+
+        { New-EntraOpsServiceEMAccessPackage -ServiceName 'Rg-X' -ServiceCatalogId 'cat' -ServiceRoles $roles 6>$null } |
+        Should -Throw '*Failed to look up the access packages of catalog cat*no access package was created*Graph 503*'
+
+        $script:Created.Count | Should -Be 0
     }
 
     It 'creates the remaining assignment policies and reports a failed one' {

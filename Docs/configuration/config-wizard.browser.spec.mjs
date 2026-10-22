@@ -407,6 +407,32 @@ test("keeps report release publishing opt-in and exports its retention setting",
     expect(preview.ClassificationExplorer.GenerateChangeHistory).toBe(false);
 });
 
+test("keeps generated report tests and their diagnostics opt-in and preserves them through import and export", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+
+    await expect(page.locator('[data-key="RunGeneratedReportTests"]')).not.toBeChecked();
+    await expect(page.locator('[data-key="UploadReportTestDiagnostics"]')).not.toBeChecked();
+    let preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.AutomatedReportingGeneration.RunGeneratedReportTests).toBe(false);
+    expect(preview.AutomatedReportingGeneration.UploadReportTestDiagnostics).toBe(false);
+
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            AutomatedReportingGeneration: { RunGeneratedReportTests: true, UploadReportTestDiagnostics: true }
+        }))
+    });
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+
+    await expect(page.locator('[data-key="RunGeneratedReportTests"]')).toBeChecked();
+    await expect(page.locator('[data-key="UploadReportTestDiagnostics"]')).toBeChecked();
+    preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.AutomatedReportingGeneration.RunGeneratedReportTests).toBe(true);
+    expect(preview.AutomatedReportingGeneration.UploadReportTestDiagnostics).toBe(true);
+});
+
 test("preserves enabled Classification Explorer change history through import and export", async ({ page }) => {
     await page.goto(wizardUrl);
     await page.locator("#wizImportFile").setInputFiles({

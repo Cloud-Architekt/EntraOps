@@ -140,6 +140,14 @@
 .PARAMETER PublishReportsAsRelease
     Publishes generated reports as GitHub Releases in addition to the 30-day workflow artifact. Disabled by default because each release contains a full tenant-data snapshot.
 
+.PARAMETER RunGeneratedReportTests
+    Installs npm dependencies and runs browser tests against generated tenant reports in reporting automation.
+    Disabled by default because third-party dependencies can access tenant report data and the network.
+
+.PARAMETER UploadReportTestDiagnostics
+    Uploads Playwright traces of failed report tests as a 1-day artifact (EntraOps-Reporting-TestDiagnostics).
+    Disabled by default because the traces contain tenant report data. Used only with RunGeneratedReportTests.
+
 .PARAMETER ReportingReleasesToKeep
     Number of `reporting-*` GitHub Releases to retain when release publishing is enabled. Default is 10.
     Accepts 1 to 1000, so a generated configuration always prunes. Turning pruning off is deliberately not
@@ -390,6 +398,12 @@ function New-EntraOpsConfigFile {
 
         [Parameter(Mandatory = $false)]
         [boolean]$PublishReportsAsRelease = $false,
+
+        [Parameter(Mandatory = $false)]
+        [boolean]$RunGeneratedReportTests = $false,
+
+        [Parameter(Mandatory = $false)]
+        [boolean]$UploadReportTestDiagnostics = $false,
 
         [Parameter(Mandatory = $false)]
         [ValidateRange(1, 1000)]
@@ -654,6 +668,8 @@ function New-EntraOpsConfigFile {
         AutomatedReportingGeneration                  = [ordered]@{
             ApplyAutomatedReportingGeneration = $ApplyAutomatedReportingGeneration
             PublishReportsAsRelease           = $PublishReportsAsRelease
+            RunGeneratedReportTests           = $RunGeneratedReportTests
+            UploadReportTestDiagnostics       = $UploadReportTestDiagnostics
             ReportingReleasesToKeep           = $ReportingReleasesToKeep
             GenerateClassificationExplorer    = $true
             GenerateTierBreachAnalyzer        = $true

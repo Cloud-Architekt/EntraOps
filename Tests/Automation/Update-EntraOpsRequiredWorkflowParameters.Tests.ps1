@@ -45,12 +45,12 @@ BeforeAll {
                 PushReportingScheduledCron            = '0 9 * * 1'
             }
             TenantGovernanceSnapshot      = @{
-                EnableTenantGovernanceSnapshot       = $false
-                SnapshotScheduledTrigger             = $true
-                SnapshotScheduledCron                = '0 6 * * *'
-                SnapshotScheduledCronComplete        = '0 7 * * *'
-                SnapshotScheduledCronCompleteRetry1  = '30 7 * * *'
-                SnapshotScheduledCronCompleteRetry2  = '0 8 * * *'
+                EnableTenantGovernanceSnapshot      = $false
+                SnapshotScheduledTrigger            = $true
+                SnapshotScheduledCron               = '0 6 * * *'
+                SnapshotScheduledCronComplete       = '0 7 * * *'
+                SnapshotScheduledCronCompleteRetry1 = '30 7 * * *'
+                SnapshotScheduledCronCompleteRetry2 = '0 8 * * *'
             }
         } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
 
@@ -60,7 +60,7 @@ BeforeAll {
 
 Describe 'Update-EntraOpsRequiredWorkflowParameters' -Skip:(-not [bool](Get-Module -ListAvailable -Name powershell-yaml)) {
     BeforeAll {
-    $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         Import-Module (Join-Path $script:TestRepositoryRoot 'EntraOps') -Force
     }
 
@@ -99,6 +99,24 @@ Describe 'Update-EntraOpsRequiredWorkflowParameters' -Skip:(-not [bool](Get-Modu
 
         $ReportingWorkflow = Get-Content -LiteralPath (Join-Path $FixtureRoot '.github/workflows/Push-EntraOpsPrivilegedReporting.yaml') -Raw
         $ReportingWorkflow | Should -Match 'ClassificationExplorerGenerateChangeHistory:\s*false'
+    }
+
+    It 'maps every shipped deployment workflow environment setting in the updater' {
+        $Updater = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot 'EntraOps/Public/Configuration/Update-EntraOpsRequiredWorkflowParameters.ps1') -Raw
+        $WorkflowOwners = @{
+            'Pull-EntraOpsPrivilegedEAM'       = 'PullWorkflowObject'
+            'Pull-EntraOpsTenantGovernance'    = 'TenantGovernanceWorkflowObject'
+            'Push-EntraOpsPrivilegedEAM'       = 'PushWorkflowObject'
+            'Push-EntraOpsPrivilegedReporting' = 'ReportingWorkflowObject'
+            'Update-EntraOps'                  = 'UpdateWorkflowObject'
+        }
+        foreach ($Name in $WorkflowOwners.Keys) {
+            $Workflow = Get-Content -LiteralPath (Join-Path $script:TestRepositoryRoot ".github/workflows/$Name.yaml") -Raw | ConvertFrom-Yaml
+            foreach ($Key in $Workflow.env.Keys) {
+                $Pattern = '\$(?:WorkflowContent|' + $WorkflowOwners[$Name] + ')\.env\.' + [regex]::Escape($Key) + '\s*='
+                $Updater | Should -Match $Pattern -Because "$Name must reconcile $Key from configuration"
+            }
+        }
     }
 
     It 'materializes an enabled Classification Explorer history setting for checkout depth' {
@@ -193,18 +211,18 @@ Describe 'Update-EntraOpsRequiredWorkflowParameters' -Skip:(-not [bool](Get-Modu
         Push-Location $FixtureRoot
         try {
             { Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigPath -ErrorAction Stop } |
-                Should -Throw '*ValidationFrequency*'
+            Should -Throw '*ValidationFrequency*'
 
             $Config.AutomatedEntraOpsUpdate.ValidationFrequency = 'OnChange'
             $Config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
             { Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigPath -ErrorAction Stop } |
-                Should -Throw '*RunBrowserTests*JSON boolean*'
+            Should -Throw '*RunBrowserTests*JSON boolean*'
 
             $Config.AutomatedEntraOpsUpdate.RunBrowserTests = $true
             $Config.AutomatedEntraOpsUpdate | Add-Member -NotePropertyName PublicationMode -NotePropertyValue MergeQueue
             $Config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
             { Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigPath -ErrorAction Stop } |
-                Should -Throw '*PublicationMode*'
+            Should -Throw '*PublicationMode*'
         } finally {
             Pop-Location
         }
@@ -299,8 +317,7 @@ Describe 'Update-EntraOpsRequiredWorkflowParameters' -Skip:(-not [bool](Get-Modu
         # The shipped templates already default these to false, so seed the permissive value the
         # reconciler has to overwrite - otherwise the assertions below would pass without it running.
         (Get-Content -LiteralPath $ReportingWorkflowPath -Raw) `
-            -replace '(?m)^(\s*ApplyAutomatedReportingGeneration:\s*)false(?=\r?$)', '${1}true' `
-            -replace '(?m)^(\s*PublishReportsAsRelease:\s*)false(?=\r?$)', '${1}true' |
+            -replace '(?m)^(\s*ApplyAutomatedReportingGeneration:\s*)false(?=\r?$)', '${1}true' |
         Set-Content -LiteralPath $ReportingWorkflowPath -Encoding UTF8
         (Get-Content -LiteralPath $PushWorkflowPath -Raw) `
             -replace '(?m)^(\s*ApplyPrivilegedElmCatalogProtection:\s*)false(?=\r?$)', '${1}true' |
@@ -319,8 +336,71 @@ Describe 'Update-EntraOpsRequiredWorkflowParameters' -Skip:(-not [bool](Get-Modu
         $ReportingWorkflow = Get-Content -LiteralPath $ReportingWorkflowPath -Raw
         $PushWorkflow = Get-Content -LiteralPath $PushWorkflowPath -Raw
         $ReportingWorkflow | Should -Match 'ApplyAutomatedReportingGeneration:\s*false'
-        $ReportingWorkflow | Should -Match 'PublishReportsAsRelease:\s*false'
         $PushWorkflow | Should -Match 'ApplyPrivilegedElmCatalogProtection:\s*false'
+    }
+
+    It 'reconciles report switches in an older workflow as <Expected> for a <Setting> config setting' -ForEach @(
+        @{ Setting = 'missing'; Expected = 'false' }
+        @{ Setting = 'false'; Expected = 'false' }
+        @{ Setting = 'true'; Expected = 'true' }
+    ) {
+        $FixtureRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -Path $FixtureRoot -ItemType Directory -Force | Out-Null
+        $ConfigPath = New-WorkflowFixture -Root $FixtureRoot
+        $ReportingWorkflowPath = Join-Path $FixtureRoot '.github/workflows/Push-EntraOpsPrivilegedReporting.yaml'
+        $Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        $Config.AutomatedReportingGeneration.PSObject.Properties.Remove('PublishReportsAsRelease')
+        if ($Setting -ne 'missing') {
+            $Config.AutomatedReportingGeneration | Add-Member -NotePropertyName RunGeneratedReportTests -NotePropertyValue ($Setting -eq 'true')
+            $Config.AutomatedReportingGeneration | Add-Member -NotePropertyName PublishReportsAsRelease -NotePropertyValue ($Setting -eq 'true')
+        }
+        $Config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+        # Older deployed workflows still declare permissive env switches that the updater must overwrite.
+        # Set keys structurally so a retained deployment workflow cannot produce duplicate YAML keys.
+        $ReportingWorkflow = Get-Content -LiteralPath $ReportingWorkflowPath -Raw | ConvertFrom-Yaml -Ordered
+        $ReportingWorkflow.env.PublishReportsAsRelease = $true
+        $ReportingWorkflow.env.RunGeneratedReportTests = $true
+        $ReportingWorkflow | ConvertTo-Yaml | Set-Content -LiteralPath $ReportingWorkflowPath -Encoding UTF8
+
+        Push-Location $FixtureRoot
+        try {
+            Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigPath -ErrorAction Stop
+        } finally {
+            Pop-Location
+        }
+
+        $Workflow = Get-Content -LiteralPath $ReportingWorkflowPath -Raw | ConvertFrom-Yaml
+        [string]$Workflow.env.RunGeneratedReportTests | Should -Be $Expected
+        [string]$Workflow.env.PublishReportsAsRelease | Should -Be $Expected
+    }
+
+    It 'does not add report switches absent from the workflow' {
+        $FixtureRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -Path $FixtureRoot -ItemType Directory -Force | Out-Null
+        $ConfigPath = New-WorkflowFixture -Root $FixtureRoot
+        $ReportingWorkflowPath = Join-Path $FixtureRoot '.github/workflows/Push-EntraOpsPrivilegedReporting.yaml'
+        $Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        $Config.AutomatedReportingGeneration.PublishReportsAsRelease = $true
+        $Config.AutomatedReportingGeneration | Add-Member -NotePropertyName RunGeneratedReportTests -NotePropertyValue $true
+        $Config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+
+        # Model a runtime-config workflow even when the deployment retains an older template.
+        $ReportingWorkflow = Get-Content -LiteralPath $ReportingWorkflowPath -Raw | ConvertFrom-Yaml -Ordered
+        foreach ($Name in 'RunGeneratedReportTests', 'PublishReportsAsRelease') {
+            $ReportingWorkflow.env.Remove($Name)
+        }
+        $ReportingWorkflow | ConvertTo-Yaml | Set-Content -LiteralPath $ReportingWorkflowPath -Encoding UTF8
+
+        Push-Location $FixtureRoot
+        try {
+            Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigPath -ErrorAction Stop
+        } finally {
+            Pop-Location
+        }
+
+        $Workflow = Get-Content -LiteralPath $ReportingWorkflowPath -Raw | ConvertFrom-Yaml
+        $Workflow.env.Contains('RunGeneratedReportTests') | Should -BeFalse
+        $Workflow.env.Contains('PublishReportsAsRelease') | Should -BeFalse
     }
 
     It 'restores workflow_run triggers after they were disabled' {

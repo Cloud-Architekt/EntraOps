@@ -97,6 +97,8 @@ test("collects integration details and carries them into the expert config", asy
     expect(draft.AutomatedEntraOpsUpdate.RunBrowserTests).toBe(true);
     expect(draft.AutomatedEntraOpsUpdate.TargetUpdateFolders).not.toContain("./.github/workflows");
     expect(draft.AutomatedReportingGeneration.PublishReportsAsRelease).toBe(false);
+    expect(draft.AutomatedReportingGeneration.RunGeneratedReportTests).toBe(false);
+    expect(draft.AutomatedReportingGeneration.UploadReportTestDiagnostics).toBe(false);
     expect(draft.GeneratedArtifactValidation.FailOnPrivilegedAssignmentWithoutClassification).toBe(false);
     expect(draft.ClassificationExplorer.GenerateChangeHistory).toBe(false);
     expect(draft.CustomSecurityAttributes.PrivilegedUserAdminTierLevelAttribute).toBe("adminTierLevel");
