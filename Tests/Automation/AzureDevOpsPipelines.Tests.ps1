@@ -368,6 +368,8 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
     }
 
     It 'verifies the tested hand-over against the digest of the staged bundle' -Skip:$IsConfiguredDeployment {
+        # Match the update candidate validator and pipeline's terminating error policy.
+        $ErrorActionPreference = 'Stop'
         $Pipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-push-reporting.yml') -Raw | ConvertFrom-Yaml
         $Prepare = $Pipeline.jobs[0].steps | Where-Object { $_.name -eq 'handover' }
         $Verify = $Pipeline.jobs[2].steps | Where-Object { $_.displayName -eq 'Verify report bundle digest' }
@@ -375,6 +377,9 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
         $Staging = Join-Path $TestDrive 'DigestStaging'
         New-Item -Path "$Fixture/Reports/App", $Staging -ItemType Directory -Force | Out-Null
         Set-Content -LiteralPath "$Fixture/Reports/App/index.html" -Value '<html>Tenant report</html>'
+        foreach ($Name in 'package.json', 'package-lock.json', 'playwright.config.mjs') {
+            Copy-Item -LiteralPath (Join-Path $script:TestRepositoryRoot $Name) -Destination $Fixture
+        }
 
         Push-Location $Fixture
         try {
