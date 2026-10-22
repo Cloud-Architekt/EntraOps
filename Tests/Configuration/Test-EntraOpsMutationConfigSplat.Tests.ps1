@@ -81,10 +81,12 @@ Describe "Mutation configuration workflow splatting" {
         New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -DevOpsPlatform $Platform -ConfigFilePath $ConfigPath | Out-Null
         $Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
         $Config.AutomatedReportingGeneration.RunGeneratedReportTests | Should -BeFalse
+        $Config.AutomatedReportingGeneration.UploadReportTestDiagnostics | Should -BeFalse
 
-        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -DevOpsPlatform $Platform -RunGeneratedReportTests $true -ConfigFilePath $ConfigPath | Out-Null
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -DevOpsPlatform $Platform -RunGeneratedReportTests $true -UploadReportTestDiagnostics $true -ConfigFilePath $ConfigPath | Out-Null
         $Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
         $Config.AutomatedReportingGeneration.RunGeneratedReportTests | Should -BeTrue
+        $Config.AutomatedReportingGeneration.UploadReportTestDiagnostics | Should -BeTrue
     }
 
     It "generates safe automated-update validation defaults" {
