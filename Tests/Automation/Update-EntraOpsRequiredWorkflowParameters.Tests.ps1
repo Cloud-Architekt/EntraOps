@@ -356,8 +356,11 @@ Describe 'Update-EntraOpsRequiredWorkflowParameters' -Skip:(-not [bool](Get-Modu
         }
         $Config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
         # Older deployed workflows still declare permissive env switches that the updater must overwrite.
-        (Get-Content -LiteralPath $ReportingWorkflowPath -Raw) -replace '(?m)^(\s*)ReportingReleasesToKeep:', "`${1}PublishReportsAsRelease: true`n`${1}RunGeneratedReportTests: true`n`${1}ReportingReleasesToKeep:" |
-        Set-Content -LiteralPath $ReportingWorkflowPath -Encoding UTF8
+        # Set keys structurally so a retained deployment workflow cannot produce duplicate YAML keys.
+        $ReportingWorkflow = Get-Content -LiteralPath $ReportingWorkflowPath -Raw | ConvertFrom-Yaml -Ordered
+        $ReportingWorkflow.env.PublishReportsAsRelease = $true
+        $ReportingWorkflow.env.RunGeneratedReportTests = $true
+        $ReportingWorkflow | ConvertTo-Yaml | Set-Content -LiteralPath $ReportingWorkflowPath -Encoding UTF8
 
         Push-Location $FixtureRoot
         try {
@@ -371,7 +374,7 @@ Describe 'Update-EntraOpsRequiredWorkflowParameters' -Skip:(-not [bool](Get-Modu
         [string]$Workflow.env.PublishReportsAsRelease | Should -Be $Expected
     }
 
-    It 'does not add runtime-config report switches to the current workflow template' {
+    It 'does not add report switches absent from the workflow' {
         $FixtureRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -Path $FixtureRoot -ItemType Directory -Force | Out-Null
         $ConfigPath = New-WorkflowFixture -Root $FixtureRoot
@@ -380,6 +383,13 @@ Describe 'Update-EntraOpsRequiredWorkflowParameters' -Skip:(-not [bool](Get-Modu
         $Config.AutomatedReportingGeneration.PublishReportsAsRelease = $true
         $Config.AutomatedReportingGeneration | Add-Member -NotePropertyName RunGeneratedReportTests -NotePropertyValue $true
         $Config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+
+        # Model a runtime-config workflow even when the deployment retains an older template.
+        $ReportingWorkflow = Get-Content -LiteralPath $ReportingWorkflowPath -Raw | ConvertFrom-Yaml -Ordered
+        foreach ($Name in 'RunGeneratedReportTests', 'PublishReportsAsRelease') {
+            $ReportingWorkflow.env.Remove($Name)
+        }
+        $ReportingWorkflow | ConvertTo-Yaml | Set-Content -LiteralPath $ReportingWorkflowPath -Encoding UTF8
 
         Push-Location $FixtureRoot
         try {
