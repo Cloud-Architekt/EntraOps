@@ -100,7 +100,7 @@ The EntraOps PowerShell module can be executed locally, as part of a CI/CD pipel
 
 ## Service EM - Service-scoped Landing Zones
 
-**Service EM**, developed in collaboration with **Michael Soule**, provisions service-scoped Azure and Entra ID landing zones aligned with the Enterprise Access Model. It combines tiered groups, PIM for Groups, Entra ID Governance access packages, Azure RBAC, and ABAC-constrained delegation for least-privilege administration. See the [Service EM documentation](./Docs/service-em/index.html) for setup, governance models, configuration, and dependency diagrams.
+**Service EM**, developed in collaboration with **Michael Soule**, provisions service-scoped Azure and Entra ID landing zones aligned with the Enterprise Access Model. It combines tiered groups, PIM for Groups, Entra ID Governance access packages, Azure RBAC, and ABAC-constrained delegation for least-privilege administration. See the [Service EM documentation](https://www.entraops.com/docs/service-em/index.html) for setup, governance models, configuration, and dependency diagrams.
 
 ## Videos and demos of EntraOps Privileged EAM
 
@@ -110,23 +110,23 @@ The EntraOps PowerShell module can be executed locally, as part of a CI/CD pipel
 ## Documentation
 
 Full documentation - including a **Get Started** guide, configuration reference and feature deep-dives for **Core**,
-**Privileged EAM**, **Service EM**, and **Reportings** - is available in the **[EntraOps Docs](./Docs/index.html)**.
+**Privileged EAM**, **Service EM**, and **Reportings** - is available in the **[EntraOps Docs](https://www.entraops.com/docs/index.html)**.
 
-- 🚩 [Get Started](./Docs/get-started/index.html) - prerequisites, sign-in options, and deploying EntraOps
+- 🚩 [Get Started](https://www.entraops.com/docs/get-started/index.html) - prerequisites, sign-in options, and deploying EntraOps
   interactively or as an automated GitHub Actions or Azure DevOps pipeline.
-- ⚙️ [Core](./Docs/core/index.html) - authentication, the `EntraOpsConfig.json` reference, Tenant Governance
+- ⚙️ [Core](https://www.entraops.com/docs/core/index.html) - authentication, the `EntraOpsConfig.json` reference, Tenant Governance
   relationships and configuration snapshots, object classification by Custom Security Attributes or Alternate
   Tier Level Attributes, and updating the module.
-- 🛡️ [Privileged EAM](./Docs/privileged-eam/index.html) - collecting and exporting data, filtering examples,
+- 🛡️ [Privileged EAM](https://www.entraops.com/docs/privileged-eam/index.html) - collecting and exporting data, filtering examples,
   customizing classification with overwrite files, Identity Governance delegation, and automatic Control Plane scope
   updates.
-- 🏗️ [Service EM](./Docs/service-em/index.html) - service-scoped Azure and Entra ID landing zones with tiered
+- 🏗️ [Service EM](https://www.entraops.com/docs/service-em/index.html) - service-scoped Azure and Entra ID landing zones with tiered
   groups, PIM for Groups, access packages, Azure RBAC, and constrained delegation.
-- 📊 [Reportings](./Docs/reportings/index.html) - eleven static Reporting apps, including Classification Explorer, EAM
+- 📊 [Reportings](https://www.entraops.com/docs/reportings/index.html) - eleven static Reporting apps, including Classification Explorer, EAM
   Dashboard, Privileged Assets, Access Path Map, Tier Breach Analyzer, Privilege History, Configuration Analyzer,
   Conditional Access Analysis, EIDSCA Findings, PIM Request Flow, and Access Package Flow; plus Microsoft Sentinel/Unified SecOps
   Platform and BloodHound OpenGraph integrations.
-- 🏢 [Tenant Governance](./Docs/tenant-governance/index.html) - cross-tenant delegated administration,
+- 🏢 [Tenant Governance](https://www.entraops.com/docs/tenant-governance/index.html) - cross-tenant delegated administration,
   Microsoft Graph UTCM configuration snapshots, permissions, scheduling, quotas, and Configuration Analyzer.
 
 Open [`Reports/index.html`](./Reports/index.html) to use the reporting apps directly.
@@ -157,7 +157,7 @@ Initialize-EntraOpsWorkspace
 > [!NOTE]
 > EntraOps 1.1.0 is currently a release candidate. Without `-Prerelease` (or `Install-Module EntraOps -AllowPrerelease` with PowerShellGet), the PowerShell Gallery installs 1.0.0, which doesn't include `Initialize-EntraOpsWorkspace`. Use `-Prerelease` / `-AllowPrerelease` for updates as well, and drop it once 1.1.0 is generally available.
 
-See [Install EntraOps](Docs/get-started/index.html#install-entraops) for a comparison of both options.
+See [Install EntraOps](https://www.entraops.com/docs/get-started/index.html#install-entraops) for a comparison of both options.
   
 User Interactive with consented Microsoft Graph PowerShell
 
@@ -367,7 +367,7 @@ _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-Ent
   Update-EntraOpsAzureDevOpsSchedules -ConfigFile ./EntraOpsConfig.json -BranchName main
   ```
 
-  Use the [Get Started guide](./Docs/get-started/index.html?guide=expert#deploy-with-azure-devops) for
+  Use the [Get Started guide](https://www.entraops.com/docs/get-started/index.html?guide=expert#deploy-with-azure-devops) for
   the integrated service-connection setup, pipeline import, repository permissions, cross-tenant
   guidance, reporting behavior, troubleshooting, and GitHub/Azure DevOps comparison.
 
@@ -741,7 +741,7 @@ In addition, custom security attributes will be also used to build a correlation
 - `associatedSecureAdminWorkstation`
 - `associatedWorkAccount`
 
-`New-EntraOpsWorkloadIdentity` grants the required permission `CustomSecAttributeAssignment.Read.All` to the application it creates. For an existing service principal, grant this permission explicitly (see [Service principal permissions](./Docs/core/index.html#service-principal-permissions)).
+`New-EntraOpsWorkloadIdentity` grants the required permission `CustomSecAttributeAssignment.Read.All` to the application it creates. For an existing service principal, grant this permission explicitly (see [Service principal permissions](https://www.entraops.com/docs/core/index.html#service-principal-permissions)).
 
 ## Classification of Identity Governance delegation and roles
 
