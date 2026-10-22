@@ -88,9 +88,10 @@
     }
 
     var state = {
-        search: "", type: "", subType: "", tier: "", assignmentTier: "", au: "", restricted: "", sync: "", finding: "", worklist: "",
-        whatIf: false, sort: "tier", sortDir: 1, page: 0, selected: new Set(), worklistEntries: {}, script: "", fileChanged: false
+        search: "", whatIf: false, sort: "tier", sortDir: 1, page: 0, selected: new Set(), worklistEntries: {}, script: "", fileChanged: false
     };
+    // Filter select values are kept apart from the render state: they're written by key from the DOM and only compared, never rendered.
+    var filters = { type: "", subType: "", tier: "", assignmentTier: "", au: "", restricted: "", sync: "", finding: "", worklist: "" };
     var objects = [];
     var objectsById = {};
     var related = {};
@@ -111,7 +112,7 @@
     }
 
     function tierBadge(tier) {
-        var name = TIER_LABEL[tier] ? tier : "Unclassified";
+        var name = Object.prototype.hasOwnProperty.call(TIER_LABEL, tier) ? tier : "Unclassified";
         return '<span class="tier-badge tier-' + name.toLowerCase() + '"><span class="tier-dot"></span>' + esc(TIER_LABEL[name]) + "</span>";
     }
 
@@ -370,23 +371,23 @@
             var haystack = [object.displayName, object.userPrincipalName, object.objectId].join(" ").toLowerCase();
             if (haystack.indexOf(state.search) < 0) return false;
         }
-        if (state.type && object.objectType !== state.type) return false;
-        if (state.subType && object.objectSubType !== state.subType) return false;
-        if (state.tier && effectiveTier(object) !== state.tier) return false;
-        if (state.assignmentTier && object.assignmentSummary.highestTierName !== state.assignmentTier) return false;
-        if (state.au === "__none" && (object.administrativeUnits || []).length) return false;
-        if (state.au && state.au !== "__none" && !(object.administrativeUnits || []).some(function (unit) { return unit.id === state.au; })) return false;
-        if (state.restricted && object.restrictedManagement !== state.restricted) return false;
-        if (state.sync === "hybrid" && !object.onPremSynchronized) return false;
-        if (state.sync === "cloud" && object.onPremSynchronized) return false;
-        if (state.finding === "__any" && !object._findings.length && !object._maester.length) return false;
-        if (state.finding === "__relationship" && !object._findings.some(function (id) { return RELATIONSHIP_FINDINGS.indexOf(id) >= 0; })) return false;
-        if (state.finding === "__maester" && !object._maester.length) return false;
-        if (state.finding.indexOf("maester:") === 0 && !object._maester.some(function (finding) { return finding.testId === state.finding.slice(8); })) return false;
-        if (state.finding && state.finding.indexOf("__") !== 0 && state.finding.indexOf("maester:") !== 0 && object._findings.indexOf(state.finding) < 0) return false;
-        if (state.worklist === "in" && !state.worklistEntries[object.objectId]) return false;
-        if (state.worklist === "out" && state.worklistEntries[object.objectId]) return false;
-        if (state.worklist === "pending" && ["Added", "Changed", "Removed"].indexOf(worklistStatus(object.objectId)) < 0) return false;
+        if (filters.type && object.objectType !== filters.type) return false;
+        if (filters.subType && object.objectSubType !== filters.subType) return false;
+        if (filters.tier && effectiveTier(object) !== filters.tier) return false;
+        if (filters.assignmentTier && object.assignmentSummary.highestTierName !== filters.assignmentTier) return false;
+        if (filters.au === "__none" && (object.administrativeUnits || []).length) return false;
+        if (filters.au && filters.au !== "__none" && !(object.administrativeUnits || []).some(function (unit) { return unit.id === filters.au; })) return false;
+        if (filters.restricted && object.restrictedManagement !== filters.restricted) return false;
+        if (filters.sync === "hybrid" && !object.onPremSynchronized) return false;
+        if (filters.sync === "cloud" && object.onPremSynchronized) return false;
+        if (filters.finding === "__any" && !object._findings.length && !object._maester.length) return false;
+        if (filters.finding === "__relationship" && !object._findings.some(function (id) { return RELATIONSHIP_FINDINGS.indexOf(id) >= 0; })) return false;
+        if (filters.finding === "__maester" && !object._maester.length) return false;
+        if (filters.finding.indexOf("maester:") === 0 && !object._maester.some(function (finding) { return finding.testId === filters.finding.slice(8); })) return false;
+        if (filters.finding && filters.finding.indexOf("__") !== 0 && filters.finding.indexOf("maester:") !== 0 && object._findings.indexOf(filters.finding) < 0) return false;
+        if (filters.worklist === "in" && !state.worklistEntries[object.objectId]) return false;
+        if (filters.worklist === "out" && state.worklistEntries[object.objectId]) return false;
+        if (filters.worklist === "pending" && ["Added", "Changed", "Removed"].indexOf(worklistStatus(object.objectId)) < 0) return false;
         return true;
     }
 
@@ -450,7 +451,7 @@
                 var tile = tiles[Number(button.getAttribute("data-stat"))];
                 if (tile.view) { setView(tile.view, true); return; }
                 resetFilters(false);
-                Object.keys(tile.filter).forEach(function (key) { state[key] = tile.filter[key]; });
+                Object.keys(tile.filter).forEach(function (key) { filters[key] = tile.filter[key]; });
                 syncFilterControls();
                 renderInventory();
                 $("secPaiInventory").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1203,13 +1204,13 @@
     var FILTER_CONTROLS = { paiFilterType: "type", paiFilterSubType: "subType", paiFilterTier: "tier", paiFilterAssignmentTier: "assignmentTier", paiFilterAu: "au", paiFilterRestricted: "restricted", paiFilterSync: "sync", paiFilterFinding: "finding", paiFilterWorklist: "worklist" };
 
     function syncFilterControls() {
-        Object.keys(FILTER_CONTROLS).forEach(function (id) { $(id).value = state[FILTER_CONTROLS[id]]; });
+        Object.keys(FILTER_CONTROLS).forEach(function (id) { $(id).value = filters[FILTER_CONTROLS[id]]; });
         $("paiSearch").value = state.search;
         $("paiWhatIf").checked = state.whatIf;
     }
 
     function resetFilters(render) {
-        Object.keys(FILTER_CONTROLS).forEach(function (id) { state[FILTER_CONTROLS[id]] = ""; });
+        Object.keys(FILTER_CONTROLS).forEach(function (id) { filters[FILTER_CONTROLS[id]] = ""; });
         state.search = "";
         state.page = 0;
         if (render !== false) { syncFilterControls(); renderInventory(); }
@@ -1219,7 +1220,7 @@
 
     function wire() {
         Object.keys(FILTER_CONTROLS).forEach(function (id) {
-            $(id).addEventListener("change", function () { state[FILTER_CONTROLS[id]] = $(id).value; state.page = 0; renderInventory(); });
+            $(id).addEventListener("change", function () { filters[FILTER_CONTROLS[id]] = $(id).value; state.page = 0; renderInventory(); });
         });
         $("paiSearch").addEventListener("input", function () { state.search = $("paiSearch").value.trim().toLowerCase(); state.page = 0; renderInventory(); });
         $("paiWhatIf").addEventListener("change", function () { state.whatIf = $("paiWhatIf").checked; renderAll(); });
