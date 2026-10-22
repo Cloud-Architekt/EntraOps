@@ -1026,17 +1026,6 @@
       },
       {
         "Category": "Microsoft.AzureAD",
-        "Service": "Microsoft Dragon",
-        "RoleAssignmentScopeName": [
-          "/"
-        ],
-        "RoleDefinitionActions": [
-          "microsoft.healthPlatform/allEntities/allProperties/allTasks",
-          "microsoft.healthPlatform/allEntities/allProperties/read"
-        ]
-      },
-      {
-        "Category": "Microsoft.AzureAD",
         "Service": "Dynamics 365",
         "RoleAssignmentScopeName": [
           "/"

@@ -100,6 +100,7 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
         }
 
         Write-Verbose "$logPrefix Processing $(($catalogRoles|Measure-Object).Count) catalog resource role assignments"
+        $assignmentFailures = [System.Collections.Generic.List[string]]::new()
         foreach ($catalogRole in $catalogRoles) {
             $catalogRoleParams = @{
                 principalId      = ($ServiceGroups | Where-Object { $_.DisplayName -like "$($catalogRole.filter)" }).Id
@@ -112,13 +113,16 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
                     $nr = $catalogRoleParams.principalId + "_" + $catalogRoleParams.roleDefinitionId
                     $er = $catalogAssignments | ForEach-Object { $_.PrincipalId + "_" + $_.RoleDefinitionId }
                     if ($nr -notin $er) {
-                        $catalogAssignments += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/roleManagement/entitlementManagement/roleAssignments" -Body ($catalogRoleParams | ConvertTo-Json -Depth 10) -OutputType PSObject
+                        $catalogAssignments += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/roleManagement/entitlementManagement/roleAssignments" -Body ($catalogRoleParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
                     }
                 }
             } catch {
-                Write-Verbose "$logPrefix Failed to assign catalog roles"
-                Write-Error $_
+                Write-Verbose "$logPrefix Failed to assign catalog role $($catalogRole.displayName)"
+                $assignmentFailures.Add("$($catalogRole.displayName) for $($catalogRoleParams.principalId): $($_.Exception.Message)")
             }
+        }
+        if ($assignmentFailures.Count -gt 0) {
+            throw "$logPrefix Failed to assign $($assignmentFailures.Count) catalog role(s) on catalog ${ServiceCatalogId}: $($assignmentFailures -join '; ')"
         }
 
         $assignmentManagerGroup = $ServiceGroups | Where-Object { $_.DisplayName -like "*ManagementPlane-Admins" } | Select-Object -First 1
@@ -135,7 +139,8 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
         $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Catalog role assignments" -logPrefix $logPrefix -Condition {
             $check.Assignments = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogRolesUri -OutputType PSObject -DisableCache
             $actualIds = @($check.Assignments | Where-Object { $_.id } | Select-Object -ExpandProperty id)
-            ($expectedIds.Count -eq 0 -and $actualIds.Count -eq 0) -or (Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0
+            # The catalog may hold further role assignments (e.g. added manually or by another deployment)
+            @($expectedIds | Where-Object { $_ -notin $actualIds }).Count -eq 0
         }
         if (-not $confirmed) {
             throw "Catalog Resource Role Assignment consistency with Entra not achieved"

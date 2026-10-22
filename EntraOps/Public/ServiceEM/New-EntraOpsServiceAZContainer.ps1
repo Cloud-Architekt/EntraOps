@@ -21,6 +21,12 @@
       when SkipControlPlaneDelegation is set)
     - Resource groups created by this function are tagged EntraOpsServiceEM = <ServiceName>
 
+    An existing eligible Role Based Access Control Administrator assignment of the same principal on the
+    scope is only replaced when it has the condition created by ServiceEM and its target group no longer
+    exists (leftover of a deleted landing zone). Any other assignment is kept, the remaining assignments
+    are still created, and the function then stops with an error because the constrained delegation for
+    this landing zone isn't assigned.
+
     Constrained delegation settings are read from
     EntraOpsConfig.ServiceEM.ConstrainedDelegation when available.
 
@@ -99,6 +105,11 @@ function New-EntraOpsServiceAZContainer {
             try {
                 Write-Verbose "$logPrefix Looking up Azure Resource Group"
                 $resourceGroup = Get-AzResourceGroup -Name $rgName -ErrorAction Stop
+                # Warn when using a resource group that ServiceEM didn't create
+                $resourceGroupTag = if ($null -ne $resourceGroup -and $null -ne $resourceGroup.Tags) { "$($resourceGroup.Tags['EntraOpsServiceEM'])" }
+                if ($null -ne $resourceGroup -and $resourceGroupTag -ne $ServiceName) {
+                    Write-Warning "$logPrefix Resource group '$rgName' exists and is not tagged 'EntraOpsServiceEM = $ServiceName'. It is used as landing zone: the service groups get eligible Contributor and RBAC Administrator access to all of its existing resources."
+                }
             } catch {
                 if ($_.Exception.Message -like "*not exist*" -or $_.Exception.Message -like "*ResourceGroupNotFound*") {
                     Write-Verbose "$logPrefix Azure Resource Group not found, creating"
@@ -262,6 +273,30 @@ function New-EntraOpsServiceAZContainer {
             Write-Warning "$logPrefix No ManagementPlane-Admins for $scopeId; nobody gets Contributor from ServiceEM and WorkloadPlane-Admins stay restricted to Reader and the constrained RBAC Administrator."
         }
 
+        # Condition of the constrained RBAC Administrator: write and delete of role assignments limited to the
+        # role definitions matched by RoleOperator and to the single target group
+        $newConstrainedCondition = {
+            param([string]$RoleOperator, [string]$RoleIds, [string]$TargetId)
+            "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'}))" +
+            " OR " +
+            "(@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] $RoleOperator {$RoleIds}" +
+            " AND " +
+            "@Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {$TargetId}))" +
+            " AND " +
+            "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'}))" +
+            " OR " +
+            "(@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] $RoleOperator {$RoleIds}" +
+            " AND " +
+            "@Resource[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {$TargetId}))"
+        }
+        # Matches a condition created by $newConstrainedCondition with any role list and target group
+        $getConstrainedConditionPattern = {
+            param([string]$RoleOperator)
+            $guid = '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}'
+            $template = [regex]::Escape((& $newConstrainedCondition $RoleOperator '__ROLES__' '__TARGET__'))
+            '^\s*' + $template.Replace('\ ', '\s*').Replace('__ROLES__', "\s*$guid(?:\s*,\s*$guid)*\s*").Replace('__TARGET__', "\s*(?<target>$guid)\s*") + '\s*$'
+        }
+
         # Leftover schedules of a deleted resource group reference the old target group ID and don't count
         $hasConstrainedRbacAdmin = {
             param([string]$PrincipalId, [string]$TargetGroupId)
@@ -292,25 +327,15 @@ function New-EntraOpsServiceAZContainer {
             if ($invalidRoleIds.Count -gt 0) {
                 throw "$logPrefix ServiceEM.ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds contains invalid GUIDs: $($invalidRoleIds -join ', ')"
             }
-            $mgmtCondition = (
-                "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'}))" +
-                " OR " +
-                "(@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAllOfAnyValues:GuidNotEquals {$excludeRolesStr}" +
-                " AND " +
-                "@Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {$($workloadAdmins.Id)}))" +
-                " AND " +
-                "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'}))" +
-                " OR " +
-                "(@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAllOfAnyValues:GuidNotEquals {$excludeRolesStr}" +
-                " AND " +
-                "@Resource[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {$($workloadAdmins.Id)}))"
-            )
+            # ForAnyOfAllValues: the requested role must differ from every excluded role (ForAllOfAnyValues would always be true)
+            $mgmtRoleOperator = "ForAnyOfAllValues:GuidNotEquals"
             $toAdd += @{
                 RoleDefinitionId = "$roleDefinitionPrefix/$($rbacAdmin.Id)"
                 RoleId           = $rbacAdmin.Id
                 PrincipalId      = $management.Id
-                Condition        = $mgmtCondition
+                Condition        = & $newConstrainedCondition $mgmtRoleOperator $excludeRolesStr $workloadAdmins.Id
                 ConditionVersion = "2.0"
+                ConditionPattern = & $getConstrainedConditionPattern $mgmtRoleOperator
             }
         } elseif ($workloadAdmins -and $management) {
             Write-Verbose "$logPrefix ManagementPlane-Admins already has the constrained Role Based Access Control Administrator eligible assignment for $($workloadAdmins.Id) — skipping"
@@ -352,30 +377,20 @@ function New-EntraOpsServiceAZContainer {
             if ($invalidRoleIds.Count -gt 0) {
                 throw "$logPrefix ServiceEM.ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds contains invalid GUIDs: $($invalidRoleIds -join ', ')"
             }
-            $wlCondition = (
-                "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'}))" +
-                " OR " +
-                "(@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$allowRolesStr}" +
-                " AND " +
-                "@Request[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {$($workloadUsers.Id)}))" +
-                " AND " +
-                "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'}))" +
-                " OR " +
-                "(@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$allowRolesStr}" +
-                " AND " +
-                "@Resource[Microsoft.Authorization/roleAssignments:PrincipalId] ForAnyOfAnyValues:GuidEquals {$($workloadUsers.Id)}))"
-            )
+            $wlRoleOperator = "ForAnyOfAnyValues:GuidEquals"
             $toAdd += @{
                 RoleDefinitionId = "$roleDefinitionPrefix/$($rbacAdmin.Id)"
                 RoleId           = $rbacAdmin.Id
                 PrincipalId      = $workloadAdmins.Id
-                Condition        = $wlCondition
+                Condition        = & $newConstrainedCondition $wlRoleOperator $allowRolesStr $workloadUsers.Id
                 ConditionVersion = "2.0"
+                ConditionPattern = & $getConstrainedConditionPattern $wlRoleOperator
             }
         } elseif ($workloadAdmins -and $workloadUsers) {
             Write-Verbose "$logPrefix WorkloadPlane-Admins already has the constrained Role Based Access Control Administrator eligible assignment for $($workloadUsers.Id) — skipping"
         }
 
+        $keptConflicts = [System.Collections.Generic.List[string]]::new()
         foreach ($add in $toAdd) {
             $scheduleRequestParams.Name = [guid]::NewGuid()
             $scheduleRequestParams.RoleDefinitionId = $add.RoleDefinitionId
@@ -399,7 +414,8 @@ function New-EntraOpsServiceAZContainer {
             # Use @() to handle both Array (legacy) and List (Az.Resources 9+) rule collections
             $policyRules = @($policy.Rule)
             if (($policyRules | Where-Object { $_.Id -eq "Expiration_Admin_Eligibility" }).IsExpirationRequired) {
-                Write-Verbose "$logPrefix Policy requires eligible expiration, updating"
+                # The role management policy applies to every principal of the scope, not only to the service groups
+                Write-Warning "$logPrefix The PIM policy of role '$($add.RoleId)' on '$scopeId' requires an expiration of eligible assignments. It is changed to allow permanent eligible assignments, which applies to all eligible assignments of this role on the scope."
                 $roleManagementPolicySplat = @{
                     Scope = $scopeId
                     Name  = $add.RoleId
@@ -424,8 +440,37 @@ function New-EntraOpsServiceAZContainer {
                 $isStale = {
                     "$($_.RoleDefinitionId)" -like "*$($add.RoleId)" -and $_.PrincipalId -eq $add.PrincipalId -and $_.Scope -ieq $scopeId
                 }
-                if (@($existing | Where-Object $isStale).Count -gt 0) {
-                    Write-Warning "$logPrefix Removing leftover eligible assignment of $($add.PrincipalId) on $scopeId; its condition doesn't match the current constrained delegation"
+                $conflicting = @($existing | Where-Object $isStale)
+                if ($conflicting.Count -gt 0) {
+                    # Only remove assignments created by ServiceEM for a target group that no longer exists; in the Centralized model the
+                    # principal is a tenant-wide group whose other assignments (customer or another landing zone) must be kept
+                    $keepReason = $null
+                    foreach ($assignment in $conflicting) {
+                        $conditionMatch = [regex]::Match("$($assignment.Condition)", $add.ConditionPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                        if (-not $conditionMatch.Success) {
+                            $keepReason = "its condition wasn't created by ServiceEM"
+                            break
+                        }
+                        $previousTargetId = $conditionMatch.Groups['target'].Value
+                        try {
+                            $previousTarget = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$($previousTargetId)?`$select=id" -OutputType PSObject -DisableCache -ThrowOnFailure -SuppressNotFoundWarning
+                        } catch {
+                            if ($_.Exception.Data['StatusCode'] -ne 404) {
+                                throw "$logPrefix Failed to look up target group $previousTargetId of the existing eligible assignment of $($add.PrincipalId) on ${scopeId}: $($_.Exception.Message)"
+                            }
+                            $previousTarget = $null
+                        }
+                        if ($previousTarget.Id) {
+                            $keepReason = "it delegates to the existing group $previousTargetId (e.g. another landing zone on the same scope)"
+                            break
+                        }
+                    }
+                    if ($keepReason) {
+                        Write-Warning "$logPrefix Keeping the existing eligible Role Based Access Control Administrator assignment of $($add.PrincipalId) on ${scopeId}: $keepReason. The constrained delegation for this landing zone isn't assigned; remove or adjust the existing assignment and run the deployment again."
+                        $keptConflicts.Add("$($add.PrincipalId) on ${scopeId} ($keepReason)")
+                        continue
+                    }
+                    Write-Warning "$logPrefix Removing leftover eligible assignment of $($add.PrincipalId) on $scopeId; its target group no longer exists"
                     try {
                         New-AzRoleEligibilityScheduleRequest -Name ([guid]::NewGuid()) -Scope $scopeId -RoleDefinitionId $add.RoleDefinitionId -PrincipalId $add.PrincipalId -RequestType AdminRemove -ErrorAction Stop | Out-Null
                     } catch {
@@ -447,6 +492,9 @@ function New-EntraOpsServiceAZContainer {
                 Write-Verbose "$logPrefix Failed to create PIM Eligible Assignment"
                 throw "$logPrefix Failed to create PIM eligible assignment for $($add.PrincipalId) on ${scopeId}: $($_.Exception.Message)"
             }
+        }
+        if ($keptConflicts.Count -gt 0) {
+            throw "$logPrefix The constrained Role Based Access Control Administrator delegation wasn't assigned because existing eligible assignments were kept: $($keptConflicts -join '; '). Remove or adjust them and run the deployment again."
         }
     }
 

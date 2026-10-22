@@ -132,6 +132,7 @@ ServiceEM automates the creation of **tiered, service-scoped landing zones** fol
 | `-ControlPlaneAdmins <string[]>`                                                               | UPNs added as initial members of the per-service ControlPlane-Admins group (PerService only, ignored with a warning in the Centralized model or with `-ControlPlaneDelegationGroupId`): PIM for Groups eligible members with `-EnablePimForGroups`, otherwise permanent members                                                                                     |
 | `-AddWorkloadPlaneAdminToUsers`                                                                | Also assign the admin to the WorkloadPlane-Users access package (default: admin access package only; `ServiceEM.AddWorkloadPlaneAdminToUsers`)                                                                                                                                                                                                                      |
 | `-GovernanceModel <string>`                                                                    | `"PerService"` or `"Centralized"`; parameter > `ServiceEM.GovernanceModel` in config > `"PerService"`                                                                                                                                                                                                                                                               |
+| `-AllowPerServiceFallback`                                                                     | Centralized only: fall back to PerService (per-service ControlPlane-/ManagementPlane-Admins groups) when a delegation group can't be resolved, instead of stopping with an error. Off by default                                                                                                                                                                    |
 | `-ControlPlaneDelegationGroupId`, `-ManagementPlaneDelegationGroupId`, `-AdministratorGroupId` | Existing groups to use instead of per-service groups (ControlPlane/ManagementPlane: role-assignable security groups only); fall back to the `ServiceEM` config values                                                                                                                                                                                               |
 | `-SkipAzureResourceGroup`                                                                      | Entra-only: no Azure resource group and no Azure RBAC                                                                                                                                                                                                                                                                                                               |
 | `-SkipCatalogOwnerAssignment`                                                                  | No permanent Catalog Owner assignment for ControlPlane-Admins in the catalog (recommended, see [Catalog Owner assignment](#catalog-owner-assignment-for-controlplane-admins))                                                                                                                                                                                       |
@@ -162,7 +163,7 @@ New-EntraOpsSubscriptionLandingZone -DeploymentPrefix "IdentityOnly" -WorkloadPl
 
 #### Troubleshooting for AI
 - **Missing groups**: Centralized removes per-service ControlPlane-/ManagementPlane-Admins and CatalogPlane-Members groups; the Microsoft 365 group is only created with `-CreateM365Group`
-- **Centralized silently became PerService**: A delegation group could not be resolved or created - check the `CENTRALIZED GOVERNANCE MODEL FAILED` warnings
+- **Centralized deployment stops with "failed to resolve the tenant-wide delegation groups"**: A delegation group could not be resolved or created - configure `ControlPlaneDelegationGroupId` / `ManagementPlaneDelegationGroupId` with existing role-assignable groups, or pass `-AllowPerServiceFallback` to deploy with the PerService model (`CENTRALIZED GOVERNANCE MODEL FAILED` warnings)
 - **Assignment policy errors**: Usually a referenced approver or requestor group does not exist in the same scope (see [Assignment Policies](#assignment-policies)) or the users are invalid
 - **Azure RBAC failures**: Caller lacks Azure subscription permissions or the Azure context points to another subscription
 
@@ -230,7 +231,7 @@ Open `Reports/index.html` and use these apps to inspect the landing zone resourc
 
 #### Required (All Deployments)
 
-1. **PowerShell 7+** and the **EntraOps PowerShell Module** imported:
+1. **PowerShell 7.4** or later and the **EntraOps PowerShell Module** imported:
    ```powershell
    Import-Module ./EntraOps
    ```
@@ -353,7 +354,11 @@ and an existing group for CatalogPlane (`AdministratorGroupId`):
    - If none exists and the session token contains `RoleManagement.ReadWrite.Directory` (included in `-Scope "ServiceEM"`),
      a role-assignable group is created (always without owner, see [Group owners](#group-owners))
    - Found or created group IDs are persisted to `EntraOpsConfig.json` in the current directory
-   - If resolution fails, ServiceEM warns and **falls back to the PerService model**
+   - A configured group ID that doesn't exist (HTTP 404) falls back to this name-based lookup, but is never replaced:
+     no group is created and the configured ID isn't overwritten. Other lookup errors, and more than one
+     role-assignable group with the default name, stop with an error
+   - If resolution fails, `New-EntraOpsSubscriptionLandingZone` **stops before creating any object**. Pass
+     `-AllowPerServiceFallback` to fall back to the PerService model instead
 
 #### Governance Model Comparison
 
@@ -781,7 +786,7 @@ The **`ServiceEM`** section of `EntraOpsConfig.json` contains the following basi
 | `AdministrativeUnits`               | Object IDs of administrative units for WorkloadPlane-Admins (`WorkloadPlane`) and WorkloadPlane-Users (`UserAccess`); empty skips the assignment (see [Classification of workload groups](#classification-of-workload-groups))                                                     |
 | `UpdateObjectClassificationFile`    | `true` adds WorkloadPlane-Admins and WorkloadPlane-Users to the Object Classification File (see [Classification of workload groups](#classification-of-workload-groups))                                                                                                           |
 
-> **Note:** The `ControlPlaneDelegationGroupId` and `ManagementPlaneDelegationGroupId` values must be **role-assignable Security Groups**; ServiceEM stops before creating any object when such a group isn't role-assignable, and the name-based lookup only accepts role-assignable security groups. They are also honored in the PerService model (see [How ServiceEM Reads EntraOpsConfig.json](#how-serviceem-reads-entraopsconfigjson)).
+> **Note:** The `ControlPlaneDelegationGroupId` and `ManagementPlaneDelegationGroupId` values must be **role-assignable Security Groups**; ServiceEM stops before creating any object when such a group isn't role-assignable, and the name-based lookup only accepts role-assignable security groups. A value that isn't a valid object ID stops with an error; a configured group that no longer exists (HTTP 404) falls back to the name-based lookup with a warning, without changing the configured ID. They are also honored in the PerService model (see [How ServiceEM Reads EntraOpsConfig.json](#how-serviceem-reads-entraopsconfigjson)).
 
 ### Classification of workload groups
 
@@ -913,7 +918,7 @@ by `New-EntraOpsConfigFile`); the runtime default without configuration is PerSe
 - **Consistent permissions**: Same administrators have access across all landing zones
 - **Reduced complexity**: Fewer groups to manage across multiple services
 - **Skipped per-service groups**: ServiceEM removes the per-service ControlPlane-Admins, ManagementPlane-Admins and CatalogPlane-Members groups from all scopes
-- **Fallback**: If a delegation group can neither be found nor created, ServiceEM warns and falls back to the PerService model
+- **No silent fallback**: If a delegation group can't be resolved, ServiceEM stops with an error before creating any object. Only with `-AllowPerServiceFallback` it warns and falls back to the PerService model, which creates per-service ControlPlane-Admins and ManagementPlane-Admins groups with their privileged catalog and Azure roles
 
 **Configuration in EntraOpsConfig.json (under the `ServiceEM` section):**
 
@@ -968,7 +973,7 @@ New-EntraOpsSubscriptionLandingZone `
 
 **What happens:**
 1. ServiceEM reads `ControlPlaneDelegationGroupId`, `ManagementPlaneDelegationGroupId`, and `AdministratorGroupId` from `EntraOpsConfig.json` (unless passed as parameters)
-2. Validates that the ControlPlane and ManagementPlane groups exist (falls back to name-based lookup/creation, see [Required for Centralized Model](#required-for-centralized-model-optional))
+2. Validates that the ControlPlane and ManagementPlane groups exist (name-based lookup/creation, see [Required for Centralized Model](#required-for-centralized-model-optional)); stops with an error when they can't be resolved, unless `-AllowPerServiceFallback` is set
 3. **Skips creating** per-service ControlPlane-Admins, ManagementPlane-Admins and CatalogPlane-Members groups
 4. **References** the tenant-wide groups in the catalog (catalog roles, policy approvers/requestors); they are not added as catalog resources and are never modified
 5. Creates only the following groups for the service (default `-DeploymentScope ResourceGroup`; `Subscription` uses the `Sub-MyApp` prefix):
@@ -1639,6 +1644,20 @@ group is tenant-wide and would otherwise read the assignments of every service c
 > role in the Privileged EAM data. Catalog role assignments created by earlier versions for CatalogPlane-Members or
 > ManagementPlane-Admins are not removed by a re-run; remove them in the catalog's **Roles and administrators** page.
 
+### Progress and completion feedback
+
+Creation and removal show progress for the current phase, including elapsed wait time and pending request counts, without
+requiring `-Verbose`. Progress clears when the command finishes or stops with an error. These are status indicators;
+fulfillment duration depends on Entitlement Management and no completion percentage is estimated.
+
+Creation prints a brief summary that identifies pending access requests or requests needing attention; provisioning the
+resources does not mean those requests have delivered access. Removal summarizes the deleted service groups and whether
+the Azure resource group was deleted, kept, or needs cleanup. Request IDs and API details remain in `-Verbose` output.
+
+Completion messages use the information stream and do not change pipeline results: creation returns its report, and removal
+returns an empty hashtable. Set `$ProgressPreference = 'SilentlyContinue'` to hide progress and pass `-InformationAction Ignore`
+to hide completion messages. `-WhatIf` on removal does not display a completion message or start teardown progress.
+
 ### Service Owner and Member Assignment
 
 **Owner vs. Members** (initial `adminAdd` assignments by `New-EntraOpsServiceEMAssignment`):
@@ -1648,7 +1667,13 @@ group is tenant-wide and would otherwise read the assignments of every service c
 
 The cmdlet waits up to 5 minutes (at most 30 seconds between checks) until the submitted requests are delivered. Requests that
 wait for approval or failed are reported with a warning and not awaited; requests that are still in progress after 5 minutes are
-listed with their last state and completed in the background.
+listed with their last state and status and continue processing in the background. Access is not ready until the request is
+fully delivered. The bootstrap report includes `AssignmentRequests` (ID, state, status, target ID and access package ID) for
+requests submitted or found open in this run; `Assignments` contains only delivered assignments. A re-run detects existing
+open requests instead of submitting duplicates.
+
+Polling budgets include time spent in Graph calls and cap the final sleep to the remaining time. An in-flight API call is
+allowed to finish, so actual elapsed time can exceed the budget. Verbose output shows elapsed time and pending request states.
 
 **ControlPlaneAdmins** (`-ControlPlaneAdmins`, PerService only): ControlPlane-Admins has no access package. The users are added
 directly to the per-service ControlPlane-Admins group: as **PIM for Groups eligible members** with
@@ -1733,7 +1758,7 @@ ServiceEM exports 15 cmdlets for automated landing zone provisioning and managem
 | 8   | `New-EntraOpsServiceEMAssignmentPolicy`                | Creates assignment policies: requestor scopes, approvers, expiration, quarterly access reviews                                                                                                                                                                                                                                                                                                           |
 | 9   | `New-EntraOpsServiceEMAssignment`                      | Initial `adminAdd` assignments: service members → WorkloadPlane-Members (fallback WorkloadPlane-Users); admin → ManagementPlane-Admins (fallback WorkloadPlane-Admins); admin and `-CatalogPlaneMembers` → CatalogPlane-Members                                                                                                                                                                          |
 | 10  | `New-EntraOpsServicePIMPolicy`                         | Configures PIM for Groups activation policies (MFA, justification, optional authentication context, max duration (10 hours), no approval) for ControlPlane-/ManagementPlane-Admins with `-EnablePimForGroups` and WorkloadPlane-Admins with `-EnableWorkloadPlanePimForGroups`, before the groups are added to the catalog; only called when a group is selected (`PimPolicies` in the bootstrap report) |
-| 11  | `New-EntraOpsServicePIMAssignment`                     | Creates the PIM for Groups eligible owner assignments (no expiration) of the WorkloadPlane groups for `-WorkloadPlaneAdminPrincipalId`; only with `-EnableOwnerAssignment`, which the bootstrap sets for `-GroupOwnership Eligible` (without the switch the cmdlet returns an empty array). Returned as `PimForGroupsAssignments` in the bootstrap report                                                |
+| 11  | `New-EntraOpsServicePIMAssignment`                     | Creates the PIM for Groups eligible owner assignments (no expiration) of the WorkloadPlane groups for `-WorkloadPlaneAdminPrincipalId`; only with `-EnableOwnerAssignment`, which the bootstrap sets for `-GroupOwnership Eligible` (without the switch the cmdlet returns an empty array). Failed lookups or assignments stop with one error after all groups were processed; the bootstrap still runs the remaining steps (including the Azure resource group) and then stops with that error. Returned as `PimForGroupsAssignments` in the bootstrap report                                                |
 | 12  | `New-EntraOpsServiceAZContainer`                       | Creates the Azure Resource Group `RG-<Prefix>` (or, with `-AzureScope Subscription`, uses the subscription) with PIM-eligible RBAC (Contributor, UAA, constrained RBAC Administrator) and permanent Reader for WorkloadPlane-Admins; assigns no Owner role                                                                                                                                               |
 | 13  | `New-EntraOpsSubscriptionLandingZone`                  | **Landing Zone** — exactly one scope: resource group (default) or subscription (`-DeploymentScope`); resolves governance model and delegation groups                                                                                                                                                                                                                                                     |
 | 14  | `Get-EntraOpsServiceEMReport`                          | Read-only report of **all** Entitlement Management catalogs in the tenant (roles, resources, access packages, policies, delivered assignments)                                                                                                                                                                                                                                                           |
@@ -1756,9 +1781,16 @@ group by ID or display name, or creates a role-assignable one, and persists its 
 > The cmdlet asks for confirmation before deleting anything; `-Force` (or `-Confirm:$false`) skips the prompt for automation,
 > and `-WhatIf` shows the catalog, number of access packages and group resources without changing anything.
 > Open assignment requests (e.g. pending approval) are canceled first, and requests that can't be canceled (e.g. delivering)
-> are awaited, because Microsoft Graph rejects removing an assignment while a request for it is open. If a request doesn't
+> are awaited, because Microsoft Graph rejects removing an assignment while a request for it is open. Waiting for open requests
+> and waiting for removals each have a separate five-minute budget; deleting soon after provisioning can therefore take longer.
+> Removal requests must succeed, and the cmdlet checks that no non-expired assignments remain before deleting package resource
+> roles. Failed, canceled or partially delivered removals and failed verification reads stop teardown. Assignment visibility is
+> polled for up to five minutes; package deletion retries only `InvalidDeleteEntitlementHasGrants` for up to another 60 seconds.
+> Verbose output identifies pending requests by ID, state and status. If a request doesn't
 > complete, an assignment can't be removed or an access package can't be deleted, the cmdlet stops with an error listing the
 > causes and keeps the catalog, the groups and the resource group; run it again once the causes are resolved.
+> The groups are deleted before the catalog. If a group can't be deleted, the cmdlet continues with the other groups, keeps
+> the catalog so a re-run can find it and finish the removal, and reports all failures in one error at the end.
 >
 > ```powershell
 > Remove-EntraOpsServiceCatalog -ServiceCatalogName "Catalog-Rg-MyApp" -WhatIf
@@ -1839,6 +1871,13 @@ their roles on the same resource group or subscription. The table shows the reso
 ServiceEM also updates the PIM for Azure resources policy of these roles on the resource group (or subscription) so that
 eligible assignments are not required to expire. ServiceEM assigns no Owner role: unrestricted access (role assignments
 including Owner) remains only with ControlPlane-Admins via the PIM-eligible User Access Administrator.
+
+Azure allows only one eligible assignment per principal, role and scope. An existing eligible Role Based Access Control
+Administrator assignment of the same group on the scope is only removed and replaced when it has exactly the condition
+shape created by ServiceEM and its target group no longer exists (leftover of a deleted landing zone). Any other
+assignment, e.g. a customer condition or the delegation of another landing zone on the same scope, is kept. The
+remaining assignments are still created, then the deployment stops with an error because the constrained delegation
+for this landing zone isn't assigned. Remove or adjust the existing assignment and run the deployment again.
 
 > **No Contributor for WorkloadPlane-Admins:** Contributor on the resource group (or subscription) equals ManagementPlane control
 > (e.g. managed identities, Key Vault access policies, run command on virtual machines) and would be a tier breach for the
@@ -2276,7 +2315,7 @@ Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso
 **Symptom:**
 ```
 WARNING: [New-EntraOpsServiceEMAssignment] Fulfillment can take 5+ minutes to complete
-WARNING: [New-EntraOpsServiceEMAssignment] Assignment requests not fulfilled after 300 seconds, continuing without waiting: <request-id>=delivering
+WARNING: [New-EntraOpsServiceEMAssignment] Assignment requests not fulfilled within the 300-second wait budget, continuing without waiting; access for these requests is not ready: <request-id>=delivering
 ```
 
 **Cause:**

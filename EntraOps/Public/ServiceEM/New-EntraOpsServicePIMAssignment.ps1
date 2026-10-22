@@ -8,10 +8,11 @@
     ManagementPlane, CatalogPlane or Microsoft 365 groups. Eligible memberships are granted through
     the access packages.
 
-    Idempotent: existing noExpiration eligible assignments are detected and
-    skipped.
+    Idempotent: an existing eligible owner assignment of the workload plane admin (active
+    eligibility schedule) is detected and skipped.
 
-    Without -EnableOwnerAssignment the function returns an empty array without error.
+    Without -EnableOwnerAssignment the function returns an empty array without error. Failed lookups or
+    assignments are reported together in a terminating error after all groups have been processed.
 
 .PARAMETER ServiceGroups
     All service group objects (owned groups only — delegated groups must be
@@ -54,6 +55,23 @@ function New-EntraOpsServicePIMAssignment {
     begin {
         $pimEligibilities = @()
         $isOwnerTarget = { param($group) $EnableOwnerAssignment -and $group.DisplayName -like "*-WorkloadPlane-*" }
+        # The owner policy is the tenant's: request its maximum duration when it requires an expiration
+        $getOwnerEligibilityExpiration = {
+            param($group)
+            $ownerPolicyUri = "/v1.0/policies/roleManagementPolicyAssignments?`$filter=scopeId eq '$($group.Id)' and scopeType eq 'Group' and roleDefinitionId eq 'owner'&`$expand=policy(`$expand=rules)"
+            try {
+                $ownerPolicyAssignments = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $ownerPolicyUri -OutputType PSObject -DisableCache -ThrowOnFailure)
+            } catch {
+                Write-Warning "$logPrefix Could not read the PIM owner policy of group $($group.Id); requesting a permanent eligibility. Error: $($_.Exception.Message)"
+                return @{ type = "noExpiration" }
+            }
+            $expirationRule = @($ownerPolicyAssignments | ForEach-Object { $_.policy.rules } | Where-Object { $_ -and $_.id -eq "Expiration_Admin_Eligibility" }) | Select-Object -First 1
+            if ($null -ne $expirationRule -and $expirationRule.isExpirationRequired -eq $true -and -not [string]::IsNullOrWhiteSpace("$($expirationRule.maximumDuration)")) {
+                Write-Verbose "$logPrefix The owner policy of group $($group.Id) requires an expiration; requesting $($expirationRule.maximumDuration)"
+                return @{ type = "afterDuration"; duration = "$($expirationRule.maximumDuration)" }
+            }
+            return @{ type = "noExpiration" }
+        }
         $targetGroups = @($ServiceGroups | Where-Object {
                 $_.GroupTypes -notcontains "Unified" -and (& $isOwnerTarget $_)
             })
@@ -62,40 +80,51 @@ function New-EntraOpsServicePIMAssignment {
     process {
         Write-Verbose "$logPrefix Beginning PIM Assignment"
 
+        $createdGroupIds = [System.Collections.Generic.List[string]]::new()
+        $ownerFailures = [System.Collections.Generic.List[string]]::new()
+        if ($targetGroups.Count -gt 0 -and [string]::IsNullOrWhiteSpace($WorkloadPlaneAdminPrincipalId)) {
+            throw "$logPrefix -WorkloadPlaneAdminPrincipalId is required with -EnableOwnerAssignment."
+        }
         foreach($group in $targetGroups){
             Write-Verbose "$logPrefix Looking up eligibility for group ID: $($group.Id)"
 
+            # eligibilitySchedules holds the current eligibilities only; schedule requests also contain revoked, denied or failed requests
             try {
-                $currentEligibilities = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
-                $pimEligibilities += $currentEligibilities
+                $currentEligibilities = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq '$($group.Id)'" -OutputType PSObject -DisableCache -ThrowOnFailure
+                $pimEligibilities += @($currentEligibilities | Where-Object { $_ })
             } catch {
-                Write-Warning "$logPrefix Failed to query eligibility schedule requests for group $($group.Id). Ensure the group is role-assignable and the caller has PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup permission. Error: $_"
+                Write-Warning "$logPrefix Failed to query eligibility schedules for group $($group.Id). Ensure the group is role-assignable and the caller has PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup permission. Error: $_"
+                $ownerFailures.Add("lookup of '$($group.DisplayName)' ($($group.Id)): $($_.Exception.Message)")
                 continue
             }
 
-            if(-not [string]::IsNullOrWhiteSpace($WorkloadPlaneAdminPrincipalId)){
-                $ownerParams = @{
-                    accessId    = "owner"
-                    principalId = $WorkloadPlaneAdminPrincipalId
-                    groupId     = $group.Id
-                    action      = "AdminAssign"
-                    scheduleInfo = @{
-                        startDateTime = (Get-Date).AddHours(-1).ToString("o")
-                        expiration    = @{ type = "noExpiration" }
-                    }
-                }
-                $neOwner = $WorkloadPlaneAdminPrincipalId + "_noExpiration"
-                $eeOwner = $pimEligibilities | Where-Object { $_.groupId -eq $group.Id -and $_.accessId -eq "owner" } | ForEach-Object { $_.principalId+"_"+$_.targetSchedule.scheduleInfo.expiration.type }
-                if($neOwner -notin $eeOwner){
-                    Write-Verbose "$logPrefix Creating owner eligible assignment for $WorkloadPlaneAdminPrincipalId on group $($group.Id)"
-                    try {
-                        Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($ownerParams | ConvertTo-Json -Depth 10) -OutputType PSObject | Out-Null
-                        $pimEligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
-                    } catch {
-                        Write-Warning "$logPrefix Failed to create PIM eligible owner assignment for group $($group.Id). Error: $_"
-                    }
+            $ownerParams = @{
+                accessId    = "owner"
+                principalId = $WorkloadPlaneAdminPrincipalId
+                groupId     = $group.Id
+                action      = "AdminAssign"
+                scheduleInfo = @{
+                    startDateTime = (Get-Date).AddHours(-1).ToString("o")
+                    expiration    = @{ type = "noExpiration" }
                 }
             }
+            $existingOwner = @($pimEligibilities | Where-Object { $_.groupId -eq $group.Id -and $_.accessId -eq "owner" -and $_.principalId -eq $WorkloadPlaneAdminPrincipalId })
+            if ($existingOwner.Count -gt 0) {
+                Write-Verbose "$logPrefix $WorkloadPlaneAdminPrincipalId is already eligible owner of group $($group.Id)"
+            } else {
+                Write-Verbose "$logPrefix Creating owner eligible assignment for $WorkloadPlaneAdminPrincipalId on group $($group.Id)"
+                $ownerParams.scheduleInfo.expiration = & $getOwnerEligibilityExpiration $group
+                try {
+                    Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests" -Body ($ownerParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure | Out-Null
+                    $createdGroupIds.Add($group.Id)
+                } catch {
+                    Write-Warning "$logPrefix Failed to create PIM eligible owner assignment for group $($group.Id). Error: $_"
+                    $ownerFailures.Add("assignment on '$($group.DisplayName)' ($($group.Id)): $($_.Exception.Message)")
+                }
+            }
+        }
+        if ($ownerFailures.Count -gt 0) {
+            throw "$logPrefix Failed to ensure $($ownerFailures.Count) PIM for Groups eligible owner assignment(s) for $($WorkloadPlaneAdminPrincipalId): $($ownerFailures -join '; ')"
         }
     }
 
@@ -104,28 +133,27 @@ function New-EntraOpsServicePIMAssignment {
             Write-Verbose "$logPrefix -EnableOwnerAssignment not set, no PIM for Groups eligibilities to create"
             return [psobject[]]@()
         }
-
-        $expectedIds = @($pimEligibilities | Where-Object { $_.id } | Select-Object -ExpandProperty id)
-        if ($expectedIds.Count -eq 0) {
-            Write-Warning "$logPrefix No PIM eligibilities were successfully created or retrieved. Check previous warnings for permission errors (e.g., group not role-assignable, missing PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup)."
-            return [psobject[]]@()
+        if ($createdGroupIds.Count -eq 0) {
+            return [psobject[]]$pimEligibilities
         }
 
-        $check = @{}
+        $check = @{ Eligibilities = @() }
         $confirmed = Wait-EntraOpsServiceEMCondition -Activity "PIM for Groups eligibilities" -logPrefix $logPrefix -Condition {
             $check.Eligibilities = @()
             foreach($group in $targetGroups){
                 try {
-                    $check.Eligibilities += Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilityScheduleRequests?`$filter=groupId eq '$($group.Id)'&`$expand=group,principal,targetSchedule" -OutputType PSObject -DisableCache
+                    $check.Eligibilities += @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq '$($group.Id)'" -OutputType PSObject -DisableCache | Where-Object { $_ })
                 } catch {
                     Write-Verbose "$logPrefix Failed to query eligibility during consistency check for group $($group.Id): $_"
                 }
             }
-            $actualIds = @($check.Eligibilities | Where-Object { $_.id } | Select-Object -ExpandProperty id)
-            (Compare-Object $expectedIds $actualIds | Measure-Object).Count -eq 0
+            @($createdGroupIds | Where-Object {
+                    $groupId = $_
+                    -not ($check.Eligibilities | Where-Object { $_.groupId -eq $groupId -and $_.accessId -eq "owner" -and $_.principalId -eq $WorkloadPlaneAdminPrincipalId })
+                }).Count -eq 0
         }
         if(-not $confirmed){
-            Write-Warning "$logPrefix PIM eligibility consistency with Entra not achieved. Expected $($expectedIds.Count) entries. Returning best-effort results."
+            Write-Warning "$logPrefix PIM eligibility consistency with Entra not achieved for $($createdGroupIds.Count) new eligible owner assignment(s). Returning best-effort results."
             return [psobject[]]$pimEligibilities
         }
         return [psobject[]]$check.Eligibilities

@@ -12,16 +12,21 @@
     Reuses the configuration loaded by Connect-EntraOps. Otherwise, looks for EntraOpsConfig.json
     in the current folder, then the EntraOps working folder. Use -ConfigFilePath to select a file
     explicitly. Command parameters override configuration values. Without a configuration, defaults apply.
+    When an automatically found configuration contains AlternateObjectTierLevelAttributes filter
+    expressions, a warning is written before the run because these expressions execute as PowerShell
+    code. Pass trusted configuration files with -ConfigFilePath.
+    The Azure and Microsoft Graph contexts must belong to the same tenant, with or without a configuration.
 
     Prerequisites:
-    - PowerShell 7+ with the EntraOps module loaded.
+    - PowerShell 7.4+ with the EntraOps module loaded.
     - An active Az context (Connect-AzAccount).
     - An active Microsoft Graph context (Connect-MgGraph).
 
     No EntraOpsConfig.json, no Classification folder, and no tenant-specific files are
-    required beforehand. All temporary artefacts are removed after the run, except for
-    Classification_RoleActionOverwrites.json and Classification_RoleDefinitionOverwrites.json
-    in the tenant-specific Classification folder: these are tenant customization files that
+    required beforehand. All temporary artefacts are removed after the run, except for the
+    overwrite files (Classification_RoleActionOverwrites.json, Classification_RoleDefinitionOverwrites.json,
+    Classification_ApiPermissionOverwrites.json and their _<Tag> variants) in the tenant-specific
+    Classification folder: these are tenant customization files that
     can be authored/maintained outside of this cmdlet (e.g. via the ClassificationExplorer
     "Customize Overwrites" view, or manually) and are always preserved if present. Use
     -KeepClassificationFiles to keep all classification files for the reporting apps.
@@ -148,6 +153,7 @@ function Invoke-EntraOpsPrivilegedEAM {
             $RunConfig = $SessionConfig
             $ResolvedConfigPath = $__EntraOpsSession['ConfigFilePath']
         } else {
+            $ConfigAutoDiscovered = -not $ConfigFilePath
             if (-not $ConfigFilePath) {
                 $ConfigFilePath = @(
                     Join-Path (Get-Location -PSProvider FileSystem).ProviderPath 'EntraOpsConfig.json'
@@ -159,6 +165,19 @@ function Invoke-EntraOpsPrivilegedEAM {
                 $RunConfig = Get-Content -LiteralPath $ResolvedConfigPath -Raw | ConvertFrom-Json -Depth 100 -AsHashtable -NoEnumerate
                 if ($RunConfig -isnot [System.Collections.IDictionary]) {
                     throw "Configuration file '$ResolvedConfigPath' must contain a JSON object."
+                }
+                # Warn before any AlternateObjectTierLevelAttributes filter can run: an automatically
+                # discovered file (e.g. in a cloned or downloaded folder) was not explicitly chosen as trusted.
+                $AlternateConfig = $RunConfig.AlternateObjectTierLevelAttributes
+                $HasAlternateFilters = $null -ne $AlternateConfig -and @(foreach ($ObjectType in 'User', 'ServicePrincipal', 'Group') {
+                        if (Test-EntraOpsAlternateObjectTierLevelEnabled -ObjectType $ObjectType -AlternateObjectTierLevelAttributes $AlternateConfig) {
+                            foreach ($TierName in 'ControlPlane', 'ManagementPlane', 'WorkloadPlane', 'UserAccess') {
+                                if (-not [string]::IsNullOrWhiteSpace([string]$AlternateConfig.$ObjectType.$TierName)) { $TierName }
+                            }
+                        }
+                    }).Count -gt 0
+                if ($ConfigAutoDiscovered -and $HasAlternateFilters) {
+                    Write-Warning "Automatically loaded configuration '$ResolvedConfigPath' contains AlternateObjectTierLevelAttributes filter expressions. These expressions are executed as PowerShell code with your current sessions. Only run with configuration files you trust, and pass trusted files explicitly with -ConfigFilePath."
                 }
             }
         }
@@ -221,8 +240,9 @@ function Invoke-EntraOpsPrivilegedEAM {
         if ($HasConfiguration -and $RunConfig.TenantId -and $RunConfig.TenantId -ne $TenantId) {
             throw "Configuration tenant '$($RunConfig.TenantId)' does not match the active Azure tenant '$TenantId'. Connect-EntraOps to the configured tenant before running."
         }
-        if ($HasConfiguration -and $MgContext.TenantId -ne $TenantId) {
-            throw "Microsoft Graph tenant '$($MgContext.TenantId)' does not match the active Azure tenant '$TenantId'. Reconnect to the configured tenant before running."
+        if ($MgContext.TenantId -ne $TenantId) {
+            $ReconnectTarget = if ($HasConfiguration) { 'the configured tenant' } else { 'the same tenant in both contexts' }
+            throw "Microsoft Graph tenant '$($MgContext.TenantId)' does not match the active Azure tenant '$TenantId'. Reconnect to $ReconnectTarget before running."
         }
 
         # Keep the configured tenant name so an alternate verified domain does not select a different
@@ -504,8 +524,9 @@ function Invoke-EntraOpsPrivilegedEAM {
             Write-Host "       Kept    : classification files in $ClassificationRoot (-KeepClassificationFiles)" -ForegroundColor DarkGray
         }
 
-        # Remove the generated tenant-specific classification folder, but preserve
-        # Classification_RoleActionOverwrites.json and Classification_RoleDefinitionOverwrites.json:
+        # Remove the generated tenant-specific classification folder, but preserve the overwrite files
+        # (Classification_RoleActionOverwrites.json, Classification_RoleDefinitionOverwrites.json,
+        # Classification_ApiPermissionOverwrites.json and their _<Tag> variants):
         # these are tenant customization files that are commonly authored/maintained outside of this
         # cmdlet (e.g. via the ClassificationExplorer "Customize Overwrites" view, or manually) and
         # must survive a zero-config run, unlike the classification files generated by this run.
@@ -514,11 +535,13 @@ function Invoke-EntraOpsPrivilegedEAM {
         # permanently deleted the user's generated Classification_Azure.json / ScopeReasoning_*.json - on the
         # success path as well as on failure.
         if (-not $KeepClassificationFiles -and -not [string]::IsNullOrEmpty($ClassificationTenant) -and ($CreatedPaths -contains $ClassificationTenant) -and (Test-Path -LiteralPath $ClassificationTenant -ErrorAction SilentlyContinue)) {
-            $PreservedTenantFiles = @('Classification_RoleActionOverwrites.json', 'Classification_RoleDefinitionOverwrites.json')
+            $PreservedTenantFiles = @(Get-ChildItem -LiteralPath $ClassificationTenant -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { Test-EntraOpsClassificationOverwriteFileName -Name $_.Name } | Select-Object -ExpandProperty Name)
             Get-ChildItem -LiteralPath $ClassificationTenant -Force -ErrorAction SilentlyContinue |
             Where-Object { $PreservedTenantFiles -notcontains $_.Name } |
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "       Cleaned : $ClassificationTenant (preserved $($PreservedTenantFiles -join ', '))" -ForegroundColor DarkGray
+            $PreservedTenantFileList = if ($PreservedTenantFiles.Count -gt 0) { $PreservedTenantFiles -join ', ' } else { 'no overwrite files' }
+            Write-Host "       Cleaned : $ClassificationTenant (preserved $PreservedTenantFileList)" -ForegroundColor DarkGray
 
             # Remove the tenant folder itself only if it ends up empty (i.e. no preserved overwrite files remain).
             if (-not (Get-ChildItem -LiteralPath $ClassificationTenant -Force -ErrorAction SilentlyContinue)) {

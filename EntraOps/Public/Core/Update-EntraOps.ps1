@@ -16,11 +16,62 @@
     "EntraOps-Insiders" repository, which requires -PersonalAccessToken or the ENTRAOPS_PAT
     environment variable (the EntraOpsUpdatePat secret in the workflow).
 
+.PARAMETER Branch
+    Upstream ref to update from: a branch, release tag or full commit SHA. Default is "main".
+    Pin a release tag or commit SHA for unattended updates. Overridden by AutomatedEntraOpsUpdate.Branch
+    in the config file unless passed explicitly.
+
+.PARAMETER Repository
+    Distribution repository to update from, resolved through the local EntraOpsUpdateContract.json
+    (e.g. "EntraOps" or "EntraOps-Insiders"). Default is "EntraOps". Overridden by
+    AutomatedEntraOpsUpdate.Repository in the config file unless passed explicitly. Ignored when -UpstreamUrl is set.
+
+.PARAMETER UpstreamUrl
+    Git URL of a custom upstream repository to clone instead of the contract-resolved repository.
+    A Personal Access Token passed with -PersonalAccessToken is used for this URL. The ENTRAOPS_PAT environment
+    variable is only used for github.com URLs. Credentials embedded in the URL are not logged or recorded.
+
+.PARAMETER PersonalAccessToken
+    Personal Access Token for private repositories (required for "EntraOps-Insiders"). Defaults to the
+    ENTRAOPS_PAT environment variable. Passed to git as an HTTP header via environment variables and never
+    sent to the public release repository.
+
+.PARAMETER ConfigFile
+    Path to the EntraOps configuration file. Default is "./EntraOpsConfig.json". Relative paths are
+    resolved against the EntraOps repository root. Its AutomatedEntraOpsUpdate section can override
+    -Repository, -Branch and -TargetUpdateFolders, and it is used to re-apply workflow parameters and
+    Azure DevOps schedules after the update.
+
+.PARAMETER TemporaryUpdateFolder
+    Folder for the temporary clone of the update candidate, relative to the current PowerShell location
+    unless absolute. Default is "TmpUpdate". It must not exist yet and is removed after the update.
+
+.PARAMETER RunBrowserTests
+    Also run the documentation and reporting browser tests when validating the update candidate.
+
+.PARAMETER SkipCandidateValidation
+    Skip validation of the update candidate before local files are replaced. Not allowed when
+    ./.github/workflows is updated. Use only for fully trusted sources.
+
+.PARAMETER PreparedCandidatePath
+    Path to an already downloaded update candidate (git checkout) to apply instead of cloning, relative
+    to the current PowerShell location unless absolute. The folder is left in place after the update.
+
+.PARAMETER ValidatedSourceCommit
+    Full commit SHA of a candidate that was already validated in a separate, credential-free job.
+    Requires -PreparedCandidatePath. The update fails if the prepared candidate is at another commit,
+    and validation is not repeated in this process.
+
+.PARAMETER BrowserTestsValidated
+    Records in .EntraOpsUpdateManifest.json that browser tests ran during the separate validation of
+    -ValidatedSourceCommit.
+
 .PARAMETER TargetUpdateFolders
     Repository-relative targets to replace from the configured upstream ref. Workflow definitions
     are supported but excluded by default. Select ./.github/workflows together with
     ./.github/actions and ./.github/scripts for an interactive workflow refresh. Automated workflow
     publication additionally requires the GitHub App credentials documented in Docs/content/core.md.
+    Targets are resolved against the EntraOps repository root, independent of the current location.
 
 .EXAMPLE
     This example updates EntraOps with default values of the main branch and the default target folders.
@@ -82,9 +133,12 @@ function Update-EntraOps {
     # Allow the config file's "AutomatedEntraOpsUpdate" section to override the default
     # Repository/Branch/TargetUpdateFolders used for self-update, unless the caller explicitly
     # passed -Repository, -Branch or -TargetUpdateFolders.
-    if (Test-Path -Path $ConfigFile) {
+    # Repository-relative paths (config file and update targets) resolve against the EntraOps
+    # repository root rather than the caller's current location.
+    $ConfigFilePath = if ([System.IO.Path]::IsPathRooted($ConfigFile)) { $ConfigFile } else { Join-Path $EntraOpsBaseFolder $ConfigFile }
+    if (Test-Path -LiteralPath $ConfigFilePath) {
         try {
-            $UpdateConfig = (Get-Content -Path $ConfigFile | ConvertFrom-Json).AutomatedEntraOpsUpdate
+            $UpdateConfig = (Get-Content -LiteralPath $ConfigFilePath | ConvertFrom-Json).AutomatedEntraOpsUpdate
             if (-not $PSBoundParameters.ContainsKey('Repository') -and -not [string]::IsNullOrWhiteSpace($UpdateConfig.Repository)) {
                 Write-Verbose "Using Repository '$($UpdateConfig.Repository)' from config file '$ConfigFile'."
                 $Repository = $UpdateConfig.Repository
@@ -130,14 +184,36 @@ function Update-EntraOps {
         throw '-ValidatedSourceCommit requires -PreparedCandidatePath. Resolve and validate the candidate in a separate, credential-free job before applying it.'
     }
 
+    $PersonalAccessTokenFromEnvironment = $false
     if ([string]::IsNullOrWhiteSpace($PersonalAccessToken) -and -not [string]::IsNullOrWhiteSpace($env:ENTRAOPS_PAT)) {
         $PersonalAccessToken = $env:ENTRAOPS_PAT
+        $PersonalAccessTokenFromEnvironment = $true
     }
     $UsePersonalAccessToken = $false
 
     if (-not [string]::IsNullOrWhiteSpace($UpstreamUrl)) {
+        $UpstreamUri = $null
+        if (-not [System.Uri]::TryCreate($UpstreamUrl, [System.UriKind]::Absolute, [ref]$UpstreamUri)) {
+            $UpstreamUri = $null
+        }
+        # Credentials embedded in the URL must not reach the console, logs or .EntraOpsUpdateManifest.json
         $SourceRepository = $UpstreamUrl
-        $UsePersonalAccessToken = -not [string]::IsNullOrWhiteSpace($PersonalAccessToken)
+        if ($null -ne $UpstreamUri -and -not [string]::IsNullOrEmpty($UpstreamUri.UserInfo)) {
+            $SanitizedUpstreamUri = [System.UriBuilder]::new($UpstreamUri)
+            $SanitizedUpstreamUri.UserName = ''
+            $SanitizedUpstreamUri.Password = ''
+            $SourceRepository = $SanitizedUpstreamUri.Uri.AbsoluteUri
+        }
+        if (-not [string]::IsNullOrWhiteSpace($PersonalAccessToken)) {
+            # ENTRAOPS_PAT is a GitHub token: another host only gets an explicit -PersonalAccessToken
+            if ($PersonalAccessTokenFromEnvironment -and ($null -eq $UpstreamUri -or $UpstreamUri.Host -ne 'github.com')) {
+                Write-Warning "ENTRAOPS_PAT is not sent to the custom upstream host '$(if ($null -ne $UpstreamUri) { $UpstreamUri.Host } else { $SourceRepository })'. Pass -PersonalAccessToken to authenticate against it."
+            } elseif ($null -eq $UpstreamUri) {
+                throw "-PersonalAccessToken requires an absolute https URL as -UpstreamUrl. No local folder was changed."
+            } else {
+                $UsePersonalAccessToken = $true
+            }
+        }
     } else {
         # The local contract is the single source of truth for which Cloud-Architekt repositories
         # distribute EntraOps and whether they need a Personal Access Token. Resolving it here, before
@@ -166,7 +242,7 @@ function Update-EntraOps {
 
     $CloneUpdateCandidate = {
         param([string]$RepositoryUrl)
-        & git clone --filter=blob:none --no-checkout $RepositoryUrl $TemporaryUpdateFolder
+        & git clone --filter=blob:none --no-checkout -- $RepositoryUrl $TemporaryUpdateFolder
         if ($LASTEXITCODE -ne 0) {
             throw "git clone failed with exit code $LASTEXITCODE. Verify the repository name and whether a Personal Access Token (secret: EntraOpsUpdatePat) is required."
         }
@@ -191,6 +267,10 @@ function Update-EntraOps {
     $OwnCandidateCheckout = [string]::IsNullOrWhiteSpace($PreparedCandidatePath)
     if ($OwnCandidateCheckout) {
         $TemporaryUpdateFolder = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TemporaryUpdateFolder)
+        # The folder is removed after the update: never clone into (and later delete) an existing folder.
+        if (Test-Path -LiteralPath $TemporaryUpdateFolder) {
+            throw "Temporary update folder '$TemporaryUpdateFolder' already exists. Remove it or pass another -TemporaryUpdateFolder. No local folder was changed."
+        }
     } else {
         $TemporaryUpdateFolder = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PreparedCandidatePath)
     }
@@ -240,6 +320,22 @@ function Update-EntraOps {
         # The contract validator confirms every requested target exists before anything is removed,
         # so a stale or dishonest source contract cannot leave the deployment partially updated.
 
+        # List the files to install before candidate code runs (validation): git in the candidate afterwards could
+        # run its hooks (e.g. core.fsmonitor) with this process' credentials, and .git or the index could be changed
+        $CandidateIsGitCheckout = Test-Path -LiteralPath (Join-Path $TemporaryUpdateFolder '.git')
+        $TargetSources = [ordered]@{}
+        foreach ($TargetUpdateFolder in $TargetUpdateFolders) {
+            if ($CandidateIsGitCheckout) {
+                $TrackedFiles = @(Get-EntraOpsGitTrackedFile -Root $TemporaryUpdateFolder -Pathspec @($TargetUpdateFolder -replace '^\./', '') | ForEach-Object { $_.Path })
+                if ($TrackedFiles.Count -eq 0) {
+                    throw "Update candidate tracks no file in '$TargetUpdateFolder'. No local folder was changed."
+                }
+                $TargetSources[$TargetUpdateFolder] = $TrackedFiles
+            } else {
+                $TargetSources[$TargetUpdateFolder] = $null
+            }
+        }
+
         if ($ValidatedSourceCommit) {
             Write-Output "Applying candidate $SourceRepository@$SourceCommit after validation completed in a separate credential-free job."
         } elseif (-not $SkipCandidateValidation) {
@@ -254,7 +350,7 @@ function Update-EntraOps {
                 'PATH', 'PSModulePath', 'LANG', 'LC_ALL', 'TMPDIR', 'TEMP', 'TMP', 'CI',
                 'HOME', 'USER', 'USERNAME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA',
                 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'SystemRoot', 'SystemDrive', 'windir',
-                'COMSPEC', 'PATHEXT', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'POWERSHELL_TELEMETRY_OPTOUT'
+                'COMSPEC', 'PATHEXT', 'DOTNET_ROOT', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'POWERSHELL_TELEMETRY_OPTOUT'
             )
             $SavedEnvironment = @{}
             foreach ($Entry in Get-ChildItem Env:) { $SavedEnvironment[$Entry.Name] = $Entry.Value }
@@ -275,12 +371,45 @@ function Update-EntraOps {
             Write-Warning 'Candidate validation was explicitly skipped. Apply only candidates from a fully trusted source.'
         }
 
+        # Checked without git before any local folder is removed: a link would install the content of its target,
+        # and a missing tracked file would leave the target incomplete
         foreach ($TargetUpdateFolder in $TargetUpdateFolders) {
+            $RelativeTarget = $TargetUpdateFolder -replace '^\./', ''
+            $SourcePath = Join-Path $TemporaryUpdateFolder $RelativeTarget
+            # The target itself and every parent folder inside the candidate
+            $Segments = $RelativeTarget -split '/'
+            $LinkedItems = @(for ($Index = 1; $Index -le $Segments.Count; $Index++) {
+                    $SegmentPath = Join-Path $TemporaryUpdateFolder ($Segments[0..($Index - 1)] -join '/')
+                    $SegmentItem = Get-Item -LiteralPath $SegmentPath -Force -ErrorAction SilentlyContinue
+                    if ($null -ne $SegmentItem -and $SegmentItem.LinkType) { $SegmentPath }
+                })
+            if ((Test-Path -LiteralPath $SourcePath -PathType Container) -and $LinkedItems.Count -eq 0) {
+                $LinkedItems += @(Get-ChildItem -LiteralPath $SourcePath -Recurse -Force | Where-Object { $_.LinkType } | ForEach-Object { $_.FullName })
+            }
+            if ($LinkedItems.Count -gt 0) {
+                throw "Update candidate contains symbolic link(s) or junction(s) in '$TargetUpdateFolder': $($LinkedItems -join ', '). No local folder was changed."
+            }
 
-            if (Test-Path -Path $TargetUpdateFolder) {
+            if ($null -ne $TargetSources[$TargetUpdateFolder]) {
+                $MissingFiles = @($TargetSources[$TargetUpdateFolder] | Where-Object {
+                        $SourceItem = Get-Item -LiteralPath (Join-Path $TemporaryUpdateFolder $_) -Force -ErrorAction SilentlyContinue
+                        $null -eq $SourceItem -or $SourceItem.PSIsContainer -or $SourceItem.LinkType
+                    })
+                if ($MissingFiles.Count -gt 0) {
+                    throw "Update candidate is missing tracked file(s) in '$TargetUpdateFolder' or they are no regular files: $(@($MissingFiles | Select-Object -First 10) -join ', '). No local folder was changed."
+                }
+            } elseif (-not (Test-Path -LiteralPath $SourcePath)) {
+                throw "Update candidate no longer contains '$TargetUpdateFolder'. No local folder was changed."
+            }
+        }
+
+        foreach ($TargetUpdateFolder in $TargetUpdateFolders) {
+            $TargetPath = Join-Path $EntraOpsBaseFolder $TargetUpdateFolder
+
+            if (Test-Path -LiteralPath $TargetPath) {
                 Write-Output "Removing folder $TargetUpdateFolder..."
                 try {
-                    Remove-Item -Path $TargetUpdateFolder -Force -Recurse
+                    Remove-Item -LiteralPath $TargetPath -Force -Recurse
                 } catch {
                     throw "Failed to remove folder $($TargetUpdateFolder). Error: $_"
                 }
@@ -288,7 +417,17 @@ function Update-EntraOps {
 
             Write-Output "Updating folder $TargetUpdateFolder..."
             try {
-                Copy-item -Path "$($TemporaryUpdateFolder)/$($TargetUpdateFolder)" -Destination "$($TargetUpdateFolder)" -Force -Recurse
+                if ($null -ne $TargetSources[$TargetUpdateFolder]) {
+                    # Only the tracked (validated) files of the checkout
+                    foreach ($TrackedFile in $TargetSources[$TargetUpdateFolder]) {
+                        $Destination = Join-Path $EntraOpsBaseFolder $TrackedFile
+                        # .NET instead of New-Item: tracked paths can contain wildcard characters such as [ ]
+                        [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($Destination))
+                        Copy-Item -LiteralPath (Join-Path $TemporaryUpdateFolder $TrackedFile) -Destination $Destination -Force
+                    }
+                } else {
+                    Copy-Item -LiteralPath (Join-Path $TemporaryUpdateFolder $TargetUpdateFolder) -Destination $TargetPath -Force -Recurse
+                }
             } catch {
                 throw "Failed to copy folder $($TemporaryUpdateFolder)/$($TargetUpdateFolder) to $($TargetUpdateFolder). The local folder is now incomplete and must be restored from source control. Error: $_"
             }
@@ -300,22 +439,36 @@ function Update-EntraOps {
         # process/session after reviewing the applied diff.
         Write-Output 'Updated module import deferred until a subsequent clean process or session.'
 
-        if ($TargetUpdateFolders -contains './.github/workflows') {
-            Write-Host "Re-adding workflow parameters in GitHub workflows after update..."
+        # Reapply the configuration with the helpers of the loaded (trusted) module. Candidate code must not
+        # run here, not even in a child process: the token-bearing publish step runs next on the same agent.
+        # The installed helpers must therefore understand the new templates; the GitHub helper rewrites the
+        # whole workflow YAML and fails if a release renames a node it sets. That failure stays fatal, so
+        # workflows with template defaults are never published.
+        $RefreshGitHubWorkflows = $TargetUpdateFolders -contains './.github/workflows'
+        $RefreshAzureDevOpsPipelines = $TargetUpdateFolders -contains './.azure-pipelines'
+        if ($RefreshGitHubWorkflows -or $RefreshAzureDevOpsPipelines) {
+            # The helpers resolve the configuration and template paths relative to the location
+            Push-Location -LiteralPath $EntraOpsBaseFolder
             try {
-                Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigFile
-            } catch {
-                throw "Failed to update required workflow parameters. Error: $_"
-            }
-        }
-
-        # The upstream pipeline templates ship with default schedules; re-apply the ones from the configuration
-        if ($TargetUpdateFolders -contains './.azure-pipelines') {
-            Write-Host "Re-applying the configured schedules in Azure DevOps pipelines after update..."
-            try {
-                Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile -PipelineFolder './.azure-pipelines'
-            } catch {
-                throw "Failed to update the Azure DevOps pipeline schedules. Error: $_"
+                if ($RefreshGitHubWorkflows) {
+                    Write-Host "Re-adding workflow parameters in GitHub workflows after update..."
+                    try {
+                        Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigFile
+                    } catch {
+                        throw "Failed to update required workflow parameters. Error: $_ The updated files were copied, but the configuration was not re-applied to them. The installed EntraOps module may not support the updated workflow templates: update the module in a clean session (Update-PSResource EntraOps or Update-Module EntraOps), then run Update-EntraOpsRequiredWorkflowParameters -ConfigFile '$ConfigFile' from the repository root and commit the result, or rerun the update."
+                    }
+                }
+                # The upstream pipeline templates ship with default schedules; re-apply the ones from the configuration
+                if ($RefreshAzureDevOpsPipelines) {
+                    Write-Host "Re-applying the configured schedules and service connection in Azure DevOps pipelines after update..."
+                    try {
+                        Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile -PipelineFolder './.azure-pipelines'
+                    } catch {
+                        throw "Failed to update the Azure DevOps pipeline schedules. Error: $_ The updated files were copied, but the configuration was not re-applied to them. Update the EntraOps module in a clean session, then run Update-EntraOpsAzureDevOpsSchedules -ConfigFile '$ConfigFile' -PipelineFolder './.azure-pipelines' from the repository root and commit the result, or rerun the update."
+                    }
+                }
+            } finally {
+                Pop-Location
             }
         }
 
@@ -335,9 +488,9 @@ function Update-EntraOps {
         $UpdateManifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $UpdateManifestPath -Encoding utf8
     } finally {
         # A caller-supplied -PreparedCandidatePath is left in place for inspection.
-        if ($OwnCandidateCheckout -and (Test-Path -Path $TemporaryUpdateFolder)) {
+        if ($OwnCandidateCheckout -and (Test-Path -LiteralPath $TemporaryUpdateFolder)) {
             Write-Output "Cleaning up temporary folder $TemporaryUpdateFolder."
-            Remove-Item -Path $TemporaryUpdateFolder -Force -Recurse -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $TemporaryUpdateFolder -Force -Recurse -ErrorAction SilentlyContinue
         }
     }
 }

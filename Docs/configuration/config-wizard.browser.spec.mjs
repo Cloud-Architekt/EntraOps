@@ -407,6 +407,32 @@ test("keeps report release publishing opt-in and exports its retention setting",
     expect(preview.ClassificationExplorer.GenerateChangeHistory).toBe(false);
 });
 
+test("keeps generated report tests and their diagnostics opt-in and preserves them through import and export", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+
+    await expect(page.locator('[data-key="RunGeneratedReportTests"]')).not.toBeChecked();
+    await expect(page.locator('[data-key="UploadReportTestDiagnostics"]')).not.toBeChecked();
+    let preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.AutomatedReportingGeneration.RunGeneratedReportTests).toBe(false);
+    expect(preview.AutomatedReportingGeneration.UploadReportTestDiagnostics).toBe(false);
+
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            AutomatedReportingGeneration: { RunGeneratedReportTests: true, UploadReportTestDiagnostics: true }
+        }))
+    });
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+
+    await expect(page.locator('[data-key="RunGeneratedReportTests"]')).toBeChecked();
+    await expect(page.locator('[data-key="UploadReportTestDiagnostics"]')).toBeChecked();
+    preview = JSON.parse(await page.locator("#wizPreview").textContent());
+    expect(preview.AutomatedReportingGeneration.RunGeneratedReportTests).toBe(true);
+    expect(preview.AutomatedReportingGeneration.UploadReportTestDiagnostics).toBe(true);
+});
+
 test("preserves enabled Classification Explorer change history through import and export", async ({ page }) => {
     await page.goto(wizardUrl);
     await page.locator("#wizImportFile").setInputFiles({
@@ -464,4 +490,83 @@ test("hydrates a partial draft from the beginner setup guide", async ({ page }) 
     await expect(page.locator('[data-key="IncludeObjectDetails"]')).toBeChecked();
     await expect(page.locator("#wizPreview")).toContainText('"IncludeObjectDetails": true');
     await expect(page.locator("#wizPreview")).toContainText('"DataCollectionRuleName": "entraops-dcr"');
+});
+
+const githubUpdateTargets = ["./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"];
+const azureDevOpsUpdateTargets = ["./.azure-pipelines", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json"];
+const exportedUpdateTargets = (page) => page.locator("#wizPreview").innerText().then((text) => JSON.parse(text).AutomatedEntraOpsUpdate.TargetUpdateFolders);
+
+test("keeps imported Azure Pipelines and unknown update targets when toggling update targets", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            DevOpsPlatform: "AzureDevOps",
+            AutomatedEntraOpsUpdate: { TargetUpdateFolders: ["./.azure-pipelines", "./EntraOps", "./Custom/Folder"] }
+        }))
+    });
+    await page.getByRole("button", { name: /Workflow & Updates/ }).click();
+    const chips = page.locator('.wiz-chips[data-key="UpdateTargetFolders"]');
+    await expect(chips.locator('input[value="./.azure-pipelines"]')).toBeChecked();
+    await expect(chips.locator("label.wiz-chip", { hasText: "./Custom/Folder (imported)" })).toHaveCount(1);
+
+    await chips.locator('input[value="./Reports"]').check();
+    expect(await exportedUpdateTargets(page)).toEqual(["./.azure-pipelines", "./EntraOps", "./Reports", "./Custom/Folder"]);
+
+    await chips.locator('input[value="./Custom/Folder"]').uncheck();
+    expect(await exportedUpdateTargets(page)).toEqual(["./.azure-pipelines", "./EntraOps", "./Reports"]);
+});
+
+test("defaults update targets to the DevOps platform like New-EntraOpsConfigFile", async ({ page }) => {
+    await page.goto(wizardUrl);
+    expect(await exportedUpdateTargets(page)).toEqual(githubUpdateTargets);
+
+    await page.locator('select[data-key="DevOpsPlatform"]').selectOption("AzureDevOps");
+    expect(await exportedUpdateTargets(page)).toEqual(azureDevOpsUpdateTargets);
+    await page.locator('select[data-key="DevOpsPlatform"]').selectOption("GitHub");
+    expect(await exportedUpdateTargets(page)).toEqual(githubUpdateTargets);
+
+    await page.locator('select[data-key="DevOpsPlatform"]').selectOption("AzureDevOps");
+    await page.getByRole("button", { name: /Workflow & Updates/ }).click();
+    const field = page.locator('.wiz-field[data-field="UpdateTargetFolders"]');
+    await expect(field.locator(".wiz-field-label .wiz-field-default")).toContainText("./.azure-pipelines");
+    await field.locator('input[value="./Samples"]').uncheck();
+    await page.getByRole("button", { name: /Tenant & Auth/ }).click();
+    await page.locator('select[data-key="DevOpsPlatform"]').selectOption("GitHub");
+    expect(await exportedUpdateTargets(page)).toEqual(azureDevOpsUpdateTargets.filter((target) => target !== "./Samples"));
+
+    await page.getByRole("button", { name: /Workflow & Updates/ }).click();
+    await page.locator('[data-msel-key="UpdateTargetFolders"] [data-msel="default"]').click();
+    expect(await exportedUpdateTargets(page)).toEqual(githubUpdateTargets);
+});
+
+test("imports an Azure DevOps configuration without update targets with the Azure DevOps defaults", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({ DevOpsPlatform: "AzureDevOps" }))
+    });
+    await expect(page.locator("#wizPreview")).toContainText('"DevOpsPlatform": "AzureDevOps"');
+    expect(await exportedUpdateTargets(page)).toEqual(azureDevOpsUpdateTargets);
+});
+
+test("exports and imports the Azure DevOps service connection name", async ({ page }) => {
+    const exportedServiceConnection = () => page.locator("#wizPreview").innerText().then((text) => JSON.parse(text).AzureDevOpsServiceConnection);
+    await page.goto(wizardUrl);
+    expect(await exportedServiceConnection()).toBe("EntraOps-ServiceConnection");
+
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({ DevOpsPlatform: "AzureDevOps", AzureDevOpsServiceConnection: "Fabrikam-WIF" }))
+    });
+    const field = page.locator('input[data-key="AzureDevOpsServiceConnection"]');
+    await expect(field).toHaveValue("Fabrikam-WIF");
+    await expect.poll(exportedServiceConnection).toBe("Fabrikam-WIF");
+
+    await field.fill("Contoso EntraOps");
+    await field.press("Tab");
+    await expect.poll(exportedServiceConnection).toBe("Contoso EntraOps");
 });

@@ -73,7 +73,7 @@ Start with the **[EntraOps Docs](https://www.entraops.com/docs)** and guided **[
 
 - 📊 Build reports and queries that identify Enterprise Access Model tier breaches and privilege-escalation paths. Use the included workbook to visualize classified role assignments and objects classified with Custom Security Attributes.
 
-- 🖥️ EntraOps Reporting: a portal of ten static, self-contained, offline-capable web apps for classification, privileged identities, access paths, tier breaches, privilege history, tenant configuration, Conditional Access, EIDSCA findings, PIM request flows, and access-package flows. The apps visualize data as drill-down grids, graphs, or Sankey flows, and share a cross-tool Review list — no backend or Azure subscription required.
+- 🖥️ EntraOps Reporting: a portal of eleven static, self-contained, offline-capable web apps for classification, privileged identities, privileged assets, access paths, tier breaches, privilege history, tenant configuration, Conditional Access, EIDSCA findings, PIM request flows, and access-package flows. The apps visualize data as drill-down grids, graphs, or Sankey flows, and share a cross-tool Review list — no backend or Azure subscription required.
 
 - 🛡️ Assign privileged assets automatically to Conditional Access groups and Restricted Management Administrative Units (RMAUs). Privileged users and groups that are not already protected by an Administrative Unit, role-assignable group, or Entra ID role can be assigned to an RMAU named `UnprotectedObjects`.
 
@@ -113,7 +113,7 @@ Full documentation - including a **Get Started** guide, configuration reference 
 **Privileged EAM**, **Service EM**, and **Reportings** - is available in the **[EntraOps Docs](./Docs/index.html)**.
 
 - 🚩 [Get Started](./Docs/get-started/index.html) - prerequisites, sign-in options, and deploying EntraOps
-  interactively or as an automated GitHub pipeline.
+  interactively or as an automated GitHub Actions or Azure DevOps pipeline.
 - ⚙️ [Core](./Docs/core/index.html) - authentication, the `EntraOpsConfig.json` reference, Tenant Governance
   relationships and configuration snapshots, object classification by Custom Security Attributes or Alternate
   Tier Level Attributes, and updating the module.
@@ -122,9 +122,9 @@ Full documentation - including a **Get Started** guide, configuration reference 
   updates.
 - 🏗️ [Service EM](./Docs/service-em/index.html) - service-scoped Azure and Entra ID landing zones with tiered
   groups, PIM for Groups, access packages, Azure RBAC, and constrained delegation.
-- 📊 [Reportings](./Docs/reportings/index.html) - ten static Reporting apps, including Classification Explorer, EAM
-  Dashboard, Access Path Map, Tier Breach Analyzer, Privilege History, Configuration Analyzer, Conditional Access
-  Analysis, EIDSCA Findings, PIM Request Flow, and Access Package Flow; plus Microsoft Sentinel/Unified SecOps
+- 📊 [Reportings](./Docs/reportings/index.html) - eleven static Reporting apps, including Classification Explorer, EAM
+  Dashboard, Privileged Assets, Access Path Map, Tier Breach Analyzer, Privilege History, Configuration Analyzer,
+  Conditional Access Analysis, EIDSCA Findings, PIM Request Flow, and Access Package Flow; plus Microsoft Sentinel/Unified SecOps
   Platform and BloodHound OpenGraph integrations.
 - 🏢 [Tenant Governance](./Docs/tenant-governance/index.html) - cross-tenant delegated administration,
   Microsoft Graph UTCM configuration snapshots, permissions, scheduling, quotas, and Configuration Analyzer.
@@ -150,9 +150,12 @@ Import-Module ./EntraOps
 From the PowerShell Gallery (updated with `Update-PSResource EntraOps`, or `Update-Module EntraOps` if installed with `Install-Module`). `Initialize-EntraOpsWorkspace` downloads the classification templates, samples and reporting apps into the EntraOps working folder (`ENTRAOPS_ROOT`, the current folder with `EntraOpsConfig.json`, or `<home>/EntraOps`); run it again with `-Force` after a module update:
 
 ```powershell
-Install-PSResource EntraOps -Scope CurrentUser
+Install-PSResource -Name EntraOps -Prerelease -Repository PSGallery -Scope CurrentUser
 Initialize-EntraOpsWorkspace
 ```
+
+> [!NOTE]
+> EntraOps 1.1.0 is currently a release candidate. Without `-Prerelease` (or `Install-Module EntraOps -AllowPrerelease` with PowerShellGet), the PowerShell Gallery installs 1.0.0, which doesn't include `Initialize-EntraOpsWorkspace`. Use `-Prerelease` / `-AllowPrerelease` for updates as well, and drop it once 1.1.0 is generally available.
 
 See [Install EntraOps](Docs/get-started/index.html#install-entraops) for a comparison of both options.
   
@@ -195,6 +198,7 @@ Export all classification of privileged objects using `Save-EntraOpsPrivilegedEA
 
 Both cmdlets process all supported RBAC systems by default. Use the `-RbacSystems` parameter to limit scope:
 
+- **Azure** – [Azure RBAC](https://learn.microsoft.com/en-us/azure/role-based-access-control/overview) (role assignments on management groups, subscriptions, resource groups, and resources)
 - **EntraID** – [Entra ID directory roles](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/custom-overview) (built-in and custom roles)
 - **IdentityGovernance** – [Entra ID Governance](https://learn.microsoft.com/en-us/entra/id-governance/identity-governance-overview) (access packages, entitlement management)
 - **DeviceManagement** – [Microsoft Intune RBAC](https://learn.microsoft.com/en-us/intune/intune-service/fundamentals/role-based-access-control) (device management roles)
@@ -737,7 +741,7 @@ In addition, custom security attributes will be also used to build a correlation
 - `associatedSecureAdminWorkstation`
 - `associatedWorkAccount`
 
-Permissions to read the custom security attributes needs to be granted manually to the service principal which will be used by EntraOps.
+`New-EntraOpsWorkloadIdentity` grants the required permission `CustomSecAttributeAssignment.Read.All` to the application it creates. For an existing service principal, grant this permission explicitly (see [Service principal permissions](./Docs/core/index.html#service-principal-permissions)).
 
 ## Classification of Identity Governance delegation and roles
 
@@ -920,6 +924,7 @@ _Enter the role definition name in the "used by Roles" and choose the desired ti
 ## Update EntraOps PowerShell Module and CI/CD
 
 EntraOps can be updated without losing classification definition and files by using the cmdlet `Update-EntraOps`.
+`Update-EntraOps` only updates repository clones; for installations from the PowerShell Gallery, use `Update-PSResource EntraOps` (or `Update-Module EntraOps` if installed with `Install-Module`), then `Initialize-EntraOpsWorkspace -Force` to refresh the classification templates, samples and reporting apps.
 The cmdlet can be executed interactively, and changes must be pushed to your repository. This command updates the PowerShell module, workflow files, repository resources (incl. workbooks and parsers) and parameters in workflows based on "EntraOps.config" file.
 
 The GitHub `Update-EntraOps` workflow and Azure DevOps `entraops-update` pipeline can run on

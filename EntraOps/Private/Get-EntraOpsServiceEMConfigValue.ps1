@@ -32,5 +32,6 @@ function Get-EntraOpsServiceEMConfigValue {
             $current = if ($property) { $property.Value } else { $null }
         }
     }
-    Write-Output -NoEnumerate $current
+    # Named -InputObject: bound positionally, Write-Output collects the value into a List (ValueFromRemainingArguments)
+    Write-Output -InputObject $current -NoEnumerate
 }

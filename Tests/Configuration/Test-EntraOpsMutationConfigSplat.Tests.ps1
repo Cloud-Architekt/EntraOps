@@ -73,6 +73,22 @@ Describe "Mutation configuration workflow splatting" {
         $Config.ConsoleOutput.IncludeObjectDetails | Should -BeFalse
     }
 
+    It 'disables tenant report tests by default for <Platform> and permits explicit opt-in' -ForEach @(
+        @{ Platform = 'GitHub' }
+        @{ Platform = 'AzureDevOps' }
+    ) {
+        $ConfigPath = Join-Path $TestDrive 'ReportTestingConfig.json'
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -DevOpsPlatform $Platform -ConfigFilePath $ConfigPath | Out-Null
+        $Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        $Config.AutomatedReportingGeneration.RunGeneratedReportTests | Should -BeFalse
+        $Config.AutomatedReportingGeneration.UploadReportTestDiagnostics | Should -BeFalse
+
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -DevOpsPlatform $Platform -RunGeneratedReportTests $true -UploadReportTestDiagnostics $true -ConfigFilePath $ConfigPath | Out-Null
+        $Config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        $Config.AutomatedReportingGeneration.RunGeneratedReportTests | Should -BeTrue
+        $Config.AutomatedReportingGeneration.UploadReportTestDiagnostics | Should -BeTrue
+    }
+
     It "generates safe automated-update validation defaults" {
         $ConfigPath = Join-Path $TestDrive 'EntraOpsConfig.json'
         New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -ConfigFilePath $ConfigPath | Out-Null
@@ -90,9 +106,23 @@ Describe "Mutation configuration workflow splatting" {
         $Config = [System.IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json
 
         $Config.DevOpsPlatform | Should -Be 'AzureDevOps'
-        $Config.AutomatedEntraOpsUpdate.PublicationMode | Should -Be 'DirectPush'
+        $Config.AzureDevOpsServiceConnection | Should -Be 'EntraOps-ServiceConnection'
+        $Config.AutomatedEntraOpsUpdate.PublicationMode | Should -Be 'PullRequest'
         @($Config.AutomatedEntraOpsUpdate.TargetUpdateFolders) | Should -Contain './.azure-pipelines'
+        # The update pipeline validates candidates with the trusted validator in .github/scripts
+        @($Config.AutomatedEntraOpsUpdate.TargetUpdateFolders) | Should -Contain './.github/scripts'
         @($Config.AutomatedEntraOpsUpdate.TargetUpdateFolders) | Should -Not -Contain './.github/actions'
+    }
+
+    It "writes DirectPush for Azure DevOps when it is selected explicitly" {
+        $ConfigPath = Join-Path $TestDrive 'EntraOps-AzureDevOps-DirectPush.json'
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -DevOpsPlatform AzureDevOps -UpdatePublicationMode DirectPush `
+            -AzureDevOpsServiceConnection 'Contoso EntraOps' -ConfigFilePath $ConfigPath -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        $Config = [System.IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json
+
+        $Config.AutomatedEntraOpsUpdate.PublicationMode | Should -Be 'DirectPush'
+        $Config.AzureDevOpsServiceConnection | Should -Be 'Contoso EntraOps'
+        @($warnings | Where-Object { "$_" -like '*DirectPush*Azure DevOps*' }).Count | Should -Be 0
     }
 
     It "writes explicitly selected automated-update validation options" {

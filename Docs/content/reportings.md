@@ -78,7 +78,12 @@ Analyzer is skipped with a warning, matching the shipped workflow behavior.
 
 - `New-EntraOpsClassificationExplorerData` / `New-EntraOpsTierBreachAnalyzerData` / `New-EntraOpsPrivilegedEamDashboardData` / `New-EntraOpsPrivilegedAssetsData` / `New-EntraOpsPrivilegedEamPrivilegeHistoryData` / `New-EntraOpsAccessPathMapData` / `New-EntraOpsTenantGovernanceConfigurationAnalyzerData` generate the data bundle for the individual apps. `New-EntraOpsReportingData` is a convenience wrapper that runs them in one call and can also generate Access Package Flow enrichment. It forwards parameters such as `-ClassificationExplorerRepoRoot`, `-TierBreachImportPath`, `-EamDashboardImportPath`, `-AccessPathMapImportPath`, `-SkipClassificationExplorer`, `-SkipTierBreachAnalyzer`, `-SkipEamDashboard`, `-SkipPrivilegedAssets`, `-SkipPrivilegeHistory`, `-SkipAccessPathMap`, `-SkipConfigurationAnalyzer`, and `-SkipAccessPackageFlow`.
 - `Remove-EntraOpsReportingData` deletes the generated data bundles again (`Remove-EntraOpsData` also removes the Privileged EAM export, tenant classification files, Tenant Governance snapshots and the cache) (`-WhatIf`, the same eight `-Skip*` switches, and `-PassThru` are supported). Run it before sharing or committing a checkout to remove tenant-specific reporting data.
-- Reporting generation can be automated with the `AutomatedReportingGeneration` section in `EntraOpsConfig.json` (set with `New-EntraOpsConfigFile -ApplyAutomatedReportingGeneration`) and the `Push-EntraOpsPrivilegedReporting` GitHub workflow. The workflow regenerates the selected apps, runs the offline browser smoke suite, and uploads a 30-day build artifact in a private repository only when every report passes. A failing smoke test is reported in the workflow log and blocks the artifact upload; no artifact is produced for a failed run because report traces would contain tenant data. GitHub Release publishing is a separate, disabled-by-default option (`PublishReportsAsRelease`); when enabled, `ReportingReleasesToKeep` limits retained `reporting-*` releases because each release contains a full tenant-data snapshot.
+- Reporting generation can be automated with the `AutomatedReportingGeneration` section in `EntraOpsConfig.json` (set with `New-EntraOpsConfigFile -ApplyAutomatedReportingGeneration`) and the `Push-EntraOpsPrivilegedReporting` GitHub workflow or the `entraops-push-reporting.yml` Azure DevOps pipeline. Both regenerate the selected apps and publish the `EntraOps-Reporting` artifact (30 days on GitHub) only in a private repository or project.
+  - **Report tests (`RunGeneratedReportTests`, disabled by default):** when enabled, a separate job without the workload identity and without write access installs the npm packages (`npm ci --ignore-scripts`, no dependency cache) and Playwright and runs the offline browser smoke suite against the generated reports. Any request to a non-local URL fails the tests. The reports reach that job through a short-lived `EntraOps-Reporting-Untested` hand-over artifact. A separate publishing job, which never runs the npm packages, verifies the hand-over against the SHA-256 content digest recorded at generation and only then publishes `EntraOps-Reporting`. A failing test fails the run and produces neither the artifact nor a release. GitHub deletes the hand-over artifact at the end of every run; Azure DevOps cannot delete pipeline artifacts, so it stays with the run. On Azure DevOps the npm steps also run with restricted logging commands. The setting is disabled by default. A manual run can override it with the `runGeneratedReportTests` input (GitHub) or parameter (Azure DevOps).
+  - **Test diagnostics (`UploadReportTestDiagnostics`, disabled by default):** uploads the Playwright traces of failed report tests as the 1-day `EntraOps-Reporting-TestDiagnostics` artifact (Azure DevOps keeps it with the run). Traces contain tenant report data.
+  - **GitHub Releases (`PublishReportsAsRelease`, GitHub only, disabled by default):** additionally stores the verified `EntraOps-Reporting` bundle as a private-repository release, after the tests pass when they are enabled. Only the release job gets `contents: write`. `ReportingReleasesToKeep` limits retained `reporting-*` releases because each release contains a full tenant-data snapshot. Azure DevOps publishes the pipeline artifact only and ignores both settings.
+  - Each run reports whether the published artifact was tested: in the GitHub job summary, and as the `reports-tested`, `reports-untested` or `reports-test-failed` build tag in Azure DevOps.
+  - Both pipelines read `RunGeneratedReportTests`, `UploadReportTestDiagnostics` and `PublishReportsAsRelease` from `EntraOpsConfig.json` at runtime; changing them does not require re-running `Update-EntraOpsRequiredWorkflowParameters`.
 
 ### Classification Explorer
 
@@ -92,7 +97,12 @@ reclassified role actions/scopes and access-level distribution changes. Entra ID
 compared against the public Microsoft Learn role reference to flag documentation mismatches, and a
 **Customize Overwrites** editor lets you build `Classification_RoleDefinitionOverwrites.json` /
 `Classification_RoleActionOverwrites.json` / `Classification_ApiPermissionOverwrites.json`
-interactively.
+interactively. It imports and exports several files at once, including tagged files such as
+`Classification_RoleDefinitionOverwrites_PAW.json`, and shows the origin of every entry: *Base*
+(base file) or the tag (tagged file), prefixed with *Custom* once the entry is added, edited or removed
+in the editor. Export writes every entry back to its origin file; a new entry goes to the target file
+chosen in the entry dialog. See
+[Split overwrites into tagged files](../privileged-eam/index.html#split-overwrites-into-tagged-files).
 
 The **Change History** view and its notifications are derived from a git log over the
 classification sources. Because those sources live in the sparsely checked out
@@ -123,6 +133,15 @@ all with CSV export.
 
 The dashboard's drill-down view keeps privileged assets, assignments, and their classification
 evidence together for investigation and export.
+
+**Change notifications** list privileged assets and role assignments that were added, removed, or
+changed tier since the previous dataset. Local runs compare with the existing dataset. Generated
+report data is never committed, so without one, the comparison uses the Privileged EAM export in
+git history: the commit of the latest `reporting-*` release (`PublishReportsAsRelease`), otherwise
+the export before its latest change. This needs the full git history, which the
+`Push-EntraOpsPrivilegedReporting` workflow and the Azure DevOps pipeline already check out. The
+first export, or an unreadable or other-tenant baseline, produces no notifications and never fails
+the run.
 
 ![EAM Dashboard example showing privileged identity metrics and drill-down tables](../assets/examples/eam-dashboard.png)
 
@@ -310,6 +329,18 @@ resource type, the retained-resource count of each type published with errors, p
 capture diagnostics and remediation hints retained in the
 manifest. Structural duplication or a manifest/file-count mismatch blocks report publication.
 
+A snapshot older than `ConfigurationAnalyzer.MaxTenantGovernanceSnapshotAgeHours` is stale. When the
+setting is not configured, the limit follows the snapshot schedule: 30 hours for a daily, 174 hours
+for a weekly and 750 hours for a monthly `TenantGovernanceSnapshot.SnapshotScheduledCron`. The
+reporting run checks the age before it connects to Microsoft Graph and applies
+`ConfigurationAnalyzer.StaleTenantGovernanceSnapshotAction`: `Warn` (default) generates the reports
+and shows an outdated-snapshot banner with the snapshot age, `Skip` publishes all other reports
+without the Configuration Analyzer, and `Fail` stops the run. The dataset includes the snapshots of
+the last `ConfigurationAnalyzer.TimeRangeInDays` (default 365) with at most one snapshot per
+`ConfigurationAnalyzer.SnapshotInterval` (default `P1W`). A manual run of the reporting workflow or
+pipeline can bypass the age check for that run with the `allowStaleTenantGovernance` input; scheduled
+and pull-triggered runs always apply the configured action.
+
 Generate or refresh the dataset with `New-EntraOpsTenantGovernanceConfigurationAnalyzerData` (or
 as part of `New-EntraOpsReportingData`). The app requires the Tenant Governance Snapshot feature
 to be enabled and at least one snapshot committed to the repository - see
@@ -418,6 +449,21 @@ enabled ingestion to both targets):
 
 - [Deploy the Custom Table parser to Azure](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FParsers%2FPrivilegedEAM_CustomTable.json)
 - [Deploy the WatchLists parser to Azure](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FCloud-Architekt%2FEntraOps%2Fmain%2FParsers%2FPrivilegedEAM_WatchLists.json)
+
+The Custom Table parser returns the latest completed ingestion run of each RBAC system within the last
+14 days, so objects stay visible between weekly collections and objects removed in the latest run don't
+reappear. `Save-EntraOpsPrivilegedEAMInsightsCustomTable` writes the same `TimeGenerated` for all records
+of a run and, after the last record of each RBAC system, a completion marker (a record with `ObjectType`
+`EntraOpsIngestionRun`). A run that failed part-way has no marker and never replaces the last complete run.
+A run limited with `-PrincipalTypeFilter` to some object types writes no marker either, so the parser keeps
+returning the last run with all object types.
+The parser doesn't return the marker records; exclude them when you query `PrivilegedEAM_CL` directly.
+If your data collection rule sets `TimeGenerated` itself (e.g. `extend TimeGenerated = now()`), the records
+between the previous and the latest marker belong to the latest run, which can include the records of a
+failed run in between. Until the first run with markers, the parser returns the latest ingestion.
+For a collection interval longer than 14 days, increase `LookbackPeriod` in the parser. The WatchLists
+parser also returns role assignments without classification, with an empty `Classification`.
+Redeploy the parser after updating EntraOps when the changelog lists parser changes.
 
 ### Ingest classification and enrichment data
 

@@ -34,6 +34,17 @@ Describe "Push-EntraOpsLogsIngestionAPI Azure context isolation" {
         Should -Invoke Get-AzAccessToken -Times 0 -Exactly
     }
 
+    It "stamps every record with the given TimeGenerated" {
+        # Runs the real timestamp code: the caller-side test mocks this function and can't catch a failure here.
+        $RunTime = [datetime]::new(2026, 10, 19, 6, 20, 0, [System.DateTimeKind]::Utc)
+
+        $Result = Push-EntraOpsLogsIngestionAPI -JsonContent '[{"value":1},{"value":2}]' -DataCollectionRuleName "dcr" -DataCollectionRuleSubscriptionId "target" -SampleDataOnly $true -TimeGenerated $RunTime
+
+        $Records = @($Result | ConvertFrom-Json -DateKind String)
+        $Records.Count | Should -Be 2
+        @($Records.TimeGenerated | Sort-Object -Unique) | Should -Be @('2026-10-19T06:20:00.0000000Z')
+    }
+
     It "restores the original context when ARM lookup fails" {
         Mock Invoke-AzRestMethod { throw "simulated ARM failure" }
 

@@ -1,7 +1,7 @@
 Parser:
     Title: PrivilegedEAM (WatchLists)
-    Version: 0.4
-    LastUpdated: 2026-07-02
+    Version: 0.5
+    LastUpdated: 2026-10-19
 Product:
     Name: EntraOps
 References:
@@ -23,7 +23,7 @@ ParserQuery: |
             | extend EligibilityBy = case(
                 RoleSystem == "EntraID"
                     and PIMAssignmentType == "Eligible"
-                    and RoleAssignmentSubType in ("Nested Eligible member", "Eligible member"),
+                    and RoleAssignmentSubType in ("Eligible member", "Nested Eligible member", "Nested Eligible group member"),
                     "PIM for Entra ID Roles and Groups",
                 RoleSystem == "EntraID"
                     and PIMAssignmentType == "Eligible",
@@ -31,12 +31,12 @@ ParserQuery: |
                 RoleSystem == "Azure"
                     and PIMAssignmentType == "Eligible",
                     "PIM for Azure Roles",
-                RoleAssignmentSubType in ("Nested Eligible group member", "Eligible member"),
+                RoleAssignmentSubType in ("Eligible member", "Nested Eligible member", "Nested Eligible group member"),
                     "PIM for Groups",
                 "N/A"
             )
-            | extend TransitiveByPim = iff(RoleAssignmentSubType == "Nested Eligible member" or RoleAssignmentSubType == "Eligible member", true, false)
-            | join kind=inner (
+            | extend TransitiveByPim = RoleAssignmentSubType in ("Eligible member", "Nested Eligible member", "Nested Eligible group member")
+            | join kind=leftouter (
                 _GetWatchlist('EntraOps_RoleClassifications')
                 | project RoleAssignmentId, RoleAssignmentScopeId, RoleSystem, RoleDefinitionId,
                         AdminTierLevel, AdminTierLevelName, Service, TaggedBy,
@@ -56,6 +56,8 @@ ParserQuery: |
                 )
                 | summarize Classification = make_list(Classification) by RoleAssignmentId, RoleAssignmentScopeId, RoleSystem, RoleDefinitionId
             ) on RoleAssignmentId, RoleAssignmentScopeId, RoleSystem, RoleDefinitionId
+            // Assignments without classification are kept with an empty list instead of being dropped by the join
+            | extend Classification = iff(isnull(Classification), dynamic([]), Classification)
             | extend RoleAssignment = bag_pack_columns(
                 ObjectId,
                 ObjectType,

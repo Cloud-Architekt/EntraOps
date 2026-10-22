@@ -359,6 +359,19 @@ Describe "New-EntraOpsServiceEntraGroup" {
             Should -Invoke Invoke-EntraOpsMsGraphQuery -ModuleName EntraOps -Times 0 -Exactly -ParameterFilter { $Method -eq 'POST' }
         }
 
+        It "Should record only the IDs of groups it created in -CreatedGroupIds" {
+            $existing = [pscustomobject]@{ Id = 'existing-cp'; DisplayName = 'SG-TestService-ControlPlane-Admins'; MailNickname = 'TestService.ControlPlane.Admins'; IsAssignableToRole = $true; SecurityEnabled = $true }
+            $script:MockGroups[$existing.Id] = $existing
+            $created = [System.Collections.Generic.List[string]]::new()
+
+            $result = New-EntraOpsServiceEntraGroup -ServiceName "TestService" -ServiceRoles ($script:AdminRoles + $script:WorkloadRoles) -CreatedGroupIds $created
+
+            @($result).Count | Should -Be 2
+            $newGroup = @($result | Where-Object { $_.Id -ne 'existing-cp' })
+            $newGroup.Count | Should -Be 1
+            @($created) | Should -Be @($newGroup[0].Id)
+        }
+
         It "Should reuse a WorkloadPlane group that is a resource of the service catalog" {
             $existing = [pscustomobject]@{ Id = 'existing-wu'; DisplayName = 'SG-TestService-WorkloadPlane-Users'; MailNickname = 'TestService.WorkloadPlane.Users'; IsAssignableToRole = $false; SecurityEnabled = $true }
             $script:MockGroups[$existing.Id] = $existing

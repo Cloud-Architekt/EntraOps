@@ -31,7 +31,9 @@
     var TYPE_LABEL = { user: "User", group: "Group", serviceprincipal: "Service principal", application: "Application" };
     var GUID = /^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
     var CSA_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
-    var STORE_KEY = "entraops.privilegedAssets.objectClassification.v1";
+    // v2 stores the local changes as a delta against a fingerprint of the repository file; v1 stored the full worklist.
+    var STORE_KEY = "entraops.privilegedAssets.objectClassification.v2";
+    var LEGACY_STORE_KEY = "entraops.privilegedAssets.objectClassification.v1";
     var VIEWS = { overview: "Overview", classification: "Object Classification" };
     var PAGE_SIZE = 100;
     var MAX_IMPORT_BYTES = 5 * 1024 * 1024;
@@ -87,7 +89,7 @@
 
     var state = {
         search: "", type: "", subType: "", tier: "", assignmentTier: "", au: "", restricted: "", sync: "", finding: "", worklist: "",
-        whatIf: false, sort: "tier", sortDir: 1, page: 0, selected: new Set(), worklistEntries: {}, script: ""
+        whatIf: false, sort: "tier", sortDir: 1, page: 0, selected: new Set(), worklistEntries: {}, script: "", fileChanged: false
     };
     var objects = [];
     var objectsById = {};
@@ -144,24 +146,86 @@
         return [entry.adminTierLevelName, entry.objectType || "", entry.justification || ""].join("|");
     }
 
+    function sameEntry(left, right) {
+        return ["objectId", "objectType", "objectDisplayName", "adminTierLevelName", "justification"].every(function (field) {
+            return String(left[field] || "") === String(right[field] || "");
+        });
+    }
+
+    // Stable FNV-1a hash of the repository file entries, used to detect that the file changed since the local edits.
+    function fileFingerprint() {
+        var text = JSON.stringify(Object.keys(fileEntries).sort().map(function (id) {
+            var entry = fileEntries[id];
+            return [id, entry.objectType, entry.objectDisplayName, entry.adminTierLevelName, entry.justification];
+        }));
+        var hash = 0x811c9dc5;
+        for (var i = 0; i < text.length; i++) {
+            hash ^= text.charCodeAt(i);
+            hash = Math.imul(hash, 0x01000193) >>> 0;
+        }
+        return Object.keys(fileEntries).length + "-" + hash.toString(16);
+    }
+
+    function readStore(key) {
+        try {
+            var stored = JSON.parse(localStorage.getItem(key) || "null");
+            return stored && typeof stored === "object" && stored.tenant === (DATA.tenantName || "") ? stored : null;
+        } catch (_) { return null; }
+    }
+
+    // The worklist is the current repository file with the local delta (upserts and removals) applied on top, so file
+    // entries added or removed in the repository after the local edits are never dropped or resurrected.
     function loadWorklist() {
-        var stored = null;
-        try { stored = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (_) { stored = null; }
-        if (stored && stored.tenant === (DATA.tenantName || "") && stored.entries && typeof stored.entries === "object") {
-            var entries = {};
-            Object.keys(stored.entries).forEach(function (id) {
-                var entry = sanitizeEntry(stored.entries[id]);
-                if (entry.ok) entries[entry.value.objectId] = entry.value;
-            });
+        var entries = JSON.parse(JSON.stringify(fileEntries));
+        var upsert = function (raw) {
+            var entry = sanitizeEntry(raw);
+            if (entry.ok) entries[entry.value.objectId] = entry.value;
+        };
+        state.fileChanged = false;
+        var stored = readStore(STORE_KEY);
+        if (stored && stored.version === 2) {
+            (Array.isArray(stored.removals) ? stored.removals : []).forEach(function (id) { delete entries[String(id).toLowerCase()]; });
+            if (stored.upserts && typeof stored.upserts === "object") Object.keys(stored.upserts).forEach(function (id) { upsert(stored.upserts[id]); });
+            state.fileChanged = stored.baseFingerprint !== fileFingerprint();
             return entries;
         }
-        return JSON.parse(JSON.stringify(fileEntries));
+        // A v1 full-list worklist has no known file snapshot: keep its adds and edits, but never drop current file entries.
+        var legacy = readStore(LEGACY_STORE_KEY);
+        if (legacy && legacy.entries && typeof legacy.entries === "object") {
+            Object.keys(legacy.entries).forEach(function (id) { upsert(legacy.entries[id]); });
+            state.fileChanged = true;
+        }
+        return entries;
     }
 
     function saveWorklist() {
+        var upserts = {}, removals = [];
+        Object.keys(state.worklistEntries).sort().forEach(function (id) {
+            if (!fileEntries[id] || !sameEntry(state.worklistEntries[id], fileEntries[id])) upserts[id] = state.worklistEntries[id];
+        });
+        Object.keys(fileEntries).sort().forEach(function (id) { if (!state.worklistEntries[id]) removals.push(id); });
         try {
-            localStorage.setItem(STORE_KEY, JSON.stringify({ tenant: DATA.tenantName || "", entries: state.worklistEntries }));
+            localStorage.setItem(STORE_KEY, JSON.stringify({
+                version: 2, tenant: DATA.tenantName || "", baseFingerprint: fileFingerprint(), upserts: upserts, removals: removals
+            }));
+            localStorage.removeItem(LEGACY_STORE_KEY);
         } catch (_) { /* Local storage can be unavailable in hardened browsers. */ }
+    }
+
+    function resetWorklistToFile() {
+        state.worklistEntries = JSON.parse(JSON.stringify(fileEntries));
+        state.fileChanged = false;
+        try {
+            localStorage.removeItem(STORE_KEY);
+            localStorage.removeItem(LEGACY_STORE_KEY);
+        } catch (_) { /* ignore */ }
+    }
+
+    function confirmResetWorklist() {
+        if (!window.confirm("Discard all worklist changes in this browser and reload the entries from the repository file?")) return false;
+        resetWorklistToFile();
+        renderAll();
+        return true;
     }
 
     function sanitizeEntry(raw) {
@@ -503,6 +567,7 @@
     }
 
     function renderWorklist() {
+        $("paiFileChanged").hidden = !(FILE_ENABLED && state.fileChanged);
         var ids = Array.from(new Set(Object.keys(state.worklistEntries).concat(Object.keys(fileEntries))));
         ids.sort(function (a, b) {
             var left = (state.worklistEntries[a] || fileEntries[a]).objectDisplayName || a, right = (state.worklistEntries[b] || fileEntries[b]).objectDisplayName || b;
@@ -1256,11 +1321,14 @@
         $("paiExportFile").addEventListener("click", function () {
             download(fileBaseName() + ".json", "application/json;charset=utf-8", JSON.stringify(fileRows(), null, 2) + "\n");
         });
-        $("paiResetWorklist").addEventListener("click", function () {
-            if (!window.confirm("Discard all worklist changes in this browser and reload the entries from the repository file?")) return;
-            state.worklistEntries = JSON.parse(JSON.stringify(fileEntries));
-            try { localStorage.removeItem(STORE_KEY); } catch (_) { /* ignore */ }
+        $("paiResetWorklist").addEventListener("click", confirmResetWorklist);
+        $("paiFileChangedReset").addEventListener("click", function () { if (confirmResetWorklist()) $("paiExportFile").focus(); });
+        $("paiFileChangedKeep").addEventListener("click", function () {
+            // Re-saving bases the local delta on the current repository file, which acknowledges the change.
+            saveWorklist();
+            state.fileChanged = false;
             renderAll();
+            $("paiExportFile").focus();
         });
         $("paiClearWorklist").addEventListener("click", function () {
             if (!window.confirm("Remove all entries from the worklist? Download the file afterwards to remove them from the repository.")) return;

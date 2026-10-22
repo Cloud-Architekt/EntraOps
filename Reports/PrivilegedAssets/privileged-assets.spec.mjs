@@ -11,6 +11,7 @@ let appUrl;
 let csaAppUrl;
 let mixedAppUrl;
 let maesterAppUrl;
+let twoFileAppUrl;
 
 const userId = "11111111-1111-1111-1111-111111111111";
 const servicePrincipalId = "22222222-2222-2222-2222-222222222222";
@@ -110,6 +111,11 @@ test.beforeAll(async () => {
     csaAppUrl = await writeAppFixture("PrivilegedAssetsCsa", csaData);
     mixedAppUrl = await writeAppFixture("PrivilegedAssetsMixed", mixedData);
     maesterAppUrl = await writeAppFixture("PrivilegedAssetsMaester", maesterData());
+    const twoFileData = JSON.parse(JSON.stringify(fixtureData));
+    twoFileData.classificationSettings.objectClassificationFile.entries.push(
+        { objectId: groupId, objectType: "group", objectDisplayName: "PRG-Tier0-Admins", adminTierLevelName: "ControlPlane", justification: "Added by ServiceEM" }
+    );
+    twoFileAppUrl = await writeAppFixture("PrivilegedAssetsTwoFile", twoFileData);
 });
 
 function maesterTestRecord(id, severity, title) {
@@ -298,7 +304,7 @@ test("Object Classification view shows current, target and highest-tier role ass
     await expect(appRow).toContainText("Privileged Role Administrator");
     await expect(appRow).toContainText("Added");
 
-    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("entraops.privilegedAssets.objectClassification.v1")).entries);
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("entraops.privilegedAssets.objectClassification.v2")).upserts);
     expect(stored[userId].adminTierLevelName).toBe("ManagementPlane");
     expect(stored[userId].justification).toBe("Downgraded after review");
 
@@ -323,7 +329,7 @@ test("import validates object ids, tier names and object types", async ({ page }
     await expect(page.locator("#paiImportResult")).toContainText("is not a GUID");
     await expect(page.locator("#paiImportResult")).toContainText("does not match the inventory object type");
     await expect(page.locator("#paiImportResult")).toContainText("'Tier0' is not one of");
-    const entry = await page.evaluate((id) => JSON.parse(localStorage.getItem("entraops.privilegedAssets.objectClassification.v1")).entries[id], groupId);
+    const entry = await page.evaluate((id) => JSON.parse(localStorage.getItem("entraops.privilegedAssets.objectClassification.v2")).upserts[id], groupId);
     expect(entry.adminTierLevelName).toBe("ManagementPlane");
     expect(entry.justification).toBe("=Imported");
 });
@@ -371,3 +377,106 @@ for (const viewport of [{ name: "desktop", width: 1600, height: 900 }, { name: "
         expect(overflow).toBeLessThanOrEqual(1);
     });
 }
+
+const storeKey = "entraops.privilegedAssets.objectClassification.v2";
+const legacyStoreKey = "entraops.privilegedAssets.objectClassification.v1";
+
+async function openWithStoredWorklist(page, url, key, value) {
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto(url);
+    await page.evaluate(([storageKey, stored]) => { localStorage.clear(); localStorage.setItem(storageKey, JSON.stringify(stored)); }, [key, value]);
+    await page.reload();
+    await expect(page.locator("#paiTableBody tr")).toHaveCount(4);
+    await page.evaluate(() => {
+        window.__downloads = [];
+        const createObjectURL = URL.createObjectURL;
+        URL.createObjectURL = (blob) => { blob.text().then((text) => window.__downloads.push(text)); return createObjectURL(blob); };
+    });
+    await openClassification(page);
+    return pageErrors;
+}
+
+async function downloadedFile(page) {
+    await page.click("#paiExportFile");
+    await expect.poll(() => page.evaluate(() => window.__downloads.length)).toBe(1);
+    return JSON.parse(await page.evaluate(() => window.__downloads[0]));
+}
+
+test("v1 worklist saved before a repository file entry was added keeps the new file entry", async ({ page }) => {
+    const legacy = {
+        tenant: fixtureData.tenantName,
+        entries: { [userId]: { objectId: userId, objectType: "user", objectDisplayName: "Admin A", adminTierLevelName: "ManagementPlane", justification: "Local edit" } }
+    };
+    const pageErrors = await openWithStoredWorklist(page, twoFileAppUrl, legacyStoreKey, legacy);
+
+    const notice = page.locator("#paiFileChanged");
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveAttribute("role", "status");
+    await expect(notice).toContainText("repository Object Classification File changed");
+    const groupRow = page.locator(`#paiWorklistBody tr[data-worklist="${groupId}"]`);
+    await expect(groupRow).toContainText("In repository file");
+    await expect(groupRow).not.toContainText("Removed");
+    await expect(page.locator(`#paiWorklistBody tr[data-worklist="${userId}"]`)).toContainText("Changed");
+
+    const rows = await downloadedFile(page);
+    expect(rows.map((row) => row.ObjectId)).toEqual([userId, groupId]);
+    expect(rows.find((row) => row.ObjectId === userId).AdminTierLevelName).toBe("ManagementPlane");
+    expect(rows.find((row) => row.ObjectId === groupId).Justification).toBe("Added by ServiceEM");
+
+    await page.click("#paiFileChangedKeep");
+    await expect(notice).toBeHidden();
+    const stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), storeKey);
+    expect(Object.keys(stored.upserts)).toEqual([userId]);
+    expect(stored.removals).toEqual([]);
+    expect(await page.evaluate((key) => localStorage.getItem(key), legacyStoreKey)).toBeNull();
+    await page.reload();
+    await expect(page.locator("#paiFileChanged")).toBeHidden();
+    await expect(page.locator(`#paiWorklistBody tr[data-worklist="${groupId}"]`)).toContainText("In repository file");
+    expect(pageErrors).toEqual([]);
+});
+
+test("local delta is rebased onto a changed repository file", async ({ page }) => {
+    const stored = {
+        version: 2, tenant: fixtureData.tenantName, baseFingerprint: "stale",
+        upserts: { [servicePrincipalId]: { objectId: servicePrincipalId, objectType: "serviceprincipal", objectDisplayName: "App B", adminTierLevelName: "ControlPlane", justification: "Holds PRA" } },
+        removals: [userId, "99999999-9999-9999-9999-999999999999"]
+    };
+    const pageErrors = await openWithStoredWorklist(page, twoFileAppUrl, storeKey, stored);
+
+    await expect(page.locator("#paiFileChanged")).toBeVisible();
+    await expect(page.locator(`#paiWorklistBody tr[data-worklist="${userId}"]`)).toContainText("Removed");
+    await expect(page.locator(`#paiWorklistBody tr[data-worklist="${groupId}"]`)).toContainText("In repository file");
+    await expect(page.locator(`#paiWorklistBody tr[data-worklist="${servicePrincipalId}"]`)).toContainText("Added");
+    await expect(page.locator("#paiWorklistBody tr")).toHaveCount(3);
+    const rows = await downloadedFile(page);
+    expect(rows.map((row) => row.ObjectId).sort()).toEqual([servicePrincipalId, groupId].sort());
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.click("#paiFileChangedReset");
+    await expect(page.locator("#paiFileChanged")).toBeHidden();
+    await expect(page.locator("#paiWorklistMeta")).toContainText("2 entries · 0 pending changes");
+    expect(await page.evaluate((key) => localStorage.getItem(key), storeKey)).toBeNull();
+    expect(pageErrors).toEqual([]);
+});
+
+test("unchanged entries removed from the repository file are not restored as added", async ({ page }) => {
+    // Saved against the two-entry file; the one-entry file no longer contains the group.
+    const stored = { version: 2, tenant: fixtureData.tenantName, baseFingerprint: "stale", upserts: {}, removals: [] };
+    await openWithStoredWorklist(page, appUrl, storeKey, stored);
+
+    await expect(page.locator("#paiFileChanged")).toBeVisible();
+    await expect(page.locator("#paiWorklistBody tr")).toHaveCount(1);
+    await expect(page.locator(`#paiWorklistBody tr[data-worklist="${userId}"]`)).toContainText("In repository file");
+    await expect(page.locator("#paiWorklistMeta")).toContainText("1 entries · 0 pending changes");
+});
+
+test("matching repository file fingerprint shows no notice", async ({ page }) => {
+    await openApp(page);
+    await openClassification(page);
+    await page.fill("#paiAddObject", `App B (${servicePrincipalId})`);
+    await page.click("#paiAddButton");
+    await page.reload();
+    await expect(page.locator(`#paiWorklistBody tr[data-worklist="${servicePrincipalId}"]`)).toContainText("Added");
+    await expect(page.locator("#paiFileChanged")).toBeHidden();
+});

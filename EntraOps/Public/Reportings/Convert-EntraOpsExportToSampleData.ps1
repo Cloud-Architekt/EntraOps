@@ -14,6 +14,25 @@ GUID replacements are derived from Seed. Identity and Azure resource names use
 stable aliases such as user01, group01, resourcegroup01, and storage01. The source
 is never modified and the source-to-target mapping is not written to disk.
 
+.PARAMETER SourcePath
+Folder of the EntraOps export to anonymize: the export root that contains Classification,
+PrivilegedEAM, and/or TenantGovernance, or one of these folders directly. Not modified.
+
+.PARAMETER DestinationPath
+Folder for the anonymized copy of the export.
+
+.PARAMETER SourceTenantName
+Prefix of the source tenant (e.g. fabrikam for fabrikam.onmicrosoft.com) that is replaced by
+TenantName. Auto-detected from Classification/<tenant>.onmicrosoft.com when omitted.
+
+.PARAMETER Seed
+Secret seed for the GUID replacements. Use the same seed to produce identical output for the same
+export. Defaults to a random GUID, so each run produces different identifiers.
+
+.PARAMETER AdditionalSensitivePropertyName
+Additional JSON property names whose values are anonymized like display names, user principal names,
+and resource names.
+
 .PARAMETER TenantName
 Target tenant prefix. Defaults to contoso. Unless TenantInitialDomain is supplied,
 the target initial domain is derived as <TenantName>.onmicrosoft.com.
@@ -806,7 +825,20 @@ the progress display, for example in non-interactive automation.
         }
 
         if ($GenerateReports) {
-            $GeneratedReports = @(New-AnonymizedReportBundle -AnonymizedRoot $DestinationRoot -ReportRoot $ReportRoot)
+            # Report generators prefer the connected session's tenant name; use the anonymized
+            # tenant for the bundle so a real tenant name never leaks into the sample data.
+            $TenantNameContextVariable = Get-Variable -Name TenantNameContext -Scope Global -ErrorAction SilentlyContinue
+            $PreviousTenantNameContext = if ($null -ne $TenantNameContextVariable) { $TenantNameContextVariable.Value }
+            try {
+                Set-Variable -Name TenantNameContext -Value $TenantInitialDomain -Scope Global -Force
+                $GeneratedReports = @(New-AnonymizedReportBundle -AnonymizedRoot $DestinationRoot -ReportRoot $ReportRoot)
+            } finally {
+                if ($null -ne $TenantNameContextVariable) {
+                    Set-Variable -Name TenantNameContext -Value $PreviousTenantNameContext -Scope Global -Force
+                } else {
+                    Remove-Variable -Name TenantNameContext -Scope Global -Force -ErrorAction SilentlyContinue
+                }
+            }
         }
 
         $ManifestReportPath = if ($GenerateReports -and

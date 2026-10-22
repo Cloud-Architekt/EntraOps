@@ -53,6 +53,11 @@ Microsoft **Fluent UI / Azure Portal** design, matching the
   paths* (the headline case: a Tier 1 / Tier 2 principal reaching a Tier 0 / Control Plane
   service), *all tier breach paths* and the *full graph* from the left navigation. The same tiering
   rule applies: a principal without classification is treated as Tier 2 (User Access).
+  Each principal &rarr; privilege path is counted once: a privilege is drawn both as a
+  principal &rarr; role assignment edge and a principal &rarr; role edge, but the *Tier breach
+  paths* / *Tier 0 attack paths* counts include only the role assignment edge (or the role edge
+  when no role assignment node exists; such edges carry `distinctpath = true` in the dataset).
+  *Roles reaching Tier 0* counts distinct role definitions only, not role assignments.
 - **Known (documented) attack paths, cross-referenced with the Classification Explorer** — roles
   and role assignments are matched against the same curated attack-path catalog the Classification
   Explorer's *Attack Paths* view uses

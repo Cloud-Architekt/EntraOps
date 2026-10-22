@@ -34,6 +34,10 @@
         the same rules as the Tier Breach Analyzer: a breach is a path where the principal's
         designated tier (ObjectAdminTierLevel, unclassified => Tier 2) is LESS privileged than
         the tier of the service reached through the assignment (edge classification).
+        A privilege is usually represented by both a principal -> role assignment edge and a
+        principal -> role edge; both keep the flags (graph rendering), but only one carries
+        distinctpath = $true (the role assignment edge, or the role edge when no assignment
+        edge exists), so each principal -> privilege path is counted once.
 
     Generates data/access-path-map-data.js exposing `window.ENTRAOPS_APM_DATA` so the static web
     app works both over HTTP and from the file system (no fetch / CORS required).
@@ -119,7 +123,7 @@ function New-EntraOpsAccessPathMapData {
     $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
-    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/AccessPathMap' }
+    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepoRoot 'Reports/AccessPathMap' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
         throw "Access Path Map app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/AccessPathMap, or run Install-EntraOpsReportingFolder to download the Reports folder."
     }
@@ -780,6 +784,37 @@ function New-EntraOpsAccessPathMapData {
     $nBreach = 0
     $nTier0 = 0
 
+    # The same privilege is usually represented twice: principal -> role assignment
+    # (EO_Has*RoleAssignment) AND principal -> role (EO_Has*Role / EO_EligibleFor*Role), linked
+    # by role -> assignment (EO_*RoleAssigned). Both edges keep their tier-breach flags for
+    # graph rendering, but only one represents the distinct principal -> privilege path
+    # ("distinctpath"): the role assignment edge, or the role edge when no assignment edge of
+    # that principal leads to an assignment of that role. Breach counts use distinct paths only.
+    $rolesByAssignment = @{}   # assignment node id -> role node ids (EO_*RoleAssigned)
+    $assignmentsByPrincipal = @{}   # principal node id -> assignment node ids (breachable assignment edges)
+    foreach ($e in $graphEdges) {
+        if ($null -eq $e) { continue }
+        $preKind = "$(Get-PropValue $e 'kind')"
+        if ($preKind -notmatch '^EO_\w*RoleAssigned$' -and -not ($preKind -match $BreachableEdgePattern -and $preKind -like '*RoleAssignment')) { continue }
+        $preSource = Resolve-EndpointId (Get-PropValue $e 'start')
+        $preTarget = Resolve-EndpointId (Get-PropValue $e 'end')
+        if (-not $preSource -or -not $preTarget) { continue }
+        if ($preKind -like '*RoleAssigned') {
+            if (-not $rolesByAssignment.ContainsKey($preTarget)) { $rolesByAssignment[$preTarget] = [System.Collections.Generic.List[string]]::new() }
+            $rolesByAssignment[$preTarget].Add($preSource)
+        } else {
+            if (-not $assignmentsByPrincipal.ContainsKey($preSource)) { $assignmentsByPrincipal[$preSource] = [System.Collections.Generic.List[string]]::new() }
+            $assignmentsByPrincipal[$preSource].Add($preTarget)
+        }
+    }
+    $rolePathsViaAssignment = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)   # "principal|role"
+    foreach ($principalKey in $assignmentsByPrincipal.Keys) {
+        foreach ($assignmentKey in $assignmentsByPrincipal[$principalKey]) {
+            if (-not $rolesByAssignment.ContainsKey($assignmentKey)) { continue }
+            foreach ($roleKey in $rolesByAssignment[$assignmentKey]) { [void]$rolePathsViaAssignment.Add("$principalKey|$roleKey") }
+        }
+    }
+
     foreach ($e in $graphEdges) {
         if ($null -eq $e) { continue }
         $kind = "$(Get-PropValue $e 'kind')"
@@ -803,12 +838,14 @@ function New-EntraOpsAccessPathMapData {
             $serviceTier = ConvertTo-TierNumber $props['admintierlevel']
             $isBreach = $principalTier -gt $serviceTier
             $isTier0 = ($serviceTier -eq 0 -and $principalTier -gt 0)
+            $isDistinctPath = ($kind -like '*RoleAssignment') -or -not $rolePathsViaAssignment.Contains("$sourceId|$targetId")
             $props['principaltier'] = $principalTier
             $props['servicetier'] = $serviceTier
             $props['tierbreach'] = $isBreach
             $props['tier0breach'] = $isTier0
-            if ($isBreach) { $nBreach++ }
-            if ($isTier0) { $nTier0++ }
+            $props['distinctpath'] = $isDistinctPath
+            if ($isDistinctPath -and $isBreach) { $nBreach++ }
+            if ($isDistinctPath -and $isTier0) { $nTier0++ }
         }
 
         $edges.Add([ordered]@{
@@ -1012,7 +1049,7 @@ function New-EntraOpsAccessPathMapData {
 
         Write-Host "Graph nodes:       $($nodes.Count)"
         Write-Host "Graph edges:       $($edges.Count)"
-        Write-Host "Tier breach edges: $nBreach"
+        Write-Host "Tier breach paths: $nBreach"
         Write-Host "Tier 0 breaches:   $nTier0"
         Write-Host "Endpoints resolved via Intune device map / EAM: $nResolvedEndpoints"
         if ($ResolveObjectIdsOutsidePrivilegedEAM) {

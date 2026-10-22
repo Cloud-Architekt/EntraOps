@@ -57,6 +57,8 @@ or as part of refreshing all reporting apps with `New-EntraOpsReportingData`. Us
 
 - `-TimeRangeInDays 90` - only walk the last 90 days of history.
 - `-SnapshotInterval P1W` - keep at most one snapshot per week (default: every commit).
+  `New-EntraOpsReportingData` and the reporting pipelines pass `ConfigurationAnalyzer.TimeRangeInDays`
+  (default 365) and `ConfigurationAnalyzer.SnapshotInterval` (default `P1W`), so the dataset stays bounded.
 - `-MaxDetailedSnapshots 30` - how many snapshots embed full resource content (needed for
   property-level diffs and the Conditional Access views). Content blobs are de-duplicated by git
   blob hash, so unchanged resources are stored once regardless of the snapshot count.
@@ -66,8 +68,12 @@ or as part of refreshing all reporting apps with `New-EntraOpsReportingData`. Us
   switch; manifest-only commits (no resource type published) are excluded. The GitHub reporting workflow enables this by default
   through `ConfigurationAnalyzer.AllowPartialTenantGovernanceSnapshot`; set it to `false` for a
   strict complete-snapshot-only report. Manual workflow dispatch can still override the setting.
-- `-AllowStaleSnapshot` - bypass only the snapshot age check. Combine it with
-  `-AllowPartialSnapshot` when the current mixed tree is also older than the configured limit.
+- `-MaxSnapshotAgeHours` - age limit of the published snapshot (default 30). The reporting pipelines
+  pass `ConfigurationAnalyzer.MaxTenantGovernanceSnapshotAgeHours` or a limit derived from the snapshot
+  schedule (weekly 174 hours) and apply `ConfigurationAnalyzer.StaleTenantGovernanceSnapshotAction`.
+- `-AllowStaleSnapshot` - bypass only the snapshot age check; the report then shows an
+  outdated-snapshot banner. Combine it with `-AllowPartialSnapshot` when the current mixed tree is
+  also older than the configured limit.
 - `-ResolveGroupMembersForPrivilegedAssets` - for Configuration Assets: resolve the
   transitive membership of groups referenced in the latest detailed snapshot (via Microsoft
   Graph, PIM-for-Groups aware) so a group can be attributed a tier from its members instead of

@@ -117,7 +117,7 @@ try {
     } else {
         Write-Output "Cloning '$Repository' ($($Source.Channel) channel) without authentication..."
     }
-    & git clone --filter=blob:none --no-checkout $RepositoryUrl $DestinationPath
+    & git clone --filter=blob:none --no-checkout -- $RepositoryUrl $DestinationPath
     if ($LASTEXITCODE -ne 0) { throw "git clone failed with exit code $LASTEXITCODE." }
     & git -C $DestinationPath fetch --depth 1 origin -- $RequestedRef
     if ($LASTEXITCODE -ne 0) { throw "git fetch failed for '$Repository@$RequestedRef' with exit code $LASTEXITCODE." }

@@ -89,13 +89,13 @@ repository with Contents, Workflows, Pull requests, and Commit statuses write pe
 the `EntraOpsUpdateAppClientId` repository variable and `EntraOpsUpdateAppPrivateKey` repository
 secret, then add `./.github/workflows` to `AutomatedEntraOpsUpdate.TargetUpdateFolders` while retaining
 `./.github/actions` and `./.github/scripts`. See the
-[core update documentation](core.html#update-entraops-powershell-module-and-cicd) for the complete setup
+[core update documentation](../../core/index.html#update-entraops-powershell-module-and-cicd) for the complete setup
 and security behavior.
 
 ## 4. Keep and apply your existing EntraOpsConfig.json
 
 Retain your current `EntraOpsConfig.json`; do not replace it with a newly generated file. Add newly
-documented settings only when you need their feature. The [Configuration Wizard](../configuration/index.html)
+documented settings only when you need their feature. The [Configuration Wizard](../../configuration/index.html)
 can import the existing file and export an expanded version. It merges edited fields into the imported
 document so unknown extension properties and newer settings are retained; still review the semantic
 diff before replacing production configuration.

@@ -23,6 +23,10 @@
 .PARAMETER logPrefix
     Text prepended to verbose messages. Defaults to the function name.
 
+.PARAMETER RegisteredGroupIds
+    Used by New-EntraOpsServiceBootstrap to record groups whose registration was accepted, even when a
+    later lookup fails. These groups are kept during failure cleanup while Graph indexing catches up.
+
 .EXAMPLE
     New-EntraOpsServiceEMCatalogResource `
         -ServiceGroups ($groups | Where-Object { -not $_.IsDelegated }) `
@@ -41,19 +45,23 @@ function New-EntraOpsServiceEMCatalogResource {
         [Parameter(Mandatory)]
         [string]$ServiceCatalogId,
 
+        [Parameter(DontShow)]
+        [AllowEmptyCollection()]
+        [System.Collections.Generic.List[string]]$RegisteredGroupIds,
+
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
     begin {
         $resources = @()
         Write-Verbose "$logPrefix Looking up Catalog Resources"
-        try{
+        try {
             #Catalog Resource Registration
             $catalogResourceUri = "/v1.0/identityGovernance/entitlementManagement/catalogs/$ServiceCatalogId/resources?`$expand=roles,scopes"
-            $resources += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogResourceUri -OutputType PSObject -DisableCache
-        }catch{
+            $resources += Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogResourceUri -OutputType PSObject -DisableCache -ThrowOnFailure
+        } catch {
             Write-Verbose "$logPrefix Failed to find Catalog Resources"
-            Write-Error $_
+            throw "Failed to look up catalog resources for ${ServiceCatalogId}: $($_.Exception.Message)"
         }
     }
 
@@ -61,25 +69,25 @@ function New-EntraOpsServiceEMCatalogResource {
         Write-Verbose "$logPrefix Beginning EM Catalog Resource"
 
         Write-Verbose "$logPrefix Processing $(($ServiceGroups|Measure-Object).Count) Catalog Resources"
-        foreach($group in $ServiceGroups){
+        foreach ($group in $ServiceGroups) {
             $resourceRequestParam = @{
                 requestType = "adminAdd"
-                resource = @{
+                resource    = @{
                     originId     = $group.Id
                     originSystem = "AadGroup"
                 }
-                catalog = @{
+                catalog     = @{
                     id = $ServiceCatalogId
                 }
             }
 
-            if($group.DisplayName -notin $resources.DisplayName){
+            if ($group.Id -notin @($resources | Where-Object { $_.OriginSystem -eq 'AadGroup' } | ForEach-Object { $_.OriginId })) {
                 $added = Wait-EntraOpsServiceEMCondition -Activity "Group $($group.DisplayName) in Entitlement Management" -logPrefix $logPrefix -Condition {
-                    try{
+                    try {
                         Write-Verbose "$logPrefix $($group.DisplayName) not found as catalog resource, adding"
                         Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/identityGovernance/entitlementManagement/resourceRequests" -Body ($resourceRequestParam | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure -SuppressBadRequestWarning -SuppressNotFoundWarning | Out-Null
                         return $true
-                    }catch{
+                    } catch {
                         switch ($_.Exception.Data['ErrorCode']) {
                             'ResourceAlreadyOnboarded' {
                                 Write-Verbose "$logPrefix Resource already onboarded"
@@ -94,22 +102,39 @@ function New-EntraOpsServiceEMCatalogResource {
                         throw
                     }
                 }
-                if(-not $added){
+                if (-not $added) {
                     throw "Group object consistency with Entitlement Management not achieved for $($group.DisplayName)"
                 }
             }
+            if ($null -ne $RegisteredGroupIds) { $RegisteredGroupIds.Add($group.Id) }
         }
     }
 
     end {
-        $check = @{}
+        $check = @{ LastError = $null }
         $confirmed = Wait-EntraOpsServiceEMCondition -Activity "Catalog resources" -logPrefix $logPrefix -Condition {
-            $check.Resources = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogResourceUri -OutputType PSObject -DisableCache
-            $refNames = @($ServiceGroups.DisplayName | Where-Object { $_ })
-            $chkNames = @($check.Resources.DisplayName | Where-Object { $_ })
-            $refNames.Count -gt 0 -and $chkNames.Count -ge $refNames.Count -and (Compare-Object $refNames $chkNames | Measure-Object).Count -eq 0
+            try {
+                $check.Resources = Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogResourceUri -OutputType PSObject -DisableCache -ThrowOnFailure
+            } catch {
+                # Invoke-EntraOpsMsGraphQuery already retried throttling and transient server errors. Keep polling
+                # only while the state can still change (network error, catalog not replicated yet, server error);
+                # a permission or request error won't resolve by waiting, so it is reported as it is.
+                $StatusCode = $_.Exception.Data['StatusCode']
+                if ($null -ne $StatusCode -and $StatusCode -notin @(404, 408, 429) -and $StatusCode -lt 500) { throw }
+                $check.LastError = $_.Exception.Message
+                Write-Verbose "$logPrefix Catalog resource lookup failed during the consistency check, retrying: $($check.LastError)"
+                return $false
+            }
+            $check.LastError = $null
+            $refIds = @($ServiceGroups.Id | Where-Object { $_ })
+            $chkIds = @($check.Resources | Where-Object { $_.OriginSystem -eq 'AadGroup' } | ForEach-Object { $_.OriginId })
+            # The catalog may hold further resources (e.g. shared or manually added groups)
+            $refIds.Count -gt 0 -and @($refIds | Where-Object { $_ -notin $chkIds }).Count -eq 0
         }
-        if(-not $confirmed){
+        if (-not $confirmed) {
+            if ($check.LastError) {
+                throw "Catalog Resource object consistency with Entra not achieved. Last catalog resource lookup error: $($check.LastError)"
+            }
             throw "Catalog Resource object consistency with Entra not achieved"
         }
         return [psobject[]]$check.Resources

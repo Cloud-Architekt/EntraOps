@@ -53,6 +53,42 @@ Describe 'New-EntraOpsReportingData content preflight' {
         Should -Invoke -ModuleName EntraOps New-EntraOpsPrivilegedAssetsData -Times 1 -Exactly
     }
 
+    It 'checks and installs the reporting apps below an explicit EntraOpsRoot' {
+        $OtherRoot = Join-Path $TestDrive "other-$([guid]::NewGuid().ToString('N'))"
+        Copy-Item -LiteralPath $script:Workspace -Destination $OtherRoot -Recurse
+        # The base folder lacks every app; only the explicit root is relevant.
+        Remove-Item -LiteralPath "$script:Workspace/Reports" -Recurse -Force
+
+        New-EntraOpsReportingData @script:Parameters -EntraOpsRoot $OtherRoot -InstallMissingReportingFolder
+
+        Should -Invoke -ModuleName EntraOps Install-EntraOpsReportingFolder -Times 1 -Exactly -ParameterFilter { [System.IO.Path]::GetFullPath($DestinationPath) -eq [System.IO.Path]::GetFullPath((Join-Path $OtherRoot 'Reports')) }
+        Test-Path -LiteralPath "$OtherRoot/Reports/PrivilegedAssets/index.html" | Should -BeTrue
+    }
+
+    It 'resolves the default app folder of <Generator> below the given RepoRoot' -ForEach @(
+        @{ Generator = 'New-EntraOpsTierBreachAnalyzerData'; App = 'TierBreachAnalyzer' }
+        @{ Generator = 'New-EntraOpsPrivilegedEamDashboardData'; App = 'EamDashboard' }
+        @{ Generator = 'New-EntraOpsPrivilegedAssetsData'; App = 'PrivilegedAssets' }
+        @{ Generator = 'New-EntraOpsAccessPathMapData'; App = 'AccessPathMap' }
+        @{ Generator = 'New-EntraOpsPrivilegedEamPrivilegeHistoryData'; App = 'PrivilegeHistory' }
+        @{ Generator = 'New-EntraOpsTenantGovernanceConfigurationAnalyzerData'; App = 'ConfigurationAnalyzer' }
+    ) {
+        # The base folder has no reporting apps; only the explicit root has them. Other input may be missing,
+        # but no error may refer to the base folder.
+        $OtherRoot = Join-Path $TestDrive "root-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path "$OtherRoot/Reports/$App/data" -Force | Out-Null
+        Remove-Item -LiteralPath "$script:Workspace/Reports" -Recurse -Force
+
+        $ErrorMessage = $null
+        try {
+            & (Get-Command $Generator -Module EntraOps) -RepoRoot $OtherRoot -WarningAction SilentlyContinue -ErrorAction Stop *> $null
+        } catch {
+            $ErrorMessage = $_.Exception.Message
+        }
+
+        "$ErrorMessage" | Should -Not -Match ([regex]::Escape($script:Workspace))
+    }
+
     It 'does not require a skipped app' {
         New-EntraOpsReportingData @script:Parameters -SkipPrivilegedAssets
 

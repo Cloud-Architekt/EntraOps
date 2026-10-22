@@ -180,7 +180,7 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                 Write-Host "  Group is empty - adding all $(@($UniqueDesiredObjects).Count) objects" -ForegroundColor Yellow
                 foreach ($PrivObj in $UniqueDesiredObjects) {
                     try {
-                        $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($PrivObj.ObjectId)" -DisableCache -OutputType PSObject
+                        $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($PrivObj.ObjectId)" -DisableCache -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
                         $MemberType = $GroupMember.'@odata.type'.Replace('#microsoft.graph.', '')
                         if ($IncludeObjectDetails) {
                             Write-Host "  [+] ADD  [$MemberType] $($GroupMember.displayName)" -ForegroundColor Green
@@ -195,6 +195,11 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                         Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject -ThrowOnFailure
                         $GrpAdded++
                     } catch {
+                        if (Test-EntraOpsGraphNotFoundError -ErrorRecord $_ -DestinationUri "/v1.0/groups/$($GroupId)") {
+                            Write-Warning "  [SKIP] Object $($PrivObj.ObjectId) no longer exists (deleted after the last Pull) - not added to $GroupName"
+                            $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = "Skipped deleted object $($PrivObj.ObjectId) for $GroupName" })
+                            continue
+                        }
                         $AddFailureMessage = if ($IncludeObjectDetails) { "FAIL ADD $($PrivObj.ObjectId) to $GroupName`: $_" } else { "Failed to add object $($PrivObj.ObjectId) to $GroupName" }
                         Write-Warning "  [!] $AddFailureMessage"
                         $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $AddFailureMessage })
@@ -230,7 +235,7 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                     }
                     foreach ($MemberChange in $MembersToRemove) {
                         try {
-                            $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($MemberChange.InputObject)" -OutputType PSObject
+                            $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($MemberChange.InputObject)" -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
                             $MemberType  = $GroupMember.'@odata.type'.Replace('#microsoft.graph.', '')
                             if ($IncludeObjectDetails) {
                                 Write-Host "  [-] REM  [$MemberType] $($GroupMember.displayName)" -ForegroundColor Yellow
@@ -240,6 +245,11 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                             Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/groups/$($GroupId)/members/$($MemberChange.InputObject)/`$ref" -OutputType PSObject -ThrowOnFailure
                             $GrpRemoved++
                         } catch {
+                            if (Test-EntraOpsGraphNotFoundError -ErrorRecord $_ -DestinationUri "/v1.0/groups/$($GroupId)") {
+                                Write-Warning "  [SKIP] Object $($MemberChange.InputObject) no longer exists - nothing to remove from $GroupName"
+                                $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = "Skipped removal of deleted object $($MemberChange.InputObject) from $GroupName" })
+                                continue
+                            }
                             $RemoveFailureMessage = if ($IncludeObjectDetails) { "FAIL REMOVE $($MemberChange.InputObject) from $GroupName`: $_" } else { "Failed to remove object $($MemberChange.InputObject) from $GroupName" }
                             Write-Warning "  [!] $RemoveFailureMessage"
                             $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $RemoveFailureMessage })
@@ -249,7 +259,7 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                 }
                 foreach ($MemberChange in $MembersToAdd) {
                     try {
-                        $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($MemberChange.InputObject)" -DisableCache -OutputType PSObject
+                        $GroupMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($MemberChange.InputObject)" -DisableCache -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
                         $MemberType  = $GroupMember.'@odata.type'.Replace('#microsoft.graph.', '')
                         if ($IncludeObjectDetails) {
                             Write-Host "  [+] ADD  [$MemberType] $($GroupMember.displayName)" -ForegroundColor Green
@@ -264,6 +274,11 @@ function Update-EntraOpsPrivilegedConditionalAccessGroup {
                         Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/groups/$($GroupId)/members/`$ref" -Body $OdataBody -OutputType PSObject -ThrowOnFailure
                         $GrpAdded++
                     } catch {
+                        if (Test-EntraOpsGraphNotFoundError -ErrorRecord $_ -DestinationUri "/v1.0/groups/$($GroupId)") {
+                            Write-Warning "  [SKIP] Object $($MemberChange.InputObject) no longer exists (deleted after the last Pull) - not added to $GroupName"
+                            $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = "Skipped deleted object $($MemberChange.InputObject) for $GroupName" })
+                            continue
+                        }
                         $AddFailureMessage = if ($IncludeObjectDetails) { "FAIL ADD $($MemberChange.InputObject) to $GroupName`: $_" } else { "Failed to add object $($MemberChange.InputObject) to $GroupName" }
                         Write-Warning "  [!] $AddFailureMessage"
                         $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $AddFailureMessage })

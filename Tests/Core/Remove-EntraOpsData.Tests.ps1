@@ -14,7 +14,7 @@ Describe 'Remove-EntraOpsData' {
         }
         foreach ($File in 'PrivilegedEAM/EntraID/EntraID.json', 'TenantGovernance/Snapshots/.SnapshotManifest.json', 'Classification/Templates/Classification_AadResources.json',
             'Classification/Global.json', 'Classification/ObjectClassification.json', 'Classification/contoso.onmicrosoft.com/Classification_AadResources.json',
-            'Classification/contoso.onmicrosoft.com/Classification_RoleActionOverwrites.json', 'Classification/fabrikam.onmicrosoft.com/Classification_AadResources.json',
+            'Classification/contoso.onmicrosoft.com/Classification_RoleActionOverwrites.json', 'Classification/contoso.onmicrosoft.com/Classification_RoleDefinitionOverwrites_PAW.json', 'Classification/contoso.onmicrosoft.com/Classification_ApiPermissionOverwrites.json', 'Classification/fabrikam.onmicrosoft.com/Classification_AadResources.json',
             'Reports/EamDashboard/data/eam-dashboard-data.js', 'EntraOpsConfig.json') {
             Set-Content -LiteralPath (Join-Path $script:Root $File) -Value '{}'
         }
@@ -30,6 +30,8 @@ Describe 'Remove-EntraOpsData' {
         Test-Path (Join-Path $script:Tenant 'Classification_AadResources.json') | Should -BeFalse
         Test-Path (Join-Path $script:Root 'Classification/fabrikam.onmicrosoft.com') | Should -BeFalse
         Test-Path (Join-Path $script:Tenant 'Classification_RoleActionOverwrites.json') | Should -BeTrue
+        Test-Path (Join-Path $script:Tenant 'Classification_RoleDefinitionOverwrites_PAW.json') | Should -BeTrue
+        Test-Path (Join-Path $script:Tenant 'Classification_ApiPermissionOverwrites.json') | Should -BeTrue
         Test-Path (Join-Path $script:Root 'Classification/Templates/Classification_AadResources.json') | Should -BeTrue
         Test-Path (Join-Path $script:Root 'Classification/Global.json') | Should -BeTrue
         Test-Path (Join-Path $script:Root 'Classification/ObjectClassification.json') | Should -BeTrue

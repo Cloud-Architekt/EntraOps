@@ -32,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Validate module manifest
         shell: pwsh
         run: Test-ModuleManifest ./EntraOps/EntraOps.psd1 -ErrorAction Stop | Out-Null
@@ -57,6 +59,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Check shipped content for tenant-specific or personal data
         shell: pwsh
         run: ./.github/scripts/Test-EntraOpsReleaseContent.ps1
@@ -71,6 +75,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          persist-credentials: false
           # Operator-generated Tenant Governance snapshot names can contain characters (such as
           # colons) that Windows cannot materialize. They are not inputs to the regression suite.
           sparse-checkout: |
@@ -105,8 +110,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm

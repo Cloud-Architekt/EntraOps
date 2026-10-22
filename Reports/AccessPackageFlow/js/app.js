@@ -63,6 +63,8 @@
     if (ASSIGNMENT_DATA && Array.isArray(ASSIGNMENT_DATA.assignments)) {
         ASSIGNMENT_DATA.assignments.forEach(function (a) {
             if (!a.accessPackageId) return;
+            // Expired assignments no longer grant access; datasets without a state keep every assignment.
+            if (String(a.state || "").toLowerCase() === "expired") return;
             if (!assignmentsByPackage.has(a.accessPackageId)) assignmentsByPackage.set(a.accessPackageId, []);
             assignmentsByPackage.get(a.accessPackageId).push(a);
         });

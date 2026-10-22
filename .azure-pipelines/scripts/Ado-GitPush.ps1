@@ -8,7 +8,10 @@ param (
     [string]$BranchName = ($env:BUILD_SOURCEBRANCH -replace '^refs/heads/', ''),
 
     [Parameter(Mandatory = $false)]
-    [string]$AccessToken = $env:SYSTEM_ACCESSTOKEN
+    [string]$AccessToken = $env:SYSTEM_ACCESSTOKEN,
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$Paths
 )
 
 $ErrorActionPreference = "Continue"
@@ -41,7 +44,17 @@ if (-not [string]::IsNullOrWhiteSpace($env:SYSTEM_COLLECTIONURI) -and -not [stri
 git config user.email "entraops-ado@contoso.com"
 git config user.name "Azure DevOps"
 
-git add --all
+$SelectedPaths = @($Paths | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+if ($SelectedPaths.Count -gt 0) {
+    $SelectedPaths = @($SelectedPaths | Where-Object { (Test-Path -LiteralPath $_) -or @(git ls-files -- $_).Count -gt 0 })
+    if ($SelectedPaths.Count -eq 0) {
+        Write-Host "None of the selected paths exists. No changes to commit."
+        exit 0
+    }
+    git add --all -- @SelectedPaths
+} else {
+    git add --all
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Error "git add failed."
     exit 1
@@ -49,7 +62,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # PrivilegedEAM is ignored for local safety because it contains tenant data, but
 # the automation pipelines explicitly publish this generated output to private repositories.
-if (Test-Path -LiteralPath './PrivilegedEAM' -PathType Container) {
+if ($SelectedPaths.Count -eq 0 -and (Test-Path -LiteralPath './PrivilegedEAM' -PathType Container)) {
     git add --force --all -- './PrivilegedEAM'
     if ($LASTEXITCODE -ne 0) {
         Write-Error "git add failed for generated PrivilegedEAM output."
@@ -57,7 +70,7 @@ if (Test-Path -LiteralPath './PrivilegedEAM' -PathType Container) {
     }
 }
 
-git diff-index --quiet HEAD
+if ($SelectedPaths.Count -gt 0) { git diff --cached --quiet } else { git diff-index --quiet HEAD }
 if ($LASTEXITCODE -eq 0) {
     Write-Host "No changes to commit."
     exit 0

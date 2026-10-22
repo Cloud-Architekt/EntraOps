@@ -195,6 +195,17 @@
                     </div>
                     <div class="card-pad">
                         <div class="callout" id="paiFileStatus"></div>
+                        <div class="callout scope pai-file-changed" id="paiFileChanged" role="status" hidden>
+                            <b>The repository Object Classification File changed since the worklist in this browser was
+                                last saved.</b>
+                            Current file entries are shown as they are in the repository; your local additions, edits
+                            and removals were kept on top of them. Review the worklist before you download the file.
+                            <div class="pai-toolbar">
+                                <button type="button" class="btn small" id="paiFileChangedReset">Reset to repository
+                                    file</button>
+                                <button type="button" class="btn small" id="paiFileChangedKeep">Keep my changes</button>
+                            </div>
+                        </div>
                         <div class="pai-toolbar">
                             <input type="search" id="paiAddObject" class="pai-input pai-add-object"
                                 list="paiObjectOptions" placeholder="Add object by name or object id" autocomplete="off"

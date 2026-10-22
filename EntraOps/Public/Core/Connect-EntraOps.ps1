@@ -31,11 +31,50 @@
     protection (EntitlementManagement.ReadWrite.All) and ServiceEM administrative units (AdministrativeUnit.ReadWrite.All)
     are only requested when enabled in EntraOpsConfig.json.
 
+.PARAMETER GraphApiVersion
+    Microsoft Graph API version ("beta" or "v1.0"). Default is "beta". Reserved; currently not used by
+    Connect-EntraOps.
+
+.PARAMETER AccountId
+    Application (client) ID of the user-assigned managed identity for AuthenticationType "UserAssignedMSI".
+    For "AlreadyAuthenticated", the account ID used with -AzArmAccessToken and -MsGraphAccessToken.
+
+.PARAMETER TenantName
+    Name of the tenant to connect to (e.g. contoso.onmicrosoft.com). Mandatory.
+
+.PARAMETER TenantId
+    Tenant ID of the tenant to connect to. Taken from the TenantId of the loaded configuration file
+    (see -ConfigFilePath) when not specified.
+
+.PARAMETER ManagingTenantId
+    Tenant ID of the governing (managing) tenant of a Tenant Governance relationship. Connect-EntraOps
+    pre-authenticates to this tenant for cross-tenant classification. Taken from the loaded configuration
+    file (see -ConfigFilePath) when not specified.
+
+.PARAMETER ManagingTenantName
+    Name of the governing (managing) tenant of a Tenant Governance relationship. Taken from the loaded configuration
+    file (see -ConfigFilePath) when not specified.
+
+.PARAMETER MultiTenantRepo
+    Stores the Privileged EAM export in a tenant-specific subfolder (PrivilegedEAM/<TenantName>/) for
+    repositories that contain data of multiple tenants. Default is false.
+
+.PARAMETER AzArmAccessToken
+    Azure Resource Manager access token for AuthenticationType "AlreadyAuthenticated". Used together with
+    -AccountId and -MsGraphAccessToken to connect Az PowerShell with existing tokens.
+
+.PARAMETER MsGraphAccessToken
+    Microsoft Graph access token to use for this session, e.g. from a pipeline secret or federated token.
+    With -UseInvokeRestMethodOnly, the token is used for the REST requests instead of a token from Get-AzAccessToken.
+
 .PARAMETER ConfigFilePath
     Path to the EntraOpsConfig.json to load into the session ($EntraOpsConfig). Without this parameter,
     EntraOpsConfig.json in the current folder, otherwise in the EntraOps working folder, is loaded
     automatically unless its TenantName differs from -TenantName. The connection summary shows which
     file is used.
+
+.PARAMETER NoWelcome
+    Suppresses the welcome banner and the connection summary.
 
 .EXAMPLE
     Using Interactive Sign-In of User with double authentication to Az PowerShell (Connect-AzAccount) and Microsoft Graph SDK (Connect-MgGraph)
@@ -551,7 +590,8 @@ function Connect-EntraOps {
         # Recommendation 3: Optimize context retrieval and verbose output generation
         Write-Verbose -Message "Connected to Azure Management"
         $AzContextRaw = Get-AzContext
-        $AzContext = $AzContextRaw | Select-Object Account, Tenant, TokenCache
+        # Account and tenant only - the token cache has no diagnostic value and doesn't belong in logs
+        $AzContext = $AzContextRaw | Select-Object Account, Tenant
         Write-Verbose ($AzContext | Out-String)
 
         # Retrieve MG context once (skipped when Connect-MgGraph was itself skipped in REST-only mode)
