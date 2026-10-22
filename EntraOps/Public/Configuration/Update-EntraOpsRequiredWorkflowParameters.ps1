@@ -166,10 +166,12 @@ function Update-EntraOpsRequiredWorkflowParameters {
         # Always persist master/publication switches, including $false. Older configs did not expose
         # release publishing; keep that safely disabled until the operator opts in explicitly.
         $ReportingWorkflowObject.env.ApplyAutomatedReportingGeneration = [bool]$Config.AutomatedReportingGeneration.ApplyAutomatedReportingGeneration
-        $ReportingWorkflowObject.env.PublishReportsAsRelease = if ($null -ne $Config.AutomatedReportingGeneration.PublishReportsAsRelease) {
-            [bool]$Config.AutomatedReportingGeneration.PublishReportsAsRelease
-        } else {
-            $false
+        # Current templates read these from the config at runtime; only older workflows still declare them.
+        if ($ReportingWorkflowObject.env.Contains('RunGeneratedReportTests')) {
+            $ReportingWorkflowObject.env.RunGeneratedReportTests = [bool]$Config.AutomatedReportingGeneration.RunGeneratedReportTests
+        }
+        if ($ReportingWorkflowObject.env.Contains('PublishReportsAsRelease')) {
+            $ReportingWorkflowObject.env.PublishReportsAsRelease = [bool]$Config.AutomatedReportingGeneration.PublishReportsAsRelease
         }
         # An explicitly configured empty value keeps the workflow's "no pruning" mode; only a missing value falls back.
         $ReportingWorkflowObject.env.ReportingReleasesToKeep = if ($null -eq $Config.AutomatedReportingGeneration.ReportingReleasesToKeep) {
@@ -192,6 +194,9 @@ function Update-EntraOpsRequiredWorkflowParameters {
             # Set GenerateEamDashboard Parameter
             $ReportingWorkflowObject.env.GenerateEamDashboard = $Config.AutomatedReportingGeneration.GenerateEamDashboard
         }
+
+        $ReportingWorkflowObject.env.GeneratePrivilegedAssets = $Config.AutomatedReportingGeneration.GeneratePrivilegedAssets -ne $false
+        $ReportingWorkflowObject.env.PrivilegedAssetsResolveRelatedObjectIds = $Config.PrivilegedAssets.ResolveRelatedObjectIds -ne $false
 
         if ($null -ne $Config.AutomatedReportingGeneration.GenerateAccessPathMap) {
             # Set GenerateAccessPathMap Parameter

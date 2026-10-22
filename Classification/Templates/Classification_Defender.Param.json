@@ -49,19 +49,12 @@
             },
             {
                 "Category": "Microsoft.Defender",
-                "Service": "Global Security Analytics",
+                "Service": "Global Alert Management",
                 "RoleAssignmentScopeName": [
                     "/"
                 ],
                 "RoleDefinitionActions": [
-                    "microsoft.xdr/configuration/security/*/read",
-                    "microsoft.xdr/secops/securitydata/*/read",
-                    "microsoft.xdr/secops/securitydata/alerts/manage",
-                    "microsoft.xdr/secops/securitydata/copilot/read",
-                    "microsoft.xdr/secops/securitydata/basics/read",
-                    "microsoft.xdr/securityposture/*/read",
-                    "microsoft.xdr/securityposture/posturemanagement/*/read",
-                    "microsoft.xdr/securityposture/posturemanagement/vulnerabilitymanagement/read"
+                    "microsoft.xdr/secops/securitydata/alerts/manage"
                 ]
             },
             {
@@ -118,10 +111,14 @@
                 "RoleDefinitionActions": [
                     "microsoft.xdr/configuration/*/read",
                     "microsoft.xdr/configuration/authorization/read",
-                    "microsoft.xdr/securityposture/*/read",
-                    "microsoft.xdr/securityposture/posturemanagement/vulnerabilitymanagement/read",
+                    "microsoft.xdr/configuration/security/*/read",
                     "microsoft.xdr/secops/*/read",
-                    "microsoft.xdr/secops/securitydata/basics/read"
+                    "microsoft.xdr/secops/securitydata/*/read",
+                    "microsoft.xdr/secops/securitydata/basics/read",
+                    "microsoft.xdr/secops/securitydata/copilot/read",
+                    "microsoft.xdr/securityposture/*/read",
+                    "microsoft.xdr/securityposture/posturemanagement/*/read",
+                    "microsoft.xdr/securityposture/posturemanagement/vulnerabilitymanagement/read"
                 ]
             },
             {

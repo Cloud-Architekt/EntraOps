@@ -7,7 +7,7 @@
 .DESCRIPTION
     Helps troubleshoot runs of Save-EntraOpsTenantGovernanceSnapshotJson that reported a
     'partiallySuccessful' (or 'failed') snapshot job, e.g.:
-      WARNING: Snapshot job 224f12bf-0057-4817-916b-71a297abada1 completed as 'partiallySuccessful' -
+      WARNING: Snapshot job 22222222-2222-2222-2222-222222222222 completed as 'partiallySuccessful' -
       one or more resource types may have failed to capture. Check the snapshot job details in the
       Microsoft Entra admin center for more information.
 
@@ -63,7 +63,7 @@
 
 .EXAMPLE
     Analyze the snapshot job referenced in a 'partiallySuccessful' warning message.
-    Get-EntraOpsTenantGovernanceSnapshotReport -SnapshotJobId "224f12bf-0057-4817-916b-71a297abada1"
+    Get-EntraOpsTenantGovernanceSnapshotReport -SnapshotJobId "22222222-2222-2222-2222-222222222222"
 
 .EXAMPLE
     Check the 10 most recent snapshot jobs and compare them against the local snapshot folder.
@@ -286,15 +286,15 @@ function Get-EntraOpsTenantGovernanceSnapshotReport {
 
                 $SnapshotJobs.Add(
                     [PSCustomObject]@{
-                        SnapshotId             = $JobDetail.id
-                        DisplayName            = $JobDetail.displayName
-                        Status                 = $JobDetail.status
-                        CreatedDateTime        = $JobDetail.createdDateTime
-                        CompletedDateTime      = $JobDetail.completedDateTime
-                        RequestedResourceCount = $RequestedResources.Count
+                        SnapshotId              = $JobDetail.id
+                        DisplayName             = $JobDetail.displayName
+                        Status                  = $JobDetail.status
+                        CreatedDateTime         = $JobDetail.createdDateTime
+                        CompletedDateTime       = $JobDetail.completedDateTime
+                        RequestedResourceCount  = $RequestedResources.Count
                         ResourceTypesWithErrors = $ResourceTypesWithErrors
-                        ErrorDetails           = $ParsedErrorDetails
-                        ErrorSummary           = $ErrorSummary
+                        ErrorDetails            = $ParsedErrorDetails
+                        ErrorSummary            = $ErrorSummary
                     }
                 )
             }
@@ -307,6 +307,13 @@ function Get-EntraOpsTenantGovernanceSnapshotReport {
         Write-Verbose "$($MissingOrEmptyResourceTypes.Count) configured resource type(s) currently have no data on disk under '$SnapshotFolder': $($MissingOrEmptyResourceTypes -join ', ')"
     }
     $PersistedDiagnostics = @($SnapshotManifest.Diagnostics)
+    # Literal prefix check: Graph messages often already start with "[<ErrorCode>]", and -like would
+    # treat the brackets as a wildcard character class and never match.
+    $GetErrorCodePrefix = {
+        param($ErrorCode, $Message)
+        if ([string]::IsNullOrWhiteSpace("$ErrorCode") -or "$Message".TrimStart().StartsWith("[$ErrorCode]", [System.StringComparison]::OrdinalIgnoreCase)) { return '' }
+        return "[$ErrorCode] "
+    }
     # A rejected attempt (for example duplicate canonical identities) is recorded only in the
     # last-attempt manifest so the last successful snapshot manifest stays intact. Surface its
     # diagnostics whenever that attempt is a different job than the published snapshot.
@@ -318,14 +325,14 @@ function Get-EntraOpsTenantGovernanceSnapshotReport {
         $PersistedWarnings = @(
             foreach ($Diagnostic in $PersistedDiagnostics) {
                 [PSCustomObject]@{
-                    Type = $Diagnostic.ResourceType
-                    Message = "$(if ($Diagnostic.ErrorCode) { "[$($Diagnostic.ErrorCode)] " })$($Diagnostic.Message)$(if ($Diagnostic.Occurrences -gt 1) { " ($($Diagnostic.Occurrences)x)" }) — $($Diagnostic.RemediationHint)"
+                    Type    = $Diagnostic.ResourceType
+                    Message = "$(& $GetErrorCodePrefix $Diagnostic.ErrorCode $Diagnostic.Message)$($Diagnostic.Message)$(if ($Diagnostic.Occurrences -gt 1) { " ($($Diagnostic.Occurrences)x)" }) — $($Diagnostic.RemediationHint)"
                 }
             }
             foreach ($Diagnostic in $LastAttemptDiagnostics) {
                 [PSCustomObject]@{
-                    Type = $Diagnostic.ResourceType
-                    Message = "[Last attempt $($LastAttemptManifest.SnapshotId)] $(if ($Diagnostic.ErrorCode) { "[$($Diagnostic.ErrorCode)] " })$($Diagnostic.Message)$(if ($Diagnostic.Occurrences -gt 1) { " ($($Diagnostic.Occurrences)x)" }) — $($Diagnostic.RemediationHint)"
+                    Type    = $Diagnostic.ResourceType
+                    Message = "[Last attempt $($LastAttemptManifest.SnapshotId)] $(& $GetErrorCodePrefix $Diagnostic.ErrorCode $Diagnostic.Message)$($Diagnostic.Message)$(if ($Diagnostic.Occurrences -gt 1) { " ($($Diagnostic.Occurrences)x)" }) — $($Diagnostic.RemediationHint)"
                 }
             }
         )
@@ -347,8 +354,7 @@ function Get-EntraOpsTenantGovernanceSnapshotReport {
         # counts) instead of dumping the raw errorDetails blob as a single hard-to-read line.
         $JobWarningMessages = [System.Collections.Generic.List[psobject]]::new()
         foreach ($ErrorEntry in $Job.ErrorSummary) {
-            # Avoid double-prefixing when the message already starts with its own bracketed error code.
-            $Prefix = if ($ErrorEntry.ErrorCode -and $ErrorEntry.Message -notlike "[$($ErrorEntry.ErrorCode)]*") { "[$($ErrorEntry.ErrorCode)] " } else { "" }
+            $Prefix = & $GetErrorCodePrefix $ErrorEntry.ErrorCode $ErrorEntry.Message
             $MessageText = "$Prefix$($ErrorEntry.Message)$(if ($ErrorEntry.Occurrences -gt 1) { " ($($ErrorEntry.Occurrences)x)" })"
             $JobWarningMessages.Add([PSCustomObject]@{ Type = $ErrorEntry.ResourceType; Message = $MessageText })
         }

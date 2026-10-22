@@ -69,8 +69,6 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
         [boolean]$ApplyAdministrativeUnitAssignments = $false
     )
 
-    $FirstPartyApps = Invoke-WebRequest -UseBasicParsing -Method GET -Uri "https://raw.githubusercontent.com/merill/microsoft-info/main/_info/MicrosoftApps.json" | ConvertFrom-Json
-
     # Summary tracking across all AUs
     $SyncSummary = [System.Collections.Generic.List[psobject]]::new()
     $TotalAdded = 0
@@ -209,7 +207,7 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                 # Add all members to the AU
                 foreach ($PrivObj in $EntraOpsPrivilegedObjects) {
                     try {
-                        $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($PrivObj.ObjectId)" -OutputType PSObject
+                        $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/directoryObjects/$($PrivObj.ObjectId)" -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
                         $AdminUnitMemberObjectType = $AdminUnitMember.'@odata.type'.Replace('#microsoft.graph.', '')
                         if ($IncludeObjectDetails) {
                             Write-Host "  [+] ADD  [$AdminUnitMemberObjectType] $($AdminUnitMember.displayName)" -ForegroundColor Green
@@ -223,6 +221,13 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                         Invoke-EntraOpsMsGraphQuery -Method "POST" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -DisableCache -Body $OdataBody -OutputType PSObject -ThrowOnFailure
                         $AuAdded++
                     } catch {
+                        if (Test-EntraOpsGraphNotFoundError -ErrorRecord $_ -DestinationUri "/beta/administrativeUnits/$($AdminUnitId)") {
+                            Write-Warning "  [SKIP] Object $($PrivObj.ObjectId) no longer exists (deleted after the last Pull) - not added to $AdminUnitName"
+                            $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = "Skipped deleted object $($PrivObj.ObjectId) for $AdminUnitName" })
+                            $AuSkipped++
+                            $TotalSkipped++
+                            continue
+                        }
                         $AddFailureMessage = if ($IncludeObjectDetails) { "FAIL ADD $($PrivObj.ObjectId) to $AdminUnitName`: $_" } else { "Failed to add object $($PrivObj.ObjectId) to $AdminUnitName" }
                         Write-Warning "  [!] $AddFailureMessage"
                         $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $AddFailureMessage })
@@ -259,7 +264,7 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                 if (-not $SkipRemovals) {
                     foreach ($Entry in $ToRemove) {
                         try {
-                            $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/directoryObjects/$($Entry.InputObject)" -OutputType PSObject
+                            $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "/beta/directoryObjects/$($Entry.InputObject)" -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
                             $MemberType = $AdminUnitMember.'@odata.type'.Replace('#microsoft.graph.', '')
                             if ($IncludeObjectDetails) {
                                 Write-Host "  [-] REM  [$MemberType] $($AdminUnitMember.displayName)" -ForegroundColor Yellow
@@ -269,6 +274,13 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                             Invoke-EntraOpsMsGraphQuery -Method "DELETE" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/$($Entry.InputObject)/`$ref" -OutputType PSObject -ThrowOnFailure
                             $AuRemoved++
                         } catch {
+                            if (Test-EntraOpsGraphNotFoundError -ErrorRecord $_ -DestinationUri "/beta/administrativeUnits/$($AdminUnitId)") {
+                                Write-Warning "  [SKIP] Object $($Entry.InputObject) no longer exists - nothing to remove from $AdminUnitName"
+                                $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = "Skipped removal of deleted object $($Entry.InputObject) from $AdminUnitName" })
+                                $AuSkipped++
+                                $TotalSkipped++
+                                continue
+                            }
                             $RemoveFailureMessage = if ($IncludeObjectDetails) { "FAIL REMOVE $($Entry.InputObject) from $AdminUnitName`: $_" } else { "Failed to remove object $($Entry.InputObject) from $AdminUnitName" }
                             Write-Warning "  [!] $RemoveFailureMessage"
                             $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $RemoveFailureMessage })
@@ -279,7 +291,7 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
 
                 foreach ($Entry in $ToAdd) {
                     try {
-                        $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($Entry.InputObject)" -DisableCache -OutputType PSObject
+                        $AdminUnitMember = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/directoryObjects/$($Entry.InputObject)" -DisableCache -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
                         $MemberType = $AdminUnitMember.'@odata.type'.Replace('#microsoft.graph.', '')
                         if ($IncludeObjectDetails) {
                             Write-Host "  [+] ADD  [$MemberType] $($AdminUnitMember.displayName)" -ForegroundColor Green
@@ -294,6 +306,13 @@ function Update-EntraOpsPrivilegedAdministrativeUnit {
                         Invoke-EntraOpsMsGraphQuery -Method "POST" -Uri "/beta/administrativeUnits/$($AdminUnitId)/members/`$ref" -DisableCache -Body $OdataBody -OutputType PSObject -ThrowOnFailure
                         $AuAdded++
                     } catch {
+                        if (Test-EntraOpsGraphNotFoundError -ErrorRecord $_ -DestinationUri "/beta/administrativeUnits/$($AdminUnitId)") {
+                            Write-Warning "  [SKIP] Object $($Entry.InputObject) no longer exists (deleted after the last Pull) - not added to $AdminUnitName"
+                            $WarningMessages.Add([PSCustomObject]@{ Type = "ObjectNotFound"; Message = "Skipped deleted object $($Entry.InputObject) for $AdminUnitName" })
+                            $AuSkipped++
+                            $TotalSkipped++
+                            continue
+                        }
                         $AddFailureMessage = if ($IncludeObjectDetails) { "FAIL ADD $($Entry.InputObject) to $AdminUnitName`: $_" } else { "Failed to add object $($Entry.InputObject) to $AdminUnitName" }
                         Write-Warning "  [!] $AddFailureMessage"
                         $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = $AddFailureMessage })

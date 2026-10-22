@@ -69,7 +69,7 @@ function Invoke-EntraOpsAzGraphQuery {
       return $Cached.Token
     }
 
-    $TokenResponse = Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -AsSecureString -ErrorAction Stop
+    $TokenResponse = Get-AzAccessToken -ResourceTypeName Arm -AsSecureString -ErrorAction Stop
     $PlainToken = $TokenResponse.Token | ConvertFrom-SecureString -AsPlainText
     $Expiry = if ($TokenResponse.ExpiresOn) { $TokenResponse.ExpiresOn.UtcDateTime } else { $Now.AddMinutes(30) }
     $__EntraOpsSession.ArmTokenCache['default'] = @{ Token = $PlainToken; Expiry = $Expiry }
@@ -108,7 +108,7 @@ function Invoke-EntraOpsAzGraphQuery {
             if ($_.Exception.Response.Headers -and $_.Exception.Response.Headers.Contains('Retry-After')) {
               $RetryAfter = [int]($_.Exception.Response.Headers.GetValues('Retry-After') | Select-Object -First 1)
             }
-          } catch { }
+          } catch { Write-Verbose "Ignoring unreadable Retry-After header, using exponential backoff: $($_.Exception.Message)" }
 
           if ($null -ne $RetryAfter -and $RetryAfter -gt 0) {
             $RetryDelay = $RetryAfter
@@ -122,7 +122,7 @@ function Invoke-EntraOpsAzGraphQuery {
           # Surface the Resource Graph error message from the response body when available
           $ErrorMessage = $_.Exception.Message
           if ($_.ErrorDetails.Message) {
-            try { $ErrorMessage = ($_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction Stop).error.message } catch { }
+            try { $ErrorMessage = ($_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction Stop).error.message } catch { Write-Verbose "Resource Graph error body is not valid JSON, using the exception message: $($_.Exception.Message)" }
           }
           # Note this can be reached mid-pagination ($skipToken loop), so $Result may already hold
           # earlier pages - returning it yields a partial result the caller cannot distinguish

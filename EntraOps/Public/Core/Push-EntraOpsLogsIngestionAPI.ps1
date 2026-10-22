@@ -26,6 +26,10 @@
 .PARAMETER ApiVersion
     API version to be used for the ARM API request. Default is '2022-06-01'.
 
+.PARAMETER TimeGenerated
+    Timestamp written as TimeGenerated to every record. Pass the same value for all calls of one ingestion
+    run, so the records of a run can be told apart from earlier runs. Default is the current time per call.
+
 .EXAMPLE
     Ingest JSON data to Log Analytics Custom Log Table 'PrivilegedEAM_CL' in Log Analytics Workspace
     Push-EntraOpsLogsIngestionAPI -JsonContent <VariableWithPlainJson> -DataCollectionRuleName "entraops-dcr" -DataCollectionResourceGroupName "entraops-rg" -DataCollectionRuleSubscriptionId "00000000-0000-0000-0000-000000000000"
@@ -59,6 +63,9 @@ function Push-EntraOpsLogsIngestionAPI {
         ,
         [Parameter(Mandatory = $false)]
         [System.String]$ApiVersion = "2022-06-01"
+        ,
+        [Parameter(Mandatory = $false)]
+        [Nullable[DateTime]]$TimeGenerated
     )
 
     $ErrorActionPreference = "Stop"
@@ -72,8 +79,10 @@ function Push-EntraOpsLogsIngestionAPI {
     # Add Timestamp to JSON data
     try {
         $Records = @($JsonContent | ConvertFrom-Json -Depth 10)
+        # PowerShell unwraps Nullable[DateTime], so $TimeGenerated is the DateTime itself (no .Value)
+        $RecordTimeGenerated = if ($null -ne $TimeGenerated) { $TimeGenerated.ToUniversalTime().ToString("o") } else { (Get-Date).ToUniversalTime().ToString("o") }
         $Records | ForEach-Object {
-            $_ | Add-Member -NotePropertyName TimeGenerated -NotePropertyValue (Get-Date).ToUniversalTime().ToString("o") -Force
+            $_ | Add-Member -NotePropertyName TimeGenerated -NotePropertyValue $RecordTimeGenerated -Force
         }
         $json = $Records | ConvertTo-Json -Depth 10 -AsArray
     }

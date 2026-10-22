@@ -399,7 +399,7 @@ function Get-EntraOpsPrivilegedEAMIntune {
                     'AdminTierLevel'             = $UniqueClass.EAMTierLevelTagValue
                     'AdminTierLevelName'         = $UniqueClass.EAMTierLevelName
                     'MatchedActions'             = if ($MatchedActions.Count -gt 0) { , @($MatchedActions) } else { $null }
-                    'ScopedObjects'              = if ($ScopedObjects.Count -gt 0) { $ScopedObjects } else { $null }
+                    'ScopedObjects'              = if ($ScopedObjects.Count -gt 0) { , @($ScopedObjects) } else { $null }
                     'Service'                    = $UniqueClass.Service
                     'TaggedBy'                   = "JSONwithAction"
                     'TaggedByObjectIds'          = $TaggedByIds
@@ -424,14 +424,15 @@ function Get-EntraOpsPrivilegedEAMIntune {
         $DeviceMgmtRbacAssignment = $DeviceMgmtRbacAssignment | Select-Object -ExcludeProperty Classification, DirectoryScopeIds
         $Classification = @()
         $Classification += ($DeviceMgmtRbacClassificationsByJSON | Where-Object { $_.RoleAssignmentScopeId -eq $DeviceMgmtRbacAssignment.RoleAssignmentScopeId -and $_.RoleDefinitionId -eq $DeviceMgmtRbacAssignment.RoleDefinitionId }).Classification
-        $Classification = $Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem, MatchedActions, ScopedObjects, Justification | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        $Classification = @($Classification | select-object -Unique AdminTierLevel, AdminTierLevelName, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem, MatchedActions, ScopedObjects, Justification | Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy)
+        if ($Classification.Count -eq 0) { $Classification = $null }
         $DeviceMgmtRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
         $DeviceMgmtRbacAssignment
     }
 
     # Apply role definition classification overwrites (down-/upgrade by RoleDefinitionId or RoleDefinitionName)
     if ($ClassificationOverwrites.RoleDefinitionOverwrites.Count -gt 0) {
-        Write-Host "Applying $($ClassificationOverwrites.RoleDefinitionOverwrites.Count) role definition classification overwrite(s) from Classification_RoleDefinitionOverwrites.json..." -ForegroundColor Yellow
+        Write-Host "Applying $($ClassificationOverwrites.RoleDefinitionOverwrites.Count) role definition classification overwrite(s) from $((@($ClassificationOverwrites.RoleDefinitionOverwrites.SourceFile) | Sort-Object -Unique) -join ', ')..." -ForegroundColor Yellow
         $DeviceMgmtRbacClassifications = Invoke-EntraOpsClassificationRoleOverwrite -RbacClassifications $DeviceMgmtRbacClassifications -RoleDefinitionOverwrites $ClassificationOverwrites.RoleDefinitionOverwrites -RoleSystem "DeviceManagement"
     }
 

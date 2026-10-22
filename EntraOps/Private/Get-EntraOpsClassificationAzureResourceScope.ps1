@@ -36,6 +36,12 @@
 .PARAMETER WarningMessages
     Optional list to collect warning messages raised during resource resolution.
 
+.PARAMETER ExposureManagementBaselineFile
+    Previous ScopeReasoning_Azure.json. When the Exposure Management query fails, the critical resources of the
+    last successful query recorded in this file are used instead. The query outcome is returned as
+    ExposureManagement (Status, Metadata, Results, Warnings, HasUnusablePreviousResults); its warnings are
+    reported by the caller.
+
 .EXAMPLE
     Get-EntraOpsClassificationAzureResourceScope -EntraOpsEamFolder ".\Classification\EAM" -EntraOpsScopes @("Azure","EntraID") -ExposureCriticalityLevel "<1"
 #>
@@ -54,6 +60,9 @@ function Get-EntraOpsClassificationAzureResourceScope {
         ,
         [Parameter(Mandatory = $false)]
         [System.Collections.Generic.List[psobject]]$WarningMessages
+        ,
+        [Parameter(Mandatory = $false)]
+        [string]$ExposureManagementBaselineFile
     )
 
     $AzTenantId = (Get-AzContext).Tenant.Id
@@ -174,43 +183,58 @@ ExposureGraphNodes
 | extend ResourceId = tolower(tostring(EntityId.id))
 | distinct NodeName, ResourceId, CriticalityLevel, CriticalityRules
 "@
-    $ExposureBody = @{ "Query" = $ExposureMgmtQuery; "Timespan" = "P1D" } | ConvertTo-Json
-    $ExposureResources = @()
-    try {
-        # -ThrowOnFailure so the catch below is reachable: without it the helper reports failure with a
-        # non-terminating Write-Error and returns $null, which is indistinguishable from "no critical assets"
-        # and would drop every Exposure Management Tier0 resource without recording a warning.
-        $ExposureResources = @((Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/beta/security/runHuntingQuery" -Body $ExposureBody -OutputType PSObject -ThrowOnFailure).results)
-    } catch {
-        Write-Warning "Exposure Management query failed: $_"
-        if ($null -ne $WarningMessages) {
-            $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "Exposure Management query failed for Azure resource scope: $_" })
-        }
+    # Increase when the meaning of the results changes: older results are then no longer carried forward
+    $ExposureManagementQueryVersion = 1
+    $ExposureManagementBaseline = Get-EntraOpsExposureManagementBaseline -Path $ExposureManagementBaselineFile -TenantId $AzTenantId -ExposureCriticalityLevel $ExposureCriticalityLevel -QueryVersion $ExposureManagementQueryVersion -GetLegacyResults {
+        param($Content)
+        @($Content.ScopeDetails | Where-Object { $_.Source -eq 'ExposureManagement' })
     }
+    # A failed query falls back to the critical resources of the last successful query
+    $ExposureManagementQuery = Invoke-EntraOpsExposureManagementQuery -Query $ExposureMgmtQuery -Context "critical Azure resources" -Baseline $ExposureManagementBaseline -TenantId $AzTenantId -ExposureCriticalityLevel $ExposureCriticalityLevel -QueryVersion $ExposureManagementQueryVersion
+    foreach ($ExposureManagementWarning in $ExposureManagementQuery.Warnings) {
+        Write-Warning $ExposureManagementWarning.Message
+    }
+    $ExposureResources = @($ExposureManagementQuery.Results | Where-Object { -not [string]::IsNullOrEmpty($_.ResourceId) } | ForEach-Object {
+            [PSCustomObject][ordered]@{
+                NodeName         = $_.NodeName
+                ResourceId       = $_.ResourceId
+                CriticalityLevel = $_.CriticalityLevel
+                CriticalityRules = $_.CriticalityRules
+            }
+        } | Sort-Object ResourceId, NodeName)
     foreach ($ExRes in $ExposureResources) {
-        if ([string]::IsNullOrEmpty($ExRes.ResourceId)) { continue }
-        $AzureResourceScopeDetails.Add([PSCustomObject]@{
-                ResourceId       = $ExRes.ResourceId
-                ResourceName     = $ExRes.NodeName
-                Source           = "ExposureManagement"
-                EAMTier          = "ControlPlane"
-                CriticalityLevel = $ExRes.CriticalityLevel
-                CriticalityRules = $ExRes.CriticalityRules
-                Reason           = "Critical asset (CriticalityLevel: $($ExRes.CriticalityLevel); CriticalityRules: $($ExRes.CriticalityRules))"
-            }) | Out-Null
+        $ExposureResourceDetail = [PSCustomObject]@{
+            ResourceId       = $ExRes.ResourceId
+            ResourceName     = $ExRes.NodeName
+            Source           = "ExposureManagement"
+            EAMTier          = "ControlPlane"
+            CriticalityLevel = $ExRes.CriticalityLevel
+            CriticalityRules = $ExRes.CriticalityRules
+            Reason           = "Critical asset (CriticalityLevel: $($ExRes.CriticalityLevel); CriticalityRules: $($ExRes.CriticalityRules))"
+        }
+        if ($ExposureManagementQuery.Status -eq 'CarriedForward') {
+            $ExposureResourceDetail | Add-Member -NotePropertyName XspmLastSuccessfulQueryDate -NotePropertyValue $ExposureManagementQuery.Metadata.LastSuccessfulQueryDate
+        }
+        $AzureResourceScopeDetails.Add($ExposureResourceDetail) | Out-Null
     }
     #endregion
 
     #region Load EAM data and extract managed identity object IDs
     $LoadedEamFileCount = 0
     $AllEamObjects = foreach ($EamScope in $EntraOpsScopes) {
-        try {
-            $EamObjects = Get-Content -Path (Join-Path -Path $EntraOpsEamFolder -ChildPath $EamScope -AdditionalChildPath "$($EamScope).json") -ErrorAction Stop | ConvertFrom-Json -Depth 10
-            $LoadedEamFileCount++
-            $EamObjects
-        } catch {
-            Write-Verbose "No EAM data for ${EamScope}: $_"
+        $EamFile = Join-Path -Path $EntraOpsEamFolder -ChildPath $EamScope -AdditionalChildPath "$($EamScope).json"
+        if (-not (Test-Path -LiteralPath $EamFile -PathType Leaf)) {
+            Write-Verbose "No EAM data for ${EamScope}: $EamFile not found"
+            continue
         }
+        # Only a missing export is skipped: an unreadable one would silently drop its managed identities' tiers
+        try {
+            $EamObjects = Get-Content -LiteralPath $EamFile -Raw -ErrorAction Stop | ConvertFrom-Json -Depth 10 -ErrorAction Stop
+        } catch {
+            throw "EAM export '$EamFile' could not be read: $($_.Exception.Message). Refusing to generate a narrowed Azure classification scope."
+        }
+        $LoadedEamFileCount++
+        $EamObjects
     }
     if ($LoadedEamFileCount -eq 0) {
         $MissingEamMessage = "No EntraOps EAM files were available in '$EntraOpsEamFolder'. Managed-identity host resources cannot contribute to Azure Tier0/Tier1 scope reasoning until an EAM export exists."
@@ -338,23 +362,24 @@ resources
 
         $SysAssignedResults = @()
         $UamiResults = @()
+        # Failed managed identity queries stop the update like the hierarchy query: the host scopes would drop out
 
         try {
             $SysAssignedResults = @(Invoke-EntraOpsAzGraphQuery -KqlQuery $SysAssignedQuery -ThrowOnFailure)
         } catch {
-            Write-Warning "ARG system-assigned MI query failed: $_"
             if ($null -ne $WarningMessages) {
                 $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "ARG system-assigned MI query failed: $_" })
             }
+            throw "Azure Resource Graph system-assigned MI query failed: $_. Refusing to generate a narrowed Azure classification scope."
         }
 
         try {
             $UamiResults = @(Invoke-EntraOpsAzGraphQuery -KqlQuery $UamiQuery -ThrowOnFailure)
         } catch {
-            Write-Warning "ARG user-assigned MI query failed: $_"
             if ($null -ne $WarningMessages) {
                 $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "ARG user-assigned MI query failed: $_" })
             }
+            throw "Azure Resource Graph user-assigned MI query failed: $_. Refusing to generate a narrowed Azure classification scope."
         }
 
         foreach ($SysRes in $SysAssignedResults) {
@@ -405,10 +430,10 @@ resources
             try {
                 $UamiConsumerResults = @(Invoke-EntraOpsAzGraphQuery -KqlQuery $UamiConsumerQuery -ThrowOnFailure)
             } catch {
-                Write-Warning "ARG UAMI consumer query failed: $_"
                 if ($null -ne $WarningMessages) {
                     $WarningMessages.Add([PSCustomObject]@{ Type = "ApiError"; Message = "ARG UAMI consumer query failed: $_" })
                 }
+                throw "Azure Resource Graph UAMI consumer query failed: $_. Refusing to generate a narrowed Azure classification scope."
             }
             foreach ($Consumer in $UamiConsumerResults) {
                 $MatchedUami = $UamiResults | Where-Object { $_.id -eq $Consumer.uamiId } | Select-Object -First 1
@@ -471,5 +496,12 @@ resources
         AllSubscriptionScope    = @($AllSubscriptionScope | Select-Object -Unique | Sort-Object)
         ResourceScopeDetails    = $AzureResourceScopeDetails
         SubToManagementGroupMap = $SubToMgMap
+        ExposureManagement      = [PSCustomObject]@{
+            Status                     = $ExposureManagementQuery.Status
+            Metadata                   = $ExposureManagementQuery.Metadata
+            Results                    = $ExposureResources
+            Warnings                   = @($ExposureManagementQuery.Warnings)
+            HasUnusablePreviousResults = $ExposureManagementQuery.HasUnusablePreviousResults
+        }
     }
 }

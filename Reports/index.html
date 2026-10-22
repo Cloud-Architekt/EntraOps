@@ -370,6 +370,25 @@
                 <span class="open">Open EAM Dashboard &rarr;</span>
             </a>
 
+            <div class="tile">
+                <div class="tile-head">
+                    <span class="tile-ico" style="background:#0f6cbd;">&#9776;</span>
+                    <h2><a href="PrivilegedAssets/index.html">Privileged Assets</a></h2>
+                </div>
+                <p>Object-centric view of privileged users, groups, service principals and applications with the
+                    relationships behind each object - owners, sponsors, owned objects and devices, identity parent,
+                    administrative units - and the object tier compared with its role assignment classification.</p>
+                <div class="tags">
+                    <span class="tag">Relationship findings</span>
+                    <span class="tag">Object Classification File</span>
+                    <span class="tag">PowerShell script</span>
+                </div>
+                <p class="sub-reports">Includes: <a href="PrivilegedAssets/index.html?view=classification">Object
+                        Classification</a> - worklist for the Object Classification File with CSV/JSON import and export
+                    and a PowerShell script for custom security attributes.</p>
+                <a class="open" href="PrivilegedAssets/index.html">Open Privileged Assets &rarr;</a>
+            </div>
+
             <a class="tile" href="AccessPathMap/index.html">
                 <div class="tile-head">
                     <span class="tile-ico" style="background:#1b1a19;">&#10565;</span>
@@ -449,6 +468,7 @@
             copied elsewhere. Refresh the underlying datasets with the EntraOps PowerShell module:
             <code>New-EntraOpsClassificationExplorerData</code> (Classification Explorer),
             <code>New-EntraOpsPrivilegedEamDashboardData</code> (EAM Dashboard),
+            <code>New-EntraOpsPrivilegedAssetsData</code> (Privileged Assets),
             <code>New-EntraOpsAccessPathMapData</code> (Access Path Map),
             <code>New-EntraOpsTierBreachAnalyzerData</code> (Tier Breach Analyzer),
             <code>New-EntraOpsPrivilegedEamPrivilegeHistoryData</code> (Privilege History),

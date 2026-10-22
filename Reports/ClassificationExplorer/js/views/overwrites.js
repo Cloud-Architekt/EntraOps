@@ -6,8 +6,7 @@ EOCE.views = EOCE.views || {};
 
 EOCE.views.overwrites = {
     sysFor: function (rbac) {
-        var map = { EntraID: 'EntraID', Azure: 'Azure', DeviceManagement: 'DeviceManagement', Intune: 'DeviceManagement' };
-        return map[rbac] || 'EntraID';
+        return EOCE.overwriteSysKey(rbac);
     },
 
     render: function (el) {
@@ -54,7 +53,7 @@ EOCE.views.overwrites = {
                 html += '<tr data-idx="' + idx + '">' +
                     '<td class="cell-strong">' + EOCE.util.escapeHtml(o.RoleDefinitionName) + '</td>' +
                     '<td class="muted nowrap">' + EOCE.util.escapeHtml(EOCE.RBAC_SYSTEMS[self.sysFor(o.RbacSystem)].short) + '</td>' +
-                    '<td class="muted nowrap">' + EOCE.util.escapeHtml(o.Service || '—') + '</td>' +
+                    '<td class="muted cell-words">' + EOCE.util.escapeHtml(o.Service || '—') + '</td>' +
                     '<td>' + EOCE.util.tierBadge(o.EAMTierLevelName) + '</td>' +
                     '<td class="muted">' + EOCE.util.escapeHtml(o.Justification || '') + '</td>' +
                     '</tr>';
@@ -88,11 +87,17 @@ EOCE.views.overwrites = {
         body += '<div class="callout control"><div class="callout-title">Justification</div>' + EOCE.util.escapeHtml(o.Justification || '') + '</div>';
 
         if (role) {
-            var computed = (role.Classification && role.Classification.EAMTierLevelName) || 'Unclassified';
-            body += '<div class="callout"><div class="callout-title">Effect of the overwrite</div>' +
-                'Classification from this role\'s listed actions would be ' + EOCE.util.tierBadge(computed, { short: true }) +
-                '. The overwrite pins it to ' + EOCE.util.tierBadge(o.EAMTierLevelName, { short: true }) +
-                ' to reflect its implicit power.</div>';
+            var info = EOCE.roleOverwriteInfo(o, EOCE.rolePerms(role), role.Classification && role.Classification.EAMTierLevelName);
+            body += '<div class="callout implicit"><div class="callout-title">Effect of the overwrite &middot; implicit permissions</div>' +
+                (info.actionCount
+                    ? 'Classification from this role\'s ' + info.actionCount + ' listed role action' + (info.actionCount === 1 ? '' : 's') + ' would be ' + EOCE.util.tierBadge(info.actionTier, { short: true }) + '. '
+                    : 'This role has no listed role actions. ') +
+                'The overwrite pins it to ' + EOCE.util.tierBadge(o.EAMTierLevelName, { short: true }) +
+                ' to reflect permissions that are not visible in its role actions.' +
+                (info.exportedMismatch
+                    ? '<div class="muted" style="margin-top:8px;font-size:12px;">Note: the exported classification data reports ' + EOCE.util.tierBadge(info.exportedTier, { short: true }) + ' for this role.</div>'
+                    : '') +
+                '</div>';
         }
 
         body += '<dl class="kv"><dt>Role</dt><dd>' + EOCE.util.escapeHtml(o.RoleDefinitionName) + '</dd>' +

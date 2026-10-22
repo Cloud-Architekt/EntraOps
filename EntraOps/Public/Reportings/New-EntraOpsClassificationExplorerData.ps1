@@ -27,8 +27,9 @@
     Path to the repository root that contains the 'Classification' output and 'EntraOps_Classification' source folders
     (the AzurePrivilegedIAM repository). When omitted, the shared generator probes the parent of the app folder, the
     EntraOps repository root itself, and sibling folders of the EntraOps repository named 'AzurePrivilegedIAM*'. When
-    no local checkout is found, EntraOps shallow-clones the public AzurePrivilegedIAM repository to a temporary folder
-    for this run and deletes it afterwards. With `-WhatIf`, EntraOps reports the temporary clone without creating it.
+    no local checkout is found, EntraOps downloads only the required classification catalog files of the public
+    AzurePrivilegedIAM repository into the EntraOps cache folder (<PersistentCachePath>/AzurePrivilegedIAM, refreshed
+    after 24 hours) and no git clone is needed. With `-WhatIf`, nothing is downloaded.
 
 .PARAMETER EntraOpsRoot
     Path to the EntraOps repository root that contains the classification-logic templates under
@@ -96,6 +97,10 @@ function New-EntraOpsClassificationExplorerData {
     # Config-driven default: the inverse of EntraOpsConfig.json
     # "ClassificationExplorer.GenerateChangeHistory".
     # An explicit -SkipHistory always wins over the config file setting when bound.
+    if (-not $PSBoundParameters.ContainsKey('EntraOpsRoot') -and -not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) {
+        $EntraOpsRoot = $Global:EntraOpsBaseFolder
+        $PSBoundParameters['EntraOpsRoot'] = $EntraOpsRoot
+    }
     if (-not $PSBoundParameters.ContainsKey('SkipHistory')) {
         $GenerateChangeHistory = $false
         $ClassificationExplorerConfigRoot = $EntraOpsRoot
@@ -133,31 +138,22 @@ function New-EntraOpsClassificationExplorerData {
         if ($PSBoundParameters.ContainsKey('RepoRoot') -or -not $AutoDetectionFailed) {
             throw
         }
-        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            throw "Unable to auto-detect AzurePrivilegedIAM and Git is unavailable for the temporary fallback clone. Install Git or pass -RepoRoot pointing to a local AzurePrivilegedIAM clone."
-        }
-
-        $TemporaryRepoRoot = Join-Path ([System.IO.Path]::GetTempPath()) "EntraOps_AzurePrivilegedIAM_$([guid]::NewGuid().ToString('N'))"
-        if (-not $PSCmdlet.ShouldProcess($TemporaryRepoRoot, 'Clone temporary AzurePrivilegedIAM source repository')) {
+        if (-not $PSCmdlet.ShouldProcess('AzurePrivilegedIAM classification catalog files', 'Download to the EntraOps cache')) {
             return
         }
-        try {
-            Write-Verbose "AzurePrivilegedIAM was not found locally. Cloning a temporary shallow copy to $TemporaryRepoRoot..."
-            & git clone --depth 1 'https://github.com/Cloud-Architekt/AzurePrivilegedIAM.git' $TemporaryRepoRoot
-            if ($LASTEXITCODE -ne 0) {
-                throw "Temporary AzurePrivilegedIAM clone failed with exit code $LASTEXITCODE. Clone the repository locally and pass -RepoRoot instead."
-            }
 
-            $FallbackParameters = @{}
-            foreach ($Parameter in $PSBoundParameters.GetEnumerator()) {
-                $FallbackParameters[$Parameter.Key] = $Parameter.Value
-            }
-            $FallbackParameters.RepoRoot = $TemporaryRepoRoot
-            Update-EntraOpsClassificationExplorerData -Mode EntraOps @FallbackParameters
-        } finally {
-            if (Test-Path -LiteralPath $TemporaryRepoRoot) {
-                Remove-Item -LiteralPath $TemporaryRepoRoot -Recurse -Force -ErrorAction SilentlyContinue
-            }
+        # Only the catalog JSON files are needed; a git clone is not (history needs a local clone passed as -RepoRoot).
+        Write-Verbose 'AzurePrivilegedIAM was not found locally. Using the cached classification catalog files.'
+        $CatalogRoot = Get-EntraOpsClassificationSourceCache
+        if ([string]::IsNullOrWhiteSpace($CatalogRoot)) {
+            throw "Unable to auto-detect AzurePrivilegedIAM and the classification catalog files could not be downloaded. Check the network access to raw.githubusercontent.com or pass -RepoRoot pointing to a local AzurePrivilegedIAM clone."
         }
+
+        $FallbackParameters = @{}
+        foreach ($Parameter in $PSBoundParameters.GetEnumerator()) {
+            $FallbackParameters[$Parameter.Key] = $Parameter.Value
+        }
+        $FallbackParameters.RepoRoot = $CatalogRoot
+        Update-EntraOpsClassificationExplorerData -Mode EntraOps @FallbackParameters
     }
 }

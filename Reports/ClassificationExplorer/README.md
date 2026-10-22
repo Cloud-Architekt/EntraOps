@@ -31,6 +31,10 @@ interactive, Microsoft **Fluent UI / Azure Portal** styled experience.
   **where** it is granted, driven by the EntraOps `*.Param.json` scope placeholders
   (privileged users / service principals / groups / devices, Azure Tier 0/1 resource
   scopes, Intune Tier 0/1 group IDs).
+- **Customize Overwrites** – editor for the overwrite files, including tagged files
+  (`<BaseName>_<Tag>.json`); every entry shows its origin (*Base* or the tag, prefixed with *Custom*
+  for editor changes), items overwritten in more than one file are listed, and several files can be
+  imported and exported at once
 - **Role Overwrites** – roles classified independently of their listed actions
   (`Classification_RoleDefinitionOverwrites.json`), each with its justification and a
   reference to the applicable role actions of the service.
@@ -141,7 +145,7 @@ dotnet new console --output $playwrightRoot --framework net8.0
 dotnet add $playwrightRoot package Microsoft.Playwright --version 1.55.0
 dotnet build $playwrightRoot --configuration Release
 & (Join-Path $playwrightRoot 'bin/Release/net8.0/playwright.ps1') install chromium
-Invoke-Pester ./Tests/ClassificationExplorer.Tests.ps1 -CI -Output Detailed
+Invoke-Pester ./Tests/Reporting/New-EntraOpsClassificationExplorerData.Tests.ps1 -CI -Output Detailed
 ```
 
 The `Classification Explorer` GitHub Actions workflow runs strict generator validation,
@@ -195,3 +199,4 @@ keeps duplicate copies of the JSON.
 Plain HTML, CSS and JavaScript — **no build step, no dependencies**. Just static
 files. The classification data is the single source of truth and is never modified by
 the app.
+

@@ -1,0 +1,93 @@
+# Azure DevOps CI pipeline for EntraOps repository validation.
+# For Azure Repos pull requests, configure this pipeline as a build-validation branch policy.
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - .azure-pipelines/**
+      - .github/**
+      - Classification/Templates/**
+      - Docs/**
+      - EntraOps/**
+      - Reports/**
+      - Samples/**
+      - Tests/**
+      - package.json
+      - package-lock.json
+      - playwright.config.mjs
+
+pr: none
+
+jobs:
+  - job: Repository
+    displayName: "Repository validation"
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - checkout: self
+      - task: PowerShell@2
+        displayName: "Validate manifest and generated documentation"
+        inputs:
+          targetType: inline
+          script: |
+            Test-ModuleManifest ./EntraOps/EntraOps.psd1 -ErrorAction Stop | Out-Null
+            ./Docs/Update-EntraOpsDocsContent.ps1
+            git diff --exit-code -- Docs/data/content.js
+            if ($LASTEXITCODE -ne 0) { throw 'Generated documentation is not synchronized with its Markdown sources.' }
+          pwsh: true
+
+  - job: Pester
+    displayName: "Pester tests"
+    strategy:
+      matrix:
+        Linux:
+          imageName: ubuntu-latest
+        Windows:
+          imageName: windows-latest
+        macOS:
+          imageName: macos-latest
+    pool:
+      vmImage: $(imageName)
+    steps:
+      - checkout: self
+      - task: PowerShell@2
+        displayName: "Install test dependencies and import EntraOps"
+        inputs:
+          targetType: inline
+          script: |
+            Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -Repository PSGallery
+            Install-Module powershell-yaml -RequiredVersion 0.4.12 -Scope CurrentUser -Force -Repository PSGallery
+            Import-Module ./EntraOps -ErrorAction Stop
+          pwsh: true
+      - task: PowerShell@2
+        displayName: "Run Pester tests"
+        inputs:
+          targetType: inline
+          script: |
+            Import-Module Pester -RequiredVersion 5.7.1 -Force
+            $Result = Invoke-Pester -Path ./Tests -Output Detailed -PassThru
+            if ($null -eq $Result -or $Result.FailedCount -gt 0 -or $Result.TotalCount -eq 0) {
+              throw "Pester failed: $($Result.FailedCount) failed of $($Result.TotalCount) tests"
+            }
+          pwsh: true
+
+  - job: Browser
+    displayName: "Browser tests"
+    pool:
+      vmImage: ubuntu-latest
+    timeoutInMinutes: 20
+    steps:
+      - checkout: self
+      - task: NodeTool@0
+        displayName: "Use Node.js 22"
+        inputs:
+          versionSpec: "22.x"
+      - script: npm ci
+        displayName: "Install browser test dependencies"
+      - script: npx playwright install --with-deps chromium
+        displayName: "Install Chromium"
+      - script: npm run test:browser
+        displayName: "Run documentation and report browser tests"

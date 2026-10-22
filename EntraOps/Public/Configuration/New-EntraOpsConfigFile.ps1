@@ -6,6 +6,18 @@
     Creates a configuration file used by other cmdlets, for example to create the required app registration and grant permissions.
     Connect-EntraOps can also import the file so the same settings are available to interactive and automated runs.
 
+.PARAMETER TenantName
+    Name of the tenant (e.g. contoso.onmicrosoft.com) to create the configuration for. The tenant ID is resolved
+    from the name, and the initial domain of the tenant is written as TenantName to the config file.
+
+.PARAMETER ManagingTenantName
+    Name of the governing (managing) tenant of a Tenant Governance relationship, used to classify privileged access
+    across tenants. Written as ManagingTenantName. Default is empty.
+
+.PARAMETER ManagingTenantId
+    Tenant ID of the governing (managing) tenant of a Tenant Governance relationship. Written as ManagingTenantId.
+    Default is empty.
+
 .PARAMETER AuthenticationType
     Defines the authentication method used to request tokens for Microsoft Graph, Azure Resource Manager, and other APIs. Default is FederatedCredentials.
 
@@ -20,7 +32,13 @@
     shown. Written as ConsoleOutput.IncludeObjectDetails and disabled by default for automation-log privacy.
 
 .PARAMETER DevOpsPlatform
-    Defines the platform where the EntraOps repository is hosted. Default and support is currently limited to GitHub.
+    Defines the platform where the EntraOps repository is hosted. Supported values are GitHub, AzureDevOps and None.
+    Default is GitHub.
+
+.PARAMETER AzureDevOpsServiceConnection
+    Name of the Azure Resource Manager service connection used by the Azure DevOps pipelines. Written as
+    AzureDevOpsServiceConnection and applied to the pipeline definitions by Update-EntraOpsAzureDevOpsSchedules.
+    Default is EntraOps-ServiceConnection. Not used with other DevOps platforms.
 
 .PARAMETER ConfigFilePath
     Location of the config file which will be created. Default is ./EntraOpsConfig.json.
@@ -42,6 +60,16 @@
 .PARAMETER ApplyAutomatedClassificationUpdate
     Defines whether classification templates should be updated from "https://github.com/Cloud-Architekt/AzurePrivilegedIAM" before privileges are analyzed. Default is false.
     You are able to define which classification files should be updated in the config file later.
+
+.PARAMETER FailOnContradictoryTierPair
+    Defines if generated artifact validation fails when an object's tier level contradicts its tier name
+    (e.g. 0 with ManagementPlane). Written as GeneratedArtifactValidation.FailOnContradictoryTierPair.
+    Default is false (reported as warning).
+
+.PARAMETER FailOnPrivilegedAssignmentWithoutClassification
+    Defines if generated artifact validation fails when an assignment marked as privileged has no classification.
+    Written as GeneratedArtifactValidation.FailOnPrivilegedAssignmentWithoutClassification. Default is false
+    (reported as warning).
 
 .PARAMETER ApplyAutomatedEntraOpsUpdate
     Defines whether the Update-EntraOps workflow and its weekly schedule are enabled. Default is false.
@@ -69,7 +97,21 @@
 
 .PARAMETER UpdatePublicationMode
     Controls how the Update-EntraOps workflow publishes an applied candidate. PullRequest (default)
-    creates or updates a review branch and pull request; DirectPush commits to the current branch.
+    creates or updates a review branch and pull request; DirectPush commits to the current branch
+    without review. Applies to the GitHub workflow and the Azure DevOps update pipeline.
+
+.PARAMETER ApplyConditionalAccessTargetGroups
+    Defines if security groups per tier for targeting Conditional Access policies should be created and updated
+    (AutomatedConditionalAccessTargetGroups) as part of the push pipeline. Default is false.
+
+.PARAMETER ApplyAdministrativeUnitAssignments
+    Defines if Administrative Units per tier should be created and updated with privileged users and groups
+    (AutomatedAdministrativeUnitManagement) as part of the push pipeline. Default is false.
+
+.PARAMETER ApplyRmauAssignmentsForUnprotectedObjects
+    Defines if privileged users and groups without restricted management should be added to a Restricted
+    Management Administrative Unit (AutomatedRmauAssignmentsForUnprotectedObjects) as part of the push pipeline.
+    Default is false.
 
 .PARAMETER ApplyPrivilegedElmCatalogProtection
     Defines if Entitlement Management catalogs with Control Plane scope should be updated to privileged catalogs (Update-EntraOpsPrivilegedUnprotectedElmCatalog) as part of the push pipeline. Default is false.
@@ -98,12 +140,32 @@
 .PARAMETER PublishReportsAsRelease
     Publishes generated reports as GitHub Releases in addition to the 30-day workflow artifact. Disabled by default because each release contains a full tenant-data snapshot.
 
+.PARAMETER RunGeneratedReportTests
+    Installs npm dependencies and runs browser tests against generated tenant reports in reporting automation.
+    Disabled by default because third-party dependencies can access tenant report data and the network.
+
+.PARAMETER UploadReportTestDiagnostics
+    Uploads Playwright traces of failed report tests as a 1-day artifact (EntraOps-Reporting-TestDiagnostics).
+    Disabled by default because the traces contain tenant report data. Used only with RunGeneratedReportTests.
+
 .PARAMETER ReportingReleasesToKeep
     Number of `reporting-*` GitHub Releases to retain when release publishing is enabled. Default is 10.
     Accepts 1 to 1000, so a generated configuration always prunes. Turning pruning off is deliberately not
     offered here because every retained release holds a full tenant-data snapshot; set
     `AutomatedReportingGeneration.ReportingReleasesToKeep` to an empty value in the Configuration Wizard or
     directly in the configuration file if unbounded retention is really intended.
+
+.PARAMETER EnablePrivilegeHistory
+    Defines if the Privilege History report data is generated by New-EntraOpsReportingData.
+    Written as PrivilegeHistory.EnablePrivilegeHistory. Default is true.
+
+.PARAMETER PrivilegeHistoryTimeRangeInDays
+    Number of days the Privilege History samples back into the git history. Written as
+    PrivilegeHistory.TimeRangeInDays. Default is empty (full history).
+
+.PARAMETER PrivilegeHistorySnapshotInterval
+    ISO 8601 duration of the Privilege History snapshot interval. Written as PrivilegeHistory.SnapshotInterval.
+    Default is "P2W" (every 2 weeks).
 
 .PARAMETER AccessPathMapResolveObjectIdsOutsidePrivilegedEAM
     Defines if New-EntraOpsAccessPathMapData should resolve edge endpoints that reference an object id outside the Privileged EAM export (e.g. a standard, non-privileged work account or a group/application owned by a privileged principal - referenced via OwnedObjects, Owners, AssociatedPawDevice or AssociatedWorkAccount) via Microsoft Graph to their display name and object type, instead of showing them as an anonymous "unresolved" placeholder node in Access Path Map. Default is true.
@@ -112,6 +174,10 @@
 .PARAMETER EamDashboardResolveLinkedIdentityObjectIds
     Defines if New-EntraOpsPrivilegedEamDashboardData should resolve linked identity object IDs outside the Privileged EAM export to display names through Microsoft Graph. Default is true.
     Requires an active Microsoft Graph connection with directory read permissions when generating EAM Dashboard data.
+
+.PARAMETER PrivilegedAssetsResolveRelatedObjectIds
+    Defines if New-EntraOpsPrivilegedAssetsData should resolve related object IDs outside the Privileged EAM export (owners, sponsors, owned objects, owned devices, identity parent, associated work account and PAW device) to display name and object type through Microsoft Graph. Default is true.
+    Requires an active Microsoft Graph connection with directory read permissions when generating Privileged Assets data.
 
 .PARAMETER ClassificationExplorerGenerateChangeHistory
     Defines if New-EntraOpsClassificationExplorerData should derive the classification change history
@@ -129,12 +195,51 @@
     data from a partially successful Tenant Governance snapshot. Failed resource types remain marked
     as stale in the report. Default is true.
 
+.PARAMETER MaxTenantGovernanceSnapshotAgeHours
+    Maximum age in hours of the published Tenant Governance snapshot before the Configuration Analyzer
+    treats it as stale. Default is $null, which derives the limit from TenantGovernanceSnapshotScheduledCron:
+    30 hours for a daily, 174 hours for a weekly and 750 hours for a monthly schedule.
+
+.PARAMETER StaleTenantGovernanceSnapshotAction
+    Defines what automated reporting does when the Tenant Governance snapshot is older than its maximum
+    age. Warn (default) generates the Configuration Analyzer from it and marks the report as outdated,
+    Skip leaves the Configuration Analyzer out and publishes the other reports, Fail stops the run before
+    any report is generated.
+
+.PARAMETER ConfigurationAnalyzerTimeRangeInDays
+    Only Tenant Governance snapshots of the last N days are included in the Configuration Analyzer
+    dataset. Default is 365. Use $null for the full history.
+
+.PARAMETER ConfigurationAnalyzerSnapshotInterval
+    Minimum spacing between two Configuration Analyzer snapshots as ISO 8601 duration (P1D, P1W, P1M, ...)
+    or None to keep every snapshot commit. Default is P1W (weekly), which keeps the dataset size bounded.
+
 .PARAMETER PimRequestFlowExcludedRiskFlags
     Array of PIM Request Flow risk-flag IDs to exclude from the generated report. Default is empty,
     so every supported risk flag is reported. Use the Configuration Wizard to select flags by name.
 
+.PARAMETER AccessPackageFlowExcludedRiskFlags
+    Array of Access Package Flow risk-flag IDs to exclude from the generated report. Default is empty, so every
+    supported risk flag is reported.
+
+.PARAMETER ConditionalAccessAnalysisExcludedFindings
+    Array of Conditional Access Analysis finding IDs to exclude from the generated report. Default is empty, so
+    every supported finding is reported.
+
+.PARAMETER EidscaExcludedFindings
+    Array of EIDSCA check IDs to exclude from the generated report. Default is empty.
+
+.PARAMETER EnableCustomSecurityAttributeClassification
+    Defines if the tier of User, ServicePrincipal and Application objects is read from Custom Security Attributes (CustomSecurityAttributes.Enabled). Can be combined with Alternate Tier Level Attributes and the Object Classification File: Custom Security Attributes win, an object without tier falls back to the filters of its object type, then to the file. Default is true, or false when -EnableObjectClassificationFile is $true and this parameter isn't passed. The PAW device and work account attributes are always read.
+
 .PARAMETER EnableAlternateObjectTierLevelAttributes
-    Defines if User and ServicePrincipal objects should be classified by PowerShell filter expressions evaluated against their own resolved EntraOps details (section AlternateObjectTierLevelAttributes) instead of Custom Security Attributes. Default is false. The config file always includes the section with empty filter expressions so it can be filled in and enabled later; see README.md "Classify privileged objects by Alternate Tier Level Attributes" for the required syntax.    
+    Defines if User and ServicePrincipal objects should be classified by PowerShell filter expressions evaluated against their own resolved EntraOps details (section AlternateObjectTierLevelAttributes) when they have no Custom Security Attribute tier. Sets User.Enabled and ServicePrincipal.Enabled; Group.Enabled is always created as false. Default is false. The config file always includes the section with empty filter expressions so it can be filled in and enabled per object type later; see Docs "Classify by Alternate Tier Level Attributes" for the required syntax.
+
+.PARAMETER EnableObjectClassificationFile
+    Defines if the Object Classification File (section ObjectClassificationFile) is used to classify User, Group, ServicePrincipal and Application objects by ObjectId. A file entry applies to objects that neither Custom Security Attributes nor Alternate Tier Level Attributes classify. Default is false. The file can be maintained in the Object Classification view of the Privileged Assets reporting app.
+
+.PARAMETER ObjectClassificationFilePath
+    Path of the Object Classification File (.json or .csv), relative to the EntraOps repository root. Default is "./Classification/ObjectClassification.json".
 
 .PARAMETER EnableTenantGovernanceSnapshot
     Defines if the EntraOps Tenant Governance Snapshot feature is enabled. Default is false.
@@ -164,9 +269,27 @@ When enabled, run New-EntraOpsWorkloadIdentity afterwards to grant the workload 
     (default) names files after the immutable resource Id; "DisplayName" produces readable paths but changes
     them on rename. Resource-ID naming falls back to a display-name path for singleton types without an Id.
 
+.PARAMETER RbacSystems
+    Array of RBAC systems to collect and classify. Written as RbacSystems and as
+    AutomatedControlPlaneScopeUpdate.EntraOpsScopes. Default is Azure, EntraID, IdentityGovernance, ResourceApps
+    and DeviceManagement; Defender is optional.
+
+.PARAMETER WatchListTemplates
+    Enrichment WatchLists created by Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists ("None", "All", "VIPUsers",
+    "HighValueAssets", "IdentityCorrelation"). Written as SentinelWatchLists.WatchListTemplates. Default is "None".
+
+.PARAMETER WatchListWorkloadIdentity
+    Workload identity enrichment WatchLists created by Save-EntraOpsWorkloadIdentityEnrichmentWatchLists ("All",
+    "ManagedIdentityAssignedResourceId", "WorkloadIdentityAttackPaths", "WorkloadIdentityInfo",
+    "WorkloadIdentityRecommendations"). Written as SentinelWatchLists.WatchListWorkloadIdentity. Default is "None".
+
 .EXAMPLE
     Create a configuration file in the default location, update classification files before analyzing privileges, and enable both Log Analytics and Sentinel WatchList ingestion.
     New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -ApplyAutomatedControlPlaneScopeUpdate $true -IngestToLogAnalytics $true -IngestToWatchLists $true -ApplyAutomatedClassificationUpdate $true
+
+.EXAMPLE
+    Create environment file for Azure DevOps deployment with core monitoring only.
+    New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -DevOpsPlatform "AzureDevOps" -ApplyAutomatedClassificationUpdate $true
  #>
 
 function New-EntraOpsConfigFile {
@@ -195,6 +318,10 @@ function New-EntraOpsConfigFile {
         [Parameter(Mandatory = $false)]
         [ValidateSet('AzureDevOps', 'GitHub', 'None')]
         [string]$DevOpsPlatform = "GitHub",
+
+        [Parameter(Mandatory = $false)]
+        [ValidatePattern('^[^\r\n]+$')]
+        [string]$AzureDevOpsServiceConnection = 'EntraOps-ServiceConnection',
 
         [Parameter(Mandatory = $false)]
         [ValidateScript({ Test-Path (Split-Path $_ -Parent) })]
@@ -273,6 +400,12 @@ function New-EntraOpsConfigFile {
         [boolean]$PublishReportsAsRelease = $false,
 
         [Parameter(Mandatory = $false)]
+        [boolean]$RunGeneratedReportTests = $false,
+
+        [Parameter(Mandatory = $false)]
+        [boolean]$UploadReportTestDiagnostics = $false,
+
+        [Parameter(Mandatory = $false)]
         [ValidateRange(1, 1000)]
         [int]$ReportingReleasesToKeep = 10,
 
@@ -292,6 +425,9 @@ function New-EntraOpsConfigFile {
         [boolean]$EamDashboardResolveLinkedIdentityObjectIds = $true,
 
         [Parameter(Mandatory = $false)]
+        [boolean]$PrivilegedAssetsResolveRelatedObjectIds = $true,
+
+        [Parameter(Mandatory = $false)]
         [boolean]$ClassificationExplorerGenerateChangeHistory = $false,
 
         [Parameter(Mandatory = $false)]
@@ -299,6 +435,20 @@ function New-EntraOpsConfigFile {
 
         [Parameter(Mandatory = $false)]
         [boolean]$AllowPartialTenantGovernanceSnapshot = $true,
+
+        [Parameter(Mandatory = $false)]
+        [System.Nullable[int]]$MaxTenantGovernanceSnapshotAgeHours,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Warn', 'Skip', 'Fail')]
+        [string]$StaleTenantGovernanceSnapshotAction = 'Warn',
+
+        [Parameter(Mandatory = $false)]
+        [System.Nullable[int]]$ConfigurationAnalyzerTimeRangeInDays = 365,
+
+        [Parameter(Mandatory = $false)]
+        [ValidatePattern('^(None|P\d+[DWMY])$')]
+        [string]$ConfigurationAnalyzerSnapshotInterval = 'P1W',
 
         [Parameter(Mandatory = $false)]
         [ValidateSet('noMfaActivation', 'noApprovalActivation', 'approverNotEnforced', 'approverLowerTier', 'authContextMissing', 'permanentEligible', 'permanentActive', 'noMfaActiveAssign')]
@@ -316,7 +466,17 @@ function New-EntraOpsConfigFile {
         [string[]]$EidscaExcludedFindings = @(),
 
         [Parameter(Mandatory = $false)]
+        [boolean]$EnableCustomSecurityAttributeClassification = $true,
+
+        [Parameter(Mandatory = $false)]
         [boolean]$EnableAlternateObjectTierLevelAttributes = $false,        
+
+        [Parameter(Mandatory = $false)]
+        [boolean]$EnableObjectClassificationFile = $false,
+
+        [Parameter(Mandatory = $false)]
+        [ValidatePattern('\.(json|csv)$')]
+        [string]$ObjectClassificationFilePath = "./Classification/ObjectClassification.json",
 
         [Parameter(Mandatory = $false)]
         [boolean]$EnableTenantGovernanceSnapshot = $false,
@@ -359,6 +519,11 @@ function New-EntraOpsConfigFile {
 
     $ErrorActionPreference = "Stop"
 
+    # Validated here instead of [ValidateRange] because that attribute rejects an explicit $null (derive from schedule).
+    if ($null -ne $MaxTenantGovernanceSnapshotAgeHours -and ($MaxTenantGovernanceSnapshotAgeHours -lt 1 -or $MaxTenantGovernanceSnapshotAgeHours -gt 8760)) {
+        throw "MaxTenantGovernanceSnapshotAgeHours must be between 1 and 8760 (or null to derive it from TenantGovernanceSnapshotScheduledCron), but is $MaxTenantGovernanceSnapshotAgeHours."
+    }
+
     #region Connect to Azure Resource Manager
     # Get TenantId
     try {
@@ -384,6 +549,17 @@ function New-EntraOpsConfigFile {
     #endregion
 
     #region Create configuration file schema with default values
+    $DefaultUpdateTargets = if ($DevOpsPlatform -eq 'AzureDevOps') {
+        @("./.azure-pipelines", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
+    } else {
+        @("./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
+    }
+    if (-not $PSBoundParameters.ContainsKey('EnableCustomSecurityAttributeClassification')) {
+        $EnableCustomSecurityAttributeClassification = -not $EnableObjectClassificationFile
+    }
+    # GitHub Actions and the Azure DevOps update pipeline both support PullRequest and DirectPush
+    $DefaultUpdatePublicationMode = $UpdatePublicationMode
+
     $EnvConfigSchema = [ordered]@{
         TenantId                                      = $($TenantId)
         TenantName                                    = $($TenantDetails.Domains[0])
@@ -396,6 +572,7 @@ function New-EntraOpsConfigFile {
         }
         ClientId                                      = "Use New-EntraOpsWorkloadIdentity to create a new App Registration or enter here manually"
         DevOpsPlatform                                = $($DevOpsPlatform)
+        AzureDevOpsServiceConnection                  = $AzureDevOpsServiceConnection
         RbacSystems                                   = $($RbacSystems)
         AzureRbacClassification                       = [ordered]@{
             ClassifyConstrainedDelegationAlwaysAsControlPlane = $ClassifyConstrainedDelegationAlwaysAsControlPlane
@@ -426,7 +603,7 @@ function New-EntraOpsConfigFile {
         GeneratedArtifactValidation                   = [ordered]@{
             # Contradictory tier pairs come from Custom Security Attribute drift on the source object,
             # so they are reported as warnings by default instead of blocking the whole collection run.
-            FailOnContradictoryTierPair = $FailOnContradictoryTierPair
+            FailOnContradictoryTierPair                     = $FailOnContradictoryTierPair
             FailOnPrivilegedAssignmentWithoutClassification = $FailOnPrivilegedAssignmentWithoutClassification
         }
         AutomatedEntraOpsUpdate                       = [ordered]@{
@@ -442,11 +619,10 @@ function New-EntraOpsConfigFile {
             Repository                   = $UpdateRepository
             # Track main by default so enabled automated updates require no release-ref maintenance.
             Branch                       = "main"
-            # Workflow definitions are intentionally opt-in: the built-in GITHUB_TOKEN cannot push
-            # changes below .github/workflows. Add the target explicitly only for an interactive
-            # update or after configuring the dedicated publisher GitHub App documented in core.md.
-            TargetUpdateFolders          = @("./.github/actions", "./.github/agents", "./.github/scripts", "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks", "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
-            PublicationMode              = $UpdatePublicationMode
+            # GitHub workflow definitions are intentionally opt-in because GITHUB_TOKEN cannot push
+            # them. Azure DevOps configurations instead include their pipeline templates by default.
+            TargetUpdateFolders          = $DefaultUpdateTargets
+            PublicationMode              = $DefaultUpdatePublicationMode
         }
         LogAnalytics                                  = [ordered]@{
             IngestToLogAnalytics             = $IngestToLogAnalytics
@@ -492,6 +668,8 @@ function New-EntraOpsConfigFile {
         AutomatedReportingGeneration                  = [ordered]@{
             ApplyAutomatedReportingGeneration = $ApplyAutomatedReportingGeneration
             PublishReportsAsRelease           = $PublishReportsAsRelease
+            RunGeneratedReportTests           = $RunGeneratedReportTests
+            UploadReportTestDiagnostics       = $UploadReportTestDiagnostics
             ReportingReleasesToKeep           = $ReportingReleasesToKeep
             GenerateClassificationExplorer    = $true
             GenerateTierBreachAnalyzer        = $true
@@ -500,15 +678,20 @@ function New-EntraOpsConfigFile {
             GenerateConfigurationAnalyzer     = $true
             GenerateAccessPackageFlow         = $true
             GeneratePrivilegeHistory          = $true
+            GeneratePrivilegedAssets          = $true
             ClassificationExplorerRepository  = "Cloud-Architekt/AzurePrivilegedIAM"
         }
         ConfigurationAnalyzer                         = [ordered]@{
-            ResolveGroupMembersForPrivilegedAssets = $ResolveGroupMembersForPrivilegedAssets
-            AllowPartialTenantGovernanceSnapshot    = $AllowPartialTenantGovernanceSnapshot
-            PimRequestFlowExcludedRiskFlags         = @($PimRequestFlowExcludedRiskFlags)
-            AccessPackageFlowExcludedRiskFlags       = @($AccessPackageFlowExcludedRiskFlags)
+            ResolveGroupMembersForPrivilegedAssets    = $ResolveGroupMembersForPrivilegedAssets
+            AllowPartialTenantGovernanceSnapshot      = $AllowPartialTenantGovernanceSnapshot
+            MaxTenantGovernanceSnapshotAgeHours       = $MaxTenantGovernanceSnapshotAgeHours
+            StaleTenantGovernanceSnapshotAction       = $StaleTenantGovernanceSnapshotAction
+            TimeRangeInDays                           = $ConfigurationAnalyzerTimeRangeInDays
+            SnapshotInterval                          = $ConfigurationAnalyzerSnapshotInterval
+            PimRequestFlowExcludedRiskFlags           = @($PimRequestFlowExcludedRiskFlags)
+            AccessPackageFlowExcludedRiskFlags        = @($AccessPackageFlowExcludedRiskFlags)
             ConditionalAccessAnalysisExcludedFindings = @($ConditionalAccessAnalysisExcludedFindings)
-            EidscaExcludedFindings                   = @($EidscaExcludedFindings)
+            EidscaExcludedFindings                    = @($EidscaExcludedFindings)
         }
         AutomatedElmCatalogProtection                 = [ordered]@{
             ApplyPrivilegedElmCatalogProtection = $ApplyPrivilegedElmCatalogProtection
@@ -516,28 +699,40 @@ function New-EntraOpsConfigFile {
             RemovalSafetyThreshold              = $RemovalSafetyThreshold
         }
         CustomSecurityAttributes                      = [ordered]@{
-            PrivilegedUserAttribute             = "privilegedUser"
-            PrivilegedUserPawAttribute          = "associatedSecureAdminWorkstation"
-            PrivilegedServicePrincipalAttribute = "privilegedWorkloadIdentity"
-            UserWorkAccountAttribute            = "associatedWorkAccount"
-            PrivilegedUserAdminTierLevelAttribute = "adminTierLevel"
-            PrivilegedUserAdminTierLevelNameAttribute = "adminTierLevelName"
-            PrivilegedServicePrincipalAdminTierLevelAttribute = "adminTierLevel"
+            Enabled                                               = $EnableCustomSecurityAttributeClassification
+            PrivilegedUserAttribute                               = "privilegedUser"
+            PrivilegedUserPawAttribute                            = "associatedSecureAdminWorkstation"
+            PrivilegedServicePrincipalAttribute                   = "privilegedWorkloadIdentity"
+            UserWorkAccountAttribute                              = "associatedWorkAccount"
+            PrivilegedUserAdminTierLevelAttribute                 = "adminTierLevel"
+            PrivilegedUserAdminTierLevelNameAttribute             = "adminTierLevelName"
+            PrivilegedServicePrincipalAdminTierLevelAttribute     = "adminTierLevel"
             PrivilegedServicePrincipalAdminTierLevelNameAttribute = "adminTierLevelName"
-        }        
+        }
         AlternateObjectTierLevelAttributes            = [ordered]@{
-            Enabled          = $EnableAlternateObjectTierLevelAttributes
             User             = [ordered]@{
+                Enabled         = $EnableAlternateObjectTierLevelAttributes
                 ControlPlane    = ""
                 ManagementPlane = ""
                 UserAccess      = ""
             }
             ServicePrincipal = [ordered]@{
+                Enabled         = $EnableAlternateObjectTierLevelAttributes
                 ControlPlane    = ""
                 ManagementPlane = ""
                 UserAccess      = ""
-            }            
-        }        
+            }
+            Group            = [ordered]@{
+                Enabled         = $false
+                ControlPlane    = ""
+                ManagementPlane = ""
+                UserAccess      = ""
+            }
+        }
+        ObjectClassificationFile                      = [ordered]@{
+            Enabled  = $EnableObjectClassificationFile
+            FilePath = $ObjectClassificationFilePath
+        }
         PrivilegeHistory                              = [ordered]@{
             EnablePrivilegeHistory = $EnablePrivilegeHistory
             TimeRangeInDays        = $PrivilegeHistoryTimeRangeInDays
@@ -549,19 +744,121 @@ function New-EntraOpsConfigFile {
         EamDashboard                                  = [ordered]@{
             ResolveLinkedIdentityObjectIds = $EamDashboardResolveLinkedIdentityObjectIds
         }
+        PrivilegedAssets                              = [ordered]@{
+            ResolveRelatedObjectIds = $PrivilegedAssetsResolveRelatedObjectIds
+        }
         ClassificationExplorer                        = [ordered]@{
             GenerateChangeHistory = $ClassificationExplorerGenerateChangeHistory
         }
         TenantGovernanceSnapshot                      = [ordered]@{
-            EnableTenantGovernanceSnapshot = $EnableTenantGovernanceSnapshot
-            ResourcesToInclude             = if ($TenantGovernanceResourcesToInclude) { $TenantGovernanceResourcesToInclude } else { (Get-EntraOpsTenantGovernanceResourceDefinition).DefaultResources }
-            SnapshotDisplayNamePrefix      = "EntraOps TG"
-            SnapshotResourceFileNaming     = $TenantGovernanceSnapshotResourceFileNaming
-            SnapshotScheduledTrigger       = $EnableTenantGovernanceSnapshot
-            SnapshotScheduledCron          = $TenantGovernanceSnapshotScheduledCron
-            SnapshotScheduledCronComplete  = $TenantGovernanceSnapshotScheduledCronComplete
+            EnableTenantGovernanceSnapshot      = $EnableTenantGovernanceSnapshot
+            ResourcesToInclude                  = if ($TenantGovernanceResourcesToInclude) { $TenantGovernanceResourcesToInclude } else { (Get-EntraOpsTenantGovernanceResourceDefinition).DefaultResources }
+            SnapshotDisplayNamePrefix           = "EntraOps TG"
+            SnapshotResourceFileNaming          = $TenantGovernanceSnapshotResourceFileNaming
+            SnapshotScheduledTrigger            = $EnableTenantGovernanceSnapshot
+            SnapshotScheduledCron               = $TenantGovernanceSnapshotScheduledCron
+            SnapshotScheduledCronComplete       = $TenantGovernanceSnapshotScheduledCronComplete
             SnapshotScheduledCronCompleteRetry1 = $TenantGovernanceSnapshotScheduledCronCompleteRetry1
             SnapshotScheduledCronCompleteRetry2 = $TenantGovernanceSnapshotScheduledCronCompleteRetry2
+        }
+        ServiceEM                                     = [ordered]@{
+            GovernanceModel                   = "Centralized"
+            ControlPlaneDelegationGroupId     = ""
+            ControlPlaneGroupName             = "PRG-Tenant-ControlPlane-IdentityOps"
+            ManagementPlaneDelegationGroupId  = ""
+            ManagementPlaneGroupName          = "PRG-Tenant-ManagementPlane-PlatformOps"
+            AdministratorGroupId              = ""
+            DefaultAzureRegion                = ""
+            SkipCatalogOwnerAssignment        = $false
+            CreateM365Group                   = $false
+            AddWorkloadPlaneAdminToUsers      = $false
+            GroupPrefix                       = "SG"
+            RoleAssignableWorkloadPlaneAdmins = $false
+            AdministrativeUnits               = [ordered]@{
+                WorkloadPlane = ""
+                UserAccess    = ""
+            }
+            UpdateObjectClassificationFile    = $false
+            ConstrainedDelegation             = [ordered]@{
+                ManagementPlane = [ordered]@{
+                    ExcludedRoleDefinitionIds = @(
+                        "8e3af657-a8ff-443c-a75c-2fe8c4bcb635"  # Owner
+                        "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9"  # User Access Administrator
+                        "f58310d9-a9f6-439a-9e8d-f62e7b41a168"  # Role Based Access Control Administrator
+                    )
+                    AllowedTargetGroupFilter  = "WorkloadPlane-Admins"
+                }
+                WorkloadPlane   = [ordered]@{
+                    AllowedRoleDefinitionIds = @(
+                        # Key Vault roles
+                        "00482a5a-887f-4fb3-b363-3b7fe8e74483"  # Key Vault Administrator
+                        "a4417e6f-fecd-4de8-b567-7b0420556985"  # Key Vault Certificates Officer
+                        "14b46e9e-c2b7-41b4-b07b-48a6ebf60603"  # Key Vault Crypto Officer
+                        "12338af0-0e69-4776-bea7-57ae8d297424"  # Key Vault Crypto User
+                        "21090545-7ca7-4776-b22c-e363652d74d2"  # Key Vault Reader
+                        "b86a8fe4-44ce-4948-aee5-eccb2c155cd7"  # Key Vault Secrets Officer
+                        "4633458b-17de-408a-b874-0445c86b69e6"  # Key Vault Secrets User
+                        # Storage roles
+                        "ba92f5b4-2d11-453d-a403-e96b0029c9fe"  # Storage Blob Data Contributor
+                        "b7e6dc6d-f1e8-4753-8033-0f276bb0955b"  # Storage Blob Data Owner
+                        "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"  # Storage Blob Data Reader
+                        "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"  # Storage Table Data Contributor
+                        "76199698-9eea-4c19-bc75-cec21354c6b6"  # Storage Table Data Reader
+                        "974c5e8b-45b9-4653-ba55-5f855dd0fb88"  # Storage Queue Data Contributor
+                        "19e7f393-937e-4f77-808e-94535e297925"  # Storage Queue Data Reader
+                        "8a0f0c08-91a1-4084-bc3d-661d67233fed"  # Storage Queue Data Message Processor
+                        "c6a89b2d-59bc-44d0-9896-0f6e12d7b80a"  # Storage Queue Data Message Sender
+                    )
+                    AllowedTargetGroupFilter = "WorkloadPlane-Users"
+                }
+            }
+            PIMAuthenticationContext          = [ordered]@{
+                EnableAuthenticationContext = $false
+                ControlPlane                = [ordered]@{
+                    AuthenticationContextClassReferenceId = ""
+                    AuthenticationContextDisplayName      = ""
+                }
+                ManagementPlane             = [ordered]@{
+                    AuthenticationContextClassReferenceId = ""
+                    AuthenticationContextDisplayName      = ""
+                }
+                WorkloadPlane               = [ordered]@{
+                    AuthenticationContextClassReferenceId = ""
+                    AuthenticationContextDisplayName      = ""
+                }
+            }
+            PIMForGroups                      = [ordered]@{
+                MaximumActivationDuration       = "PT10H"
+                MaximumActiveAssignmentDuration = "P15D"
+            }
+            AssignmentPolicies                = [ordered]@{
+                BaselinePolicy            = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
+                WorkloadPlaneUsers        = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; RequestorScope = "AllMemberUsers"; AllowExtension = $true }
+                WorkloadPlaneAdmins       = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P2D"; AllowExtension = $true }
+                ManagementPlaneAdmins     = [ordered]@{ Expiration = "P365D"; ApprovalTimeout = "P1D"; AllowExtension = $true }
+                InitialWorkloadMembership = [ordered]@{ Expiration = "P365D" }
+                InitialManagementAdmins   = [ordered]@{ Expiration = "P365D" }
+                InitialWorkloadUsers      = [ordered]@{ Expiration = "P365D" }
+                InitialWorkloadAdmins     = [ordered]@{ Expiration = "P365D" }
+                InitialCatalogMembers     = [ordered]@{ Expiration = "P365D" }
+            }
+            AccessReviews                     = [ordered]@{
+                EnableAccessReviews        = $true
+                RecurrenceIntervalInMonths = 3
+                StartAfterDays             = 4
+                ReviewDuration             = "P25D"
+                Policies                   = [ordered]@{
+                    BaselinePolicy            = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    WorkloadPlaneUsers        = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
+                    WorkloadPlaneAdmins       = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    ManagementPlaneAdmins     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ControlPlane-Admins") }
+                    InitialWorkloadMembership = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialManagementAdmins   = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ControlPlane-Admins") }
+                    InitialWorkloadUsers      = [ordered]@{ ReviewerType = "Group"; Reviewers = @("WorkloadPlane-Admins") }
+                    InitialWorkloadAdmins     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                    InitialCatalogMembers     = [ordered]@{ ReviewerType = "Group"; Reviewers = @("ManagementPlane-Admins") }
+                }
+            }
         }
     }
     #endregion

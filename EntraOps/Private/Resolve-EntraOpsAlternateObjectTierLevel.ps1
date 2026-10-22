@@ -1,13 +1,13 @@
 function Resolve-EntraOpsAlternateObjectTierLevel {
     <#
     .SYNOPSIS
-        Classifies a User or ServicePrincipal object by evaluating PowerShell filter expressions
+        Classifies a User, ServicePrincipal or Group object by evaluating PowerShell filter expressions
         against its own already-resolved EntraOps details, as an alternative to Custom Security
-        Attributes.
+        Attributes (which are not available for groups at all).
     .DESCRIPTION
         EntraOpsConfig.json can define an "AlternateObjectTierLevelAttributes" section with one
         PowerShell filter expression per Enterprise Access Model tier (ControlPlane, ManagementPlane,
-        WorkloadPlane, UserAccess) and object type (User, ServicePrincipal). Each filter expression is evaluated
+        WorkloadPlane, UserAccess) and object type (User, ServicePrincipal, Group). Each filter expression is evaluated
         against the object's own details already resolved by Get-EntraOpsPrivilegedEntraObject (e.g.
         AssignedAdministrativeUnits, ObjectDisplayName) - the same details that end up in the
         PrivilegedEAM export - exposed to the expression as the $Object variable.
@@ -16,12 +16,13 @@ function Resolve-EntraOpsAlternateObjectTierLevel {
         then WorkloadPlane, then UserAccess) and the first matching tier wins, matching the Enterprise Access Model
         principle that an object should be classified at its most privileged applicable tier.
 
-        Returns $null when alternate classification is not enabled (caller should then fall back to
-        Custom Security Attribute classification). Once enabled for a given object type, returns an
-        explicit Unclassified result (never $null) when no tier filter is defined/matches or a filter
-        expression throws - it does not fall back to Custom Security Attributes for that object.
+        Filters are enabled per object type by the 'Enabled' property of the User, ServicePrincipal and
+        Group sections (see Test-EntraOpsAlternateObjectTierLevelEnabled for the fallback of older config
+        files). Returns $null when the object type is not enabled. Once enabled, returns an Unclassified
+        result when no tier filter is defined/matches or a filter expression throws; the caller then
+        falls back to the Object Classification File, if enabled.
     .PARAMETER ObjectType
-        The EntraOps object type to classify. One of 'User' or 'ServicePrincipal'.
+        The EntraOps object type to classify. One of 'User', 'ServicePrincipal' or 'Group'.
     .PARAMETER Object
         PSCustomObject with the resolved object details available to the filter expressions (exposed
         as $Object). Only primitive/array properties already known at classification time should be
@@ -35,7 +36,7 @@ function Resolve-EntraOpsAlternateObjectTierLevel {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
-        [ValidateSet('User', 'ServicePrincipal')]
+        [ValidateSet('User', 'ServicePrincipal', 'Group')]
         [string]$ObjectType,
 
         [Parameter(Mandatory = $true)]
@@ -46,9 +47,20 @@ function Resolve-EntraOpsAlternateObjectTierLevel {
         [PSObject]$AlternateObjectTierLevelAttributes
     )
 
-    if ($null -eq $AlternateObjectTierLevelAttributes -or $AlternateObjectTierLevelAttributes.Enabled -ne $true) {
+    if (-not (Test-EntraOpsAlternateObjectTierLevelEnabled -ObjectType $ObjectType -AlternateObjectTierLevelAttributes $AlternateObjectTierLevelAttributes)) {
         return $null
     }
+
+    # Most privileged tier first - first matching filter wins. Tag values follow the canonical
+    # map in New-EntraOpsEAMOutputObject (WorkloadPlane shares tag "1" with ManagementPlane).
+    $TierTagValueByName = [ordered]@{
+        ControlPlane    = "0"
+        ManagementPlane = "1"
+        WorkloadPlane   = "1"
+        UserAccess      = "2"
+    }
+
+    $TypeConfig = $AlternateObjectTierLevelAttributes.$ObjectType
 
     # SECURITY NOTE: AlternateObjectTierLevelAttributes filter expressions from EntraOpsConfig.json
     # are executed as PowerShell code in this module's context. Anyone who can modify the config file
@@ -65,18 +77,8 @@ function Resolve-EntraOpsAlternateObjectTierLevel {
         $Script:AlternateTierFilterScriptBlockCache = @{}
     }
 
-    # Most privileged tier first - first matching filter wins. Tag values follow the canonical
-    # map in New-EntraOpsEAMOutputObject (WorkloadPlane shares tag "1" with ManagementPlane).
-    $TierTagValueByName = [ordered]@{
-        ControlPlane    = "0"
-        ManagementPlane = "1"
-        WorkloadPlane   = "1"
-        UserAccess      = "2"
-    }
-
-    $TypeConfig = $AlternateObjectTierLevelAttributes.$ObjectType
-    if ($null -eq $TypeConfig) {
-        Write-Warning "AlternateObjectTierLevelAttributes is enabled but no filter definitions found for object type '$ObjectType'. Classifying as Unclassified."
+    if ($null -eq $TypeConfig -or @($TierTagValueByName.Keys | Where-Object { -not [string]::IsNullOrWhiteSpace($TypeConfig.$_) }).Count -eq 0) {
+        Write-Warning "AlternateObjectTierLevelAttributes is enabled for object type '$ObjectType' but no filter expression is set."
         return [PSCustomObject]@{ AdminTierLevel = "Unclassified"; AdminTierLevelName = "Unclassified" }
     }
 
@@ -102,6 +104,6 @@ function Resolve-EntraOpsAlternateObjectTierLevel {
         }
     }
 
-    Write-Verbose "Object '$($Object.ObjectDisplayName)' ($($Object.ObjectId)) matched no AlternateObjectTierLevelAttributes filter for $ObjectType. Classifying as Unclassified."
+    Write-Verbose "Object '$($Object.ObjectDisplayName)' ($($Object.ObjectId)) matched no AlternateObjectTierLevelAttributes filter for $ObjectType."
     return [PSCustomObject]@{ AdminTierLevel = "Unclassified"; AdminTierLevelName = "Unclassified" }
 }

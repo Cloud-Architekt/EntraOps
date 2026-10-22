@@ -120,8 +120,9 @@ EOCE.app = (function () {
 
     // ---- Sidebar counts --------------------------------------------------
     function updateCounts() {
+        // Attack paths load on demand (ensureAttackPaths fills the badge); don't show "0" before that.
         var elA = document.getElementById('cnt-attack');
-        if (elA && EOCE.ATTACK_PATHS) elA.textContent = EOCE.util.formatNumber(EOCE.ATTACK_PATHS.length);
+        if (elA && EOCE.ATTACK_PATHS && EOCE.ATTACK_PATHS.length) elA.textContent = EOCE.util.formatNumber(EOCE.ATTACK_PATHS.length);
 
         var rolePaths = EOCE.rolesSystemKeys().map(function (k) { return EOCE.RBAC_SYSTEMS[k].file; });
         Promise.all([
@@ -169,7 +170,8 @@ EOCE.app = (function () {
         if (notificationSources && notificationSources.length === 0) {
             return { id: notification.changeSetId || 'none', items: [] };
         }
-        var items = [];
+        var MS = 'Microsoft role definitions', MODEL = 'Classification model';
+        var buckets = { msAdded: [], msChanged: [], msRemoved: [], model: [] };
         var newestDate = '';
         Object.keys(history.sources).forEach(function (sourceKey) {
             if (notificationSources && notificationSources.indexOf(sourceKey) === -1) return;
@@ -179,36 +181,53 @@ EOCE.app = (function () {
             var commit = commits[commits.length - 1];
             if (commit.date > newestDate) newestDate = commit.date;
             var isPermission = source.kind === 'permissions';
+            var kind = isPermission ? 'API permission' : 'Role';
             var resourceHref = function (entry) {
                 return isPermission
                     ? '#permissions/all/' + encodeURIComponent(entry.name || '') + '/' + encodeURIComponent(entry.id || '')
                     : '#roles/' + encodeURIComponent(sourceKey) + '/' + encodeURIComponent(entry.id || '');
             };
-            ['added', 'removed', 'changed'].forEach(function (changeKey) {
-                (commit[changeKey] || []).forEach(function (entry) {
-                    var tierChanged = entry.oldTier && entry.newTier && entry.oldTier !== entry.newTier;
-                    var actionChanged = (entry.actionsAdded && entry.actionsAdded.length) || (entry.actionsRemoved && entry.actionsRemoved.length);
-                    var changeLabel = changeKey.charAt(0).toUpperCase() + changeKey.slice(1);
-                    if (changeKey !== 'changed' || isPermission || tierChanged) {
-                        items.push({
-                            kind: isPermission ? 'API permission' : 'Role',
-                            change: changeLabel,
-                            title: (entry.name || entry.id) + ' ' + changeKey,
-                            detail: entry.oldTier && entry.newTier ? entry.oldTier + ' -> ' + entry.newTier : source.label,
-                            href: resourceHref(entry)
-                        });
-                    }
-                    if (!isPermission) {
-                        (entry.actions || entry.actionsAdded || []).forEach(function (action) {
-                            items.push({ kind: 'Role action', change: 'Added', title: action, detail: 'Role: ' + (entry.name || entry.id), href: '#actions/' + encodeURIComponent(sourceKey) + '/' + encodeURIComponent(action) });
-                        });
-                        (entry.actionsRemoved || []).forEach(function (action) {
-                            items.push({ kind: 'Role action', change: 'Removed', title: action, detail: 'Role: ' + (entry.name || entry.id), href: '#actions/' + encodeURIComponent(sourceKey) + '/' + encodeURIComponent(action) });
-                        });
-                    }
-                });
+            var actionHref = function (action) {
+                return '#actions/' + encodeURIComponent(sourceKey) + '/' + encodeURIComponent(action);
+            };
+            var definitionDetail = function (entry) {
+                var parts = [entry.tier || 'Unclassified'];
+                if (!isPermission && Array.isArray(entry.actions)) parts.push(entry.actions.length + ' role action' + (entry.actions.length === 1 ? '' : 's'));
+                parts.push(source.label);
+                return parts.join(' · ');
+            };
+
+            (commit.added || []).forEach(function (entry) {
+                buckets.msAdded.push({ section: MS, group: 'Added', kind: kind, change: 'Added', title: entry.name || entry.id, detail: definitionDetail(entry), href: resourceHref(entry) });
+            });
+            (commit.removed || []).forEach(function (entry) {
+                buckets.msRemoved.push({ section: MS, group: 'Removed', kind: kind, change: 'Removed', title: entry.name || entry.id, detail: definitionDetail(entry), href: resourceHref(entry) });
+            });
+            (commit.changed || []).forEach(function (entry) {
+                var name = entry.name || entry.id;
+                var tierChanged = entry.oldTier && entry.newTier && entry.oldTier !== entry.newTier;
+                var categoryChanged = isPermission && (entry.oldCategory || '') !== (entry.newCategory || '');
+                var actionsAdded = entry.actionsAdded || [];
+                var actionsRemoved = entry.actionsRemoved || [];
+                // Keep definition changes separate from tier changes: history does not establish causation.
+                if (!isPermission && (actionsAdded.length || actionsRemoved.length)) {
+                    actionsAdded.forEach(function (action) {
+                        buckets.msChanged.push({ section: MS, group: 'Changed', kind: 'Role action', change: 'Added', title: action, detail: 'Added to ' + name, href: actionHref(action) });
+                    });
+                    actionsRemoved.forEach(function (action) {
+                        buckets.msChanged.push({ section: MS, group: 'Changed', kind: 'Role action', change: 'Removed', title: action, detail: 'Removed from ' + name, href: actionHref(action) });
+                    });
+                }
+                if (tierChanged || categoryChanged) {
+                    var details = [];
+                    if (tierChanged) details.push(entry.oldTier + ' -> ' + entry.newTier);
+                    if (categoryChanged) details.push('Category: ' + (entry.oldCategory || 'none') + ' -> ' + (entry.newCategory || 'none'));
+                    var group = categoryChanged ? (tierChanged ? 'Tier and category changed' : 'Category changed') : 'Tier assignment changed';
+                    buckets.model.push({ section: MODEL, group: group, kind: kind, change: 'Reclassified', title: name, detail: details.join(' · '), href: resourceHref(entry) });
+                }
             });
         });
+        var items = buckets.msAdded.concat(buckets.msChanged, buckets.msRemoved, buckets.model);
         return { id: notification && notification.changeSetId || newestDate || 'none', items: items };
     }
 
@@ -308,7 +327,7 @@ EOCE.app = (function () {
             if (item.current) {
                 html += '<div class="nav-item active"><span class="ico">' + item.icon + '</span><span>' + EOCE.util.escapeHtml(item.label) + '</span></div>';
             } else {
-                html += '<a class="nav-item" href="' + EOCE.util.escapeHtml(item.href) + '"><span class="ico">' + item.icon + '</span><span>' + EOCE.util.escapeHtml(item.label) + '</span></a>';
+                html += '<a class="nav-item' + (item.sub ? ' nav-subitem' : '') + '" href="' + EOCE.util.escapeHtml(item.href) + '"><span class="ico">' + item.icon + '</span><span>' + EOCE.util.escapeHtml(item.label) + '</span></a>';
             }
         });
         anchor.insertAdjacentHTML('afterend', html);

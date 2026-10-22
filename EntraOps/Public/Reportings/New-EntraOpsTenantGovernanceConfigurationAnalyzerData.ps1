@@ -76,7 +76,9 @@
 
 .PARAMETER MaxSnapshotAgeHours
 Maximum age of the successful Tenant Governance snapshot manifest. Default 30 hours.
-Use -AllowStaleSnapshot to generate a report from an older known-good snapshot.
+Use -AllowStaleSnapshot to generate a report from an older known-good snapshot; the report then
+marks the snapshot as stale (snapshotHealth.isStale). New-EntraOpsReportingData passes a limit
+derived from ConfigurationAnalyzer.MaxTenantGovernanceSnapshotAgeHours or the snapshot schedule.
 
 .PARAMETER AllowStaleSnapshot
 Allow report generation when the snapshot manifest is older than -MaxSnapshotAgeHours.
@@ -85,8 +87,13 @@ overrides are intentionally required.
 
 .PARAMETER AllowPartialSnapshot
 Allow the current mixed snapshot tree to be analyzed when the latest attempt was partially
-successful. Preserved resource types remain marked stale in snapshotManifest. Historical partial
-commits are still excluded because their trees can combine files from multiple capture times.
+successful. Preserved resource types remain marked stale in snapshotManifest.
+This switch only gates the current snapshot. Historical partially successful commits are part of
+the timeline regardless of this switch whenever they published resource files: their published
+resource types contain freshly captured files, while stale resource types keep their previous,
+unchanged files. Historical commits that published no resource type (manifest-only) are excluded,
+because they would present an older tree at the partial job time. Changes to stale or retained
+resources therefore become visible only in a later snapshot.
 
 .PARAMETER SkipWorkingTree
     Do not append the "(working tree)" snapshot for uncommitted on-disk changes.
@@ -110,7 +117,8 @@ commits are still excluded because their trees can combine files from multiple c
     New-EntraOpsTenantGovernanceConfigurationAnalyzerData -AllowPartialSnapshot
 
     Includes the current mixed snapshot tree after a partially successful capture. Historical
-    partial commits remain excluded from the timeline.
+    partial commits that published resource files are included with or without this switch;
+    manifest-only commits remain excluded from the timeline.
 #>
 
 function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
@@ -175,15 +183,6 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
         return [ordered]@{ Years = $years; Months = $months; Days = $days }
     }
 
-    function Add-SnapshotInterval {
-        param([datetimeoffset]$Date, [System.Collections.Specialized.OrderedDictionary]$Interval)
-        $result = $Date
-        if ($Interval.Years -gt 0) { $result = $result.AddYears($Interval.Years) }
-        if ($Interval.Months -gt 0) { $result = $result.AddMonths($Interval.Months) }
-        if ($Interval.Days -gt 0) { $result = $result.AddDays($Interval.Days) }
-        return $result
-    }
-
     $SnapshotIntervalComponents = ConvertTo-SnapshotIntervalComponents -Interval $SnapshotInterval
 
     # Resolve the app/repository location relative to the module location:
@@ -195,12 +194,12 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
-    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/ConfigurationAnalyzer' }
+    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepoRoot 'Reports/ConfigurationAnalyzer' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
-        throw "Configuration Analyzer app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/ConfigurationAnalyzer."
+        throw "Configuration Analyzer app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/ConfigurationAnalyzer, or run Install-EntraOpsReportingFolder to download the Reports folder."
     }
     if ([string]::IsNullOrWhiteSpace($ImportPath)) { $ImportPath = Join-Path $RepoRoot 'TenantGovernance/Snapshots' }
     if ([string]::IsNullOrWhiteSpace($OutFile)) { $OutFile = Join-Path $AppRoot 'data/configuration-analyzer-data.js' }
@@ -320,22 +319,19 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     if (-not $IsCompleteSnapshot) {
         Write-Warning "Generating Configuration Analyzer data from a partial Tenant Governance snapshot. Stale resource types: $(@($SnapshotManifest.StaleResourceTypes) -join ', ')."
     }
-    $CapturedDateTime = if ($SnapshotManifest.CapturedDateTime -is [datetime]) {
-        [datetimeoffset]$SnapshotManifest.CapturedDateTime
-    } elseif ($SnapshotManifest.CapturedDateTime -is [datetimeoffset]) {
-        $SnapshotManifest.CapturedDateTime
-    } else {
-        $ParsedCapturedDateTime = [datetimeoffset]::MinValue
-        if ([datetimeoffset]::TryParse([string]$SnapshotManifest.CapturedDateTime, [ref]$ParsedCapturedDateTime)) {
-            $ParsedCapturedDateTime
-        }
-    }
-    if ($null -eq $CapturedDateTime) {
+    # Same parser as the pre-check in Invoke-EntraOpsReportingGeneration, so both agree on the snapshot age.
+    $SnapshotAge = Get-EntraOpsTenantGovernanceSnapshotAge -ManifestPath $ManifestPath
+    if ($null -eq $SnapshotAge) {
         throw "Tenant Governance snapshot manifest has no valid CapturedDateTime: $ManifestPath."
     }
-    $SnapshotAgeHours = ((Get-Date).ToUniversalTime() - $CapturedDateTime.UtcDateTime).TotalHours
-    if (-not $AllowStaleSnapshot -and $SnapshotAgeHours -gt $MaxSnapshotAgeHours) {
+    $CapturedDateTime = $SnapshotAge.CapturedDateTime
+    $SnapshotAgeHours = $SnapshotAge.AgeHours
+    $IsStaleSnapshot = $SnapshotAgeHours -gt $MaxSnapshotAgeHours
+    if ($IsStaleSnapshot -and -not $AllowStaleSnapshot) {
         throw "Tenant Governance snapshot is $([math]::Round($SnapshotAgeHours, 1)) hour(s) old, exceeding the $MaxSnapshotAgeHours-hour limit. Run a new snapshot or use -AllowStaleSnapshot explicitly."
+    }
+    if ($IsStaleSnapshot) {
+        Write-Warning "Generating Configuration Analyzer data from a stale Tenant Governance snapshot ($([math]::Round($SnapshotAgeHours, 1)) hour(s) old, limit $MaxSnapshotAgeHours hour(s)). The report shows it as stale."
     }
 
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -367,13 +363,20 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     # Save-EntraOpsTenantGovernanceSnapshotJson), not captured resources.
     $ExcludedFileNames = @('.PendingSnapshotJob.json', '.SnapshotManifest.json', '.LastAttemptManifest.json')
 
-    # ---- Enumerate commits that touched the snapshot folder ------------------------
+    # ---- Enumerate commits that published snapshots --------------------------------
     $logArgs = @('-C', $GitRoot, 'log', "--format=%H%x1f%cI%x1f%s")
     if ($TimeRangeInDays) {
         $since = (Get-Date).ToUniversalTime().AddDays(-1 * [Math]::Abs($TimeRangeInDays)).ToString('o')
         $logArgs += "--since=$since"
     }
     $logArgs += @('--', $RelPath)
+    # Start/Collect polls and rejected attempts update only bookkeeping files. They must
+    # not take a sampling interval away from the completed capture that follows them.
+    # Keep .SnapshotManifest.json in the history: a successful capture can publish a new
+    # manifest even when all resource content is unchanged.
+    foreach ($BookkeepingFile in @('.PendingSnapshotJob.json', '.LastAttemptManifest.json')) {
+        $logArgs += ":(top,exclude,literal)$RelPath/$BookkeepingFile"
+    }
 
     $logOutput = & git @logArgs
     if ($LASTEXITCODE -ne 0) {
@@ -385,14 +388,17 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
             [pscustomobject]@{ Sha = $parts[0]; Date = [datetimeoffset]::Parse($parts[1]); Subject = $parts[2] }
         }) | Sort-Object -Property Date
 
-    # A partial snapshot intentionally commits only its manifest, preserving the last known-good
-    # resources. Do not present that unchanged tree as a historical capture at the partial job time.
+    # A fully-stale partial snapshot (e.g. Graph returned no parseable per-type errors) commits only
+    # its manifest, preserving the last known-good resources unchanged - do not present that as a
+    # historical capture at the partial job time. A mixed partial snapshot still publishes real,
+    # changed resource files for its non-stale types (stale types simply keep their previous blob
+    # hash, so they never appear as a diff), so it must not be dropped from history wholesale.
     $commits = @($commits | Where-Object {
             $manifestAtCommit = & git -C $GitRoot show "$($_.Sha):$RelPath/.SnapshotManifest.json" 2>$null
             if ($LASTEXITCODE -ne 0 -or -not $manifestAtCommit) { return $true }
             try {
                 $commitManifest = ($manifestAtCommit -join "`n") | ConvertFrom-Json -Depth 10
-                return -not ($commitManifest.IsComplete -eq $false -or $commitManifest.SnapshotJobStatus -eq 'partiallySuccessful')
+                return -not ($commitManifest.IsComplete -eq $false -and @($commitManifest.PublishedResourceTypes).Count -eq 0)
             } catch {
                 return $true
             }
@@ -405,16 +411,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
 
     # ---- Thin commits down to the requested snapshot interval ----------------------
     if ($null -ne $SnapshotIntervalComponents -and $commits.Count -gt 2) {
-        $thinned = [System.Collections.Generic.List[object]]::new()
-        $lastKeptDate = $null
-        for ($ci = 0; $ci -lt $commits.Count; $ci++) {
-            $commit = $commits[$ci]
-            $isLast = ($ci -eq $commits.Count - 1)
-            if ($null -eq $lastKeptDate -or $isLast -or $commit.Date -ge (Add-SnapshotInterval -Date $lastKeptDate -Interval $SnapshotIntervalComponents)) {
-                $thinned.Add($commit)
-                $lastKeptDate = $commit.Date
-            }
-        }
+        $thinned = Select-EntraOpsSnapshotIntervalCommit -Commit @($commits) -Years $SnapshotIntervalComponents.Years -Months $SnapshotIntervalComponents.Months -Days $SnapshotIntervalComponents.Days
         Write-Verbose "Snapshot interval '$SnapshotInterval' reduced $($commits.Count) commit(s) to $($thinned.Count) snapshot(s)."
         $commits = $thinned
     }
@@ -461,7 +458,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     # ---- Append the current working tree state when it adds information -------------
     if (-not $SkipWorkingTree -and (Test-Path -LiteralPath $ImportPath -PathType Container)) {
         $wtFiles = @(Get-ChildItem -LiteralPath $ImportPath -Recurse -File -Filter '*.json' |
-                Where-Object { $ExcludedFileNames -notcontains $_.Name } | Sort-Object FullName)
+            Where-Object { $ExcludedFileNames -notcontains $_.Name } | Sort-Object FullName)
         if ($wtFiles.Count -gt 0) {
             $wtResources = [System.Collections.Generic.List[object]]::new()
             # git hash-object computes the same blob hash a commit would produce, so
@@ -495,11 +492,11 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
             }
             if ($differs) {
                 $snapshots.Add([ordered]@{
-                        commitSha  = '(working tree)'
-                        commitDate = (Get-Date).ToUniversalTime().ToString('o')
-                        subject    = 'Uncommitted working tree state'
-                        hasDetail  = $false
-                        resources  = @($wtResources)
+                        commitSha   = '(working tree)'
+                        commitDate  = (Get-Date).ToUniversalTime().ToString('o')
+                        subject     = 'Uncommitted working tree state'
+                        hasDetail   = $false
+                        resources   = @($wtResources)
                         workingTree = $true
                     })
                 Write-Verbose "Appended working tree state with $($wtResources.Count) resource file(s)."
@@ -572,8 +569,8 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
                 $ObjectId = "$($Object.objectId)"
                 if (-not $ObjectId) { continue }
                 $ObjectTierNames = @("$($Object.objectAdminTierLevelName)") +
-                    @($Object.classification | ForEach-Object { "$($_.adminTierLevelName)" }) +
-                    @($Object.roleAssignments | ForEach-Object { $_.classification } | ForEach-Object { "$($_.adminTierLevelName)" })
+                @($Object.classification | ForEach-Object { "$($_.adminTierLevelName)" }) +
+                @($Object.roleAssignments | ForEach-Object { $_.classification } | ForEach-Object { "$($_.adminTierLevelName)" })
                 foreach ($TierName in $ObjectTierNames | Where-Object { $TierRank.ContainsKey($_) }) {
                     if (-not $TierByObjectId.ContainsKey($ObjectId) -or $TierRank[$TierName] -lt $TierRank[$TierByObjectId[$ObjectId]]) {
                         $TierByObjectId[$ObjectId] = $TierName
@@ -619,7 +616,8 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
 
             foreach ($PolicyId in $AssignmentPolicyIds) {
                 try {
-                    $Policy = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies/$PolicyId" -OutputType PSObject -ThrowOnFailure
+                    # A deleted policy is reported once by the catch below, not again by the Graph helper
+                    $Policy = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies/$PolicyId" -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
                     $PolicyGroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
                     $UserSets = @($Policy.requestorSettings.allowedRequestors) + @($Policy.requestApprovalSettings.approvalStages | ForEach-Object { $_.primaryApprovers })
                     foreach ($UserSet in $UserSets) {
@@ -686,40 +684,43 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     # surface the health of the analyzed snapshot (partial captures with stale resource
     # types) without embedding manifest internals nothing reads.
     $SnapshotHealth = [ordered]@{
-        status             = if ($null -ne $SnapshotManifest.SnapshotJobStatus) { "$($SnapshotManifest.SnapshotJobStatus)" } else { $null }
-        capturedDateTime   = if ($null -ne $CapturedDateTime) { $CapturedDateTime.ToString('o') } else { $null }
-        isComplete         = $SnapshotManifest.IsComplete -eq $true
-        staleResourceTypes = @($SnapshotManifest.StaleResourceTypes | Where-Object { $_ } | ForEach-Object { "$_" })
-        resourceTypeStates = @($SnapshotManifest.ResourceTypeStates | ForEach-Object {
+        status                  = if ($null -ne $SnapshotManifest.SnapshotJobStatus) { "$($SnapshotManifest.SnapshotJobStatus)" } else { $null }
+        capturedDateTime        = if ($null -ne $CapturedDateTime) { $CapturedDateTime.ToString('o') } else { $null }
+        isComplete              = $SnapshotManifest.IsComplete -eq $true
+        isStale                 = [bool]$IsStaleSnapshot
+        ageHours                = [math]::Round($SnapshotAgeHours, 1)
+        maxAgeHours             = $MaxSnapshotAgeHours
+        staleResourceTypes      = @($SnapshotManifest.StaleResourceTypes | Where-Object { $_ } | ForEach-Object { "$_" })
+        resourceTypeStates      = @($SnapshotManifest.ResourceTypeStates | ForEach-Object {
                 [ordered]@{
-                    resourceType        = "$($_.ResourceType)"
-                    status              = "$($_.Status)"
+                    resourceType          = "$($_.ResourceType)"
+                    status                = "$($_.Status)"
                     retainedResourceCount = if ($null -ne $_.RetainedResourceCount) { [int]$_.RetainedResourceCount } else { 0 }
-                    publishedSnapshotId = if ($_.PublishedSnapshotId) { "$($_.PublishedSnapshotId)" } else { $null }
-                    publishedSource     = if ($_.PublishedSource) { "$($_.PublishedSource)" } else { $null }
-                    attemptSnapshotId   = if ($_.AttemptSnapshotId) { "$($_.AttemptSnapshotId)" } else { $null }
+                    publishedSnapshotId   = if ($_.PublishedSnapshotId) { "$($_.PublishedSnapshotId)" } else { $null }
+                    publishedSource       = if ($_.PublishedSource) { "$($_.PublishedSource)" } else { $null }
+                    attemptSnapshotId     = if ($_.AttemptSnapshotId) { "$($_.AttemptSnapshotId)" } else { $null }
                 }
             })
-        diagnostics         = @(
+        diagnostics             = @(
             @($SnapshotManifest.Diagnostics | ForEach-Object {
                     [ordered]@{
-                        resourceType    = "$($_.ResourceType)"
-                        errorCategory   = "$($_.ErrorCategory)"
-                        errorCode       = if ($_.ErrorCode) { "$($_.ErrorCode)" } else { $null }
-                        occurrences     = [int]$_.Occurrences
-                        message         = "$($_.Message)"
-                        remediationHint = "$($_.RemediationHint)"
+                        resourceType      = "$($_.ResourceType)"
+                        errorCategory     = "$($_.ErrorCategory)"
+                        errorCode         = if ($_.ErrorCode) { "$($_.ErrorCode)" } else { $null }
+                        occurrences       = [int]$_.Occurrences
+                        message           = "$($_.Message)"
+                        remediationHint   = "$($_.RemediationHint)"
                         attemptSnapshotId = $null
                     }
                 })
             @($LastAttemptDiagnostics | ForEach-Object {
                     [ordered]@{
-                        resourceType    = "$($_.ResourceType)"
-                        errorCategory   = "$($_.ErrorCategory)"
-                        errorCode       = if ($_.ErrorCode) { "$($_.ErrorCode)" } else { $null }
-                        occurrences     = [int]$_.Occurrences
-                        message         = "[Last attempt $($LastAttemptManifest.SnapshotId)] $($_.Message)"
-                        remediationHint = "$($_.RemediationHint)"
+                        resourceType      = "$($_.ResourceType)"
+                        errorCategory     = "$($_.ErrorCategory)"
+                        errorCode         = if ($_.ErrorCode) { "$($_.ErrorCode)" } else { $null }
+                        occurrences       = [int]$_.Occurrences
+                        message           = "[Last attempt $($LastAttemptManifest.SnapshotId)] $($_.Message)"
+                        remediationHint   = "$($_.RemediationHint)"
                         attemptSnapshotId = "$($LastAttemptManifest.SnapshotId)"
                     }
                 })
@@ -728,21 +729,21 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     }
 
     $payload = [ordered]@{
-        tenantName       = Get-EntraOpsReportingTenantName -RepoRoot $RepoRoot
-        generatedAt      = (Get-Date).ToUniversalTime().ToString('o')
-        snapshotFolder   = $RelPath
-        snapshotHealth   = $SnapshotHealth
-        timeRangeInDays  = $TimeRangeInDays
-        snapshotInterval = $SnapshotInterval
-        snapshots        = @($snapshots)
-        blobs            = $blobs
-        resolvedGroupTiers = $ResolvedGroupTiers
-        resolvedPolicyGroupIds = $ResolvedPolicyGroupIds
-        resolvedDeviceTiers = $ResolvedDeviceTiers
-        pimRequestFlowExcludedRiskFlags = $PimRequestFlowExcludedRiskFlags
-        accessPackageFlowExcludedRiskFlags = $AccessPackageFlowExcludedRiskFlags
+        tenantName                                = Get-EntraOpsReportingTenantName -RepoRoot $RepoRoot
+        generatedAt                               = (Get-Date).ToUniversalTime().ToString('o')
+        snapshotFolder                            = $RelPath
+        snapshotHealth                            = $SnapshotHealth
+        timeRangeInDays                           = $TimeRangeInDays
+        snapshotInterval                          = $SnapshotInterval
+        snapshots                                 = @($snapshots)
+        blobs                                     = $blobs
+        resolvedGroupTiers                        = $ResolvedGroupTiers
+        resolvedPolicyGroupIds                    = $ResolvedPolicyGroupIds
+        resolvedDeviceTiers                       = $ResolvedDeviceTiers
+        pimRequestFlowExcludedRiskFlags           = $PimRequestFlowExcludedRiskFlags
+        accessPackageFlowExcludedRiskFlags        = $AccessPackageFlowExcludedRiskFlags
         conditionalAccessAnalysisExcludedFindings = $ConditionalAccessAnalysisExcludedFindings
-        eidscaExcludedFindings = $EidscaExcludedFindings
+        eidscaExcludedFindings                    = $EidscaExcludedFindings
     }
 
     $json = $payload | ConvertTo-Json -Depth 25 -Compress

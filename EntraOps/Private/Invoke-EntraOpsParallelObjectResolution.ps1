@@ -276,13 +276,11 @@ function Invoke-EntraOpsParallelObjectResolution {
                 # Process results
                 $SuccessCount = 0
                 $FailureCount = 0
-                $UsedThreads = @()
                 
                 foreach ($Result in $ParallelResults) {
                     if ($Result.Success) {
                         $ObjectDetailsCache[$Result.ObjectId] = $Result.Details
                         $SuccessCount++
-                        if ($Result.ThreadId -notin $UsedThreads) { $UsedThreads += $Result.ThreadId }
                     } else {
                         Write-Warning "Failed to get details for object $($Result.ObjectId): $($Result.Error)"
                         $ObjectDetailsCache[$Result.ObjectId] = $null
@@ -290,7 +288,7 @@ function Invoke-EntraOpsParallelObjectResolution {
                     }
                 }
                 
-                Write-Host "Parallel processing completed: $SuccessCount successful, $FailureCount failed (used $($UsedThreads.Count) threads)"
+                Write-Host "Parallel processing completed: $SuccessCount successful, $FailureCount failed (throttle limit $ParallelThrottleLimit)"
                 
             } catch {
                 Write-Warning "Parallel processing failed: $($_.Exception.Message). Falling back to sequential processing."

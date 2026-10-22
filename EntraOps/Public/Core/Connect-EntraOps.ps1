@@ -24,6 +24,58 @@
     Connect-MgGraph -Scopes can trigger the interactive/incremental consent prompt that delegated
     Graph scopes require; a warning is emitted when this fallback applies.
 
+.PARAMETER Scope
+    Delegated Microsoft Graph scopes requested for interactive sign-in. "Report" (default) requests read scopes,
+    "ServiceEM" the ServiceEM write scopes and "ApplyProtection" the write scopes of the protection cmdlets of
+    Push-EntraOpsPrivilegedEAM (administrative units, Conditional Access groups, catalog protection). Catalog
+    protection (EntitlementManagement.ReadWrite.All) and ServiceEM administrative units (AdministrativeUnit.ReadWrite.All)
+    are only requested when enabled in EntraOpsConfig.json.
+
+.PARAMETER GraphApiVersion
+    Microsoft Graph API version ("beta" or "v1.0"). Default is "beta". Reserved; currently not used by
+    Connect-EntraOps.
+
+.PARAMETER AccountId
+    Application (client) ID of the user-assigned managed identity for AuthenticationType "UserAssignedMSI".
+    For "AlreadyAuthenticated", the account ID used with -AzArmAccessToken and -MsGraphAccessToken.
+
+.PARAMETER TenantName
+    Name of the tenant to connect to (e.g. contoso.onmicrosoft.com). Mandatory.
+
+.PARAMETER TenantId
+    Tenant ID of the tenant to connect to. Taken from the TenantId of the loaded configuration file
+    (see -ConfigFilePath) when not specified.
+
+.PARAMETER ManagingTenantId
+    Tenant ID of the governing (managing) tenant of a Tenant Governance relationship. Connect-EntraOps
+    pre-authenticates to this tenant for cross-tenant classification. Taken from the loaded configuration
+    file (see -ConfigFilePath) when not specified.
+
+.PARAMETER ManagingTenantName
+    Name of the governing (managing) tenant of a Tenant Governance relationship. Taken from the loaded configuration
+    file (see -ConfigFilePath) when not specified.
+
+.PARAMETER MultiTenantRepo
+    Stores the Privileged EAM export in a tenant-specific subfolder (PrivilegedEAM/<TenantName>/) for
+    repositories that contain data of multiple tenants. Default is false.
+
+.PARAMETER AzArmAccessToken
+    Azure Resource Manager access token for AuthenticationType "AlreadyAuthenticated". Used together with
+    -AccountId and -MsGraphAccessToken to connect Az PowerShell with existing tokens.
+
+.PARAMETER MsGraphAccessToken
+    Microsoft Graph access token to use for this session, e.g. from a pipeline secret or federated token.
+    With -UseInvokeRestMethodOnly, the token is used for the REST requests instead of a token from Get-AzAccessToken.
+
+.PARAMETER ConfigFilePath
+    Path to the EntraOpsConfig.json to load into the session ($EntraOpsConfig). Without this parameter,
+    EntraOpsConfig.json in the current folder, otherwise in the EntraOps working folder, is loaded
+    automatically unless its TenantName differs from -TenantName. The connection summary shows which
+    file is used.
+
+.PARAMETER NoWelcome
+    Suppresses the welcome banner and the connection summary.
+
 .EXAMPLE
     Using Interactive Sign-In of User with double authentication to Az PowerShell (Connect-AzAccount) and Microsoft Graph SDK (Connect-MgGraph)
     Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
@@ -48,6 +100,10 @@ function Connect-EntraOps {
         [ValidateSet('UserInteractive', 'SystemAssignedMSI', 'UserAssignedMSI', 'FederatedCredentials', 'AlreadyAuthenticated', 'DeviceAuthentication')]
         [System.String]$AuthenticationType = "AlreadyAuthenticated"
         ,
+        [Parameter(Mandatory = $False)]
+        [ValidateSet("Report", "ServiceEM", "ApplyProtection")]
+        [System.String]$Scope = "Report"
+        ,        
         [Parameter(Mandatory = $False)]
         [ValidateSet("beta", "v1.0")]
         [System.String]$GraphApiVersion = "beta"
@@ -113,22 +169,112 @@ function Connect-EntraOps {
 
             $PSEnvironment = "PowerShell " + ($PSVersionTable.PSEdition) + " " + ($PSVersionTable.PSVersion.ToString())
 
-            $Splash = @"
- ______       _              ____
-|  ____|     | |            / __ \
-| |__   _ __ | |_ _ __ __ _| |  | |_ __  ___
-|  __| | '_ \| __| '__/ _`  | |  | | '_ \/ __|
-| |____| | | | |_| | | (_| | |__| | |_) \__ \
-|______|_| |_|\__|_|  \__,_|\____/| .__/|___/
-                                  | |
-                                  |_|
+            # Splash art and a color map of the same shape: each map character sets the color of the art character at that position
+            $SplashArt = @'
+         .  .  .                  ______      __             ____
+         |\/ \/|                 / ____/___  / /__________ _/ __ \____  _____
+        _'-----'_               / __/ / __ \/ __/ ___/ __ `/ / / / __ \/ ___/
+       /_________/|            / /___/ / / / /_/ /  / /_/ / /_/ / /_/ (__  )
+     __|_________|/_          /_____/_/ /_/\__/_/   \__,_/\____/ .___/____/
+    /_______________/|                                        /_/
+  __|_______________|/_
+ /_____________________/|
+ |_____________________|/
+'@ -split '\r?\n'
 
-Version $($ModuleVersion) on $($PSEnvironment)
-Community Project by Thomas Naunheim - www.entraops.com
-"@
+            $SplashColorMap = @'
+         C  C  C                  WWWWWW      WW             WWWW
+         CCC CCC                 W WWWWWWWW  W WWWWWWWWWWW WW WW WWWWW  WWWWW
+        0CCCCCCC0               W WWW W WW WW WWW WWWW WW WW W W W WW WW WWWW
+       000000000000            W WWWWW W W W WWW W  W WWW W WWW W WWW WWW  W
+     110000000000001          WWWWWWWWW WWWWWWWWW   WWWWWWWWWWWW WWWWWWWWWW
+    111111111111111111                                        WWW
+  221111111111111111112
+ 222222222222222222222222
+ 222222222222222222222222
+'@ -split '\r?\n'
 
-            Write-Host $Splash -ForegroundColor Blue
+            # 24-bit colors on terminals with virtual terminal support, console colors as fallback
+            $SplashUseRgb = $Host.UI.SupportsVirtualTerminal -and -not [Console]::IsOutputRedirected -and $PSStyle.OutputRendering -ne 'PlainText'
+            $SplashColors = @{
+                'C' = @{ Rgb = 0xF2C14E; Console = 'Yellow' }    # Crown (gold)
+                '0' = @{ Rgb = 0xE5534B; Console = 'Red' }       # Top level (red)
+                '1' = @{ Rgb = 0x4DA3E8; Console = 'Blue' }      # Middle level (blue)
+                '2' = @{ Rgb = 0x57C26B; Console = 'Green' }     # Lowest level (green)
+                'W' = @{ Console = 'Blue' }                      # EntraOps wordmark
+            }
+            $WriteSplashSegment = {
+                param($Text, $ColorKey)
+                $Color = $SplashColors[$ColorKey]
+                if ($SplashUseRgb -and $Color.Rgb) {
+                    Write-Host "$($PSStyle.Foreground.FromRgb($Color.Rgb))$Text$($PSStyle.Reset)" -NoNewline
+                } else {
+                    Write-Host $Text -ForegroundColor $Color.Console -NoNewline
+                }
+            }
+
+            # Info lines are printed to the right of the pyramid base
+            $SplashInfo = @{
+                 6 = @("📦 Version $($ModuleVersion) on $($PSEnvironment)", 'Gray')
+                 7 = @("👤 Community Project by Thomas Naunheim", 'Gray')
+                 8 = @("🌐 www.entraops.com", 'Cyan')
+            }
+
+            for ($Row = 0; $Row -lt $SplashArt.Count; $Row++) {
+                $Line = $SplashArt[$Row]
+                $Map = $SplashColorMap[$Row]
+                if ($SplashInfo.ContainsKey($Row)) { $Line = $Line.PadRight(31) }
+
+                # Group characters of the same color into segments to keep the number of Write-Host calls low
+                $Segment = ''
+                $SegmentKey = 'W'
+                for ($Col = 0; $Col -lt $Line.Length; $Col++) {
+                    $ColorKey = if ($Col -lt $Map.Length -and $Map[$Col] -ne ' ') { [string]$Map[$Col] } else { $SegmentKey }
+                    if ($ColorKey -ne $SegmentKey -and $Segment) {
+                        & $WriteSplashSegment $Segment $SegmentKey
+                        $Segment = ''
+                    }
+                    $SegmentKey = $ColorKey
+                    $Segment += $Line[$Col]
+                }
+                & $WriteSplashSegment $Segment $SegmentKey
+
+                if ($SplashInfo.ContainsKey($Row)) {
+                    Write-Host $SplashInfo[$Row][0] -ForegroundColor $SplashInfo[$Row][1] -NoNewline
+                }
+                Write-Host ''
+            }
         }
+
+        #region Resolve EntraOpsConfig.json when -ConfigFilePath is not passed
+        $ConfigFileStatus = if ($ConfigFilePath) { 'Parameter' } else { 'NotFound' }
+        $ConfigFileSkipReason = $null
+        if (-not $ConfigFilePath) {
+            $ConfigCandidates = @(
+                Join-Path (Get-Location -PSProvider FileSystem).ProviderPath 'EntraOpsConfig.json'
+                if (-not [string]::IsNullOrWhiteSpace($EntraOpsBaseFolder)) { Join-Path $EntraOpsBaseFolder 'EntraOpsConfig.json' }
+            ) | Select-Object -Unique
+            $DetectedConfigPath = $ConfigCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+            if ($DetectedConfigPath) {
+                try {
+                    $DetectedConfig = Get-Content -LiteralPath $DetectedConfigPath -Raw | ConvertFrom-Json
+                    $DetectedTenantName = if ($DetectedConfig.PSObject.Properties.Name -contains 'TenantName') { [string]$DetectedConfig.TenantName }
+                    if (-not [string]::IsNullOrWhiteSpace($DetectedTenantName) -and $DetectedTenantName -ne $TenantName) {
+                        $ConfigFileSkipReason = "TenantName '$DetectedTenantName' in $DetectedConfigPath does not match -TenantName '$TenantName'"
+                    } else {
+                        $ConfigFilePath = $DetectedConfigPath
+                        $ConfigFileStatus = 'AutoDetected'
+                    }
+                } catch {
+                    $ConfigFileSkipReason = "$DetectedConfigPath is not valid JSON: $($_.Exception.Message)"
+                }
+                if ($ConfigFileSkipReason) {
+                    $ConfigFileStatus = 'Skipped'
+                    Write-Warning "EntraOpsConfig.json is not used: $ConfigFileSkipReason. Pass -ConfigFilePath to load a configuration explicitly."
+                }
+            }
+        }
+        #endregion
 
         #region Load tenant and managing tenant settings from config file if not provided as parameters
         if ($ConfigFilePath -and (Test-Path $ConfigFilePath)) {
@@ -209,30 +355,9 @@ Community Project by Thomas Naunheim - www.entraops.com
                     Install-EntraOpsRequiredModule -ModuleName $_.ModuleName -MinimalVersion $_.ModuleVersion
                 }
             }
-
-            $Scopes = @(
-                "AdministrativeUnit.Read.All",
-                "Application.Read.All",
-                "CustomSecAttributeAssignment.Read.All",
-                "DeviceManagementConfiguration.Read.All",
-                "DeviceManagementManagedDevices.Read.All",
-                "DeviceManagementRBAC.Read.All",
-                "DeviceManagementServiceConfig.Read.All",
-                "Directory.Read.All",
-                "DirectoryRecommendations.Read.All",
-                "EntitlementManagement.Read.All",
-                "Group.Read.All",
-                "PrivilegedAccess.Read.AzureADGroup",
-                "PrivilegedEligibilitySchedule.Read.AzureADGroup",
-                "Policy.Read.All",
-                "RemoteTenantGroups.Read.All",
-                "RoleManagement.Read.All",
-                "TenantGovernance-Relationship.Read.All",
-                "ThreatHunting.Read.All",
-                "User.Read.All",
-                "Zone.Read.All"
-            )
         }
+        # Read before sign-in: optional write scopes depend on the features enabled in EntraOpsConfig.json
+        $Scopes = Get-EntraOpsMsGraphDelegatedScope -Scope $Scope -Config $EarlyConfig
         #endregion
 
         # In UseInvokeRestMethodOnly mode, Invoke-EntraOps*Query cmdlets acquire and cache their own
@@ -373,9 +498,9 @@ Community Project by Thomas Naunheim - www.entraops.com
                     # should not fail Connect-EntraOps over this optimization.
                     try {
                         if (-not [string]::IsNullOrEmpty($TenantId)) {
-                            $SecureArmAccessToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -TenantId $TenantId -AsSecureString).Token
+                            $SecureArmAccessToken = (Get-AzAccessToken -ResourceTypeName Arm -TenantId $TenantId -AsSecureString).Token
                         } else {
-                            $SecureArmAccessToken = (Get-AzAccessToken -ResourceUrl "https://management.azure.com/" -AsSecureString).Token
+                            $SecureArmAccessToken = (Get-AzAccessToken -ResourceTypeName Arm -AsSecureString).Token
                         }
                     } catch {
                         Write-Verbose "Could not pre-warm an Azure Resource Manager access token: $($_.Exception.Message)"
@@ -465,7 +590,8 @@ Community Project by Thomas Naunheim - www.entraops.com
         # Recommendation 3: Optimize context retrieval and verbose output generation
         Write-Verbose -Message "Connected to Azure Management"
         $AzContextRaw = Get-AzContext
-        $AzContext = $AzContextRaw | Select-Object Account, Tenant, TokenCache
+        # Account and tenant only - the token cache has no diagnostic value and doesn't belong in logs
+        $AzContext = $AzContextRaw | Select-Object Account, Tenant
         Write-Verbose ($AzContext | Out-String)
 
         # Retrieve MG context once (skipped when Connect-MgGraph was itself skipped in REST-only mode)
@@ -512,8 +638,8 @@ Community Project by Thomas Naunheim - www.entraops.com
                 Write-Error "Issue to import config file $($ConfigFilePath)! Check if the file exists and is in JSON format."
             }
             # Remove Ingest or Apply* parameters from config file and show configuration
-            $EntraOpsConfig.AutomatedClassificationUpdate.Remove("ApplyAutomatedClassificationUpdate")
-            $EntraOpsConfig.AutomatedControlPlaneScopeUpdate.Remove("ApplyAutomatedControlPlaneScopeUpdate")
+            if ($EntraOpsConfig.AutomatedClassificationUpdate) { $EntraOpsConfig.AutomatedClassificationUpdate.Remove("ApplyAutomatedClassificationUpdate") }
+            if ($EntraOpsConfig.AutomatedControlPlaneScopeUpdate) { $EntraOpsConfig.AutomatedControlPlaneScopeUpdate.Remove("ApplyAutomatedControlPlaneScopeUpdate") }
             if ($EntraOpsConfig.LogAnalytics) { $EntraOpsConfig.LogAnalytics.Remove("IngestToLogAnalytics") }
             if ($EntraOpsConfig.SentinelWatchLists) { $EntraOpsConfig.SentinelWatchLists.Remove("IngestToWatchLists") }
             if ($EntraOpsConfig.AutomatedAdministrativeUnitManagement) { $EntraOpsConfig.AutomatedAdministrativeUnitManagement.Remove("ApplyAdministrativeUnitAssignments") }
@@ -525,8 +651,20 @@ Community Project by Thomas Naunheim - www.entraops.com
             }
 
             New-Variable -Name EntraOpsConfig -Value $EntraOpsConfig -Scope Global -Force
+            $__EntraOpsSession['ConfigFilePath'] = (Resolve-Path -LiteralPath $ConfigFilePath -ErrorAction Stop).ProviderPath
             Write-Verbose -Message "Config file $($ConfigFilePath) imported"
+        } else {
+            # A configuration from a previous connection may belong to another tenant
+            Remove-Variable -Name EntraOpsConfig -Scope Global -Force -ErrorAction SilentlyContinue
+            $__EntraOpsSession.Remove('ConfigFilePath')
         }
+        $ConfigFileSummary = switch ($ConfigFileStatus) {
+            'Parameter' { "$ConfigFilePath" }
+            'AutoDetected' { "$ConfigFilePath (found automatically)" }
+            'Skipped' { "Not used - $ConfigFileSkipReason" }
+            default { 'Not used - no EntraOpsConfig.json found, defaults apply' }
+        }
+        Write-Verbose -Message "EntraOpsConfig.json: $ConfigFileSummary"
         #endregion
 
         #region Set global variables
@@ -558,6 +696,17 @@ Community Project by Thomas Naunheim - www.entraops.com
             Write-Host "═══════════════════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
             
             Write-Host "  Authentication Type : $AuthenticationType" -ForegroundColor White
+            Write-Host "  EntraOps Scope      : $Scope" -ForegroundColor White
+            Write-Host "  Config File         : $ConfigFileSummary" -ForegroundColor $(switch ($ConfigFileStatus) { 'Skipped' { 'Yellow' } 'NotFound' { 'Gray' } default { 'Green' } })
+            $WorkingFolderSource = if ($EntraOpsBaseFolderResolution -and $EntraOpsBaseFolderResolution.Path -eq $Global:EntraOpsBaseFolder) {
+                switch ($EntraOpsBaseFolderResolution.Source) {
+                    'EnvironmentVariable' { 'ENTRAOPS_ROOT' }
+                    'RepositoryCheckout' { 'repository clone' }
+                    'CurrentFolder' { 'current folder with EntraOpsConfig.json' }
+                    'UserFolder' { 'default, set ENTRAOPS_ROOT to change' }
+                }
+            } else { 'set in this session' }
+            Write-Host "  Working Folder      : $Global:EntraOpsBaseFolder ($WorkingFolderSource)" -ForegroundColor White
 
             # Display managing tenant info if configured
             if (-not [string]::IsNullOrEmpty($ManagingTenantId)) {
@@ -588,7 +737,7 @@ Community Project by Thomas Naunheim - www.entraops.com
                     $ScopeDisplay = if ($Scopes.Count -le 5) {
                         $Scopes -join ", "
                     } else {
-                        ($Scopes | Select-Object -First 5) -join ", " + " (+$($Scopes.Count - 5) more)"
+                        (($Scopes | Select-Object -First 5) -join ", ") + " (+$($Scopes.Count - 5) more)"
                     }
                     Write-Host "  Graph Scopes        : $ScopeDisplay" -ForegroundColor White
                 }

@@ -50,12 +50,14 @@
     Folder where the per-resource snapshot files are stored. Default is <EntraOpsBaseFolder>/TenantGovernance/Snapshots.
 
 .PARAMETER ResourcesToInclude
-    Array of Microsoft Entra resource types to include in the snapshot. Defaults to the recommended
+    Array of Microsoft Entra resource types to include in the snapshot. Defaults to
+    TenantGovernanceSnapshot.ResourcesToInclude of the loaded EntraOpsConfig, otherwise to the recommended
     tenant governance resource set.
 
 .PARAMETER SnapshotDisplayNamePrefix
     Prefix used for the snapshot's display name on the Microsoft Graph side (visible in the admin
-    center / when listing snapshot jobs via Graph). Default is "EntraOps TG". The Microsoft Graph
+    center / when listing snapshot jobs via Graph). Defaults to TenantGovernanceSnapshot.SnapshotDisplayNamePrefix
+    of the loaded EntraOpsConfig, otherwise "EntraOps TG". The Microsoft Graph
     UTCM API only allows alphabets, numbers, and spaces in the resulting display name (any other
     characters, e.g. hyphens, are stripped automatically) and enforces a length between 8 and 32
     characters (longer names are truncated automatically). Purely cosmetic - it has no effect on
@@ -83,12 +85,14 @@
 
 .PARAMETER SnapshotResourceFileNaming
     Controls the file name used for each persisted resource file (the folder structure - resourceType
-    then the first displayName segment - is unaffected). Possible values:
-    - "DisplayName" (default): the file is named after the remainder of the resource's displayName
+    then the first displayName segment - is unaffected). Defaults to
+    TenantGovernanceSnapshot.SnapshotResourceFileNaming of the loaded EntraOpsConfig, otherwise
+    "DisplayName". Possible values:
+    - "DisplayName" (default without configuration): the file is named after the remainder of the resource's displayName
       (everything after its first "-"), e.g. "Legacy 1 - Block legacy auth.json". Human-readable, but
       the file is effectively renamed/re-created if the resource's displayName changes.
     - "ResourceId": the file is named after the resource's underlying Id (typically a GUID), e.g.
-      "e9f699a0-fb3f-48da-84c6-6351163b2109.json". Stable across renames, so Git history tracks
+      "33333333-3333-3333-3333-333333333333.json". Stable across renames, so Git history tracks
       changes to the same resource as diffs to the same file instead of a rename. Falls back to
       DisplayName-based naming for resource types that don't expose an Id.
 
@@ -142,6 +146,25 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
 
     $ErrorActionPreference = "Stop"
 
+    # Settings not passed as parameters fall back to the configuration loaded by Connect-EntraOps -ConfigFilePath
+    $TenantGovernanceConfig = if ($null -ne $Global:EntraOpsConfig) { $Global:EntraOpsConfig.TenantGovernanceSnapshot }
+    if ($null -ne $TenantGovernanceConfig) {
+        if (-not $PSBoundParameters.ContainsKey('ResourcesToInclude') -and @($TenantGovernanceConfig.ResourcesToInclude | Where-Object { $_ }).Count -gt 0) {
+            $ResourcesToInclude = @($TenantGovernanceConfig.ResourcesToInclude | Where-Object { $_ })
+            Write-Verbose "Using ResourcesToInclude from EntraOpsConfig ($($ResourcesToInclude.Count) resource types)"
+        }
+        if (-not $PSBoundParameters.ContainsKey('SnapshotDisplayNamePrefix') -and -not [string]::IsNullOrWhiteSpace([string]$TenantGovernanceConfig.SnapshotDisplayNamePrefix)) {
+            $SnapshotDisplayNamePrefix = [string]$TenantGovernanceConfig.SnapshotDisplayNamePrefix
+            Write-Verbose "Using SnapshotDisplayNamePrefix '$SnapshotDisplayNamePrefix' from EntraOpsConfig"
+        }
+        if (-not $PSBoundParameters.ContainsKey('SnapshotResourceFileNaming') -and -not [string]::IsNullOrWhiteSpace([string]$TenantGovernanceConfig.SnapshotResourceFileNaming)) {
+            if ([string]$TenantGovernanceConfig.SnapshotResourceFileNaming -notin @('DisplayName', 'ResourceId')) {
+                throw "Invalid TenantGovernanceSnapshot.SnapshotResourceFileNaming '$($TenantGovernanceConfig.SnapshotResourceFileNaming)' in EntraOpsConfig. Use 'DisplayName' or 'ResourceId'."
+            }
+            $SnapshotResourceFileNaming = [string]$TenantGovernanceConfig.SnapshotResourceFileNaming
+            Write-Verbose "Using SnapshotResourceFileNaming '$SnapshotResourceFileNaming' from EntraOpsConfig"
+        }
+    }
     # --- Path safety: ensure ExportFolder is under the expected base directory ---
     $ResolvedExportFolder = [System.IO.Path]::GetFullPath($ExportFolder)
     $ResolvedBaseFolder = [System.IO.Path]::GetFullPath($EntraOpsBaseFolder)
@@ -185,7 +208,44 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
         }
 
         Write-Output "Checking pending snapshot job $($PendingJob.SnapshotJobId) started at $($PendingJob.CreatedDateTime)..."
-        $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId $PendingJob.SnapshotJobId -ResourcesToInclude @($PendingJob.ResourcesToInclude) -SkipWaitForCompletion -SkipPrerequisiteCheck:$SkipPrerequisiteCheck
+        try {
+            $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId $PendingJob.SnapshotJobId -ResourcesToInclude @($PendingJob.ResourcesToInclude) -SkipWaitForCompletion -SkipPrerequisiteCheck:$SkipPrerequisiteCheck
+        } catch {
+            # A job that can never be collected would block every later Start and Collect: record it as last attempt,
+            # release the pending job and fail. Transient polling errors keep the pending job.
+            if ($_.FullyQualifiedErrorId -like 'EntraOpsTenantGovernanceSnapshotJobTerminal*') {
+                $TerminalMessage = $_.Exception.Message
+                [ordered]@{
+                    SnapshotId                  = $PendingJob.SnapshotJobId
+                    SnapshotDisplayName         = $PendingJob.SnapshotDisplayName
+                    SnapshotJobStatus           = 'failed'
+                    CapturedDateTime            = $PendingJob.CreatedDateTime
+                    ResourcesToInclude          = @($PendingJob.ResourcesToInclude)
+                    CapturedResourceCount       = 0
+                    AttemptResourceTypeCounts   = [ordered]@{}
+                    PublishedResourceTypeCounts = [ordered]@{}
+                    ResourceTypeFileCounts      = [ordered]@{}
+                    PublishedResourceTypes      = @()
+                    StaleResourceTypes          = @($PendingJob.ResourcesToInclude | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
+                    ResourceTypeStates          = @()
+                    Diagnostics                 = @(
+                        [PSCustomObject][ordered]@{
+                            ResourceType    = $null
+                            ErrorCategory   = 'SnapshotJobFailed'
+                            ErrorCode       = 'SnapshotJobNotCollectable'
+                            Occurrences     = 1
+                            Message         = $TerminalMessage
+                            RemediationHint = 'The snapshot job failed or returned no resources and is not retried. The next run starts a new snapshot job.'
+                        }
+                    )
+                    ErrorDetailsUnavailable     = $false
+                    IsComplete                  = $false
+                } | ConvertTo-Json -Depth 10 | Set-Content -Path $LastAttemptManifestFilePath -Encoding utf8
+                Remove-Item -LiteralPath $PendingJobFilePath -Force
+                Write-Warning "Snapshot job $($PendingJob.SnapshotJobId) can't be collected and was released. The next run starts a new snapshot job; the published snapshot is unchanged."
+            }
+            throw
+        }
     } else {
         if ($HasPendingJob) {
             throw "Pending snapshot job $($PendingJob.SnapshotJobId) already exists. Run -Operation Collect before starting another job."
@@ -318,11 +378,14 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
                 }
             }
         )
+        # Nothing published: keep the previous capture time, so the snapshot age isn't reset
+        $PublishedCapturedDateTime = if ($null -ne $PreviousManifest -and -not [string]::IsNullOrWhiteSpace("$($PreviousManifest.CapturedDateTime)")) { $PreviousManifest.CapturedDateTime } else { $Snapshot.CreatedDateTime }
         $AmbiguousPartialManifest = [ordered]@{
             SnapshotId                  = $Snapshot.SnapshotId
             SnapshotDisplayName         = $Snapshot.DisplayName
             SnapshotJobStatus           = $SnapshotJobStatus
-            CapturedDateTime            = $Snapshot.CreatedDateTime
+            CapturedDateTime            = $PublishedCapturedDateTime
+            AttemptDateTime             = $Snapshot.CreatedDateTime
             ResourcesToInclude          = @($Snapshot.ResourcesToInclude)
             CapturedResourceCount       = $Snapshot.ResourceCount
             AttemptResourceTypeCounts   = [ordered]@{}

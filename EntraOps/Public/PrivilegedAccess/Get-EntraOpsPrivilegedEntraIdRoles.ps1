@@ -953,7 +953,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     $TgDelegatedActiveAndPermanentAssignments = @()
 
     if ($null -ne $ActiveTgRelationships -and $ActiveTgRelationships.Count -gt 0) {
-        Write-Host "Processing ... Remote Tenant Groups"
+        Write-Host "Fetching remote tenant groups..."
         # Remote tenant root group lookup: the only way to resolve a display name for
         # delegated admin groups living in a (non-managing) governing tenant. Best-effort -
         # a failure here must not abort the whole role collection.
@@ -970,6 +970,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                     })
             }
         }
+        Write-Host "Found $(@($RemoteTgGroups | Where-Object { $null -ne $_ }).Count) remote tenant group(s)"
 
         # O(1) lookup by remote group id for the parallel block below (avoids scanning
         # the whole array in every runspace).

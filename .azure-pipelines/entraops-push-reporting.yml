@@ -1,0 +1,300 @@
+# Azure DevOps Pipeline for EntraOps report generation
+
+trigger: none
+pr: none
+
+parameters:
+  # BEGIN EntraOps managed service connection
+  - name: serviceConnection
+    displayName: Azure Resource Manager service connection
+    type: string
+    default: "EntraOps-ServiceConnection"
+  # END EntraOps managed service connection
+  - name: allowStaleTenantGovernance
+    displayName: Allow a Tenant Governance snapshot older than its maximum age for this run (unchecked applies StaleTenantGovernanceSnapshotAction)
+    type: boolean
+    default: false
+  - name: allowPartialTenantGovernance
+    displayName: Allow a mixed partial Tenant Governance snapshot
+    type: string
+    default: Configured
+    values:
+      - Configured
+      - "true"
+      - "false"
+  - name: runGeneratedReportTests
+    displayName: Test the generated reports before publishing them (Configured uses AutomatedReportingGeneration.RunGeneratedReportTests)
+    type: string
+    default: Configured
+    values:
+      - Configured
+      - "true"
+      - "false"
+
+resources:
+  pipelines:
+    - pipeline: entraops-pull
+      source: entraops-pull
+      trigger: true
+
+# BEGIN EntraOps managed schedules
+# Schedules are added by Update-EntraOpsAzureDevOpsSchedules from EntraOpsConfig.json.
+# END EntraOps managed schedules
+variables:
+  ConfigFile: ./EntraOpsConfig.json
+
+pool:
+  vmImage: ubuntu-latest
+
+jobs:
+  - job: Generate
+    displayName: "Generate reports with the configured service connection"
+    steps:
+      - checkout: self
+        fetchDepth: 0
+        persistCredentials: false
+        displayName: "Checkout repository"
+
+      - task: PowerShell@2
+        displayName: "Checkout latest branch commit"
+        inputs:
+          targetType: filePath
+          filePath: "./.azure-pipelines/scripts/Ado-CheckoutLatest.ps1"
+          pwsh: true
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+      - task: AzurePowerShell@5
+        name: generate
+        displayName: "Generate configured reports"
+        inputs:
+          azureSubscription: ${{ parameters.serviceConnection }}
+          ScriptType: InlineScript
+          Inline: |
+            Import-Module ./EntraOps
+            $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
+            if ($Config.AutomatedReportingGeneration.ApplyAutomatedReportingGeneration -ne $true -or
+                ($env:BUILD_REASON -eq 'ResourceTrigger' -and $Config.WorkflowTrigger.PushReportingAfterPullWorkflowTrigger -eq $false)) {
+              Write-Host 'Automated reporting is disabled for this trigger.'
+              exit 0
+            }
+
+            $ClassificationRepository = [string]$Config.AutomatedReportingGeneration.ClassificationExplorerRepository
+            if (-not [string]::IsNullOrWhiteSpace($ClassificationRepository)) {
+              git clone --depth 1 --filter=blob:none --sparse "https://github.com/$ClassificationRepository.git" ./.reporting/AzurePrivilegedIAM
+              if ($LASTEXITCODE -ne 0) { throw 'Could not clone the configured classification repository.' }
+              git -C ./.reporting/AzurePrivilegedIAM sparse-checkout set Classification
+              if ($LASTEXITCODE -ne 0) { throw 'Could not configure the sparse classification checkout.' }
+            }
+
+            $ReportingParameters = @{
+              ConfigFilePath                         = '$(ConfigFile)'
+              AuthenticationType                     = 'FederatedCredentials'
+              AllowPartialTenantGovernanceSnapshot   = $Config.ConfigurationAnalyzer.AllowPartialTenantGovernanceSnapshot -ne $false
+              RemoveClassificationRepositoryAfterRun = $true
+            }
+            $PartialSnapshotOverride = '${{ parameters.allowPartialTenantGovernance }}'
+            if ($PartialSnapshotOverride -ne 'Configured') {
+              $ReportingParameters.AllowPartialTenantGovernanceSnapshot = [bool]::Parse($PartialSnapshotOverride)
+            }
+            if ([bool]::Parse('${{ parameters.allowStaleTenantGovernance }}')) {
+              $ReportingParameters.AllowStaleTenantGovernanceSnapshot = $true
+            }
+            Invoke-EntraOpsReportingGeneration @ReportingParameters | Out-Host
+            $RunGeneratedReportTests = $Config.AutomatedReportingGeneration.RunGeneratedReportTests -eq $true
+            $ReportTestsOverride = '${{ parameters.runGeneratedReportTests }}'
+            if ($ReportTestsOverride -ne 'Configured') { $RunGeneratedReportTests = [bool]::Parse($ReportTestsOverride) }
+            Write-Host "##vso[task.setvariable variable=RunGeneratedReportTests;isOutput=true]$($RunGeneratedReportTests.ToString().ToLowerInvariant())"
+            $UploadReportTestDiagnostics = $Config.AutomatedReportingGeneration.UploadReportTestDiagnostics -eq $true
+            Write-Host "##vso[task.setvariable variable=UploadReportTestDiagnostics;isOutput=true]$($UploadReportTestDiagnostics.ToString().ToLowerInvariant())"
+            Write-Host '##vso[task.setvariable variable=ReportingEnabled;isOutput=true]true'
+          pwsh: true
+          azurePowerShellVersion: LatestVersion
+
+      - task: PowerShell@2
+        name: visibility
+        displayName: "Check Azure DevOps project visibility"
+        condition: and(succeeded(), eq(variables['generate.ReportingEnabled'], 'true'))
+        inputs:
+          targetType: inline
+          script: |
+            $Headers = @{ Authorization = "Bearer $env:SYSTEM_ACCESSTOKEN" }
+            $ProjectUri = "${env:SYSTEM_COLLECTIONURI}_apis/projects/${env:SYSTEM_TEAMPROJECTID}?api-version=7.1"
+            try {
+              $Project = Invoke-RestMethod -Uri $ProjectUri -Headers $Headers -Method Get
+              $IsPrivate = $Project.visibility -eq 'private'
+            } catch {
+              Write-Warning "Could not verify project visibility. Reporting artifacts will not be published. $($_.Exception.Message)"
+              $IsPrivate = $false
+            }
+            Write-Host "##vso[task.setvariable variable=ProjectIsPrivate;isOutput=true]$($IsPrivate.ToString().ToLowerInvariant())"
+          pwsh: true
+        env:
+          SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+      - task: PowerShell@2
+        name: handover
+        displayName: "Prepare report handover"
+        condition: and(succeeded(), eq(variables['visibility.ProjectIsPrivate'], 'true'))
+        inputs:
+          targetType: inline
+          script: |
+            $ReportsRoot = (Resolve-Path ./Reports).Path
+            $StagingRoot = '$(Build.ArtifactStagingDirectory)'
+            Copy-Item -LiteralPath $ReportsRoot -Destination "$StagingRoot/Reports" -Recurse
+            Get-ChildItem -LiteralPath "$StagingRoot/Reports" -Filter '*.spec.mjs' -Recurse | Remove-Item
+            if ('$(generate.RunGeneratedReportTests)' -eq 'true') {
+              $HarnessRoot = New-Item -Path "$StagingRoot/ReportTests" -ItemType Directory -Force
+              Copy-Item -Path ./package.json, ./package-lock.json, ./playwright.config.mjs -Destination $HarnessRoot
+              foreach ($Spec in Get-ChildItem -LiteralPath $ReportsRoot -Filter '*.spec.mjs' -Recurse) {
+                $RelativePath = [System.IO.Path]::GetRelativePath($ReportsRoot, $Spec.FullName)
+                $Destination = Join-Path $HarnessRoot "Reports/$RelativePath"
+                New-Item -Path (Split-Path $Destination -Parent) -ItemType Directory -Force | Out-Null
+                Copy-Item -LiteralPath $Spec.FullName -Destination $Destination
+              }
+            }
+            # Content digest of the staged bundle; the Publish job verifies the tested hand-over against it.
+            $DigestRoot = (Resolve-Path "$StagingRoot/Reports").Path
+            $Entries = [System.Collections.Generic.List[string]]::new()
+            foreach ($File in Get-ChildItem -LiteralPath $DigestRoot -Recurse -File -Force) {
+              $RelativePath = [System.IO.Path]::GetRelativePath($DigestRoot, $File.FullName).Replace('\', '/')
+              $Entries.Add("$RelativePath`t$((Get-FileHash -LiteralPath $File.FullName -Algorithm SHA256).Hash)")
+            }
+            if ($Entries.Count -eq 0) { throw 'No generated report files were staged.' }
+            $Entries.Sort([System.StringComparer]::Ordinal)
+            $Digest = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($Entries -join "`n"))).ToLowerInvariant()
+            Write-Host "##vso[task.setvariable variable=ReportsDigest;isOutput=true]$Digest"
+            if ('$(generate.RunGeneratedReportTests)' -eq 'true') {
+              Write-Host "Report tests enabled: EntraOps-Reporting is published only after the Test job passes (digest $Digest)."
+            } else {
+              Write-Host "Report tests disabled: EntraOps-Reporting is published untested (digest $Digest)."
+              Write-Host '##vso[build.addbuildtag]reports-untested'
+            }
+          pwsh: true
+
+      - task: PublishPipelineArtifact@1
+        displayName: "Publish EntraOps Reporting artifact"
+        condition: and(succeeded(), eq(variables['visibility.ProjectIsPrivate'], 'true'), ne(variables['generate.RunGeneratedReportTests'], 'true'))
+        inputs:
+          targetPath: "$(Build.ArtifactStagingDirectory)/Reports"
+          artifact: EntraOps-Reporting
+          publishLocation: pipeline
+
+      # With opted-in tests, EntraOps-Reporting is only published by the Publish job after the tests pass.
+      - task: PublishPipelineArtifact@1
+        displayName: "Hand over untested reports"
+        condition: and(succeeded(), eq(variables['visibility.ProjectIsPrivate'], 'true'), eq(variables['generate.RunGeneratedReportTests'], 'true'))
+        inputs:
+          targetPath: "$(Build.ArtifactStagingDirectory)/Reports"
+          artifact: EntraOps-Reporting-Untested
+          publishLocation: pipeline
+
+      - task: PublishPipelineArtifact@1
+        displayName: "Hand over report test harness"
+        condition: and(succeeded(), eq(variables['visibility.ProjectIsPrivate'], 'true'), eq(variables['generate.RunGeneratedReportTests'], 'true'))
+        inputs:
+          targetPath: "$(Build.ArtifactStagingDirectory)/ReportTests"
+          artifact: EntraOps-Reporting-TestHarness
+          publishLocation: pipeline
+
+  - job: Test
+    displayName: "Test reports without the service connection"
+    dependsOn: Generate
+    condition: and(succeeded(), eq(dependencies.Generate.outputs['visibility.ProjectIsPrivate'], 'true'), eq(dependencies.Generate.outputs['generate.RunGeneratedReportTests'], 'true'))
+    timeoutInMinutes: 30
+    variables:
+      UploadReportTestDiagnostics: $[ dependencies.Generate.outputs['generate.UploadReportTestDiagnostics'] ]
+    steps:
+      - checkout: none
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          buildType: current
+          artifactName: EntraOps-Reporting-TestHarness
+          targetPath: "$(Pipeline.Workspace)/ReportTests"
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          buildType: current
+          artifactName: EntraOps-Reporting-Untested
+          targetPath: "$(Pipeline.Workspace)/ReportTests/Reports"
+      - task: UseNode@1
+        displayName: "Use Node.js 22"
+        inputs:
+          version: "22.x"
+      # Restricted logging commands: the third-party packages cannot upload artifacts or set variables.
+      - script: npm ci --ignore-scripts
+        displayName: "Install report test dependencies"
+        workingDirectory: "$(Pipeline.Workspace)/ReportTests"
+        target:
+          commands: restricted
+      - script: npx playwright install --with-deps chromium
+        displayName: "Install Chromium"
+        workingDirectory: "$(Pipeline.Workspace)/ReportTests"
+        target:
+          commands: restricted
+      - script: npm run test:reports
+        displayName: "Test generated reports"
+        workingDirectory: "$(Pipeline.Workspace)/ReportTests"
+        target:
+          commands: restricted
+        env:
+          ENTRAOPS_REPORT_TEST_TRACE: $(UploadReportTestDiagnostics)
+      # Traces contain tenant data; published only when UploadReportTestDiagnostics is enabled.
+      - task: PublishPipelineArtifact@1
+        displayName: "Publish report test diagnostics"
+        condition: and(failed(), eq(variables['UploadReportTestDiagnostics'], 'true'))
+        continueOnError: true
+        inputs:
+          targetPath: "$(Pipeline.Workspace)/ReportTests/test-results"
+          artifact: EntraOps-Reporting-TestDiagnostics
+          publishLocation: pipeline
+      - pwsh: |
+          Write-Host '##vso[build.addbuildtag]reports-test-failed'
+          Write-Host '##vso[task.logissue type=warning]Report tests failed: EntraOps-Reporting is not published for this run.'
+        displayName: "Report test failure"
+        condition: failed()
+
+  # Separate job so the tested artifact is published from reports the npm-based test job cannot modify.
+  - job: Publish
+    displayName: "Publish tested reports"
+    dependsOn:
+      - Generate
+      - Test
+    condition: and(eq(dependencies.Generate.result, 'Succeeded'), eq(dependencies.Test.result, 'Succeeded'))
+    variables:
+      ExpectedReportsDigest: $[ dependencies.Generate.outputs['handover.ReportsDigest'] ]
+    steps:
+      - checkout: none
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          buildType: current
+          artifactName: EntraOps-Reporting-Untested
+          targetPath: "$(Pipeline.Workspace)/Reports"
+      - task: PowerShell@2
+        displayName: "Verify report bundle digest"
+        inputs:
+          targetType: inline
+          script: |
+            $DigestRoot = (Resolve-Path '$(Pipeline.Workspace)/Reports').Path
+            $Entries = [System.Collections.Generic.List[string]]::new()
+            foreach ($File in Get-ChildItem -LiteralPath $DigestRoot -Recurse -File -Force) {
+              $RelativePath = [System.IO.Path]::GetRelativePath($DigestRoot, $File.FullName).Replace('\', '/')
+              $Entries.Add("$RelativePath`t$((Get-FileHash -LiteralPath $File.FullName -Algorithm SHA256).Hash)")
+            }
+            $Entries.Sort([System.StringComparer]::Ordinal)
+            $Digest = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($Entries -join "`n"))).ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($env:EXPECTED_DIGEST) -or $Digest -ne $env:EXPECTED_DIGEST) {
+              throw "Report bundle digest '$Digest' does not match the generated bundle '$env:EXPECTED_DIGEST'."
+            }
+          pwsh: true
+        env:
+          EXPECTED_DIGEST: $(ExpectedReportsDigest)
+      - task: PublishPipelineArtifact@1
+        displayName: "Publish EntraOps Reporting artifact"
+        inputs:
+          targetPath: "$(Pipeline.Workspace)/Reports"
+          artifact: EntraOps-Reporting
+          publishLocation: pipeline
+      - pwsh: |
+          Write-Host '##vso[build.addbuildtag]reports-tested'
+          Write-Host 'Report tests passed: tested EntraOps-Reporting artifact published.'
+        displayName: "Report published artifact"

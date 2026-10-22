@@ -150,9 +150,9 @@ function Invoke-EntraOpsAzQuery {
         }
 
         $TokenParams = @{
-            ResourceUrl     = "$ArmBaseUri/"
-            AsSecureString  = $true
-            ErrorAction     = 'Stop'
+            ResourceTypeName = 'Arm'
+            AsSecureString   = $true
+            ErrorAction      = 'Stop'
         }
         if (-not [string]::IsNullOrEmpty($ForTenantId)) { $TokenParams.TenantId = $ForTenantId }
 
@@ -298,7 +298,7 @@ function Invoke-EntraOpsAzQuery {
                 # Extract the ARM error code from the response body (best effort)
                 $ErrorCode = $null
                 if ($_.ErrorDetails.Message) {
-                    try { $ErrorCode = ($_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction Stop).error.code } catch { }
+                    try { $ErrorCode = ($_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction Stop).error.code } catch { Write-Verbose "ARM error body is not valid JSON, continuing without an error code: $($_.Exception.Message)" }
                 }
 
                 $IsNetworkError = ($null -eq $StatusCode -and $_.Exception.Message -match 'An error occurred while sending the request|operation has timed out|Unable to connect|Connection reset')
@@ -331,7 +331,7 @@ function Invoke-EntraOpsAzQuery {
                         if ($_.Exception.Response.Headers -and $_.Exception.Response.Headers.Contains('Retry-After')) {
                             $RetryAfter = [int]($_.Exception.Response.Headers.GetValues('Retry-After') | Select-Object -First 1)
                         }
-                    } catch { }
+                    } catch { Write-Verbose "Ignoring unreadable Retry-After header, using exponential backoff: $($_.Exception.Message)" }
 
                     if ($null -ne $RetryAfter -and $RetryAfter -gt 0) {
                         $RetryDelay = $RetryAfter

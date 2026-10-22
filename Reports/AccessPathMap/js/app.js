@@ -171,6 +171,50 @@
 
     // Edges that carry computed tier-breach flags (principal -> role / assignment).
     const BREACHABLE_PATTERN = /^EO_(Has|EligibleFor)\w*Role(Assignment)?$/;
+    const ROLE_ASSIGNED_PATTERN = /^EO_\w*RoleAssigned$/;
+
+    // Role node ids per role assignment node (EO_*RoleAssigned: role -> assignment).
+    const rolesByAssignment = new Map();
+    DATA.edges.forEach((e) => {
+        if (!ROLE_ASSIGNED_PATTERN.test(e.kind)) return;
+        if (!rolesByAssignment.has(e.target)) rolesByAssignment.set(e.target, new Set());
+        rolesByAssignment.get(e.target).add(e.source);
+    });
+
+    // The same privilege is usually represented twice: principal -> role assignment and
+    // principal -> role (linked via role -> assignment). Both edges stay in the graph, but
+    // counts must include each principal -> privilege path once: the role assignment edge,
+    // or the role edge when no (visible) assignment edge of that principal leads to an
+    // assignment of that role. Computed from the graph structure (not only the generator's
+    // "distinctpath" flag) so datasets generated before that flag existed count correctly
+    // and filters hiding role assignment nodes fall back to the role edge.
+    function distinctPathEdges(edges, base) {
+        const viaAssignment = new Set();
+        base.forEach((e) => {
+            if (!BREACHABLE_PATTERN.test(e.kind) || !/RoleAssignment$/.test(e.kind)) return;
+            (rolesByAssignment.get(e.target) || []).forEach((roleId) => viaAssignment.add(e.source + "|" + roleId));
+        });
+        const seen = new Set();
+        return edges.filter((e) => {
+            if (!/RoleAssignment$/.test(e.kind) && viaAssignment.has(e.source + "|" + e.target)) return false;
+            const key = e.source + "|" + e.kind + "|" + e.target;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
+    // Role definition nodes (not role assignment nodes) reached by the given breach edges:
+    // direct role edge targets plus the role(s) behind each reached role assignment.
+    function rolesReached(edges) {
+        const roles = new Set();
+        edges.forEach((e) => {
+            const tN = nodesById.get(e.target);
+            if (tN && tN.bucket === "role") roles.add(e.target);
+            else (rolesByAssignment.get(e.target) || []).forEach((roleId) => roles.add(roleId));
+        });
+        return roles;
+    }
 
     // ---- Property display names (PascalCase) --------------------------------
     // Node/edge properties are stored all-lowercase in the dataset (OpenGraph convention -
@@ -228,6 +272,7 @@
         servicetier: "ServiceTier",
         tierbreach: "TierBreach",
         tier0breach: "Tier0Breach",
+        distinctpath: "DistinctPath",
         unresolved: "Unresolved",
     };
     // Fallback for any property not in the lookup above (e.g. a future dataset addition):
@@ -642,22 +687,31 @@
             const sN = nodesById.get(e.source);
             if (sN && ["user", "group", "serviceprincipal"].includes(sN.bucket)) principals.add(sN.id);
         });
-        const breachEdges = base.filter((e) => e.properties && e.properties.tierbreach);
-        const tier0Edges = base.filter((e) => e.properties && e.properties.tier0breach);
-        const tier0Roles = new Set(tier0Edges.map((e) => e.target));
+        const breachEdges = distinctPathEdges(base.filter((e) => e.properties && e.properties.tierbreach), base);
+        const tier0Edges = distinctPathEdges(base.filter((e) => e.properties && e.properties.tier0breach), base);
+        const tier0Roles = rolesReached(tier0Edges);
 
         const stats = [
             { num: nodesById.size, lbl: "Graph nodes (total)", view: "all" },
             { num: DATA.edges.length, lbl: "Graph edges (total)", view: "all" },
             { num: principals.size, lbl: "Principals in view" },
-            { num: breachEdges.length, lbl: "Tier breach paths", danger: true, view: "breach" },
-            { num: tier0Edges.length, lbl: "Tier 0 attack paths", danger: true, view: "tier0" },
-            { num: tier0Roles.size, lbl: "Roles reaching Tier 0", danger: true, view: "tier0", tier0RolesOnly: true },
+            {
+                num: breachEdges.length, lbl: "Tier breach paths", danger: true, view: "breach",
+                tip: "Distinct principal \u2192 role assignment paths where the principal's tier is less privileged than the service tier (each assignment counted once, not once per role and assignment edge)",
+            },
+            {
+                num: tier0Edges.length, lbl: "Tier 0 attack paths", danger: true, view: "tier0",
+                tip: "Distinct principal \u2192 role assignment paths from a Tier 1/2 principal to a Tier 0 (Control Plane) service (each assignment counted once, not once per role and assignment edge)",
+            },
+            {
+                num: tier0Roles.size, lbl: "Roles reaching Tier 0", danger: true, view: "tier0", tier0RolesOnly: true,
+                tip: "Distinct role definitions (not role assignments) held by a Tier 1/2 principal on a Tier 0 (Control Plane) service",
+            },
         ];
         document.getElementById("stats").innerHTML = stats
             .map(
                 (s) =>
-                    `<div class="stat${s.view ? " stat-action" : ""}${s.view === state.view && !!s.tier0RolesOnly === state.tier0RolesOnly ? " active" : ""}"${s.view ? ` data-view="${s.view}" data-tier0-roles="${!!s.tier0RolesOnly}" role="button" tabindex="0" aria-pressed="${s.view === state.view && !!s.tier0RolesOnly === state.tier0RolesOnly}"` : ""}><span class="stat-accent" style="background:${s.danger ? "var(--tier-control)" : "var(--brand)"
+                    `<div class="stat${s.view ? " stat-action" : ""}${s.view === state.view && !!s.tier0RolesOnly === state.tier0RolesOnly ? " active" : ""}"${s.tip ? ` title="${esc(s.tip)}"` : ""}${s.view ? ` data-view="${s.view}" data-tier0-roles="${!!s.tier0RolesOnly}" role="button" tabindex="0" aria-pressed="${s.view === state.view && !!s.tier0RolesOnly === state.tier0RolesOnly}"` : ""}><span class="stat-accent" style="background:${s.danger ? "var(--tier-control)" : "var(--brand)"
                     }"></span><div class="stat-label">${s.lbl}</div><div class="stat-value"${s.danger ? ' style="color:var(--tier-control)"' : ""
                     }>${s.num.toLocaleString()}</div></div>`
             )
@@ -681,8 +735,8 @@
             const el = document.getElementById(id);
             if (el) el.textContent = n.toLocaleString();
         };
-        set("cnt-tier0", base.filter((e) => e.properties && e.properties.tier0breach).length);
-        set("cnt-breach", base.filter((e) => e.properties && e.properties.tierbreach).length);
+        set("cnt-tier0", distinctPathEdges(base.filter((e) => e.properties && e.properties.tier0breach), base).length);
+        set("cnt-breach", distinctPathEdges(base.filter((e) => e.properties && e.properties.tierbreach), base).length);
         set("cnt-all", base.length);
     }
 
@@ -971,7 +1025,7 @@
         // breaches), so the section label reflects that instead of overpromising.
         document.getElementById("pathTableTitle").textContent =
             state.view === "all" ? "Tier-crossing edges" : "Attack path edges";
-        document.getElementById("pathCount").textContent = allRows.length.toLocaleString() + " path(s)";
+        document.getElementById("pathCount").textContent = allRows.length.toLocaleString() + " edge(s)";
         const rows = allRows.slice(0, pathLimit);
 
         const tbody = document.querySelector("#pathTable tbody");

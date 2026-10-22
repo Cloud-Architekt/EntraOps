@@ -31,7 +31,7 @@
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to custom table in Log Analytics or Sentinel Workspace defined in parameter.
-    Save-EntraOpsPrivilegedEAMInsightsCustomTable -DataCollectionRuleName "EntraOpsDataCollectionRule" -DataCollectionResourceGroupName "EntraOpsResourceGroup" -DataCollectionRuleSubscriptionId "3f72a077-c32a-423c-8503-41b93d3b0737"
+    Save-EntraOpsPrivilegedEAMInsightsCustomTable -DataCollectionRuleName "EntraOpsDataCollectionRule" -DataCollectionResourceGroupName "EntraOpsResourceGroup" -DataCollectionRuleSubscriptionId "11111111-1111-1111-1111-111111111111"
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to custom table in Log Analytics or Sentinel Workspace defined in config file and available in global variable.
@@ -69,13 +69,24 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
         [object]$RbacSystems = ("Azure", "AzureBilling", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")
     )
 
+    # One TimeGenerated for the whole run: the PrivilegedEAM parser selects runs by it
+    $IngestionTimeGenerated = (Get-Date).ToUniversalTime()
+
+    # A run limited to some object types writes no completion marker: the parser would hide the other types
+    $UploadedPrincipalTypes = @($PrincipalTypeFilter | ForEach-Object { "$_".ToLowerInvariant() })
+    $IsCompleteRun = @(@('user', 'group', 'serviceprincipal') | Where-Object { $_ -notin $UploadedPrincipalTypes }).Count -eq 0
+    if (-not $IsCompleteRun) {
+        Write-Warning "PrincipalTypeFilter '$($PrincipalTypeFilter -join ', ')' doesn't include all object types (user, group, serviceprincipal). No completion marker is written: the PrivilegedEAM parser keeps returning the last complete run, and the uploaded records are only available in $TableName."
+    }
+
     $OriginalAzContext = Get-AzContext
     try {
         Set-AzContext -SubscriptionId $DataCollectionRuleSubscriptionId | Out-Null
 
         foreach ($RbacSystem in $RbacSystems) {
         Write-Host "Upload data for $($RbacSystem)"
-        foreach ($ObjectType in $PrincipalTypeFilter) {
+        # Export folders are lowercase (case-sensitive file systems)
+        foreach ($ObjectType in $UploadedPrincipalTypes) {
             $EamFiles = @()
             $ObjectTypePath = Join-Path -Path $ImportPath -ChildPath "$RbacSystem/$ObjectType"
 
@@ -115,12 +126,23 @@ function Save-EntraOpsPrivilegedEAMInsightsCustomTable {
                         $Json = $EamSummary | ConvertTo-Json -Depth 10 -AsArray
 
                         # Send the batch to the API
-                        Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId
+                        Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $json -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId -TimeGenerated $IngestionTimeGenerated
                     }
 
                     Write-Host "Processed batch ${CurrentBatch}/${TotalBatches}: $($EamSummary.Count) files (starting at index $i)"
                 }
             }
+        }
+
+        # Completion marker per collected RBAC system: the parser ignores runs without it (e.g. a failed batch)
+        if ($IsCompleteRun -and (Test-Path -LiteralPath (Join-Path -Path $ImportPath -ChildPath $RbacSystem) -PathType Container)) {
+            $RunMarker = ConvertTo-Json -InputObject @([ordered]@{
+                    ObjectId          = "EntraOpsIngestionRun"
+                    ObjectType        = "EntraOpsIngestionRun"
+                    ObjectDisplayName = "EntraOps ingestion run completed"
+                    RoleSystem        = $RbacSystem
+                }) -Depth 3
+            Push-EntraOpsLogsIngestionAPI -TableName $TableName -JsonContent $RunMarker -DataCollectionRuleName $DataCollectionRuleName -DataCollectionResourceGroupName $DataCollectionResourceGroupName -DataCollectionRuleSubscriptionId $DataCollectionRuleSubscriptionId -TimeGenerated $IngestionTimeGenerated
         }
         }
     } finally {

@@ -60,8 +60,6 @@ EOCE.views.roles = {
                     });
                 });
             });
-            self.overwrites = {};
-            res[1].forEach(function (o) { self.overwrites[o.RoleDefinitionId] = o; });
 
             // Roles that exist ONLY in the Microsoft Learn permissions reference
             // (documented on Learn but not returned by Microsoft Graph). Their tier
@@ -95,6 +93,15 @@ EOCE.views.roles = {
                         raw: r
                     });
                 });
+            });
+
+            var overwriteIndex = EOCE.indexRoleOverwrites(res[1]);
+            all.forEach(function (r) {
+                var o = overwriteIndex[r.sysKey + '|' + r.id];
+                if (!o) return;
+                r.overwriteInfo = EOCE.roleOverwriteInfo(o, EOCE.rolePerms(r.raw), r.classification);
+                // The overwrite tier wins even when the exported role classification disagrees.
+                r.classification = r.overwriteInfo.effectiveTier;
             });
             self.all = all;
 
@@ -166,7 +173,7 @@ EOCE.views.roles = {
         if (this.state.sys === 'all' || EOCE.hasDocsCompare(this.state.sys)) {
             html += '<label class="chip" style="cursor:pointer;gap:6px;" title="Include roles that only exist in the Microsoft Learn permissions reference and are not returned by Microsoft Graph"><input type="checkbox" id="rolesLearnOnly"' + (this.state.learnOnly ? ' checked' : '') + '> \u21C4 Include Microsoft Learn-only</label>';
         }
-        html += '<label class="chip" style="cursor:pointer;gap:6px;" title="Only roles with an EntraOps classification overwrite"><input type="checkbox" id="overwriteOnly"' + (this.state.overwriteOnly ? ' checked' : '') + '> Overwrite</label>';
+        html += '<label class="chip" style="cursor:pointer;gap:6px;" title="Only roles with an EntraOps role definition overwrite (implicit permissions not visible in their role actions)"><input type="checkbox" id="overwriteOnly"' + (this.state.overwriteOnly ? ' checked' : '') + '> Overwrite</label>';
         html += '<label class="chip" style="cursor:pointer;gap:6px;" title="Only roles referenced in a known documented attack path"><input type="checkbox" id="rolesAttackPathOnly"' + (this.state.attackPathOnly ? ' checked' : '') + '> \u26A0 Attack paths exist</label>';
         html += '<label class="chip" style="cursor:pointer;gap:6px;" title="Only roles whose classification depends on assignment scope \u2014 for example Identity Governance catalog-scoped delegation, or a placeholder-scoped action in Entra ID, Azure, Intune or Defender"><input type="checkbox" id="rolesScopeAwareOnly"' + (this.state.scopeAwareOnly ? ' checked' : '') + '> Scope-aware</label>';
         if (this.state.sys !== 'all') html += EOCE.historyToolbarLink(this.state.sys);
@@ -250,7 +257,6 @@ EOCE.views.roles = {
     filtered: function () {
         var s = this.state;
         var q = s.q.toLowerCase();
-        var overwrites = this.overwrites || {};
         return this.all.filter(function (r) {
             if (r.learnOnly && !s.learnOnly) return false;
             if (s.sys !== 'all' && r.sysKey !== s.sys) return false;
@@ -259,7 +265,7 @@ EOCE.views.roles = {
             if (!s.tiers[r.classification]) return false;
             if (s.privOnly && !r.isPrivileged) return false;
             if (s.docMismatchOnly && EOCE.docMismatchCount(r.docDiff) === 0) return false;
-            if (s.overwriteOnly && !overwrites[r.id]) return false;
+            if (s.overwriteOnly && !r.overwriteInfo) return false;
             if (s.attackPathOnly && (!r.attackPaths || r.attackPaths.length === 0)) return false;
             if (s.scopeAwareOnly && !r.scopeAware) return false;
             if (q) {
@@ -310,7 +316,7 @@ EOCE.views.roles = {
             rows.slice(0, visibleRows).forEach(function (r, idx) {
                 var sys = EOCE.RBAC_SYSTEMS[r.sysKey];
                 var nm = EOCE.util.highlight(EOCE.util.escapeHtml(r.name), s.q);
-                var ovr = self.overwrites[r.id] ? '<span class="chip warn" title="Has a classification overwrite">overwrite</span>' : '';
+                var ovr = EOCE.implicitPermissionsChip(r.overwriteInfo);
                 var learnChip = r.learnOnly ? '<span class="chip docdiff" title="This role only exists in the Microsoft Learn permissions reference - it is not returned by Microsoft Graph">Learn-only</span>' : '';
                 var scopeChip = EOCE.scopeAwareChip(r.sysKey, r.scopeAware);
                 var atkChip = EOCE.attackPathChip((r.attackPaths || []).length);
@@ -432,6 +438,7 @@ EOCE.views.roles = {
             (raw.IsCustom === true ? '<span class="chip">custom</span>' : '') +
             (r.learnOnly ? '<span class="chip docdiff" title="This role only exists in the Microsoft Learn permissions reference - it is not returned by Microsoft Graph">Learn-only</span>' : '') +
             EOCE.scopeAwareChip(r.sysKey, r.scopeAware) +
+            EOCE.implicitPermissionsChip(r.overwriteInfo) +
             EOCE.attackPathChip((r.attackPaths || []).length) +
             EOCE.docMismatchChip(r.docDiff) +
             (window.EOReview ? '<button type="button" id="eoRoleStar" class="eo-star" title="Add to review list">&#9734;</button>' : '') +
@@ -445,11 +452,30 @@ EOCE.views.roles = {
         }
 
         var t = EOCE.tier(r.classification);
-        body += '<div class="callout ' + (r.classification === 'ControlPlane' ? 'control' : '') + '">' +
-            '<div class="callout-title">Why ' + EOCE.util.escapeHtml(t.label) + '?</div>' +
-            'This role is classified as <strong>' + EOCE.util.escapeHtml(t.label) + '</strong> because it is the highest-privilege plane among its ' +
-            EOCE.util.formatNumber(perms.length) + ' role action' + (perms.length === 1 ? '' : 's') + '. ' +
-            EOCE.util.escapeHtml(t.description) + '</div>';
+        var ovrInfo = r.overwriteInfo;
+        if (ovrInfo) {
+            var ovr = ovrInfo.overwrite;
+            body += '<div class="callout ' + (r.classification === 'ControlPlane' ? 'control' : 'implicit') + '">' +
+                '<div class="callout-title">Why ' + EOCE.util.escapeHtml(t.label) + '? &middot; implicit permissions</div>' +
+                'This role is pinned to <strong>' + EOCE.util.escapeHtml(t.label) + '</strong>' +
+                (ovr.Service ? ' (' + EOCE.util.escapeHtml(ovr.Service) + ')' : '') +
+                ' by a role definition overwrite, independently of its listed role actions. ' +
+                (ovrInfo.actionCount
+                    ? 'Its ' + EOCE.util.formatNumber(ovrInfo.actionCount) + ' listed role action' + (ovrInfo.actionCount === 1 ? ' alone reaches ' : 's alone reach ') + EOCE.util.tierBadge(ovrInfo.actionTier, { short: true }) + '.'
+                    : 'It has no listed role actions.') +
+                '<div style="margin-top:8px;"><em>' + EOCE.util.escapeHtml(ovr.Justification || '') + '</em></div>' +
+                (ovrInfo.exportedMismatch
+                    ? '<div class="muted" style="margin-top:8px;font-size:12px;">Note: the exported classification data reports ' + EOCE.util.tierBadge(ovrInfo.exportedTier, { short: true }) +
+                    ' for this role; the explorer shows the overwrite tier instead.</div>'
+                    : '') +
+                '</div>';
+        } else {
+            body += '<div class="callout ' + (r.classification === 'ControlPlane' ? 'control' : '') + '">' +
+                '<div class="callout-title">Why ' + EOCE.util.escapeHtml(t.label) + '?</div>' +
+                'This role is classified as <strong>' + EOCE.util.escapeHtml(t.label) + '</strong> because it is the highest-privilege plane among its ' +
+                EOCE.util.formatNumber(perms.length) + ' role action' + (perms.length === 1 ? '' : 's') + '. ' +
+                EOCE.util.escapeHtml(t.description) + '</div>';
+        }
 
         if (r.scopeAware) {
             body += EOCE.scopeAwareCallout(r.sysKey);
@@ -479,14 +505,6 @@ EOCE.views.roles = {
 
         body += EOCE.attackPathCallout(r.attackPaths);
         body += EOCE.docMismatchCallout(r.sysKey, r.docDiff);
-        // overwrite justification
-        var ovr = (this.overwrites || {})[r.id];
-        if (ovr) {
-            body += '<div class="callout scope"><div class="callout-title">Classification overwrite</div>' +
-                'EntraOps overrides this role to <strong>' + EOCE.util.escapeHtml(EOCE.tier(ovr.EAMTierLevelName).label) + '</strong>' +
-                (ovr.Service ? ' (' + EOCE.util.escapeHtml(ovr.Service) + ')' : '') + ' independently of its listed role actions.<br>' +
-                '<em>' + EOCE.util.escapeHtml(ovr.Justification || '') + '</em></div>';
-        }
 
         // InheritsPermissionsFrom holds role IDs (GUIDs) of other roles in the same
         // system whose permissions this role inherits (for example the built-in
@@ -535,7 +553,16 @@ EOCE.views.roles = {
             '<select class="filter" id="roleActionMode"><option value="all">All actions</option>' +
             '<option value="privileged">IsPrivileged only</option>' + docModeOptions + '</select>' +
             (showsPlaneFilter ? '<select class="filter" id="roleActionPlane" title="Azure RBAC keeps control/management plane Actions and data plane DataActions in separate namespaces \u2014 matches the Actions / Data actions split shown in the Azure Portal and Microsoft Learn"><option value="all">Actions + Data actions</option><option value="action">Actions only</option><option value="dataaction">Data actions only</option></select>' : '') +
+            (ovrInfo
+                ? '<label class="chip" style="cursor:pointer;gap:6px;" title="Show permissions that are not part of the role definition (role definition overwrite), separated from the listed role actions">' +
+                '<input type="checkbox" id="roleImplicitToggle" checked> Include implicit permissions</label>' +
+                '<button type="button" class="info-btn" id="roleImplicitInfoBtn" aria-expanded="false" aria-controls="roleImplicitInfo" title="What are implicit permissions?">i</button>'
+                : '') +
             '</div>';
+        if (ovrInfo) {
+            body += '<div class="callout implicit" id="roleImplicitInfo" hidden>' + EOCE.implicitPermissionsInfoHtml() + '</div>';
+            body += '<div id="roleImplicitList">' + this.renderImplicitBlock(ovrInfo) + '</div>';
+        }
         body += '<div id="roleActionList">' + this.renderActionGroups(groups, '', r.docDiff, r.sysKey, 'all', 'all') + '</div>'
         body += '<div style="margin-top:18px;"><a href="' + sys.docs + '" target="_blank" rel="noopener noreferrer" class="inline-link">' + EOCE.util.escapeHtml(sys.short) + ' permissions reference &#8599;</a></div>';
 
@@ -600,6 +627,35 @@ EOCE.views.roles = {
         if (pi) pi.addEventListener('change', function (e) {
             actionState.plane = e.target.value; rerenderActions();
         });
+        var implicitToggle = document.getElementById('roleImplicitToggle');
+        if (implicitToggle) implicitToggle.addEventListener('change', function (e) {
+            document.getElementById('roleImplicitList').hidden = !e.target.checked;
+        });
+        var implicitInfoBtn = document.getElementById('roleImplicitInfoBtn');
+        if (implicitInfoBtn) implicitInfoBtn.addEventListener('click', function () {
+            var info = document.getElementById('roleImplicitInfo');
+            info.hidden = !info.hidden;
+            implicitInfoBtn.setAttribute('aria-expanded', String(!info.hidden));
+        });
+    },
+
+    // Implicit permissions from a role definition overwrite - rendered in its own block so they
+    // are never mixed with the role actions of the role definition.
+    renderImplicitBlock: function (info) {
+        var o = info.overwrite;
+        var t = EOCE.tier(info.effectiveTier);
+        return '<div class="implicit-block">' +
+            '<div class="group-head">' + EOCE.util.tierBadge(info.effectiveTier) +
+            '<span class="chip implicit">\u25C8 implicit permissions</span>' +
+            '<span class="g-count">not part of the role definition</span></div>' +
+            '<div class="action-row implicit" style="border-left:3px dashed ' + t.color + ';">' +
+            '<div style="min-width:0;"><div class="a-name">' + EOCE.util.escapeHtml(o.Service || 'Implicit permissions') + '</div>' +
+            '<div class="a-cat">' + EOCE.util.escapeHtml(o.Justification || '') + '</div>' +
+            '<div class="a-cat">' + EOCE.util.escapeHtml(EOCE.implicitPermissionsSummary(info)) + '</div>' +
+            '<div class="a-cat cell-mono">TaggedBy: RoleDefinitionOverwrites</div>' +
+            '</div>' + EOCE.util.tierBadge(info.effectiveTier, { short: true }) + '</div>' +
+            '<div class="implicit-sep"><span>Role actions from the role definition</span></div>' +
+            '</div>';
     },
 
     // Azure RBAC keeps control/management plane Actions and data plane DataActions in
@@ -691,7 +747,13 @@ EOCE.views.roles = {
             }
         }
 
-        if (!any) html = '<div class="empty" style="padding:24px;">No actions match the filter.</div>';
+        if (!any) {
+            var total = 0;
+            Object.keys(groups).forEach(function (k) { total += (groups[k] || []).length; });
+            html = total || filter || mode !== 'all'
+                ? '<div class="empty" style="padding:24px;">No actions match the filter.</div>'
+                : '<div class="empty" style="padding:24px;">No role actions are listed in the role definition.</div>';
+        }
         return html;
     }
 };
