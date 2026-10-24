@@ -87,7 +87,8 @@ Describe 'Get-EntraOpsPrivilegedEntraObject resolution status' {
 
         $Result.ObjectType | Should -Be 'unknown'
         $Result.ObjectSubType | Should -Be 'unknown'
-        $Result.ResolutionStatus | Should -Be 'Unresolved'
+        # The object exists, so the aggregation must not turn it into a fail-closed placeholder
+        $Result.ResolutionStatus | Should -Be 'UnhandledType'
         $Warnings | Should -HaveCount 1
         $Warnings[0].Message | Should -Match '#microsoft\.graph\.futureIdentity'
         $Warnings[0].Message | Should -Match $ObjectId

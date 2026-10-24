@@ -22,7 +22,7 @@ test("builds a zero-configuration express quickstart", async ({ page }) => {
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByRole("alert")).toHaveText("Choose whether you use the GitHub template or the PowerShell Gallery.");
     await page.locator('label.setup-choice:has(input[value="gallery"])').click();
-    await expect(page.locator(".setup-command").filter({ hasText: "Install-PSResource -Name EntraOps -Prerelease -Repository PSGallery" })).toHaveCount(1);
+    await expect(page.locator(".setup-command").filter({ hasText: "Install-PSResource -Name EntraOps -Repository PSGallery" })).toHaveCount(1);
     await expect(page.locator(".setup-command").filter({ hasText: "Initialize-EntraOpsWorkspace" })).toHaveCount(1);
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByRole("heading", { name: "Sign in interactively" })).toBeVisible();
@@ -51,7 +51,7 @@ test("builds a zero-configuration express quickstart", async ({ page }) => {
 
     await expect(page.getByRole("heading", { name: "Your EntraOps setup" })).toBeVisible();
     const commands = page.locator(".setup-command");
-    await expect(commands.filter({ hasText: "Install-PSResource -Name EntraOps -Prerelease -Repository PSGallery" })).toHaveCount(1);
+    await expect(commands.filter({ hasText: "Install-PSResource -Name EntraOps -Repository PSGallery" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "Initialize-EntraOpsWorkspace" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "Import-Module EntraOps" })).toHaveCount(1);
     await expect(commands.filter({ hasText: "Connect-EntraOps -AuthenticationType 'UserInteractive' -TenantName 'contoso.onmicrosoft.com'" })).toHaveCount(2);

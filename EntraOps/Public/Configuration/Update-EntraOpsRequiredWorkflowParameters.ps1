@@ -13,7 +13,7 @@
 
 .EXAMPLE
     Update all workflows in default location (/.github/workflows) with values from config file:
-    Update-EntraOpsRequiredWorkflowParameters -ConfigFile "./EntraOps.config"
+    Update-EntraOpsRequiredWorkflowParameters -ConfigFile "./EntraOpsConfig.json"
  #>
 
 function Update-EntraOpsRequiredWorkflowParameters {

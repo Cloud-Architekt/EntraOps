@@ -1,5 +1,5 @@
 # Azure DevOps Pipeline for EntraOps Log Analytics Ingestion
-# Pushes collected PrivilegedEAM JSON from ado/main to Log Analytics via Logs Ingestion API.
+# Pushes collected PrivilegedEAM JSON from the pipeline branch to Log Analytics via Logs Ingestion API.
 #
 # Prerequisites:
 #   1. Data Collection Rule (DCR) and Data Collection Endpoint (DCE) must exist
@@ -8,7 +8,7 @@
 #      "Monitoring Metrics Publisher" role on the DCR (Log Analytics Contributor
 #      on the resource group is NOT sufficient for the Logs Ingestion API).
 #   3. EntraOpsConfig.json must contain a populated LogAnalytics section.
-#   4. The pull pipeline must have run and committed JSON to ado/main.
+#   4. The pull pipeline must have run and committed JSON to the pipeline branch.
 #
 # Trigger modes:
 #   A) Automatic: after entraops-pull completes (configure build completion
@@ -33,10 +33,16 @@ resources:
   pipelines:
     - pipeline: entraops-pull
       source: entraops-pull
-      trigger: true
+      # Only pull runs of the pipeline branch trigger this pipeline (Update-EntraOpsAzureDevOpsSchedules -BranchName)
+      # BEGIN EntraOps managed pipeline trigger
+      trigger:
+        branches:
+          include:
+            - 'main'
+      # END EntraOps managed pipeline trigger
 
 variables:
-  # Path to the environment-specific config file (committed in ado/main)
+  # Path to the environment-specific config file (committed in the pipeline branch)
   ConfigFile: ./EntraOpsConfig.json
 
 pool:

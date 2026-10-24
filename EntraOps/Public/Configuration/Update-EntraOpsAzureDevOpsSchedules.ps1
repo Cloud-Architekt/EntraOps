@@ -4,10 +4,13 @@
 
 .DESCRIPTION
     Materializes the Azure DevOps YAML values that cannot be populated from runtime variables. Only
-    regions delimited by the EntraOps managed schedule and service connection markers are changed.
+    regions delimited by the EntraOps managed schedule, pipeline trigger and service connection markers
+    are changed.
     The service connection name is read from AzureDevOpsServiceConnection (default
     EntraOps-ServiceConnection) and written as the default of the compile-time serviceConnection
     parameter, because Azure Pipelines resolves service connections before runtime variables exist.
+    The push and reporting pipelines run after entraops-pull only when it ran on BranchName, so a pull
+    run of another branch can't trigger them with the service connection.
 
 .PARAMETER ConfigFile
     Location of the EntraOps configuration file. Defaults to ./EntraOpsConfig.json.
@@ -17,7 +20,9 @@
     ./.azure-pipelines.
 
 .PARAMETER BranchName
-    Branch included by generated Azure DevOps schedules. Defaults to main.
+    Branch included by generated Azure DevOps schedules and by the entraops-pull completion trigger of the
+    push and reporting pipelines. Defaults to main; Update-EntraOps passes the branch of the current
+    pipeline definitions.
 
 .EXAMPLE
     Update-EntraOpsAzureDevOpsSchedules -ConfigFile ./EntraOpsConfig.json -BranchName main
@@ -45,6 +50,9 @@ function Update-EntraOpsAzureDevOpsSchedules {
     if ([string]::IsNullOrWhiteSpace($ServiceConnection)) { $ServiceConnection = 'EntraOps-ServiceConnection' }
     if ($ServiceConnection -match '[\r\n]') {
         throw 'AzureDevOpsServiceConnection must be a single-line service connection name.'
+    }
+    if ($BranchName -match '[\r\n]') {
+        throw 'BranchName must be a single-line branch name.'
     }
     $ScheduleRegionPattern = '(?ms)^# BEGIN EntraOps managed schedules\r?\n.*?^# END EntraOps managed schedules\s*$'
 
@@ -184,6 +192,38 @@ function Update-EntraOpsAzureDevOpsSchedules {
             Write-Host "Updated the service connection in $PipelineName."
         } else {
             Write-Host "Service connection in $PipelineName is already current."
+        }
+    }
+
+    # The entraops-pull completion trigger of push and reporting is limited to the pipeline branch
+    $TriggerRegionPattern = '(?m)^(?<indent>[ \t]*)# BEGIN EntraOps managed pipeline trigger\r?\n(?:.*\r?\n)*?\k<indent># END EntraOps managed pipeline trigger[ \t]*(?=\r?$)'
+    foreach ($PipelineName in @('entraops-push.yml', 'entraops-push-reporting.yml')) {
+        $PipelinePath = Join-Path -Path $PipelineFolder -ChildPath $PipelineName
+        if (-not (Test-Path -LiteralPath $PipelinePath -PathType Leaf)) {
+            throw "Azure DevOps pipeline not found: $PipelinePath"
+        }
+        $PipelineContent = Get-Content -LiteralPath $PipelinePath -Raw
+        $RegionMatch = [regex]::Match($PipelineContent, $TriggerRegionPattern)
+        if (-not $RegionMatch.Success) {
+            Write-Warning "Azure DevOps pipeline '$PipelinePath' does not contain the managed pipeline trigger markers, so it runs after entraops-pull of any branch; update the pipeline definitions with Update-EntraOps to limit the trigger to '$BranchName'."
+            continue
+        }
+        $Indent = $RegionMatch.Groups['indent'].Value
+        $RegionLines = @(
+            "$Indent# BEGIN EntraOps managed pipeline trigger"
+            "${Indent}trigger:"
+            "$Indent  branches:"
+            "$Indent    include:"
+            "$Indent      - $(ConvertTo-EntraOpsYamlScalar -Value $BranchName)"
+            "$Indent# END EntraOps managed pipeline trigger"
+        )
+        $NewLine = if ($RegionMatch.Value -match "`r`n") { "`r`n" } else { "`n" }
+        $UpdatedContent = $PipelineContent.Remove($RegionMatch.Index, $RegionMatch.Length).Insert($RegionMatch.Index, ($RegionLines -join $NewLine))
+        if ($UpdatedContent -cne $PipelineContent) {
+            Set-Content -LiteralPath $PipelinePath -Value $UpdatedContent -Encoding UTF8 -NoNewline
+            Write-Host "Updated the pipeline trigger branch in $PipelineName."
+        } else {
+            Write-Host "Pipeline trigger branch in $PipelineName is already current."
         }
     }
 }

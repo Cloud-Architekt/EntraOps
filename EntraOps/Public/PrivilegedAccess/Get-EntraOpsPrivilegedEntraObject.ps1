@@ -629,6 +629,8 @@ function Get-EntraOpsPrivilegedEntraObject {
             Write-Warning "Unhandled directory object type '$($ObjectDetails.'@odata.type')' for object $AadObjectId. Classified as 'unknown'; classification for this object may be incomplete."
             $ObjectType = 'unknown'
             $ObjectSubType = 'unknown'
+            # The object exists; 'Unresolved' stays reserved for failed lookups, which the aggregation treats fail-closed
+            $ResolutionStatus = 'UnhandledType'
         }
         #endregion
     }
