@@ -591,8 +591,12 @@ Update-EntraOpsAzureDevOpsSchedules `
 
 The module command changes only the marked YAML schedule, pipeline trigger and service connection regions; `-BranchName`
 is the pipeline branch: the schedules run on it, and the push and reporting pipelines run only after `entraops-pull` runs
-of this branch, so a pull run of another branch never triggers them with the service connection. `Update-EntraOps` keeps
-the branch of the current pipeline definitions when it updates them. Operational
+of this branch, so a pull run of another branch never triggers them with the service connection. Azure DevOps reads the
+pipeline completion trigger from the pipeline's **Default branch for manual and scheduled builds**; keep it set to the
+pipeline branch for all EntraOps pipelines. `Update-EntraOps` keeps the branch of the current pipeline definitions when it
+updates them. Deployments of a 1.1.0 release candidate on another branch than `main` run
+`Update-EntraOpsAzureDevOpsSchedules -BranchName <branch>` once after the update, because the release candidate didn't
+know the pipeline trigger region; otherwise push and reporting no longer run after pull. Operational
 values remain in `EntraOpsConfig.json` and are read by each pipeline at runtime. Azure Pipelines
 resolves the service connection before runtime variables exist, so its name is written as the default
 of the `serviceConnection` pipeline parameter; `Update-EntraOps` applies it again after updating the

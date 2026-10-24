@@ -483,7 +483,8 @@ function Update-EntraOps {
                     try {
                         Update-EntraOpsAzureDevOpsSchedules @AzureDevOpsScheduleParameters
                     } catch {
-                        throw "Failed to update the Azure DevOps pipeline schedules. Error: $_ The updated files were copied, but the configuration was not re-applied to them. Update the EntraOps module in a clean session, then run Update-EntraOpsAzureDevOpsSchedules -ConfigFile '$ConfigFile' -PipelineFolder './.azure-pipelines' from the repository root and commit the result, or rerun the update."
+                        $BranchHint = if ([string]::IsNullOrWhiteSpace($AzureDevOpsPipelineBranch)) { '' } else { " -BranchName '$AzureDevOpsPipelineBranch'" }
+                        throw "Failed to update the Azure DevOps pipeline schedules. Error: $_ The updated files were copied, but the configuration was not re-applied to them. Update the EntraOps module in a clean session, then run Update-EntraOpsAzureDevOpsSchedules -ConfigFile '$ConfigFile' -PipelineFolder './.azure-pipelines'$BranchHint from the repository root and commit the result, or rerun the update."
                     }
                 }
             } finally {

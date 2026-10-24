@@ -103,6 +103,36 @@ Describe "New-EntraOpsEAMOutputObject tier-pair validation" {
     }
 }
 
+Describe "Role assignment order of the EAM output" {
+    It "orders role assignments with the same role and scope by RoleAssignmentId (parallel: <Parallel>)" -ForEach @(
+        @{ Parallel = $false }
+        @{ Parallel = $true }
+    ) {
+        # Equal sort keys apart from the ID, e.g. an application and a delegated grant of the same permission on the same resource
+        $Assignments = @('id-c', 'id-a', 'id-d', 'id-b') | ForEach-Object {
+            $Assignment = New-TestAssignment -RoleName 'User.Read.All'
+            $Assignment | Add-Member -NotePropertyName RoleAssignmentId -NotePropertyValue $_ -PassThru
+        }
+        $Objects = [System.Collections.Generic.List[psobject]]::new()
+        $Cache = @{}
+        $Rbac = @{}
+        $Count = if ($Parallel) { 50 } else { 1 }
+        for ($i = 1; $i -le $Count; $i++) {
+            $Id = "aaaaaaaa-0000-0000-0000-{0:d12}" -f $i
+            $Objects.Add([pscustomobject]@{ ObjectId = $Id; ObjectType = "user" })
+            $Cache[$Id] = New-TestObjectDetails -ObjectId $Id -DisplayName "User $i"
+            $Rbac[$Id] = $Assignments
+        }
+
+        $Result = @(Invoke-EntraOpsEAMClassificationAggregation -UniqueObjects $Objects.ToArray() -ObjectDetailsCache $Cache `
+                -RbacClassificationsByObject $Rbac -RoleSystem "ResourceApps" -EnableParallelProcessing $Parallel -ParallelThrottleLimit 5 -WarningAction SilentlyContinue)
+
+        foreach ($Object in $Result) {
+            @($Object.RoleAssignments.RoleAssignmentId) | Should -Be @('id-a', 'id-b', 'id-c', 'id-d')
+        }
+    }
+}
+
 Describe "Save-EntraOpsEAMRbacSystemJson export replacement" {
     BeforeEach {
         $script:EntraOpsBaseFolder = Join-Path $TestDrive "replace-$([guid]::NewGuid().ToString('N'))"

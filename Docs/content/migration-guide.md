@@ -236,8 +236,6 @@ directly instead of through the parser must exclude these records.
 - `Connect-EntraOps` loads `EntraOpsConfig.json` from the current folder, otherwise from the EntraOps
   [working folder](../index.html#working-folder), when `-ConfigFilePath` isn't passed. A configuration set in the
   session before is removed when no file is found.
-- The warning `IntuneDeviceScopeDesignatedTierGap` is now `IntuneDeviceScopeSelectionGap`; update alert rules or
-  log filters that match the former name.
 - `Test-EntraOpsGeneratedArtifacts` fails, instead of warning, when a `Classification`, `MatchedActions` or
   `ScopedObjects` collection of the export is stored as a single value.
 

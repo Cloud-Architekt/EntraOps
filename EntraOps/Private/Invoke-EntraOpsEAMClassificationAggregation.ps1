@@ -332,7 +332,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                     'RoleSystem'                    = $LocalRoleSystem
                     'Classification'                = $Classification
-                    'RoleAssignments'               = @($RbacClassifiedAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId)
+                    'RoleAssignments'               = @($RbacClassifiedAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
                     'Sponsors'                      = $ObjectDetails.Sponsors
                     'Owners'                        = $ObjectDetails.Owners
                     'OwnedObjects'                  = $ObjectDetails.OwnedObjects

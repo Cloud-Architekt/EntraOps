@@ -26,12 +26,7 @@
 
     An existing eligible Role Based Access Control Administrator assignment of the same principal on the
     scope is kept when its condition matches the configured constrained delegation (same target group and
-    same role IDs, regardless of order and case). It is removed and replaced only when it has the condition
-    created by ServiceEM and either targets this landing zone's group with another role list (e.g. after
-    ExcludedRoleDefinitionIds or AllowedRoleDefinitionIds changed) or targets a group that no longer exists
-    (leftover of a deleted landing zone). Any other assignment, e.g. a condition not created by ServiceEM or
-    the delegation to another existing group, is kept, the remaining assignments are still created, and the
-    function then stops with an error because the constrained delegation for this landing zone isn't assigned.
+    same role IDs, regardless of order and case).
 
     Constrained delegation settings are read from
     EntraOpsConfig.ServiceEM.ConstrainedDelegation when available.
@@ -355,7 +350,7 @@ function New-EntraOpsServiceAZContainer {
                 if ($invalidRoleIds.Count -gt 0) {
                     throw "$logPrefix ServiceEM.ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds contains invalid GUIDs: $($invalidRoleIds -join ', ')"
                 }
-                $highPrivRoleIds = @(@($mandatoryExcludedRoleIds) + $configuredRoleIds | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Select-Object -Unique)
+                $highPrivRoleIds = @(@($mandatoryExcludedRoleIds) + $configuredRoleIds | ForEach-Object { [guid]::Parse("$_").ToString('D') } | Select-Object -Unique)
                 Write-Verbose "$logPrefix Using the built-in and configured ManagementPlane excluded role IDs: $($highPrivRoleIds -join ', ')"
             }
 
@@ -415,7 +410,8 @@ function New-EntraOpsServiceAZContainer {
             if ($invalidRoleIds.Count -gt 0) {
                 throw "$logPrefix ServiceEM.ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds contains invalid GUIDs: $($invalidRoleIds -join ', ')"
             }
-            $forbiddenRoleIds = @($dataPlaneRoleIds | Where-Object { "$_".Trim() -in $mandatoryExcludedRoleIds })
+            $dataPlaneRoleIds = @($dataPlaneRoleIds | ForEach-Object { [guid]::Parse("$_").ToString('D') } | Select-Object -Unique)
+            $forbiddenRoleIds = @($dataPlaneRoleIds | Where-Object { $_ -in $mandatoryExcludedRoleIds })
             if ($forbiddenRoleIds.Count -gt 0) {
                 throw "$logPrefix ServiceEM.ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds must not contain Owner, User Access Administrator or Role Based Access Control Administrator: $($forbiddenRoleIds -join ', ')"
             }
