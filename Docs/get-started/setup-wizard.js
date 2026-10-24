@@ -3,7 +3,7 @@
 
     // True while EntraOps/EntraOps.psd1 sets PrivateData.PSData.Prerelease (e.g. 'rc1'): the PowerShell Gallery
     // only has older stable releases without Initialize-EntraOpsWorkspace. Set to false at GA.
-    var ENTRAOPS_PRERELEASE = true;
+    var ENTRAOPS_PRERELEASE = false;
 
     var state = {
         step: 0,

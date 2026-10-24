@@ -73,6 +73,48 @@ Describe 'Update-EntraOpsAzureDevOpsSchedules' {
         @($Pull, $Reporting, $Update, $TenantGovernance) | ForEach-Object { $_ | Should -Match "- 'production'" }
     }
 
+    It 'limits the pull completion trigger of push and reporting to the target branch' -Skip:$SkipScheduleTests {
+        $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'trigger')
+
+        Update-EntraOpsAzureDevOpsSchedules -ConfigFile $Fixture.ConfigPath -PipelineFolder $Fixture.PipelineFolder -BranchName 'production'
+
+        foreach ($PipelineName in @('entraops-push.yml', 'entraops-push-reporting.yml')) {
+            $Content = Get-Content -LiteralPath (Join-Path $Fixture.PipelineFolder $PipelineName) -Raw
+            $Region = [regex]::Match($Content, '(?ms)# BEGIN EntraOps managed pipeline trigger.*?# END EntraOps managed pipeline trigger').Value
+            $Region | Should -Match "(?m)^\s+trigger:\r?\n\s+branches:\r?\n\s+include:\r?\n\s+- 'production'"
+            $Content | Should -Not -Match "trigger: true"
+        }
+    }
+
+    It 'reads the branch of the current pipeline definitions for Update-EntraOps' -Skip:$SkipScheduleTests {
+        $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'branch')
+        Update-EntraOpsAzureDevOpsSchedules -ConfigFile $Fixture.ConfigPath -PipelineFolder $Fixture.PipelineFolder -BranchName "release's"
+
+        InModuleScope EntraOps -Parameters @{ PipelineFolder = $Fixture.PipelineFolder } {
+            param($PipelineFolder)
+            Get-EntraOpsAzureDevOpsPipelineBranch -PipelineFolder $PipelineFolder | Should -Be "release's"
+        }
+    }
+
+    It 'falls back to the branch of the running Azure DevOps job' {
+        $EmptyFolder = New-Item -Path (Join-Path $TestDrive 'no-pipelines') -ItemType Directory -Force
+        $PreviousSourceBranch = $env:BUILD_SOURCEBRANCH
+        try {
+            $env:BUILD_SOURCEBRANCH = 'refs/heads/feature/x'
+            InModuleScope EntraOps -Parameters @{ PipelineFolder = $EmptyFolder.FullName } {
+                param($PipelineFolder)
+                Get-EntraOpsAzureDevOpsPipelineBranch -PipelineFolder $PipelineFolder | Should -Be 'feature/x'
+            }
+            $env:BUILD_SOURCEBRANCH = 'refs/pull/1/merge'
+            InModuleScope EntraOps -Parameters @{ PipelineFolder = $EmptyFolder.FullName } {
+                param($PipelineFolder)
+                Get-EntraOpsAzureDevOpsPipelineBranch -PipelineFolder $PipelineFolder | Should -BeNullOrEmpty
+            }
+        } finally {
+            $env:BUILD_SOURCEBRANCH = $PreviousSourceBranch
+        }
+    }
+
     It 'removes managed schedules when their switches are disabled' -Skip:$SkipScheduleTests {
         $Fixture = New-AdoScheduleFixture -Root (Join-Path $TestDrive 'disabled')
         $Config = Get-Content -LiteralPath $Fixture.ConfigPath -Raw | ConvertFrom-Json

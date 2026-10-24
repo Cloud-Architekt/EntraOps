@@ -1194,19 +1194,29 @@ Constrained delegations are applied as [Azure ABAC conditions](https://learn.mic
 > **`AllowedTargetGroupFilter` is currently not evaluated.** The target principal is always the object ID of the WorkloadPlane-Admins
 > group (ManagementPlane) or WorkloadPlane-Users group (WorkloadPlane) of the same landing zone scope. Only
 > `ExcludedRoleDefinitionIds` and `AllowedRoleDefinitionIds` are read from the configuration; built-in defaults apply if they are missing.
+> `ExcludedRoleDefinitionIds` **extends** the built-in exclusions (Owner, User Access Administrator, Role Based Access Control
+> Administrator), which always apply, while `AllowedRoleDefinitionIds` replaces the default allow-list and must not contain any of
+> these three roles. A rerun compares the condition of the existing assignment with the configuration: a ServiceEM condition of the
+> same landing zone with another role list (e.g. after you changed one of the lists) is replaced, and an assignment with a condition
+> that ServiceEM didn't create is kept and stops the deployment with an error.
 
 ### ManagementPlane Constrained Delegation
 
 **Scope:** ManagementPlane-Admins group (PIM eligible Role Based Access Control Administrator on the resource group). Assigned when a ManagementPlane-Admins group and WorkloadPlane-Admins exist for the Azure scope, i.e. in a single-scope PerService deployment or with a delegated ManagementPlane group (Centralized model or `ManagementPlaneDelegationGroupId`)
 
-**Permissions:** Can assign **any** Azure role **EXCEPT** the high-privileged roles listed in `ExcludedRoleDefinitionIds`
+**Permissions:** Can assign **any** Azure role **EXCEPT** the built-in high-privileged roles below and the roles listed in `ExcludedRoleDefinitionIds`
 
 **Target:** Can only assign roles to the WorkloadPlane-Admins group of the landing zone
 
-**Default Excluded Roles:**
+**Built-in Excluded Roles** (always excluded, also when `ExcludedRoleDefinitionIds` lists other roles):
 - `8e3af657-a8ff-443c-a75c-2fe8c4bcb635` - Owner
 - `18d7d88d-d35e-4fb5-a5c3-7773c20a72d9` - User Access Administrator
 - `f58310d9-a9f6-439a-9e8d-f62e7b41a168` - Role Based Access Control Administrator
+
+> **Residual risk of the deny-list:** every role that isn't excluded stays assignable, including Contributor and custom roles. Contributor
+> includes `Microsoft.ManagedIdentity/userAssignedIdentities/*/assign/action`, so WorkloadPlane-Admins with Contributor can use the
+> managed identities of the scope. Add Contributor and custom roles with role assignment or identity permissions to
+> `ExcludedRoleDefinitionIds` if WorkloadPlane-Admins must stay below the ManagementPlane.
 
 **Use Case:** Management-tier administrators assign resource-level or limited roles (e.g. Website Contributor) to the WorkloadPlane-Admins group without granting control-plane access. WorkloadPlane-Admins get no Contributor on the resource group from ServiceEM (see [Azure RBAC Implementation](#azure-rbac-implementation-resource-group-or-subscription-scope)).
 
@@ -1865,7 +1875,7 @@ their roles on the same resource group or subscription. The table shows the reso
 | `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`        | Reader                                  | Permanent (active)          | Always assigned                                                                           |
 | `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`        | Role Based Access Control Administrator | PIM eligible, no expiration | ABAC: only `WorkloadPlane.AllowedRoleDefinitionIds` → WorkloadPlane-Users                 |
 | ManagementPlane-Admins (per-service or delegated) | Contributor                             | PIM eligible, no expiration | Skipped if already eligible at a parent scope                                             |
-| ManagementPlane-Admins (per-service or delegated) | Role Based Access Control Administrator | PIM eligible, no expiration | ABAC: all roles except `ManagementPlane.ExcludedRoleDefinitionIds` → WorkloadPlane-Admins |
+| ManagementPlane-Admins (per-service or delegated) | Role Based Access Control Administrator | PIM eligible, no expiration | ABAC: all roles except Owner, User Access Administrator, Role Based Access Control Administrator and `ManagementPlane.ExcludedRoleDefinitionIds` → WorkloadPlane-Admins |
 | ControlPlane-Admins (per-service or delegated)    | User Access Administrator               | PIM eligible, no expiration | Skipped if already eligible at a parent scope                                             |
 
 ServiceEM also updates the PIM for Azure resources policy of these roles on the resource group (or subscription) so that
@@ -1873,11 +1883,18 @@ eligible assignments are not required to expire. ServiceEM assigns no Owner role
 including Owner) remains only with ControlPlane-Admins via the PIM-eligible User Access Administrator.
 
 Azure allows only one eligible assignment per principal, role and scope. An existing eligible Role Based Access Control
-Administrator assignment of the same group on the scope is only removed and replaced when it has exactly the condition
-shape created by ServiceEM and its target group no longer exists (leftover of a deleted landing zone). Any other
-assignment, e.g. a customer condition or the delegation of another landing zone on the same scope, is kept. The
-remaining assignments are still created, then the deployment stops with an error because the constrained delegation
-for this landing zone isn't assigned. Remove or adjust the existing assignment and run the deployment again.
+Administrator assignment of the same group on the scope is kept unchanged when its condition matches the configured
+constrained delegation: same target group and same role IDs, regardless of their order and case. It is removed and
+replaced only when it has exactly the condition shape created by ServiceEM and either
+
+- targets the group of this landing zone with another role list, e.g. after you changed `ExcludedRoleDefinitionIds` or
+  `AllowedRoleDefinitionIds` (the new condition applies on the next deployment), or
+- targets a group that no longer exists (leftover of a deleted landing zone).
+
+Any other assignment, e.g. a customer condition, a ServiceEM condition edited by hand into another shape, or the
+delegation of another landing zone on the same scope, is kept. The remaining assignments are still created, then the
+deployment stops with an error because the constrained delegation for this landing zone isn't assigned. Remove or
+adjust the existing assignment and run the deployment again.
 
 > **No Contributor for WorkloadPlane-Admins:** Contributor on the resource group (or subscription) equals ManagementPlane control
 > (e.g. managed identities, Key Vault access policies, run command on virtual machines) and would be a tier breach for the

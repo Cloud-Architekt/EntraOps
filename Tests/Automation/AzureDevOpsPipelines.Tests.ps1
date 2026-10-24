@@ -132,6 +132,27 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
         }
     }
 
+    It 'runs push and reporting only after pull runs of the pipeline branch' {
+        foreach ($PipelineName in @('entraops-push.yml', 'entraops-push-reporting.yml')) {
+            $Content = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw
+            $Content | Should -Match '# BEGIN EntraOps managed pipeline trigger' -Because "$PipelineName must keep the region that Update-EntraOpsAzureDevOpsSchedules maintains"
+            $Pipeline = $Content | ConvertFrom-Yaml
+            $PullResource = @($Pipeline.resources.pipelines | Where-Object { $_.source -eq 'entraops-pull' })
+            $PullResource.Count | Should -Be 1
+            $PullResource[0].trigger | Should -BeOfType [System.Collections.IDictionary] -Because "'trigger: true' would also run $PipelineName after pull runs of other branches"
+            @($PullResource[0].trigger.branches.include).Count | Should -Be 1
+        }
+    }
+
+    It 'sets job timeouts above the 60 minute default for long-running collections' {
+        $Expected = @{ 'entraops-pull.yml' = 360; 'entraops-pull-tenant-governance.yml' = 75 }
+        foreach ($PipelineName in $Expected.Keys) {
+            $Pipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw | ConvertFrom-Yaml
+            @($Pipeline.jobs).Count | Should -Be 1
+            $Pipeline.jobs[0].timeoutInMinutes | Should -Be $Expected[$PipelineName]
+        }
+    }
+
     It 'processes the latest branch commit in pipelines triggered by the pull pipeline' -Skip:$IsConfiguredDeployment {
         foreach ($PipelineName in @('entraops-push.yml', 'entraops-push-reporting.yml')) {
             $Pipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw | ConvertFrom-Yaml
@@ -208,7 +229,7 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
     It 'uses the latest Az version for every Azure PowerShell task' {
         foreach ($PipelineName in $PipelineNames) {
             $Pipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot $PipelineName) -Raw | ConvertFrom-Yaml
-            foreach ($Step in @($Pipeline.steps | Where-Object task -Like 'AzurePowerShell@*')) {
+            foreach ($Step in @(@($Pipeline.steps) + @($Pipeline.jobs | ForEach-Object { $_.steps }) | Where-Object task -Like 'AzurePowerShell@*')) {
                 $Step.inputs.azurePowerShellVersion | Should -Be 'LatestVersion' -Because "$PipelineName should use the latest Az module version"
             }
         }
@@ -246,7 +267,8 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
 
     It 'keeps pull collection operations separate and validates generated artifacts' -Skip:$IsConfiguredDeployment {
         $PullPipeline = Get-Content -LiteralPath (Join-Path $PipelineRoot 'entraops-pull.yml') -Raw | ConvertFrom-Yaml
-        $DisplayNames = @($PullPipeline.steps | ForEach-Object { $_.displayName })
+        $PullSteps = @(@($PullPipeline.steps) + @($PullPipeline.jobs | ForEach-Object { $_.steps }) | Where-Object { $null -ne $_ })
+        $DisplayNames = @($PullSteps | ForEach-Object { $_.displayName })
         $ExpectedSteps = @(
             'Get updated definition files for classification'
             'Get updated scope for definition of Control Plane in Entra ID'
@@ -261,9 +283,9 @@ Describe 'Azure DevOps pipeline templates' -Skip:(-not $HasAdoPipelines -or $Has
         $DisplayNames.IndexOf($ExpectedSteps[1]) | Should -BeLessThan $DisplayNames.IndexOf($ExpectedSteps[2])
         $DisplayNames.IndexOf($ExpectedSteps[2]) | Should -BeLessThan $DisplayNames.IndexOf($ExpectedSteps[3])
 
-        $ClassificationStep = $PullPipeline.steps | Where-Object { $_.displayName -eq $ExpectedSteps[0] }
-        $ControlPlaneStep = $PullPipeline.steps | Where-Object { $_.displayName -eq $ExpectedSteps[1] }
-        $CollectionStep = $PullPipeline.steps | Where-Object { $_.displayName -eq $ExpectedSteps[2] }
+        $ClassificationStep = $PullSteps | Where-Object { $_.displayName -eq $ExpectedSteps[0] }
+        $ControlPlaneStep = $PullSteps | Where-Object { $_.displayName -eq $ExpectedSteps[1] }
+        $CollectionStep = $PullSteps | Where-Object { $_.displayName -eq $ExpectedSteps[2] }
         $ClassificationStep.task | Should -Be 'AzurePowerShell@5'
         $ClassificationStep.condition | Should -Match 'ApplyAutomatedClassificationUpdate'
         [string]$ClassificationStep.inputs.Inline | Should -Match 'Update-EntraOpsClassificationFiles'

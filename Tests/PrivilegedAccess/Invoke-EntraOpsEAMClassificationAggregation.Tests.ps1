@@ -334,6 +334,46 @@ Describe "Invoke-EntraOpsEAMClassificationAggregation" {
             $Warning.Target | Should -Be $UnresolvedId
         }
 
+        It "treats a failed lookup returned as 'unknown' object fail-closed (parallel: <Parallel>)" -ForEach @(
+            @{ Parallel = $false }
+            @{ Parallel = $true }
+        ) {
+            # Get-EntraOpsPrivilegedEntraObject returns an 'unknown' object with ResolutionStatus 'Unresolved' after throttling, 5xx or 403
+            $FailedId = "dddddddd-0000-0000-0000-000000000004"
+            $Objects = [System.Collections.Generic.List[psobject]]::new()
+            $Cache = @{}
+            $Rbac = @{}
+            # 50+ objects trigger the parallel branch
+            $Count = if ($Parallel) { 49 } else { 0 }
+            for ($i = 1; $i -le $Count; $i++) {
+                $Id = "aaaaaaaa-0000-0000-0000-{0:d12}" -f $i
+                $Objects.Add([pscustomobject]@{ ObjectId = $Id; ObjectType = "user" })
+                $Cache[$Id] = New-TestObjectDetails -ObjectId $Id -DisplayName "User $i"
+                $Rbac[$Id] = @(New-TestAssignment)
+            }
+            $Objects.Add([pscustomobject]@{ ObjectId = $FailedId; ObjectType = "user" })
+            $FailedDetails = New-TestObjectDetails -ObjectId $FailedId -DisplayName "Identity not found"
+            $FailedDetails.ObjectType = 'unknown'
+            $FailedDetails.ObjectSubType = 'unknown'
+            $FailedDetails | Add-Member -NotePropertyName ResolutionStatus -NotePropertyValue 'Unresolved'
+            $Cache[$FailedId] = $FailedDetails
+            $Rbac[$FailedId] = @(New-TestAssignment)
+
+            $FailedResult = @(Invoke-EntraOpsEAMClassificationAggregation `
+                    -UniqueObjects $Objects.ToArray() `
+                    -ObjectDetailsCache $Cache `
+                    -RbacClassificationsByObject $Rbac `
+                    -RoleSystem "EntraID" `
+                    -EnableParallelProcessing $Parallel `
+                    -ParallelThrottleLimit 5 `
+                    -WarningAction SilentlyContinue) | Where-Object { $_.ObjectId -eq $FailedId }
+
+            $FailedResult.ObjectType | Should -Be "user"
+            $FailedResult.ObjectSubType | Should -Be "Unresolved"
+            $FailedResult.ObjectAdminTierLevelName | Should -Be "ControlPlane"
+            @($FailedResult.Classification).TaggedBy | Should -Contain "UnresolvedObject"
+        }
+
         It "falls back to ObjectType 'unresolved' when the assignment carries no object type" {
             $NoTypeId = "cccccccc-0000-0000-0000-000000000003"
             $NoTypeResult = Invoke-EntraOpsEAMClassificationAggregation `
@@ -771,12 +811,46 @@ Describe "Get-EntraOpsPrivilegedEAMResourceApps classification aggregation" {
         @($Agent[0].RoleAssignments | Where-Object ObjectId -ne 'agent').Count | Should -Be 0
     }
 
-    It "uses the shared merge helper instead of first-wins aggregation in both code paths" {
+    It "uses the shared merge helper and the shared aggregation instead of first-wins aggregation" {
         $Path = Join-Path $script:TestRepositoryRoot "EntraOps/Public/PrivilegedAccess/Get-EntraOpsPrivilegedEAMResourceApps.ps1"
         $Ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
         $Commands = $Ast.FindAll({ param($Node) $Node -is [System.Management.Automation.Language.CommandAst] }, $true) |
         ForEach-Object { $_.GetCommandName() }
-        @($Commands | Where-Object { $_ -eq "Merge-EntraOpsEAMClassification" }).Count | Should -BeGreaterOrEqual 2
+        # Agent identities with inheritable permissions merge their own classifications; service principals use the shared aggregation
+        @($Commands | Where-Object { $_ -eq "Merge-EntraOpsEAMClassification" }).Count | Should -BeGreaterOrEqual 1
+        @($Commands | Where-Object { $_ -eq "Invoke-EntraOpsEAMClassificationAggregation" }).Count | Should -Be 1
         (Get-Content -Path $Path -Raw) | Should -Not -Match 'UniqueClassificationsHash'
+    }
+
+    It "keeps a service principal whose details couldn't be resolved and exports IdentityParent" {
+        Mock Resolve-EntraOpsClassificationPath { 'unused.json' }
+        Mock Get-EntraOpsPrivilegedAppRoles {
+            @(
+                New-TestAppAssignment -ObjectId 'resolved-sp' -Action 'User.Read.All'
+                New-TestAppAssignment -ObjectId 'throttled-sp' -Action 'Group.Read.All'
+            )
+        }
+        Mock Import-EntraOpsGlobalExclusions { @() }
+        Mock Expand-EntraOpsPrivilegedEAMJsonFile { @() }
+        Mock Resolve-EntraOpsAppRoleAssignmentClassification { $AppRoleAssignments }
+        Mock Invoke-EntraOpsMsGraphQuery { @() }
+        Mock Invoke-EntraOpsParallelObjectResolution {
+            $Details = New-TestObjectDetails -ObjectId 'resolved-sp' -DisplayName 'Resolved'
+            $Details.ObjectType = 'serviceprincipal'
+            $Details.IdentityParent = 'parent-id'
+            @{ 'resolved-sp' = $Details; 'throttled-sp' = $null }
+        }
+        Mock Show-EntraOpsWarningSummary {}
+
+        $Result = @(Get-EntraOpsPrivilegedEamResourceApps -TenantId 'tenant-1' -EnableParallelProcessing $false -WarningAction SilentlyContinue 6>$null)
+
+        $Result.Count | Should -Be 2
+        foreach ($Object in $Result) {
+            $Object.PSObject.Properties.Name | Should -Contain 'IdentityParent'
+        }
+        ($Result | Where-Object ObjectId -eq 'resolved-sp').IdentityParent | Should -Be 'parent-id'
+        $Throttled = $Result | Where-Object ObjectId -eq 'throttled-sp'
+        $Throttled.ObjectAdminTierLevelName | Should -Be 'ControlPlane'
+        @($Throttled.Classification).TaggedBy | Should -Contain 'UnresolvedObject'
     }
 }

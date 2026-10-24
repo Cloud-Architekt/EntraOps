@@ -1331,6 +1331,34 @@ Describe 'ServiceEM Azure container scope' {
         }
     }
 
+    Context 'constrained delegation configuration' {
+        AfterEach {
+            $Global:EntraOpsConfig = $null
+        }
+
+        It 'keeps the built-in exclusions when ExcludedRoleDefinitionIds lists other roles' {
+            $script:MgmtCondition = $null
+            Mock New-AzRoleEligibilityScheduleRequest { if ($PrincipalId -eq 'id:SG-Sub-X-ManagementPlane-Admins' -and $Condition) { $script:MgmtCondition = $Condition } }
+            $Global:EntraOpsConfig = @{ ServiceEM = @{ ConstrainedDelegation = @{ ManagementPlane = @{ ExcludedRoleDefinitionIds = @('B24988AC-6180-42A0-AB88-20F7382DD24C', '8e3af657-a8ff-443c-a75c-2fe8c4bcb635') } } } }
+            $expected = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635, 18d7d88d-d35e-4fb5-a5c3-7773c20a72d9, f58310d9-a9f6-439a-9e8d-f62e7b41a168, b24988ac-6180-42a0-ab88-20f7382dd24c'
+
+            New-EntraOpsServiceAZContainer -ServiceName 'Sub-X' -ServiceGroups $script:Groups -AzureScope Subscription -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            foreach ($attribute in '@Request', '@Resource') {
+                $script:MgmtCondition | Should -BeLike "*$attribute[[]Microsoft.Authorization/roleAssignments:RoleDefinitionId[]] ForAnyOfAllValues:GuidNotEquals {$expected}*"
+            }
+        }
+
+        It 'rejects a WorkloadPlane allow-list with a role that can assign roles' {
+            $Global:EntraOpsConfig = @{ ServiceEM = @{ ConstrainedDelegation = @{ WorkloadPlane = @{ AllowedRoleDefinitionIds = @('4633458b-17de-408a-b874-0445c86b69e6', '18D7D88D-D35E-4FB5-A5C3-7773C20A72D9') } } } }
+
+            { New-EntraOpsServiceAZContainer -ServiceName 'Sub-X' -ServiceGroups $script:Groups -AzureScope Subscription -WarningAction SilentlyContinue 6>$null | Out-Null } |
+            Should -Throw '*AllowedRoleDefinitionIds must not contain*18D7D88D-D35E-4FB5-A5C3-7773C20A72D9*'
+
+            Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly
+        }
+    }
+
     Context 'existing eligible RBAC Administrator assignment of the same principal' {
         BeforeAll {
             $script:GuidGroups = @(
@@ -1388,6 +1416,29 @@ Describe 'ServiceEM Azure container scope' {
             Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly -ParameterFilter { $RequestType -eq 'AdminRemove' }
             Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly -ParameterFilter { $PrincipalId -eq 'aaaaaaaa-0000-0000-0000-000000000002' -and $Condition }
             Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter { $PrincipalId -eq 'aaaaaaaa-0000-0000-0000-000000000002' -and $RoleDefinitionId -like '*rd-Contributor' }
+        }
+
+        It 'skips an assignment that already has the configured condition' {
+            # Same roles in another order and case
+            & $script:SetExisting (& $script:NewTestCondition 'ForAnyOfAllValues:GuidNotEquals' 'F58310D9-A9F6-439A-9E8D-F62E7B41A168, 8e3af657-a8ff-443c-a75c-2fe8c4bcb635,18d7d88d-d35e-4fb5-a5c3-7773c20a72d9' 'aaaaaaaa-0000-0000-0000-000000000001')
+
+            New-EntraOpsServiceAZContainer -ServiceName 'Sub-X' -ServiceGroups $script:GuidGroups -AzureScope Subscription -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly -ParameterFilter { $RequestType -eq 'AdminRemove' }
+            Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly -ParameterFilter { $PrincipalId -eq 'aaaaaaaa-0000-0000-0000-000000000002' -and $Condition }
+        }
+
+        It 'replaces the delegation of this landing zone when its role list differs from the configuration' {
+            & $script:SetExisting (& $script:NewTestCondition 'ForAnyOfAllValues:GuidNotEquals' '8e3af657-a8ff-443c-a75c-2fe8c4bcb635' 'aaaaaaaa-0000-0000-0000-000000000001')
+
+            New-EntraOpsServiceAZContainer -ServiceName 'Sub-X' -ServiceGroups $script:GuidGroups -AzureScope Subscription -WarningAction SilentlyContinue 6>$null | Out-Null
+
+            Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly
+            Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter { $RequestType -eq 'AdminRemove' -and $PrincipalId -eq 'aaaaaaaa-0000-0000-0000-000000000002' }
+            Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter {
+                $RequestType -eq 'AdminAssign' -and $PrincipalId -eq 'aaaaaaaa-0000-0000-0000-000000000002' -and
+                $Condition -like '*{8e3af657-a8ff-443c-a75c-2fe8c4bcb635, 18d7d88d-d35e-4fb5-a5c3-7773c20a72d9, f58310d9-a9f6-439a-9e8d-f62e7b41a168}*'
+            }
         }
 
         It 'keeps an assignment with a condition not created by ServiceEM' {

@@ -127,8 +127,15 @@ function Update-EntraOps {
 
     $ErrorActionPreference = "Stop"
 
-    if ([string]::IsNullOrWhiteSpace((Get-EntraOpsRepositoryRoot))) {
+    $RepositoryRoot = Get-EntraOpsRepositoryRoot
+    if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
         throw "Update-EntraOps updates a repository checkout of EntraOps (GitHub, Azure DevOps or local clone). This module is installed without a repository (e.g. from the PowerShell Gallery): use Update-PSResource EntraOps (or Update-Module EntraOps if installed with Install-Module), then Initialize-EntraOpsWorkspace -Force to refresh classification templates and reporting apps."
+    }
+    # All update paths resolve against the working folder. With ENTRAOPS_ROOT or Initialize-EntraOpsWorkspace -Path it can
+    # differ from the checkout that contains the module, and the update would replace the folders of the working folder.
+    if (-not ((Test-EntraOpsPathWithinRoot -Path $EntraOpsBaseFolder -Root $RepositoryRoot -AllowRoot) -and
+            (Test-EntraOpsPathWithinRoot -Path $RepositoryRoot -Root $EntraOpsBaseFolder -AllowRoot))) {
+        throw "Update-EntraOps updates the repository checkout '$RepositoryRoot' that contains the loaded module, but the EntraOps working folder is '$EntraOpsBaseFolder' (ENTRAOPS_ROOT or Initialize-EntraOpsWorkspace -Path). Run the update in a session whose working folder is the repository checkout, e.g. with ENTRAOPS_ROOT unset. No folder was changed."
     }
     # Allow the config file's "AutomatedEntraOpsUpdate" section to override the default
     # Repository/Branch/TargetUpdateFolders used for self-update, unless the caller explicitly
@@ -403,6 +410,13 @@ function Update-EntraOps {
             }
         }
 
+        # The upstream pipeline templates are on branch main; keep the branch of the current definitions for the re-applied
+        # schedules and pipeline trigger (read before the folder is replaced)
+        $AzureDevOpsPipelineBranch = $null
+        if ($TargetUpdateFolders -contains './.azure-pipelines') {
+            $AzureDevOpsPipelineBranch = Get-EntraOpsAzureDevOpsPipelineBranch -PipelineFolder (Join-Path $EntraOpsBaseFolder '.azure-pipelines')
+        }
+
         foreach ($TargetUpdateFolder in $TargetUpdateFolders) {
             $TargetPath = Join-Path $EntraOpsBaseFolder $TargetUpdateFolder
 
@@ -461,8 +475,13 @@ function Update-EntraOps {
                 # The upstream pipeline templates ship with default schedules; re-apply the ones from the configuration
                 if ($RefreshAzureDevOpsPipelines) {
                     Write-Host "Re-applying the configured schedules and service connection in Azure DevOps pipelines after update..."
+                    $AzureDevOpsScheduleParameters = @{ ConfigFile = $ConfigFile; PipelineFolder = './.azure-pipelines' }
+                    if (-not [string]::IsNullOrWhiteSpace($AzureDevOpsPipelineBranch)) {
+                        Write-Host "Using branch '$AzureDevOpsPipelineBranch' of the current Azure DevOps pipeline definitions."
+                        $AzureDevOpsScheduleParameters.BranchName = $AzureDevOpsPipelineBranch
+                    }
                     try {
-                        Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile -PipelineFolder './.azure-pipelines'
+                        Update-EntraOpsAzureDevOpsSchedules @AzureDevOpsScheduleParameters
                     } catch {
                         throw "Failed to update the Azure DevOps pipeline schedules. Error: $_ The updated files were copied, but the configuration was not re-applied to them. Update the EntraOps module in a clean session, then run Update-EntraOpsAzureDevOpsSchedules -ConfigFile '$ConfigFile' -PipelineFolder './.azure-pipelines' from the repository root and commit the result, or rerun the update."
                     }

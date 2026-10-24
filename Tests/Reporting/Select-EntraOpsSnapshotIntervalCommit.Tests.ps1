@@ -69,4 +69,15 @@ Describe 'Select-EntraOpsSnapshotIntervalCommit' {
         @((Select-EntraOpsSnapshotIntervalCommit -Commit $Commits).Sha) | Should -Be @('a', 'b', 'c')
         @((Select-EntraOpsSnapshotIntervalCommit -Commit $Commits[0..1] -Days 7).Sha) | Should -Be @('a', 'b')
     }
+
+    It 'is the only snapshot thinning of the history generators (<Generator>)' -ForEach @(
+        @{ Generator = 'New-EntraOpsPrivilegedEamPrivilegeHistoryData' }
+        @{ Generator = 'New-EntraOpsTenantGovernanceConfigurationAnalyzerData' }
+    ) {
+        $Path = Join-Path $PSScriptRoot "../../EntraOps/Public/Reportings/$Generator.ps1"
+        $Ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
+        $Commands = @($Ast.FindAll({ param($Node) $Node -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() })
+        $Commands | Should -Contain 'Select-EntraOpsSnapshotIntervalCommit'
+        $Commands | Should -Not -Contain 'Add-SnapshotInterval'
+    }
 }

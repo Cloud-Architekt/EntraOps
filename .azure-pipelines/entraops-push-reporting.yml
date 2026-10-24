@@ -35,7 +35,13 @@ resources:
   pipelines:
     - pipeline: entraops-pull
       source: entraops-pull
-      trigger: true
+      # Only pull runs of the pipeline branch trigger this pipeline (Update-EntraOpsAzureDevOpsSchedules -BranchName)
+      # BEGIN EntraOps managed pipeline trigger
+      trigger:
+        branches:
+          include:
+            - 'main'
+      # END EntraOps managed pipeline trigger
 
 # BEGIN EntraOps managed schedules
 # Schedules are added by Update-EntraOpsAzureDevOpsSchedules from EntraOpsConfig.json.

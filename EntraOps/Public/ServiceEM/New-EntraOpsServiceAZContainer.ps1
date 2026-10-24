@@ -21,11 +21,17 @@
       when SkipControlPlaneDelegation is set)
     - Resource groups created by this function are tagged EntraOpsServiceEM = <ServiceName>
 
+    ExcludedRoleDefinitionIds extends the built-in exclusions (Owner, User Access Administrator, Role Based
+    Access Control Administrator), which always apply; AllowedRoleDefinitionIds must not contain them.
+
     An existing eligible Role Based Access Control Administrator assignment of the same principal on the
-    scope is only replaced when it has the condition created by ServiceEM and its target group no longer
-    exists (leftover of a deleted landing zone). Any other assignment is kept, the remaining assignments
-    are still created, and the function then stops with an error because the constrained delegation for
-    this landing zone isn't assigned.
+    scope is kept when its condition matches the configured constrained delegation (same target group and
+    same role IDs, regardless of order and case). It is removed and replaced only when it has the condition
+    created by ServiceEM and either targets this landing zone's group with another role list (e.g. after
+    ExcludedRoleDefinitionIds or AllowedRoleDefinitionIds changed) or targets a group that no longer exists
+    (leftover of a deleted landing zone). Any other assignment, e.g. a condition not created by ServiceEM or
+    the delegation to another existing group, is kept, the remaining assignments are still created, and the
+    function then stops with an error because the constrained delegation for this landing zone isn't assigned.
 
     Constrained delegation settings are read from
     EntraOpsConfig.ServiceEM.ConstrainedDelegation when available.
@@ -294,57 +300,90 @@ function New-EntraOpsServiceAZContainer {
             param([string]$RoleOperator)
             $guid = '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}'
             $template = [regex]::Escape((& $newConstrainedCondition $RoleOperator '__ROLES__' '__TARGET__'))
-            '^\s*' + $template.Replace('\ ', '\s*').Replace('__ROLES__', "\s*$guid(?:\s*,\s*$guid)*\s*").Replace('__TARGET__', "\s*(?<target>$guid)\s*") + '\s*$'
+            '^\s*' + $template.Replace('\ ', '\s*').Replace('__ROLES__', "\s*(?<roles>$guid(?:\s*,\s*$guid)*)\s*").Replace('__TARGET__', "\s*(?<target>$guid)\s*") + '\s*$'
         }
 
-        # Leftover schedules of a deleted resource group reference the old target group ID and don't count
+        # True when a condition created by $newConstrainedCondition limits both actions to exactly the expected role IDs and
+        # target group; whitespace, case and the order of the role IDs don't matter
+        $isSameConstrainedCondition = {
+            param([string]$Condition, [hashtable]$Delegation)
+            $conditionMatch = [regex]::Match($Condition, $Delegation.ConditionPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if (-not $conditionMatch.Success) {
+                return $false
+            }
+            $targetIds = @($conditionMatch.Groups['target'].Captures | ForEach-Object { $_.Value.ToLowerInvariant() } | Select-Object -Unique)
+            if ($targetIds.Count -ne 1 -or $targetIds[0] -ne "$($Delegation.TargetId)".ToLowerInvariant()) {
+                return $false
+            }
+            $expectedRoleIds = @($Delegation.RoleIds | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Sort-Object -Unique)
+            foreach ($rolesCapture in $conditionMatch.Groups['roles'].Captures) {
+                $actualRoleIds = @($rolesCapture.Value -split ',' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
+                if (Compare-Object -ReferenceObject $expectedRoleIds -DifferenceObject $actualRoleIds) {
+                    return $false
+                }
+            }
+            return $true
+        }
+
+        # Only an assignment with exactly the configured condition counts: leftover schedules of a deleted resource group reference
+        # the old target group ID, and a condition with another role list (changed configuration or edited by hand) is replaced or reported
         $hasConstrainedRbacAdmin = {
-            param([string]$PrincipalId, [string]$TargetGroupId)
+            param([string]$PrincipalId, [hashtable]$Delegation)
             [bool]($existing | Where-Object {
                     $_.RoleDefinitionDisplayName -eq $rbacAdmin.Name -and $_.PrincipalId -eq $PrincipalId -and
-                    "$($_.Condition)" -like "*$TargetGroupId*"
+                    (& $isSameConstrainedCondition "$($_.Condition)" $Delegation)
                 })
         }
 
+        # Never assignable through the ManagementPlane delegation and never allowed in the WorkloadPlane allow-list: each of them
+        # lets the target group assign roles itself or take over the scope. ExcludedRoleDefinitionIds extends this list, it can't replace it.
+        $mandatoryExcludedRoleIds = @(
+            "8e3af657-a8ff-443c-a75c-2fe8c4bcb635",  # Owner
+            "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9",  # User Access Administrator
+            "f58310d9-a9f6-439a-9e8d-f62e7b41a168"   # Role Based Access Control Administrator
+        )
+
         # Constrained RBAC Administrator for ManagementPlane-Admins
         # May assign any role EXCEPT high-privileged roles, only to the WorkloadPlane-Admins group
-        if ($workloadAdmins -and $management -and
-            -not (& $hasConstrainedRbacAdmin $management.Id $workloadAdmins.Id)) {
+        if ($workloadAdmins -and $management) {
 
-            # Load excluded role IDs from configuration or use defaults
-            $highPrivRoleIds = @(
-                "8e3af657-a8ff-443c-a75c-2fe8c4bcb635",  # Owner
-                "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9",  # User Access Administrator
-                "f58310d9-a9f6-439a-9e8d-f62e7b41a168"   # Role Based Access Control Administrator
-            )
+            # Built-in exclusions plus the excluded role IDs from configuration
+            $highPrivRoleIds = $mandatoryExcludedRoleIds
             if ($constrainedDelegationConfig -and $constrainedDelegationConfig.ManagementPlane.ExcludedRoleDefinitionIds) {
-                $highPrivRoleIds = $constrainedDelegationConfig.ManagementPlane.ExcludedRoleDefinitionIds
-                Write-Verbose "$logPrefix Using ManagementPlane excluded role IDs from configuration: $($highPrivRoleIds -join ', ')"
+                $configuredRoleIds = @($constrainedDelegationConfig.ManagementPlane.ExcludedRoleDefinitionIds)
+                $invalidRoleIds = @($configuredRoleIds | Where-Object { -not [guid]::TryParse([string]$_, [ref][guid]::Empty) })
+                if ($invalidRoleIds.Count -gt 0) {
+                    throw "$logPrefix ServiceEM.ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds contains invalid GUIDs: $($invalidRoleIds -join ', ')"
+                }
+                $highPrivRoleIds = @(@($mandatoryExcludedRoleIds) + $configuredRoleIds | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Select-Object -Unique)
+                Write-Verbose "$logPrefix Using the built-in and configured ManagementPlane excluded role IDs: $($highPrivRoleIds -join ', ')"
             }
 
-            $excludeRolesStr = ($highPrivRoleIds -join ", ")
-            $invalidRoleIds = @($highPrivRoleIds | Where-Object { -not [guid]::TryParse([string]$_, [ref][guid]::Empty) })
-            if ($invalidRoleIds.Count -gt 0) {
-                throw "$logPrefix ServiceEM.ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds contains invalid GUIDs: $($invalidRoleIds -join ', ')"
-            }
             # ForAnyOfAllValues: the requested role must differ from every excluded role (ForAllOfAnyValues would always be true)
             $mgmtRoleOperator = "ForAnyOfAllValues:GuidNotEquals"
-            $toAdd += @{
-                RoleDefinitionId = "$roleDefinitionPrefix/$($rbacAdmin.Id)"
-                RoleId           = $rbacAdmin.Id
-                PrincipalId      = $management.Id
-                Condition        = & $newConstrainedCondition $mgmtRoleOperator $excludeRolesStr $workloadAdmins.Id
-                ConditionVersion = "2.0"
+            $mgmtDelegation = @{
+                RoleIds          = $highPrivRoleIds
+                TargetId         = $workloadAdmins.Id
                 ConditionPattern = & $getConstrainedConditionPattern $mgmtRoleOperator
             }
-        } elseif ($workloadAdmins -and $management) {
-            Write-Verbose "$logPrefix ManagementPlane-Admins already has the constrained Role Based Access Control Administrator eligible assignment for $($workloadAdmins.Id) — skipping"
+            if (& $hasConstrainedRbacAdmin $management.Id $mgmtDelegation) {
+                Write-Verbose "$logPrefix ManagementPlane-Admins already has the constrained Role Based Access Control Administrator eligible assignment for $($workloadAdmins.Id) — skipping"
+            } else {
+                $toAdd += @{
+                    RoleDefinitionId = "$roleDefinitionPrefix/$($rbacAdmin.Id)"
+                    RoleId           = $rbacAdmin.Id
+                    PrincipalId      = $management.Id
+                    TargetId         = $workloadAdmins.Id
+                    Condition        = & $newConstrainedCondition $mgmtRoleOperator ($highPrivRoleIds -join ", ") $workloadAdmins.Id
+                    ConditionVersion = "2.0"
+                    ConditionPattern = $mgmtDelegation.ConditionPattern
+                }
+            }
         }
 
         # Constrained RBAC Administrator for WorkloadPlane-Admins
         # May assign only data-plane roles (Key Vault, Storage) to the WorkloadPlane-Users group
-        if ($workloadAdmins -and $workloadUsers -and
-            -not (& $hasConstrainedRbacAdmin $workloadAdmins.Id $workloadUsers.Id)) {
+        if ($workloadAdmins -and $workloadUsers) {
 
             # Load allowed role IDs from configuration or use defaults
             $dataPlaneRoleIds = @(
@@ -368,26 +407,37 @@ function New-EntraOpsServiceAZContainer {
                 "c6a89b2d-59bc-44d0-9896-0f6e12d7b80a"   # Storage Queue Data Message Sender
             )
             if ($constrainedDelegationConfig -and $constrainedDelegationConfig.WorkloadPlane.AllowedRoleDefinitionIds) {
-                $dataPlaneRoleIds = $constrainedDelegationConfig.WorkloadPlane.AllowedRoleDefinitionIds
+                $dataPlaneRoleIds = @($constrainedDelegationConfig.WorkloadPlane.AllowedRoleDefinitionIds)
                 Write-Verbose "$logPrefix Using WorkloadPlane allowed role IDs from configuration: $($dataPlaneRoleIds.Count) roles"
             }
 
-            $allowRolesStr = ($dataPlaneRoleIds -join ", ")
             $invalidRoleIds = @($dataPlaneRoleIds | Where-Object { -not [guid]::TryParse([string]$_, [ref][guid]::Empty) })
             if ($invalidRoleIds.Count -gt 0) {
                 throw "$logPrefix ServiceEM.ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds contains invalid GUIDs: $($invalidRoleIds -join ', ')"
             }
+            $forbiddenRoleIds = @($dataPlaneRoleIds | Where-Object { "$_".Trim() -in $mandatoryExcludedRoleIds })
+            if ($forbiddenRoleIds.Count -gt 0) {
+                throw "$logPrefix ServiceEM.ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds must not contain Owner, User Access Administrator or Role Based Access Control Administrator: $($forbiddenRoleIds -join ', ')"
+            }
             $wlRoleOperator = "ForAnyOfAnyValues:GuidEquals"
-            $toAdd += @{
-                RoleDefinitionId = "$roleDefinitionPrefix/$($rbacAdmin.Id)"
-                RoleId           = $rbacAdmin.Id
-                PrincipalId      = $workloadAdmins.Id
-                Condition        = & $newConstrainedCondition $wlRoleOperator $allowRolesStr $workloadUsers.Id
-                ConditionVersion = "2.0"
+            $wlDelegation = @{
+                RoleIds          = $dataPlaneRoleIds
+                TargetId         = $workloadUsers.Id
                 ConditionPattern = & $getConstrainedConditionPattern $wlRoleOperator
             }
-        } elseif ($workloadAdmins -and $workloadUsers) {
-            Write-Verbose "$logPrefix WorkloadPlane-Admins already has the constrained Role Based Access Control Administrator eligible assignment for $($workloadUsers.Id) — skipping"
+            if (& $hasConstrainedRbacAdmin $workloadAdmins.Id $wlDelegation) {
+                Write-Verbose "$logPrefix WorkloadPlane-Admins already has the constrained Role Based Access Control Administrator eligible assignment for $($workloadUsers.Id) — skipping"
+            } else {
+                $toAdd += @{
+                    RoleDefinitionId = "$roleDefinitionPrefix/$($rbacAdmin.Id)"
+                    RoleId           = $rbacAdmin.Id
+                    PrincipalId      = $workloadAdmins.Id
+                    TargetId         = $workloadUsers.Id
+                    Condition        = & $newConstrainedCondition $wlRoleOperator ($dataPlaneRoleIds -join ", ") $workloadUsers.Id
+                    ConditionVersion = "2.0"
+                    ConditionPattern = $wlDelegation.ConditionPattern
+                }
+            }
         }
 
         $keptConflicts = [System.Collections.Generic.List[string]]::new()
@@ -442,9 +492,11 @@ function New-EntraOpsServiceAZContainer {
                 }
                 $conflicting = @($existing | Where-Object $isStale)
                 if ($conflicting.Count -gt 0) {
-                    # Only remove assignments created by ServiceEM for a target group that no longer exists; in the Centralized model the
-                    # principal is a tenant-wide group whose other assignments (customer or another landing zone) must be kept
+                    # Only remove assignments created by ServiceEM for this landing zone's target group (other role list) or for a target
+                    # group that no longer exists; in the Centralized model the principal is a tenant-wide group whose other assignments
+                    # (customer or another landing zone) must be kept
                     $keepReason = $null
+                    $isOutdated = $false
                     foreach ($assignment in $conflicting) {
                         $conditionMatch = [regex]::Match("$($assignment.Condition)", $add.ConditionPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
                         if (-not $conditionMatch.Success) {
@@ -452,6 +504,12 @@ function New-EntraOpsServiceAZContainer {
                             break
                         }
                         $previousTargetId = $conditionMatch.Groups['target'].Value
+                        if ($previousTargetId -ieq "$($add.TargetId)") {
+                            # The delegation of this landing zone with another role list, e.g. after ExcludedRoleDefinitionIds or
+                            # AllowedRoleDefinitionIds changed: replaced with the configured condition
+                            $isOutdated = $true
+                            continue
+                        }
                         try {
                             $previousTarget = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/groups/$($previousTargetId)?`$select=id" -OutputType PSObject -DisableCache -ThrowOnFailure -SuppressNotFoundWarning
                         } catch {
@@ -470,17 +528,21 @@ function New-EntraOpsServiceAZContainer {
                         $keptConflicts.Add("$($add.PrincipalId) on ${scopeId} ($keepReason)")
                         continue
                     }
-                    Write-Warning "$logPrefix Removing leftover eligible assignment of $($add.PrincipalId) on $scopeId; its target group no longer exists"
+                    if ($isOutdated) {
+                        Write-Warning "$logPrefix Replacing the eligible Role Based Access Control Administrator assignment of $($add.PrincipalId) on ${scopeId}: its condition doesn't match the configured constrained delegation"
+                    } else {
+                        Write-Warning "$logPrefix Removing leftover eligible assignment of $($add.PrincipalId) on $scopeId; its target group no longer exists"
+                    }
                     try {
                         New-AzRoleEligibilityScheduleRequest -Name ([guid]::NewGuid()) -Scope $scopeId -RoleDefinitionId $add.RoleDefinitionId -PrincipalId $add.PrincipalId -RequestType AdminRemove -ErrorAction Stop | Out-Null
                     } catch {
-                        throw "$logPrefix Failed to remove leftover eligible assignment of $($add.PrincipalId) on ${scopeId}: $($_.Exception.Message)"
+                        throw "$logPrefix Failed to remove the existing eligible assignment of $($add.PrincipalId) on ${scopeId}: $($_.Exception.Message)"
                     }
-                    $removed = Wait-EntraOpsServiceEMCondition -Activity "Removal of leftover eligible assignment $($add.PrincipalId)" -logPrefix $logPrefix -Condition {
+                    $removed = Wait-EntraOpsServiceEMCondition -Activity "Removal of existing eligible assignment $($add.PrincipalId)" -logPrefix $logPrefix -Condition {
                         @(Get-AzRoleEligibilitySchedule -Scope $scopeId | Where-Object $isStale).Count -eq 0
                     }
                     if (-not $removed) {
-                        throw "$logPrefix Leftover eligible assignment of $($add.PrincipalId) on $scopeId was not removed in time"
+                        throw "$logPrefix Existing eligible assignment of $($add.PrincipalId) on $scopeId was not removed in time"
                     }
                 }
             }

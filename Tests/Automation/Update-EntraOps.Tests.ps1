@@ -10,6 +10,8 @@ BeforeAll {
     . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsRepositoryCheckout.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsRepositoryRoot.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsGitTrackedFile.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsPathWithinRoot.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsAzureDevOpsPipelineBranch.ps1"
 
     # NUL-delimited "git ls-files --stage -z" output for a fake checkout: every file on disk counts as tracked
     function Get-TestTrackedFileList {
@@ -41,6 +43,9 @@ BeforeAll {
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Get-EntraOpsUpdateCandidate.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/Automation/Get-EntraOpsUpdatePlan.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/Core/Update-EntraOps.ps1"
+
+    # The tests point the working folder to a temporary deployment, which stands for the checkout that contains the module
+    function Get-EntraOpsRepositoryRoot { $script:EntraOpsBaseFolder }
 }
 
 # Evaluated at discovery: Update-EntraOpsRequiredWorkflowParameters rewrites this workflow with the
@@ -123,7 +128,9 @@ Describe 'Update-EntraOps update scope' {
         $Source.IndexOf('Test-EntraOpsUpdateContract') | Should -BeLessThan $ReplacementIndex
         $Source | Should -Match "TargetUpdateFolders -contains './\.github/workflows'"
         $Source | Should -Match "TargetUpdateFolders -contains './\.azure-pipelines'"
-        $Source.IndexOf('Update-EntraOpsAzureDevOpsSchedules -ConfigFile $ConfigFile') | Should -BeGreaterThan $ReplacementIndex
+        $Source.IndexOf('Update-EntraOpsAzureDevOpsSchedules @AzureDevOpsScheduleParameters') | Should -BeGreaterThan $ReplacementIndex
+        # The branch of the current pipeline definitions is read before they are replaced
+        $Source.IndexOf('Get-EntraOpsAzureDevOpsPipelineBranch') | Should -BeLessThan $ReplacementIndex
         $Source.IndexOf('Update-EntraOpsRequiredWorkflowParameters -ConfigFile $ConfigFile') | Should -BeGreaterThan $ReplacementIndex
     }
 
@@ -141,6 +148,23 @@ Describe 'Update-EntraOps update scope' {
 
         { Update-EntraOps -ConfigFile (Join-Path $TestDrive 'missing.json') -TargetUpdateFolders @('./Samples') } |
         Should -Throw '*Update-PSResource EntraOps*Update-Module EntraOps*'
+    }
+
+    It 'refuses to update when the working folder is not the checkout that contains the module' {
+        $Checkout = Join-Path $TestDrive 'module-checkout'
+        $WorkingFolder = Join-Path $TestDrive 'data-folder'
+        New-Item -ItemType Directory -Path $Checkout, (Join-Path $WorkingFolder 'Samples') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $WorkingFolder 'Samples/keep.txt') -Value 'keep'
+        Mock Get-EntraOpsRepositoryRoot { $Checkout }
+        $PreviousBaseFolder = $script:EntraOpsBaseFolder
+        $script:EntraOpsBaseFolder = $WorkingFolder
+        try {
+            { Update-EntraOps -ConfigFile (Join-Path $TestDrive 'missing.json') -TargetUpdateFolders @('./Samples') -SkipCandidateValidation } |
+            Should -Throw "*updates the repository checkout '$Checkout'*working folder is '$WorkingFolder'*No folder was changed*"
+        } finally {
+            $script:EntraOpsBaseFolder = $PreviousBaseFolder
+        }
+        Test-Path -LiteralPath (Join-Path $WorkingFolder 'Samples/keep.txt') | Should -BeTrue
     }
 
     It 'never imports candidate module code in the updater process' {
@@ -565,6 +589,12 @@ exit 0
         Set-Content -LiteralPath (Join-Path $Candidate '.azure-pipelines/entraops-pull.yml') -Value 'pipeline'
         Set-Content -LiteralPath (Join-Path $Deployment 'EntraOpsConfig.json') -Value '{}'
         Set-Content -LiteralPath (Join-Path $Elsewhere 'Samples/unrelated.txt') -Value 'keep'
+        # Current definitions on another branch than the template's main
+        New-Item -ItemType Directory -Path (Join-Path $Deployment '.azure-pipelines') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $Deployment '.azure-pipelines/entraops-push.yml') -Value @(
+            'resources:', '  pipelines:', '    - pipeline: entraops-pull', '      source: entraops-pull'
+            '      # BEGIN EntraOps managed pipeline trigger', '      trigger:', '        branches:', '          include:', "            - 'production'", '      # END EntraOps managed pipeline trigger'
+        )
         # The refresh must use the loaded (trusted) helper. The candidate's helper would leave a marker:
         # the publish step that follows on the same agent holds the token, so no candidate code may run.
         $ScheduleRecord = Join-Path $TestDrive 'schedule-call.json'
@@ -575,8 +605,8 @@ exit 0
             Set-Content -LiteralPath (Join-Path $CandidateHelperFolder "$HelperName.ps1") -Value "Set-Content -LiteralPath '$CandidateMarker' -Value 'executed'; function $HelperName { Set-Content -LiteralPath '$CandidateMarker' -Value 'executed' }"
         }
         function Update-EntraOpsAzureDevOpsSchedules {
-            param($ConfigFile, $PipelineFolder)
-            @{ Location = (Get-Location).ProviderPath; ConfigFile = $ConfigFile; PipelineFolder = $PipelineFolder } |
+            param($ConfigFile, $PipelineFolder, $BranchName)
+            @{ Location = (Get-Location).ProviderPath; ConfigFile = $ConfigFile; PipelineFolder = $PipelineFolder; BranchName = $BranchName } |
             ConvertTo-Json | Set-Content -LiteralPath $ScheduleRecord
         }
 
@@ -612,6 +642,7 @@ exit 0
         $ScheduleCall.Location | Should -Be (Get-Item -LiteralPath $Deployment).FullName
         $ScheduleCall.ConfigFile | Should -Be 'EntraOpsConfig.json'
         $ScheduleCall.PipelineFolder | Should -Be './.azure-pipelines'
+        $ScheduleCall.BranchName | Should -Be 'production'
         Test-Path -LiteralPath $CandidateMarker | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $Elsewhere '.azure-pipelines') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $Elsewhere 'Samples/unrelated.txt') | Should -BeTrue

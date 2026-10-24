@@ -152,7 +152,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
     $UnresolvedPrivilegedObjectIds = [System.Collections.Generic.List[string]]::new()
     $TestResolutionFailed = {
         param($ResolvedObject)
-        $null -eq $ResolvedObject -or $ResolvedObject.ResolutionStatus -eq 'Unresolved'
+        $null -eq $ResolvedObject -or $ResolvedObject.ResolutionStatus -in @('Unresolved', 'UnhandledType')
     }
 
     #region Get list of all privileged objects in Entra with classification on Control Plane by Custom Security Attribute or EntraOps Classification
