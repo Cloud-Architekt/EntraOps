@@ -34,13 +34,13 @@ The classified, object-centric EAM data of a single RBAC system (the content of
 `Get-EntraOpsPrivilegedEAM` and `Save-EntraOpsPrivilegedEAMJson` combine. Call them directly to collect one
 system in memory, e.g. `$Eam = Get-EntraOpsPrivilegedEAMEntraId -IncludeObjectDetails $true`:
 
-| RBAC system          | EAM cmdlet                              | Notable parameters                                                                                                          |
-| -------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `EntraID`            | `Get-EntraOpsPrivilegedEAMEntraId`      | `-IncludeActivatedPIMAssignments`                                                                                           |
-| `IdentityGovernance` | `Get-EntraOpsPrivilegedEAMIdGov`        | `-FilterClassifiedRbacs`, `-ExcludeInvalidOrDeletedScopes`, `-HideTaggedBy`                                                 |
-| `DeviceManagement`   | `Get-EntraOpsPrivilegedEAMIntune`       |                                                                                                                             |
-| `ResourceApps`       | `Get-EntraOpsPrivilegedEAMResourceApps` |                                                                                                                             |
-| `Defender`           | `Get-EntraOpsPrivilegedEAMDefender`     |                                                                                                                             |
+| RBAC system          | EAM cmdlet                              | Notable parameters                                                                                                                                             |
+| -------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EntraID`            | `Get-EntraOpsPrivilegedEAMEntraId`      | `-IncludeActivatedPIMAssignments`                                                                                                                              |
+| `IdentityGovernance` | `Get-EntraOpsPrivilegedEAMIdGov`        | `-FilterClassifiedRbacs`, `-ExcludeInvalidOrDeletedScopes`, `-HideTaggedBy`                                                                                    |
+| `DeviceManagement`   | `Get-EntraOpsPrivilegedEAMIntune`       |                                                                                                                                                                |
+| `ResourceApps`       | `Get-EntraOpsPrivilegedEAMResourceApps` |                                                                                                                                                                |
+| `Defender`           | `Get-EntraOpsPrivilegedEAMDefender`     |                                                                                                                                                                |
 | `Azure`              | `Get-EntraOpsPrivilegedEAMAzure`        | `-ControlPlaneScopeOnly`, `-ClassifyConstrainedDelegationAlwaysAsControlPlane`, `-UnresolvedRoleDefinitionFallbackTier`, `-DeletedPrincipalAssignmentHandling` |
 
 All of them accept `-TenantId`, `-FolderClassification`, `-SampleMode`, `-GlobalExclusion`,
@@ -117,15 +117,15 @@ the entry is split so those remain Control Plane.
 
 Evaluation is fail-closed. The assignment keeps its Control Plane classification when:
 
-| Condition | Reason |
-| --- | --- |
-| A `GuidNotEquals` deny-list is used | Every role *not* named remains delegable, including Control Plane roles |
-| `conditionVersion` is present and is not `2.0` | The expression grammar is not known to be the supported one |
-| No negated `ActionMatches` guard is recognised | The boolean structure cannot be interpreted, so the scope of the constraint is unknown |
-| The GUID set is empty, or no `RoleDefinitionId` constraint exists | Nothing is actually constrained |
-| Any allow-listed role definition cannot be resolved or classified | The reachable tier cannot be proven |
-| The allow-list still reaches a Control Plane role | Control Plane access remains delegable |
-| The assignment scope is itself a concrete Control Plane scope | Delegation at a Tier 0 resource stays Tier 0 |
+| Condition                                                         | Reason                                                                                 |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| A `GuidNotEquals` deny-list is used                               | Every role *not* named remains delegable, including Control Plane roles                |
+| `conditionVersion` is present and is not `2.0`                    | The expression grammar is not known to be the supported one                            |
+| No negated `ActionMatches` guard is recognised                    | The boolean structure cannot be interpreted, so the scope of the constraint is unknown |
+| The GUID set is empty, or no `RoleDefinitionId` constraint exists | Nothing is actually constrained                                                        |
+| Any allow-listed role definition cannot be resolved or classified | The reachable tier cannot be proven                                                    |
+| The allow-list still reaches a Control Plane role                 | Control Plane access remains delegable                                                 |
+| The assignment scope is itself a concrete Control Plane scope     | Delegation at a Tier 0 resource stays Tier 0                                           |
 
 An absent or empty `conditionVersion` is treated as `2.0`, since Azure emits `2.0` for every
 condition it stores.
@@ -133,12 +133,12 @@ condition it stores.
 Every condition-bearing assignment carries a `ConditionEvaluation` property that records the outcome,
 so a classification can be audited without re-running the evaluation:
 
-| Status | Meaning |
-| --- | --- |
-| `DowngradedConstrainedActions` | The condition was proven to constrain delegation; the constrained actions were re-tiered |
-| `RetainedControlPlane` | One of the fail-closed rules above applied, so Control Plane was kept |
-| `RetainedControlPlaneByConfiguration` | Re-tiering is disabled through `ClassifyConstrainedDelegationAlwaysAsControlPlane` |
-| `AuthorizationNotClassifiedAtScope` | No Control Plane Authorization classification matched the assignment scope, so there was nothing to downgrade |
+| Status                                | Meaning                                                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `DowngradedConstrainedActions`        | The condition was proven to constrain delegation; the constrained actions were re-tiered                      |
+| `RetainedControlPlane`                | One of the fail-closed rules above applied, so Control Plane was kept                                         |
+| `RetainedControlPlaneByConfiguration` | Re-tiering is disabled through `ClassifyConstrainedDelegationAlwaysAsControlPlane`                            |
+| `AuthorizationNotClassifiedAtScope`   | No Control Plane Authorization classification matched the assignment scope, so there was nothing to downgrade |
 
 `AuthorizationNotClassifiedAtScope` is expected for delegation at scopes outside the Control Plane
 scope list, where the `Authorization` service is classified as Management Plane. If it appears for a
@@ -295,12 +295,12 @@ $AgentObjects | Where-Object { $_.ObjectSubType -eq "AgentIdentity" -and $_.Obje
 Get-EntraOpsAgentObject -ObjectId "<object-id>"
 ```
 
-| `ObjectSubType`                   | Object                                                                |
-| --------------------------------- | --------------------------------------------------------------------- |
+| `ObjectSubType`                   | Object                                                                       |
+| --------------------------------- | ---------------------------------------------------------------------------- |
 | `AgentIdentity`                   | Agent identity (service principal), `IdentityParent` is the blueprint app id |
-| `AgentIdentityBlueprint`          | Agent identity blueprint (application, only in the owning tenant)    |
-| `AgentIdentityBlueprintPrincipal` | Service principal of the blueprint in this tenant                    |
-| `AgentUser`                       | Agent user, `IdentityParent` is the agent identity                   |
+| `AgentIdentityBlueprint`          | Agent identity blueprint (application, only in the owning tenant)            |
+| `AgentIdentityBlueprintPrincipal` | Service principal of the blueprint in this tenant                            |
+| `AgentUser`                       | Agent user, `IdentityParent` is the agent identity                           |
 
 ## Customize classification by overwrites
 
@@ -750,7 +750,7 @@ SensitiveEdges
 As described above, any Entra ID role assignment on the scope of critical assets in XSPM is
 classified as Control Plane.
 
-#### When Exposure Management is unavailable
+#### When Advanced Hunting Query Results via Microsoft Graph API is unavailable
 
 The hunting query can fail, for example with a temporary HTTP 502 or a missing `ThreatHunting.Read.All`
 permission or license. Dropping the XSPM objects would silently narrow the Control Plane scope, so EntraOps
@@ -822,10 +822,10 @@ devices are resolved to the groups they are members of.
 `DeviceMgmtPrivilegedTierScope` (parameter of `Update-EntraOpsClassificationControlPlaneScope`, or
 property of `AutomatedControlPlaneScopeUpdate` in `EntraOpsConfig.json`) selects the tiers:
 
-| Value                                     | Selected users and groups                                                                                                                                                                                     |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ControlPlaneAndManagementPlane` (default) | Devices of users designated `ControlPlane` (Tier 0) and `ManagementPlane` (Tier 1), plus the transitive group memberships of these users. A device of both tiers counts as Tier 0.                          |
-| `ControlPlaneDevicesOnly`                 | Only devices of users designated `ControlPlane`; Tier 1 users and user group memberships are skipped.                                                                                                       |
+| Value                                      | Selected users and groups                                                                                                                                                          |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ControlPlaneAndManagementPlane` (default) | Devices of users designated `ControlPlane` (Tier 0) and `ManagementPlane` (Tier 1), plus the transitive group memberships of these users. A device of both tiers counts as Tier 0. |
+| `ControlPlaneDevicesOnly`                  | Only devices of users designated `ControlPlane`; Tier 1 users and user group memberships are skipped.                                                                              |
 
 A user with Control Plane access whose designated tier is missing or lower doesn't contribute their
 devices. EntraOps compares the owned and PAW devices of all Control Plane users of the home tenant

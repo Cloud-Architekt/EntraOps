@@ -107,6 +107,10 @@
           "Microsoft.Intune/QuietTimePolicies/Create",
           "Microsoft.Intune/QuietTimePolicies/Delete",
           "Microsoft.Intune/QuietTimePolicies/Update",
+          "Microsoft.Intune/Recovery/Assign",
+          "Microsoft.Intune/Recovery/Create",
+          "Microsoft.Intune/Recovery/Delete",
+          "Microsoft.Intune/Recovery/Update",
           "Microsoft.Intune/WindowsOSRecovery/Assign",
           "Microsoft.Intune/WindowsOSRecovery/Create",
           "Microsoft.Intune/WindowsOSRecovery/Delete",
@@ -128,7 +132,11 @@
           "Microsoft.Intune/EDRPolicy/Assign",
           "Microsoft.Intune/EDRPolicy/Create",
           "Microsoft.Intune/EDRPolicy/Delete",
-          "Microsoft.Intune/EDRPolicy/Update"
+          "Microsoft.Intune/EDRPolicy/Update",
+          "Microsoft.Intune/ShieldingExclusions/Assign",
+          "Microsoft.Intune/ShieldingExclusions/Create",
+          "Microsoft.Intune/ShieldingExclusions/Delete",
+          "Microsoft.Intune/ShieldingExclusions/Update"
         ]
       },
       {
@@ -401,6 +409,8 @@
           "Microsoft.Intune/PolicySets/Read",
           "Microsoft.Intune/QuietTimePolicies/Read",
           "Microsoft.Intune/QuietTimePolicies/ViewReports",
+          "Microsoft.Intune/Recovery/Read",
+          "Microsoft.Intune/Recovery/ViewReports",
           "Microsoft.Intune/RemoteAssistance/Read",
           "Microsoft.Intune/RemoteAssistance/ViewReports",
           "Microsoft.Intune/Reports/Read",
@@ -408,6 +418,8 @@
           "Microsoft.Intune/SecurityBaselines/Read",
           "Microsoft.Intune/SecurityTasks/Read",
           "Microsoft.Intune/ServiceNow/ViewIncidents",
+          "Microsoft.Intune/ShieldingExclusions/Read",
+          "Microsoft.Intune/ShieldingExclusions/ViewReports",
           "Microsoft.Intune/TelecomExpenses/Read",
           "Microsoft.Intune/TermsAndConditions/Read",
           "Microsoft.Intune/WindowsEnterpriseCertificate/Read",

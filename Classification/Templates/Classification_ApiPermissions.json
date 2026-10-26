@@ -155,6 +155,7 @@
           "Policy.ReadWrite.Authorization",
           "UserAuthenticationMethod.Delete.All",
           "UserAuthenticationMethod.ReadWrite.All",
+          "UserCertificateIds.ReadWrite.All",
           "UserAuthMethod-Email.Delete.All",
           "UserAuthMethod-Email.ReadWrite.All",
           "UserAuthMethod-External.Delete.All",
@@ -533,6 +534,7 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "CrossTenantIdentityMapping.ReadWrite.All",
           "LifecycleWorkflows-CustomExt.ReadWrite.All",
           "LifecycleWorkflows-Workflow.Activate",
           "LifecycleWorkflows-Workflow.ReadWrite.All",
@@ -805,6 +807,8 @@
         ],
         "RoleDefinitionActions": [
           "AdministrativeUnit.ReadWrite.All",
+          "AdministrativeUnit.ReadWriteBasic.All",
+          "AdministrativeUnitMember.ReadWrite.All",
           "Agreement.ReadWrite.All",
           "BillingConfiguration.ReadWrite.All",
           "ConfigurationMonitoring.ReadWrite.All",
@@ -1124,9 +1128,12 @@
           "CopilotConversation.Delete",
           "CopilotCostManagement-Assignment.Read.All",
           "CopilotCostManagement-Assignment.ReadWrite.All",
+          "CopilotCostManagement-CreditReq.Read.All",
+          "CopilotCostManagement-CreditReq.ReadWrite.All",
           "CopilotCostManagement-Policy.Read.All",
           "CopilotCostManagement-Policy.ReadWrite.All",
           "CopilotCostManagement-UserData.Read.All",
+          "CopilotCostManagement.Read.All",
           "CopilotSettings-LimitedMode.Read",
           "CopilotSettings-LimitedMode.ReadWrite"
         ]
@@ -2383,6 +2390,8 @@
         "RoleDefinitionActions": [
           "InformationProtectionConfig.Read",
           "InformationProtectionPolicy.Read",
+          "Repository.Read.All",
+          "Repository.ReadWrite.All",
           "SecurityCopilotWorkspaces.Read.All",
           "SecurityCopilotWorkspaces.ReadWrite.All",
           "ThreatAssessment.ReadWrite.All",
@@ -2595,6 +2604,7 @@
           "AppFederatedCredentialIssuers.Read.All",
           "ConfigurationMonitoring.Read.All",
           "ConsentRequest.Read.All",
+          "CrossTenantIdentityMapping.Read.All",
           "CrossTenantInformation.ReadBasic.All",
           "CrossTenantUserProfileSharing.Read.All",
           "CustomAuthenticationExtension.Read.All",
@@ -2635,6 +2645,7 @@
           "Policy.Read.IdentityProtection",
           "Policy.Read.PermissionGrant",
           "Policy.Read.Recovery",
+          "Policy.Read.SecurityDefaults",
           "PreAuthorizationGrant.Read.All",
           "PrivilegedAccess-CustomExt.Read.All",
           "PrivilegedAccess.Read.AzureAD",
@@ -3049,6 +3060,7 @@
         ],
         "RoleDefinitionActions": [
           "AdministrativeUnit.Read.All",
+          "AdministrativeUnit.ReadBasic.All",
           "AgentCard.Read.All",
           "AgentCardManifest.Read.All",
           "AgentCollection.Read.All",

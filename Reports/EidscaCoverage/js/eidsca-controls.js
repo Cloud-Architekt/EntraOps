@@ -1,6 +1,8 @@
 // Curated subset of EIDSCA (Entra ID Security Config Analyzer) control definitions.
-// Source: https://raw.githubusercontent.com/Cloud-Architekt/AzureAD-Attack-Defense/AADSCAv4/config/EidscaConfig.json
-// Retrieved: 2026-07-17
+// Source: https://raw.githubusercontent.com/Cloud-Architekt/AzureAD-Attack-Defense/refs/heads/AADSCAv4/config/EidscaConfig.json
+// Retrieved: 2026-10-26
+// Source SHA-256: 6f43e0060bee52a26e6db7398f72b4dcc76ae48ac22d7f415fbbdbd52d1f3353
+// Snapshot property mappings and the descriptive AP03 label are curated for EntraOps.
 // Only the "Entra ID Tenant Configuration" category is included - the other two categories
 // ("Entra Conditional Access", "Entra Workload ID") are entity-list stubs with no per-property
 // checks. Within that category, only control areas whose GraphEndpoint already has a matching
@@ -23,7 +25,7 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "Enabled Self service password reset for administrators",
           "checkId": "EIDSCA.AP01",
           "recommendedValue": "false",
-          "severity": "Informational",
+          "severity": "High",
           "recommendation": "Administrators with sensitive roles should use phishing-resistant authentication methods only and therefore not able to reset their password using SSPR.",
           "portalDeepLink": "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/PasswordResetMenuBlade/~/AdminPasswordResetPolicy",
           "mitreTactic": ["TA0006 - Credential Access"]
@@ -83,7 +85,7 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "Guest user access",
           "checkId": "EIDSCA.AP07",
           "recommendedValue": "2af84b1e-32c8-42b7-82bc-daa82404023b",
-          "severity": "",
+          "severity": "Medium",
           "recommendation": "CISA SCuBA 2.18: Guest users SHOULD have limited access to Entra ID (Azure AD) directory objects.",
           "portalDeepLink": "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AllowlistPolicyBlade",
           "mitreTactic": ["TA0043 - Reconnaissance"],
@@ -95,15 +97,17 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
         },
         {
           "name": "permissionGrantPolicyIdsAssignedToDefaultUserRole",
-          "displayName": "User consent policy assigned for applications",
+          "displayName": "User consent assignments match the restricted or Microsoft recommended baseline",
           "checkId": "EIDSCA.AP08",
-          "recommendedValue": "ManagePermissionGrantsForSelf.microsoft-user-default-low",
+          "recommendedValue": "0",
           "severity": "High",
-          "recommendation": "Microsoft recommends to allow to user consent for apps from verified publisher for selected permissions. CISA SCuBA 2.7 defines that all Non-Admin Users SHALL Be Prevented From Providing Consent To Third-Party Applications.",
+          "recommendation": "Disable user consent or assign only microsoft-user-default-low, microsoft-user-default-recommended, or both for default user self-consent. Accepting microsoft-user-default-recommended trusts Microsoft's evolving recommendations and does not verify a fixed set of permission restrictions. Review other user consent policies, including custom policies and microsoft-user-default-allow-consent-apps mail-client exceptions, by retrieving their includes and excludes from policies/permissionGrantPolicies. Any assigned policy can authorize consent independently; a restrictive policy does not override a permissive one. Remove the legacy unrestricted self-consent assignment. Preserve and assess ManagePermissionGrantsForOwnedResource assignments separately. See https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/manage-app-consent-policies.",
           "portalDeepLink": "https://entra.microsoft.com/#view/Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/UserSettings",
           "mitreTactic": ["TA0001 - Initial Access", "TA0005 - Defense Evasion", "TA0006 - Credential Access", "TA0008 - Lateral Movement"],
           "mitreTechnique": ["T1566.002", "T1078", "T1550", "T1528"],
-          "mitreMitigation": ["M1017", "M1018"]
+          "mitreMitigation": ["M1017", "M1018"],
+          "evaluation": "userConsentAssignments",
+          "skipReason": "Manual review required: consent policy assignments are unavailable, or user consent policies other than microsoft-user-default-low and microsoft-user-default-recommended require evaluation of their includes and excludes against the organization's baseline. This includes custom policies and microsoft-user-default-allow-consent-apps mail-client exceptions. No compliance conclusion is made for these policies."
         },
         {
           "name": "allowUserConsentForRiskyApps",
@@ -123,7 +127,7 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "Default User Role Permissions - Allowed to create Apps",
           "checkId": "EIDSCA.AP10",
           "recommendedValue": "false",
-          "severity": "High",
+          "severity": "Medium",
           "recommendation": "CISA SCuBA 2.6: Only Administrators SHALL Be Allowed To Register Third-Party Applications",
           "portalDeepLink": "https://entra.microsoft.com/#view/Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/UserSettings",
           "mitreTactic": ["TA0001 - Initial Access", "TA0005 - Defense Evasion", "TA0006 - Credential Access", "TA0008 - Lateral Movement"],
@@ -144,9 +148,9 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "name": "defaultUserRoleAllowedToCreateTenants",
           "displayName": "Default User Role Permissions - Allowed to create Tenants",
           "checkId": "EIDSCA.AP12",
-          "recommendedValue": "",
+          "recommendedValue": "false",
           "severity": "Medium",
-          "recommendation": "",
+          "recommendation": "Restrict tenant creation by non-admin users. Users assigned the Tenant Creator role can still create tenants when this setting is false.",
           "portalDeepLink": "https://entra.microsoft.com/#view/Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/UserSettings",
           "mitreTactic": ["TA0010 - Exfiltration", "TA0040 - Impact"]
         },
@@ -169,6 +173,21 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "recommendation": "Restrict this default permissions for members have huge impact on collaboration features and user lookup.",
           "portalDeepLink": "",
           "mitreTactic": ["TA0043 - Reconnaissance"]
+        },
+        {
+          "name": "defaultUserRoleAllowedToCreateAgentIdentityBlueprints",
+          "displayName": "Default User Role Permissions - Allowed to create agent identity blueprints",
+          "checkId": "EIDSCA.AP15",
+          "alternateNames": [
+            "defaultUserRolePermissions.allowedToCreateAgentIdentityBlueprints",
+            "allowedToCreateAgentIdentityBlueprints"
+          ],
+          "skipIfNull": true,
+          "skipReason": "The allowedToCreateAgentIdentityBlueprints setting is not returned by the authorization policy API for this tenant. No compliance conclusion is made when the setting is unavailable.",
+          "recommendedValue": "false",
+          "severity": "Medium",
+          "recommendation": "Restrict agent identity blueprint creation through the default user role. Use designated Agent ID roles to govern creation. Blueprint creation and permission grants are separate controls; restricting creation does not disable existing blueprints or agent identities.",
+          "portalDeepLink": "https://entra.microsoft.com/#view/Microsoft_AAD_UsersAndTenants/UserManagementMenuBlade/~/UserSettings"
         }
       ]
     },
@@ -209,8 +228,8 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "Manage migration",
           "checkId": "EIDSCA.AG01",
           "recommendedValue": "@('migrationComplete', '')",
-          "severity": "Informational",
-          "recommendation": "On September 30th, 2025, the legacy multifactor authentication and self-service password reset policies will be deprecated and you'll manage all authentication methods here in the authentication methods policy. Use this control to manage your migration from the legacy policies to the new unified policy.",
+          "severity": "Low",
+          "recommendation": "Complete the migration from the legacy multifactor authentication and self-service password reset policies to the unified Authentication methods policy. Review the enabled methods and their user scopes before marking migration complete.",
           "portalDeepLink": "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AuthenticationMethodsMenuBlade/~/AdminAuthMethods"
         },
         {
@@ -228,7 +247,7 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "Report suspicious activity - Included users/groups",
           "checkId": "EIDSCA.AG03",
           "recommendedValue": "all_users",
-          "severity": "High",
+          "severity": "Medium",
           "recommendation": "Apply this feature to all users.",
           "portalDeepLink": "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AuthenticationMethodsMenuBlade/~/AuthMethodsSettings",
           "notCapturedNote": "Not yet captured by the Tenant Governance Snapshot - no matching M365DSC/UTCM property exists for reportSuspiciousActivitySettings today."
@@ -337,7 +356,7 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "Allow use of Microsoft Authenticator OTP",
           "checkId": "EIDSCA.AM02",
           "recommendedValue": "false",
-          "severity": "High",
+          "severity": "Medium",
           "recommendation": "CISA MS.AAD.3.3v2 recommends disabling Microsoft Authenticator OTP. We recommend using this method only if no stronger MFA option is available, or if it is needed for specific restore scenarios. Make sure you have configured authentication strength to require stronger and phishing-resistant authentication methods, in order to enforce stronger authentication than OTP in all other scenarios.",
           "portalDeepLink": "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AuthenticationMethodsMenuBlade/~/AdminAuthMethods"
         },
@@ -376,7 +395,7 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "Show application name in push and passwordless notifications",
           "checkId": "EIDSCA.AM06",
           "recommendedValue": "enabled",
-          "severity": "High",
+          "severity": "Medium",
           "recommendation": "",
           "portalDeepLink": ""
         },
@@ -385,7 +404,7 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "Included users/groups to show application name in push and passwordless notifications",
           "checkId": "EIDSCA.AM07",
           "recommendedValue": "all_users",
-          "severity": "High",
+          "severity": "Medium",
           "recommendation": "",
           "portalDeepLink": ""
         },
@@ -403,7 +422,7 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "Show geographic location in push and passwordless notifications",
           "checkId": "EIDSCA.AM09",
           "recommendedValue": "enabled",
-          "severity": "High",
+          "severity": "Medium",
           "recommendation": "",
           "portalDeepLink": ""
         },
@@ -501,7 +520,7 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "Restrict specific keys",
           "checkId": "EIDSCA.AF06",
           "recommendedValue": "true",
-          "severity": "High",
+          "severity": "Medium",
           "recommendation": "You should use Block or Allow as value to allow- or blocklisting of AAGuids.",
           "portalDeepLink": ""
         },
@@ -536,7 +555,7 @@ window.ENTRAOPS_EIDSCA_CONTROLS = {
           "displayName": "State",
           "checkId": "EIDSCA.AT01",
           "recommendedValue": "enabled",
-          "severity": "High",
+          "severity": "Medium",
           "recommendation": "Use Temporary Access Pass for secure onboarding users (initial password replacement) and enforce MFA for registering security information in Conditional Access Policy.",
           "portalDeepLink": ""
         },

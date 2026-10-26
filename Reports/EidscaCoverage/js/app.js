@@ -113,6 +113,33 @@
         return curValues.indexOf(String(recommendedValue).toLowerCase()) !== -1 ? "ok" : "warn";
     }
 
+    // AP08 evaluates assignments, not whether the list contains one approved policy:
+    // each self-consent policy can authorize consent independently. Match EIDSCA's
+    // computed CurrentValue and SkipCondition without executing source PowerShell.
+    function evaluateUserConsentAssignments(rawVal, c) {
+        if (rawVal === undefined || rawVal === null) {
+            return { curVal: undefined, status: "unknown", note: c.skipReason };
+        }
+        var assignments = Array.isArray(rawVal) ? rawVal : [rawVal];
+        var selfConsent = assignments.map(String).filter(function (value) {
+            return /^ManagePermissionGrantsForSelf\./i.test(value);
+        });
+        var outsideBaseline = selfConsent.filter(function (value) {
+            return !/^ManagePermissionGrantsForSelf\.microsoft-user-default-(low|recommended)$/i.test(value);
+        });
+        var hasLegacy = selfConsent.some(function (value) {
+            return /^ManagePermissionGrantsForSelf\.microsoft-user-default-legacy$/i.test(value);
+        });
+        if (outsideBaseline.length && !hasLegacy) {
+            return { curVal: rawVal, status: "info", note: c.skipReason };
+        }
+        return {
+            curVal: outsideBaseline.length,
+            status: evalEidscaControl(outsideBaseline.length, c.recommendedValue),
+            note: "Assigned consent policies: " + JSON.stringify(assignments)
+        };
+    }
+
     // ---- Evaluate one snapshot against the full covered control catalog ----------------
     // Shared by the Checks view, the Trend chart and the Compare diff - keeps the "what does
     // this snapshot pass/fail/miss" logic in exactly one place.
@@ -168,11 +195,27 @@
                 var props = (blob && blob.properties) ? blob.properties : {};
                 var controlResults = controls.map(function (c) {
                     var rawVal = resolveEidscaPath(props, c.name);
+                    (c.alternateNames || []).some(function (path) {
+                        if (rawVal !== undefined) return true;
+                        rawVal = resolveEidscaPath(props, path);
+                        return rawVal !== undefined;
+                    });
                     var curVal = translateValue(rawVal, c);
                     var status = (rawVal === undefined && c.notCapturedNote) ? "info" : evalEidscaControl(curVal, c.recommendedValue);
+                    var note;
+                    if (c.evaluation === "userConsentAssignments") {
+                        var consent = evaluateUserConsentAssignments(rawVal, c);
+                        curVal = consent.curVal;
+                        status = consent.status;
+                        note = consent.note;
+                    } else if (c.skipIfNull && (rawVal === undefined || rawVal === null)) {
+                        curVal = undefined;
+                        status = "unknown";
+                        note = c.skipReason;
+                    }
                     tally(c, status, true);
                     areaStats[status]++;
-                    return { control: c, status: status, rawVal: rawVal, curVal: curVal };
+                    return { control: c, status: status, rawVal: rawVal, curVal: curVal, note: note };
                 });
                 resourceBlocks.push({ blobMissing: false, resource: r, controlResults: controlResults });
             });
@@ -232,6 +275,7 @@
         }
         var detail = "Current: " + curDisplay;
         if (c.recommendedValue) detail += " &middot; Recommended: " + esc(c.recommendedValue);
+        if (cr.note) detail += "<br/>" + esc(cr.note);
         if (rawVal === undefined && c.notCapturedNote) detail += "<br/>" + esc(c.notCapturedNote);
         else if (c.recommendation) detail += "<br/>" + esc(c.recommendation);
         if (c.portalDeepLink) detail += ' &middot; <a href="' + esc(c.portalDeepLink) + '" target="_blank" rel="noopener noreferrer">Open in Entra admin center</a>';
