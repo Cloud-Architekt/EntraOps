@@ -150,12 +150,9 @@ Import-Module ./EntraOps
 From the PowerShell Gallery (updated with `Update-PSResource EntraOps`, or `Update-Module EntraOps` if installed with `Install-Module`). `Initialize-EntraOpsWorkspace` downloads the classification templates, samples and reporting apps into the EntraOps working folder (`ENTRAOPS_ROOT`, the current folder with `EntraOpsConfig.json`, or `<home>/EntraOps`); run it again with `-Force` after a module update:
 
 ```powershell
-Install-PSResource -Name EntraOps -Prerelease -Repository PSGallery -Scope CurrentUser
+Install-PSResource -Name EntraOps -Repository PSGallery -Scope CurrentUser
 Initialize-EntraOpsWorkspace
 ```
-
-> [!NOTE]
-> EntraOps 1.1.0 is currently a release candidate. Without `-Prerelease` (or `Install-Module EntraOps -AllowPrerelease` with PowerShellGet), the PowerShell Gallery installs 1.0.0, which doesn't include `Initialize-EntraOpsWorkspace`. Use `-Prerelease` / `-AllowPrerelease` for updates as well, and drop it once 1.1.0 is generally available.
 
 See [Install EntraOps](https://www.entraops.com/docs/get-started/index.html#install-entraops) for a comparison of both options.
   
@@ -315,7 +312,7 @@ Choose private repository to keep data internal
     Import-Module ./EntraOps
     ```
 
-4. Create a new EntraOps.config File and update the settings based on your parameters and use case
+4. Create a new `EntraOpsConfig.json` file and update the settings based on your parameters and use case
 _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-EntraOpsConfigFile` if you are using GitHub Codespaces or Cloud Shell to perform Device Authentication._
 
     ```powershell
@@ -327,7 +324,7 @@ _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-Ent
 
     _Recommendation: There is a limitation of 10 KB for a single WatchList entry. This limit can be exceeded in the case of a high number of property items (e.g., classification or owner properties). Therefore, I can strongly recommend choosing "Custom tables" in a large environment. If you are choosing WatchList as ingestion option, keep an eye on the deployment logs for any warnings of this limitation. Entries will not be added if the limit has been exceeded._
 
-6. Review and customize the EntraOps.config file based on your requirements.
+6. Review and customize the `EntraOpsConfig.json` file based on your requirements.
    - `TenantId` and `TenantName` should be already updated based on the provided parameters to create the config file. `ClientId` will be automatically updated by running the cmdlet `New-EntraOpsWorkloadIdentity`.
    - The default scheduled time for running the pull workflow will be a also enabled (`PullScheduledTrigger`) and defined (`PullScheduledCron`) in the config file. By default, the workflow to ingest data will be triggered right after the pull has been completed (by default value of `PushAfterPullWorkflowTrigger`).
    - Automated updates for classification templates from AzurePrivilegedIAM repository (`AutomatedClassificationUpdate`) or Control Plane scope (`ApplyAutomatedControlPlaneScopeUpdate`) can also be enabled by parameters. Customization of classification updates or data source to identify Control Plane assets is also available from here.
@@ -343,13 +340,13 @@ _Tip: Use `Connect-AzAccount -UseDeviceAuthentication` before executing `New-Ent
    - Creation and Management of Administrative Unit based on the selected EntraOps Tiering can be automated by using `AutomatedAdministrativeUnitManagement`. All supported objects (users and groups) will be added to the Administrative Unit. `RestrictedAuMode` allows to control if a RMAU will be created for RBAC Systems outside of Microsoft Entra which are not using role-assignable group usually.
    - All privileged users outside of existing protection by role-assignable group, existing (Restricted) Management Administrative Unit (RMAU) or role-assignable groups can be protected by the setting `AutomatedRmauAssignmentsForUnprotectedObjects`. All users or groups without restricted management will be added automatically to an RMAU for protection.
   
-7. Create an application registration with required permissions (Global Admin role required and User Access Administrator). All necessary permissions on Microsoft Graph API permissions but also Azure RBAC roles for data collection and/or ingestion (if configured in `EntraOps.config`) will be added. Administrative Unit, based on the defined name in the config file (`AdminUnitName`) for Conditional Access Groups will be created to scoped delegation on Group Administrator if `ApplyConditionalAccessTargetGroups` has been enabled.
+7. Create an application registration with required permissions (Global Admin role required and User Access Administrator). All necessary permissions on Microsoft Graph API permissions but also Azure RBAC roles for data collection and/or ingestion (if configured in `EntraOpsConfig.json`) will be added. Administrative Unit, based on the defined name in the config file (`AdminUnitName`) for Conditional Access Groups will be created to scoped delegation on Group Administrator if `ApplyConditionalAccessTargetGroups` has been enabled.
 
     ```powershell
     New-EntraOpsWorkloadIdentity -AppDisplayName entraops -CreateFederatedCredential -GitHubOrg "<YourGitHubUser/Org>" -GitHubRepo "<YourRepoName (e.g., EntraOps-Contoso)>" -FederatedEntityType "Branch" -FederatedEntityName "main"
     ```
 
-8. Update GitHub workflow definition based on the definitions in EntraOps.config
+8. Update GitHub workflow definition based on the definitions in `EntraOpsConfig.json`
 
     ```powershell
     Update-EntraOpsRequiredWorkflowParameters
@@ -698,7 +695,7 @@ Tenant governance relationships are fetched via the Microsoft Graph beta endpoin
 
 ### Configuring EntraOps for Tenant Governance Relationships
 
-Add the following parameters to your `EntraOps.config` file to enable tenant governance support:
+Add the following parameters to your `EntraOpsConfig.json` file to enable tenant governance support:
 
 ```json
 {
@@ -857,7 +854,7 @@ Let's have a few examples about use cases and benefits of using the feature in c
 
 ### Azure Resource Graph
 
-Included "PrivilegedRolesFromAzGraph" in the property "PrivilegedObjectClassificationSource" of the EntraOps.config file allows to gather privileged role assignments from the Azure Resource Graph. The property "AzureHighPrivilegedRoles" and "AzureHighPrivilegedScopes" allows you to define which Azure RBAC Roles and Scope will be considered as Control Plane scope. Every delegation with a scoped role assignment in Entra ID to the principal (Azure RBAC role member) will be identified as Control Plane. For example, Group Administrator of the Entra ID security group which has been assigned to the "Owner" role on the Tenant Root Group. The following Resource Graph query will be used (parameter "%AzureHighPrivilegedRoles%" and the Scope will be replaced by the value in the EntraOps.config file)
+Included "PrivilegedRolesFromAzGraph" in the property "PrivilegedObjectClassificationSource" of the `EntraOpsConfig.json` file allows to gather privileged role assignments from the Azure Resource Graph. The property "AzureHighPrivilegedRoles" and "AzureHighPrivilegedScopes" allows you to define which Azure RBAC Roles and Scope will be considered as Control Plane scope. Every delegation with a scoped role assignment in Entra ID to the principal (Azure RBAC role member) will be identified as Control Plane. For example, Group Administrator of the Entra ID security group which has been assigned to the "Owner" role on the Tenant Root Group. The following Resource Graph query will be used (parameter "%AzureHighPrivilegedRoles%" and the Scope will be replaced by the value in the `EntraOpsConfig.json` file)
 
 ```kusto
 AuthorizationResources
@@ -879,7 +876,7 @@ AuthorizationResources
 
 ### Microsoft Security Exposure Management
 
-Critical assets defined in Microsoft Security Exposure Management (XSPM) can be integrated by using the value "PrivilegedEdgesFromExposureManagement" in the property "PrivilegedObjectClassificationSource". You can also filter by using "ExposureCriticalityLevel" which "tier" classification in the XSPM critical asset management will be included. The following hunting query will be used to identify high-privileged nodes (parameter "%CriticalLevel%" will be replaced by the value in the EntraOps.config file):
+Critical assets defined in Microsoft Security Exposure Management (XSPM) can be integrated by using the value "PrivilegedEdgesFromExposureManagement" in the property "PrivilegedObjectClassificationSource". You can also filter by using "ExposureCriticalityLevel" which "tier" classification in the XSPM critical asset management will be included. The following hunting query will be used to identify high-privileged nodes (parameter "%CriticalLevel%" will be replaced by the value in the `EntraOpsConfig.json` file):
 
 ```kusto
 let Tier0CloudResources = ExposureGraphNodes
@@ -925,20 +922,21 @@ _Enter the role definition name in the "used by Roles" and choose the desired ti
 
 EntraOps can be updated without losing classification definition and files by using the cmdlet `Update-EntraOps`.
 `Update-EntraOps` only updates repository clones; for installations from the PowerShell Gallery, use `Update-PSResource EntraOps` (or `Update-Module EntraOps` if installed with `Install-Module`), then `Initialize-EntraOpsWorkspace -Force` to refresh the classification templates, samples and reporting apps.
-The cmdlet can be executed interactively, and changes must be pushed to your repository. This command updates the PowerShell module, workflow files, repository resources (incl. workbooks and parsers) and parameters in workflows based on "EntraOps.config" file.
+The cmdlet can be executed interactively, and changes must be pushed to your repository. This command updates the PowerShell module, repository resources (incl. workbooks and parsers), and the workflow or pipeline definitions when `./.github/workflows` or `./.azure-pipelines` is one of the update targets, and re-applies the parameters of the workflows and pipelines from `EntraOpsConfig.json`.
 
 The GitHub `Update-EntraOps` workflow and Azure DevOps `entraops-update` pipeline can run on
-demand or on the schedule defined in `EntraOpsConfig.json`. GitHub defaults to publishing updates
-through a pull request; Azure DevOps uses direct push. Updating GitHub workflow definitions requires
-the separately configured publisher GitHub App, while Azure DevOps pipeline definitions are included
-in its default update targets.
+demand or on the schedule defined in `EntraOpsConfig.json`. Both publish updates through a pull request by
+default (`AutomatedEntraOpsUpdate.PublicationMode: PullRequest`); `DirectPush` pushes the update to
+the pipeline branch without review. Updating GitHub workflow definitions requires the separately
+configured publisher GitHub App, so `./.github/workflows` isn't a default update target, while Azure
+DevOps pipeline definitions are included in its default update targets.
 
-Regardless of the way to update EntraOps files, it could be required to update the EntraOps.config file and service principals of EntraOps to take benefit of new features. Create a new EntraOps.config file or add manually the named properties in the description of the feature. Use `New-EntraOpsWorkloadIdentity` in combination of the parameter `-ExistingSpObjectId` and the object ID of the EntraOps service principal (Example: `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps" -ExistingSpObjectId 11111111-1111-1111-1111-111111111111`). Ignore errors regarding existing API permissions or conflicts with existing roles.
+Regardless of the way to update EntraOps files, it could be required to update the `EntraOpsConfig.json` file and service principals of EntraOps to take benefit of new features. Keep your current `EntraOpsConfig.json` and add the properties named in the description of the feature (the Configuration Wizard can import your file and add new settings); don't replace it with a newly generated file. Use `New-EntraOpsWorkloadIdentity` in combination of the parameter `-ExistingSpObjectId` and the object ID of the EntraOps service principal (Example: `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps" -ExistingSpObjectId 11111111-1111-1111-1111-111111111111`). Ignore errors regarding existing API permissions or conflicts with existing roles.
 
 After changing automation settings, run `Update-EntraOpsRequiredWorkflowParameters` for GitHub or
 `Update-EntraOpsAzureDevOpsSchedules` for Azure DevOps, then commit the resulting definition changes.
 
-I recommend to remove and create a service principal but also re-create the EntraOps.config file if there should be any issues by updating EntraOps.
+If an update causes issues, compare your `EntraOpsConfig.json` with the output of `New-EntraOpsConfigFile` for missing or renamed settings instead of re-creating it, and see [Upgrading from EntraOps 1.0](https://www.entraops.com/docs/get-started/migration-guide/index.html#upgrade-from-1-0) for the steps after updating to 1.1.
 
 ## Changelog
 

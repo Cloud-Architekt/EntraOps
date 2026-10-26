@@ -274,12 +274,12 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                 $ObjectDetails = $SharedDetailsCache[$ObjectId]
 
                 # Fail-closed: never drop a principal whose object details could not be resolved
-                # (failed/throttled Graph call, $null cache entry). A vanished ControlPlane principal
+                # (failed/throttled Graph call: $null cache entry or ResolutionStatus 'Unresolved'). A vanished ControlPlane principal
                 # would otherwise be removed from its protection group by the Administrative Unit /
                 # Conditional Access group reconciliation. Emit a placeholder pinned to ControlPlane
                 # instead, built inline from the identity fields known from the assignment data
                 # (cannot call module functions from parallel runspace).
-                $IsUnresolvedObject = ($null -eq $ObjectDetails)
+                $IsUnresolvedObject = ($null -eq $ObjectDetails -or "$($ObjectDetails.ResolutionStatus)" -eq 'Unresolved')
                 if ($IsUnresolvedObject) {
                     # Shared schema template (see its definition in function scope) - clone and
                     # fill the object-specific fields.
@@ -332,7 +332,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
                     'RoleSystem'                    = $LocalRoleSystem
                     'Classification'                = $Classification
-                    'RoleAssignments'               = @($RbacClassifiedAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId)
+                    'RoleAssignments'               = @($RbacClassifiedAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
                     'Sponsors'                      = $ObjectDetails.Sponsors
                     'Owners'                        = $ObjectDetails.Owners
                     'OwnedObjects'                  = $ObjectDetails.OwnedObjects
@@ -382,11 +382,11 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                 $ObjectDetails = $ObjectDetailsCache[$ObjectId]
 
                 # Fail-closed: never drop a principal whose object details could not be resolved
-                # (failed/throttled Graph call, $null cache entry). A vanished ControlPlane principal
+                # (failed/throttled Graph call: $null cache entry or ResolutionStatus 'Unresolved'). A vanished ControlPlane principal
                 # would otherwise be removed from its protection group by the Administrative Unit /
                 # Conditional Access group reconciliation. Emit a placeholder pinned to ControlPlane
                 # instead, built from the identity fields known from the assignment data.
-                $IsUnresolvedObject = ($null -eq $ObjectDetails)
+                $IsUnresolvedObject = ($null -eq $ObjectDetails -or "$($ObjectDetails.ResolutionStatus)" -eq 'Unresolved')
                 if ($IsUnresolvedObject) {
                     $UnresolvedWarning = "Object $ObjectId could not be resolved - emitted as fail-closed ControlPlane placeholder (TaggedBy=UnresolvedObject)"
                     if ($null -ne $WarningMessages) {

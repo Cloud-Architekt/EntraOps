@@ -11,8 +11,7 @@ ingestion, automated protection, and full rollout.
 > # Repository clone
 > Import-Module ./EntraOps
 > # or PowerShell Gallery (downloads classification templates, samples and reporting apps once)
-> # -Prerelease is needed while 1.1.0 is a release candidate; drop it once 1.1.0 is generally available
-> Install-PSResource -Name EntraOps -Prerelease -Repository PSGallery -Scope CurrentUser; Initialize-EntraOpsWorkspace
+> Install-PSResource -Name EntraOps -Repository PSGallery -Scope CurrentUser; Initialize-EntraOpsWorkspace
 >
 > Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
 > Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse
@@ -554,7 +553,7 @@ are enabled). Then verify the workflows enabled by your config:
 - `Push-EntraOpsPrivilegedEAM` performs enabled ingestion and protection actions after a successful pull.
 - `Pull-EntraOpsTenantGovernance` receives scheduled triggers and runs setup or collection steps only when Tenant Governance snapshots are enabled.
 - `Update-EntraOps` applies scheduled module updates when enabled.
-- `Test-EntraOps` validates the manifest, generated documentation, Pester suite, and browser apps on pushes and pull requests. Add it as a required status check in the branch protection rules when changes must pass CI before merge.
+- `Test-EntraOps` validates the manifest, generated documentation, Pester suite, and browser apps on pushes and pull requests. Don't add its checks as required status checks of the base branch: a workflow-definition update is committed with `[skip actions]`, and GitHub keeps a required check that never ran pending, which blocks every such update pull request. Require the `EntraOps / Update candidate validation` status instead, as described in [Update EntraOps repository and CI/CD](../core/index.html#update-entraops-powershell-module-and-cicd).
 
 For Tenant Governance, manually run `Pull-EntraOpsTenantGovernance` once before relying on its
 schedule. This verifies the workload identity and the first-party UTCM service principal have the
@@ -577,9 +576,10 @@ Administrator when Azure role assignments are configured.
 2. Generate the configuration with `New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -DevOpsPlatform AzureDevOps`, or select Azure DevOps in the guided setup above.
 3. Run `New-EntraOpsWorkloadIdentity -AppDisplayName "EntraOps-ADO" -ConfigFile "./EntraOpsConfig.json"` to create the app registration and configured permissions.
 4. Create an **Azure Resource Manager -> Workload Identity Federation (manual)** service connection. Add the exact issuer and subject identifier shown by Azure DevOps as a federated credential on the app registration; use `api://AzureADTokenExchange` as the audience.
-5. Import the five production YAML pipelines from `.azure-pipelines/`: pull, push, reporting, Tenant Governance, and update. Name the pull pipeline `entraops-pull` so its completion triggers resolve without modification. Optionally import `entraops-test.yml` for repository, cross-platform Pester, and browser validation; configure it as a build-validation policy for Azure Repos pull requests.
+5. Import the five production YAML pipelines from `.azure-pipelines/`: pull, push, reporting, Tenant Governance, and update. **Import `entraops-pull.yml` first and rename it to `entraops-pull`** (Azure DevOps names an imported pipeline after the repository): the push and reporting pipelines reference it as pipeline resource `entraops-pull`, and Azure DevOps refuses to save them while no pipeline of that name exists. Optionally import `entraops-test.yml` for repository, cross-platform Pester, and browser validation. If you add it as a build-validation policy for Azure Repos pull requests, exclude the update pull requests (source branches `entraops/update-*`) from the policy or make it optional for them: build validation runs the pipeline YAML and tests of the pull request itself, with a checkout of the tenant data and the job access token of the Build Service, which defeats the isolated **Validate** job of the update pipeline. Review those pull requests instead and run `entraops-test` manually after the merge.
 6. Name the service connection `EntraOps-ServiceConnection` to use the shipped default. For another name, set `AzureDevOpsServiceConnection` in `EntraOpsConfig.json` (or `New-EntraOpsConfigFile -AzureDevOpsServiceConnection`); step 8 writes it into the pipelines. Add the secret `EntraOpsUpdatePat` only for a private update source.
-7. Grant `<Project> Build Service (<Organization>)` **Contribute** permission on the repository, plus **Create branch** and **Contribute to pull requests** for the update pipeline in its default `PullRequest` mode, and authorize the service connection for the imported pipelines. **Force push** isn't required. The build service also needs **View project-level information** (granted by default) so the pipelines can verify that the project is private.
+7. Grant `<Project> Build Service (<Organization>)` **Contribute** permission on the repository, plus **Create branch** and **Contribute to pull requests** for the update pipeline in its default `PullRequest` mode, and authorize the service connection for the imported pipelines. **Force push** isn't required.
+   Secure the service connection, because every pipeline that can use it runs with the Graph and Azure permissions of the workload identity: authorize it only for the EntraOps pipelines (not for all pipelines), add a **Branch control** check that allows only the pipeline branch (e.g. `refs/heads/main`) and **Verify branch protection**, and enable **Protect access to repositories in YAML pipelines** in the project settings. Otherwise anyone who can push a branch, including the unreviewed `entraops/update-*` branches, can run modified pipeline YAML with the workload identity. Protect the pipeline branch with branch policies so pipeline definitions change only through reviewed pull requests. The build service also needs **View project-level information** (granted by default) so the pipelines can verify that the project is private.
 8. Apply the config-driven schedules and service connection, and commit the result:
 
 ```powershell
@@ -589,7 +589,14 @@ Update-EntraOpsAzureDevOpsSchedules `
   -BranchName "main"
 ```
 
-The module command changes only the marked YAML schedule and service connection regions; operational
+The module command changes only the marked YAML schedule, pipeline trigger and service connection regions; `-BranchName`
+is the pipeline branch: the schedules run on it, and the push and reporting pipelines run only after `entraops-pull` runs
+of this branch, so a pull run of another branch never triggers them with the service connection. Azure DevOps reads the
+pipeline completion trigger from the pipeline's **Default branch for manual and scheduled builds**; keep it set to the
+pipeline branch for all EntraOps pipelines. `Update-EntraOps` keeps the branch of the current pipeline definitions when it
+updates them. Deployments of a 1.1.0 release candidate on another branch than `main` run
+`Update-EntraOpsAzureDevOpsSchedules -BranchName <branch>` once after the update, because the release candidate didn't
+know the pipeline trigger region; otherwise push and reporting no longer run after pull. Operational
 values remain in `EntraOpsConfig.json` and are read by each pipeline at runtime. Azure Pipelines
 resolves the service connection before runtime variables exist, so its name is written as the default
 of the `serviceConnection` pipeline parameter; `Update-EntraOps` applies it again after updating the
@@ -604,6 +611,10 @@ after confirming the ADO project is private. The Tenant Governance pipeline supp
 `Start`, `Collect`, and `RunAndWait` operations plus the four configured start and collection
 schedules.
 
+The pull job has a timeout of 360 minutes and the Tenant Governance job of 75 minutes (the default job timeout is
+60 minutes). Microsoft-hosted agents of the free tier stop every job after 60 minutes regardless of these values; use a
+paid parallel job or a self-hosted agent when a collection of a large tenant takes longer.
+
 For cross-tenant service connections, use the exact issuer and subject displayed by Azure DevOps;
 do not derive either value. The pipeline runtime needs no client secret. `$(System.AccessToken)` is
 used for repository commits, so the project Build Service requires **Contribute** permission and any
@@ -612,7 +623,8 @@ in the checkout. A PAT is needed only when the update pipeline reads a private u
 
 The update pipeline runs in three jobs: **Resolve** clones the configured upstream ref without
 executing it, **Validate** runs the candidate's tests without a repository checkout and without
-credentials, and **Apply** applies the validated candidate and opens a pull request from the branch
+mapped credentials (Azure DevOps still issues a job access token to every job, so review the update pull request before
+you merge it), and **Apply** applies the validated candidate and opens a pull request from the branch
 `entraops/update-<commit>`. With `AutomatedEntraOpsUpdate.PublicationMode` set to `DirectPush`, Apply
 instead pushes the update to the pipeline branch without review; updated pipeline definitions then
 apply to the next scheduled runs, which use the Azure service connection. A manual run can override

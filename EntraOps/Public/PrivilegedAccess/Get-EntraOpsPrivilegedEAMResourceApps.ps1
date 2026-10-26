@@ -236,177 +236,29 @@ function Get-EntraOpsPrivilegedEamResourceApps {
         @{}
     }
 
-    # Classification is CPU-only and indexed; a runspace pool costs more than it saves for modest inventories.
-    $HasSufficientObjects = $UniqueObjects.Count -ge 500
-    $UseParallelForClassification = $EnableParallelProcessing -and $HasSufficientObjects
-    
-    if ($UseParallelForClassification) {
-        # Convert hashtables to synchronized versions for thread-safe access
-        $SyncObjectDetailsCache = [System.Collections.Hashtable]::Synchronized($ObjectDetailsCache)
-        $SyncAppRoleByObject = [System.Collections.Hashtable]::Synchronized($AppRoleByObject)
-        $SyncAgentIdObjects = [System.Collections.Hashtable]::Synchronized($AgentIdObjectsByObject)
-
-        # Merge classifications up front (module helpers are not available in parallel runspaces).
-        # Same assignment sources as below; duplicates do not affect the union.
-        $MergedClassificationByObject = @{}
-        foreach ($UniqueObject in $UniqueObjects) {
-            $UniqueObjectId = $UniqueObject.ObjectId
-            if ($null -eq $UniqueObjectId -or $MergedClassificationByObject.ContainsKey($UniqueObjectId)) { continue }
-            $MergeAssignments = @($AppRoleByObject[$UniqueObjectId])
-            if ($AgentIdObjectsByObject.ContainsKey($UniqueObjectId)) {
-                $MergeAssignments += @($AgentIdObjectsByObject[$UniqueObjectId].RoleAssignments)
-            }
-            $MergedClassificationByObject[$UniqueObjectId] = @(Merge-EntraOpsEAMClassification -RoleAssignments $MergeAssignments)
+    # Role assignments per object, including the inheritable permissions of an agent identity blueprint
+    $AppRoleAssignmentsByObject = @{}
+    foreach ($UniqueObject in $UniqueObjects) {
+        $UniqueObjectId = $UniqueObject.ObjectId
+        if ($AppRoleAssignmentsByObject.ContainsKey($UniqueObjectId)) { continue }
+        $ObjectAppRoleAssignments = @($AppRoleByObject[$UniqueObjectId] | Select-Object -Unique *)
+        if ($AgentIdObjectsByObject.ContainsKey($UniqueObjectId)) {
+            # Merge role assignments if the service principal has inheritable permissions by agent blueprint and assigned app roles
+            $ObjectAppRoleAssignments += @($AgentIdObjectsByObject[$UniqueObjectId].RoleAssignments)
         }
-        $SyncMergedClassificationByObject = [System.Collections.Hashtable]::Synchronized($MergedClassificationByObject)
-        
-        $ClassificationThrottleLimit = [Math]::Min($ParallelThrottleLimit, 10)
-        Write-Host "Using parallel classification processing with $ClassificationThrottleLimit threads for $($UniqueObjects.Count) objects..." -ForegroundColor Yellow
-        
-        $AppRoleClassifiedSpObjects = $UniqueObjects | ForEach-Object -ThrottleLimit $ClassificationThrottleLimit -Parallel {
-            $obj = $_
-            $ObjectId = $obj.ObjectId
-            
-            if ($null -ne $ObjectId) {
-                $SharedDetailsCache = $using:SyncObjectDetailsCache
-                $SharedAppRoleByObject = $using:SyncAppRoleByObject
-                $SharedAgentIdObjects = $using:SyncAgentIdObjects
-                
-                $ObjectDetails = $SharedDetailsCache[$ObjectId]
-                
-                if ($null -eq $ObjectDetails) {
-                    Write-Verbose "Skipping object $ObjectId - failed to retrieve details"
-                    return
-                }
-
-                # Role Assignments
-                $AppRoleAssignments = @()
-                
-                if ($SharedAgentIdObjects.ContainsKey($ObjectId)) {
-                    $AppRoleAssignments += $SharedAppRoleByObject[$ObjectId] | Select-Object -Unique *
-                    $AppRoleAssignments += $SharedAgentIdObjects[$ObjectId].RoleAssignments
-                } else {
-                    $AppRoleAssignments += $SharedAppRoleByObject[$ObjectId] | Select-Object -Unique *
-                }
-
-                # Merged classifications are precomputed in the calling runspace (module helpers are not
-                # available here); see Merge-EntraOpsEAMClassification.
-                $SharedMergedClassification = $using:SyncMergedClassificationByObject
-                $Classification = @($SharedMergedClassification[$ObjectId])
-
-                if ($Classification.Count -eq 0) {
-                    $Classification = @([PSCustomObject]@{
-                            'AdminTierLevel'     = "Unclassified"
-                            'AdminTierLevelName' = "Unclassified"
-                            'Service'            = "Unclassified"
-                        })
-                }
-
-                [PSCustomObject]@{
-                    'ObjectId'                      = $ObjectId
-                    'ObjectTenantId'                = $ObjectDetails.ObjectTenantId
-                    'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
-                    'ObjectSubType'                 = $ObjectDetails.ObjectSubType
-                    'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
-                    'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
-                    'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
-                    'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
-                    'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
-                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
-                    'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
-                    'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
-                    'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
-                    'RoleSystem'                    = "ResourceApps"
-                    'Classification'                = $Classification
-                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
-                    'Sponsors'                      = $ObjectDetails.Sponsors
-                    'Owners'                        = $ObjectDetails.Owners
-                    'OwnedObjects'                  = $ObjectDetails.OwnedObjects
-                    'OwnedDevices'                  = $ObjectDetails.OwnedDevices
-                    'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
-                    'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
-                }
-            }
-        }
-
-        if ($AppRoleClassifiedSpObjects.Count -ne $UniqueObjects.Count) {
-            $WarningMessages.Add([PSCustomObject]@{Type = "Stage-Classification-Parallel"; Message = "Parallel classification returned fewer objects than expected. Expected: $($UniqueObjects.Count), Actual: $($AppRoleClassifiedSpObjects.Count)" })
-            Write-Warning "Parallel classification returned fewer objects than expected. Expected: $($UniqueObjects.Count), Actual: $($AppRoleClassifiedSpObjects.Count)"
-        }
-    } else {
-        if ($EnableParallelProcessing) {
-            Write-Host "Using sequential classification processing (dataset too small: $($UniqueObjects.Count) objects)" -ForegroundColor Yellow
-        } else {
-            Write-Host "Using sequential classification processing (parallel disabled)..." -ForegroundColor Yellow
-        }
-        
-        $AppRoleClassifiedSpObjects = $UniqueObjects | ForEach-Object {
-            if ($null -ne $_.ObjectId) {
-                $ObjectId = $_.ObjectId
-                if ($VerbosePreference -ne 'SilentlyContinue') {
-                    Write-Verbose -Message "Processing classifications for $($ObjectId)..."
-                }
-            
-                # Object types
-                $ObjectDetails = $ObjectDetailsCache[$ObjectId]
-            
-                # Skip if object details couldn't be retrieved
-                if ($null -eq $ObjectDetails) {
-                    $WarningMessages.Add([PSCustomObject]@{Type = "SkippedObject"; Message = "Skipping object $ObjectId - failed to retrieve details"; Target = $ObjectId })
-                    return
-                }
-
-                # Role Assignments
-                $AppRoleAssignments = @()
-
-                if ($AgentIdObjectsByObject.ContainsKey($ObjectId)) {
-                    # Merge classifications and role assignments if service principal has inheritable permissions by agent blueprint and assigned app roles
-                    $AppRoleAssignments += $AppRoleByObject[$ObjectId] | Select-Object -Unique *
-                    $AppRoleAssignments += $AgentIdObjectsByObject[$ObjectId].RoleAssignments
-                } else {
-                    $AppRoleAssignments += $AppRoleByObject[$ObjectId] | Select-Object -Unique *
-                }
-
-                # Classification - merge MatchedActions/ScopedObjects across all assignments per tier/service
-                $Classification = @(Merge-EntraOpsEAMClassification -RoleAssignments @($AppRoleAssignments))
-
-                if ($Classification.Count -eq 0) {
-                    $Classification = @(
-                        [PSCustomObject]@{
-                            'AdminTierLevel'     = "Unclassified"
-                            'AdminTierLevelName' = "Unclassified"
-                            'Service'            = "Unclassified"
-                        }
-                    )
-                }
-
-                [PSCustomObject]@{
-                    'ObjectId'                      = $ObjectId
-                    'ObjectTenantId'                = $ObjectDetails.ObjectTenantId
-                    'ObjectType'                    = $ObjectDetails.ObjectType.toLower()
-                    'ObjectSubType'                 = $ObjectDetails.ObjectSubType
-                    'ObjectDisplayName'             = $ObjectDetails.ObjectDisplayName
-                    'ObjectUserPrincipalName'       = $ObjectDetails.ObjectSignInName
-                    'ObjectAdminTierLevel'          = $ObjectDetails.AdminTierLevel
-                    'ObjectAdminTierLevelName'      = $ObjectDetails.AdminTierLevelName
-                    'OnPremSynchronized'            = $ObjectDetails.OnPremSynchronized
-                    'AssignedAdministrativeUnits'   = $ObjectDetails.AssignedAdministrativeUnits
-                    'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
-                    'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
-                    'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
-                    'RoleSystem'                    = "ResourceApps"
-                    'Classification'                = $Classification
-                    'RoleAssignments'               = @($AppRoleAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
-                    'Sponsors'                      = $ObjectDetails.Sponsors
-                    'Owners'                        = $ObjectDetails.Owners
-                    'OwnedObjects'                  = $ObjectDetails.OwnedObjects
-                    'OwnedDevices'                  = $ObjectDetails.OwnedDevices
-                    'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
-                    'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
-                }
-            }
-        }
+        $AppRoleAssignmentsByObject[$UniqueObjectId] = $ObjectAppRoleAssignments
     }
+
+    # Shared aggregation of the other RBAC systems: same output schema (including IdentityParent), and a principal whose
+    # details couldn't be resolved is kept as fail-closed ControlPlane placeholder instead of being dropped from the export
+    $AppRoleClassifiedSpObjects = @(Invoke-EntraOpsEAMClassificationAggregation `
+            -UniqueObjects $UniqueObjects `
+            -ObjectDetailsCache $ObjectDetailsCache `
+            -RbacClassificationsByObject $AppRoleAssignmentsByObject `
+            -RoleSystem "ResourceApps" `
+            -EnableParallelProcessing $EnableParallelProcessing `
+            -ParallelThrottleLimit $ParallelThrottleLimit `
+            -WarningMessages $WarningMessages)
     #endregion
 
     #region Add agent identities to classified objects if not already present and correct role assignment ObjectIds

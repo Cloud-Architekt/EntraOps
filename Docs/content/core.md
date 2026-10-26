@@ -593,7 +593,11 @@ the update continues under its original definition; the updated templates apply 
 > was skipped by `[skip actions]` pending indefinitely, which would permanently block every
 > workflow-definition update. Pull requests opened by people do not carry the validation status, so
 > add the maintainers who open them to the ruleset's bypass list or approve those merges as an
-> administrator.
+> administrator. A required status check also applies to direct pushes: `Pull-EntraOpsPrivilegedEAM`
+> and `Pull-EntraOpsTenantGovernance` commit their data directly to the base branch with the workflow's
+> `GITHUB_TOKEN`, and those commits never carry the validation status. Add **GitHub Actions** to the
+> ruleset's bypass list (or target the status-check rule at a separate ruleset that the data workflows
+> bypass); otherwise every scheduled collection fails when it pushes its data.
 > It does not import the newly downloaded module into the updater process. Review the applied diff,
 > clear update credentials, and load the module in a subsequent clean PowerShell process or session.
 
