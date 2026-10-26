@@ -70,6 +70,25 @@ for (const reportApp of ["AccessPackageFlow", "ConditionalAccessAnalysis", "Conf
     });
 }
 
+for (const reportApp of ["AccessPackageFlow", "ConditionalAccessAnalysis", "ConfigurationAnalyzer", "PimRequestFlow"]) {
+    test(`${reportApp} treats section navigation targets as IDs rather than HTML`, async ({ page }) => {
+        const pageErrors = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+        const reportUrl = pathToFileURL(join(reportsRoot, reportApp, "index.html")).href;
+        await page.goto(reportUrl);
+
+        const navigationItem = page.locator(".nav-item.section-item").first();
+        await navigationItem.evaluate((item) => {
+            item.setAttribute("data-target", '<img id="security-probe" src="invalid:" onerror="window.__navigationXss = true">');
+        });
+        await navigationItem.dispatchEvent("click");
+
+        await expect(page.locator("#security-probe")).toHaveCount(0);
+        expect(await page.evaluate(() => window.__navigationXss)).toBeUndefined();
+        expect(pageErrors).toEqual([]);
+    });
+}
+
 for (const reportApp of ["AccessPackageFlow", "ConditionalAccessAnalysis", "ConfigurationAnalyzer", "EidscaCoverage", "PimRequestFlow"]) {
     test(`${reportApp} keeps partial Tenant Governance health visible`, async ({ page }) => {
         const reportUrl = pathToFileURL(join(reportsRoot, reportApp, "index.html")).href;

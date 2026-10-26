@@ -122,10 +122,18 @@ function Remove-EntraOpsServiceCatalog {
             $ConfirmPreference = 'None'
         }
         $encodedServiceCatalogName = ConvertTo-EntraOpsODataStringLiteral -Value $ServiceCatalogName
-        $catalog = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedServiceCatalogName'&`$expand=accessPackages,resources" -OutputType PSObject -DisableCache -ThrowOnFailure
-        if (($catalog | Measure-Object).Count -eq 0) {
+        $catalogs = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/identityGovernance/entitlementManagement/catalogs?`$filter=displayName eq '$encodedServiceCatalogName'&`$expand=accessPackages,resources" -OutputType PSObject -DisableCache -ThrowOnFailure | Where-Object { $null -ne $_ })
+        if ($catalogs.Count -eq 0) {
             Write-Warning "$logPrefix Unable to obtain catalog by name"
             return @{}
+        }
+        # Never enumerate packages or groups from an ambiguous name lookup during teardown.
+        if ($catalogs.Count -gt 1) {
+            throw "$logPrefix Found $($catalogs.Count) catalogs named '$ServiceCatalogName'; no resources were removed. Use a unique catalog name before retrying."
+        }
+        $catalog = $catalogs[0]
+        if ([string]::IsNullOrWhiteSpace([string]$catalog.Id)) {
+            throw "$logPrefix Catalog '$ServiceCatalogName' has no object ID; no resources were removed."
         }
         Write-Verbose "$logPrefix Obtained Service Catalog $($catalog.Id)"
         $groupResourceCount = @($catalog.Resources | Where-Object { $_.OriginSystem -eq "AadGroup" }).Count

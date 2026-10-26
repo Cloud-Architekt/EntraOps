@@ -81,6 +81,57 @@ Describe 'ServiceEM removal verification and replication recovery' {
         $script:RemoveOptions = @{ ServiceCatalogName = 'Catalog-Rg-Test'; Force = $true; WarningAction = 'SilentlyContinue' }
     }
 
+    It 'rejects duplicate catalog names before reading or changing their contents (WhatIf: <UseWhatIf>)' -TestCases @(
+        @{ UseWhatIf = $false }, @{ UseWhatIf = $true }
+    ) {
+        param($UseWhatIf)
+        Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'GET' -and $Uri -like '*/catalogs[?]*' } {
+            foreach ($index in 1, 2) {
+                [pscustomobject]@{
+                    id = "catalog-$index"
+                    accessPackages = @([pscustomobject]@{ id = "ap-$index"; displayName = "AP-$index" })
+                    Resources = @([pscustomobject]@{ OriginSystem = 'AadGroup'; OriginId = "group-$index" })
+                }
+            }
+        }
+
+        { Remove-EntraOpsServiceCatalog @script:RemoveOptions -WhatIf:$UseWhatIf } |
+        Should -Throw "*Found 2 catalogs named 'Catalog-Rg-Test'; no resources were removed*"
+
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly -ParameterFilter { $Method -ne 'GET' }
+        Should -Invoke Remove-AzResourceGroup -Times 0 -Exactly
+    }
+
+    It 'rejects a catalog without an object ID before reading or changing its contents' {
+        Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'GET' -and $Uri -like '*/catalogs[?]*' } {
+            [pscustomobject]@{ accessPackages = @([pscustomobject]@{ id = 'ap-1' }); Resources = @() }
+        }
+
+        { Remove-EntraOpsServiceCatalog @script:RemoveOptions } |
+        Should -Throw "*Catalog 'Catalog-Rg-Test' has no object ID; no resources were removed*"
+
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly
+        Should -Invoke Remove-AzResourceGroup -Times 0 -Exactly
+    }
+
+    It 'keeps the no-match behavior for an empty or null catalog response (<ReturnNull>)' -TestCases @(
+        @{ ReturnNull = $false }, @{ ReturnNull = $true }
+    ) {
+        param($ReturnNull)
+        $script:ReturnNullCatalog = $ReturnNull
+        Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Method -eq 'GET' -and $Uri -like '*/catalogs[?]*' } {
+            if ($script:ReturnNullCatalog) { return $null }
+            return @()
+        }
+
+        Remove-EntraOpsServiceCatalog @script:RemoveOptions -WarningVariable noCatalogWarnings | Out-Null
+
+        @($noCatalogWarnings | Where-Object { "$_" -like '*Unable to obtain catalog by name*' }).Count | Should -Be 1
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly
+        Should -Invoke Remove-AzResourceGroup -Times 0 -Exactly
+    }
+
     It 'waits for assignments to disappear before deleting resource roles and packages' {
         $script:RemainingForChecks = 2
 
