@@ -7,6 +7,7 @@
   - [Videos and demos of EntraOps Privileged EAM](#videos-and-demos-of-entraops-privileged-eam)
   - [Documentation](#documentation)
   - [Changelog](#changelog)
+  - [Donations and Support](#donations-and-support)
   - [Project Policies and License](#project-policies-and-license)
     - [Managed Service or Commercial Use Notice](#managed-service-or-commercial-use-notice)
 
@@ -15,6 +16,8 @@
 EntraOps is a community research project that demonstrates automated management of a Microsoft Entra ID tenant at scale using a DevOps approach. The PowerShell module and repository templates analyze privileges and apply a customizable classification model to identify access sensitivity based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA). EntraOps requires PowerShell 7.4 or later and can run in GitHub Actions, Azure Pipelines, custom automation, managed-identity hosts, or local environments.
 
 Start with the **[EntraOps Docs](https://www.entraops.com/docs)** and guided **[Get Started setup guide](https://www.entraops.com/docs/get-started/index.html)** for an interactive run, a local configuration, or GitHub automation.
+
+A signed version of the EntraOps PowerShell module is available on **[PowerShell Gallery](https://www.powershellgallery.com/packages/EntraOps/)**.
 
 ## Key features
 
@@ -93,6 +96,12 @@ Open [`Reports/index.html`](./Reports/index.html) to use the reporting apps dire
 ## Changelog
 
 Added features, changes or bug fixes can be found in the [GitHub issues](https://github.com/Cloud-Architekt/EntraOps/issues) of the repository or in the [changelog](./CHANGELOG.md).
+
+## Donations and Support
+
+EntraOps is a free, MIT-licensed open-source project that helps organizations improve the security posture of their privileged identities and access. If you find EntraOps valuable and want to show your appreciation, please consider making a voluntary donation through **[betterplace.org](https://www.betterplace.org/de/fundraising-events/58034-entraops-supports-welthungerhilfe)** to support **Welthungerhilfe** and its efforts to fight hunger and poverty worldwide.
+
+**Privileged to Give Back. ❤️**
 
 ## Project Policies and License
 
