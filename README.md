@@ -3,6 +3,7 @@
 - [EntraOps (Privileged EAM) - Management and Monitoring of Enterprise Access Model](#entraops-privileged-eam---management-and-monitoring-of-enterprise-access-model)
   - [Introduction](#introduction)
   - [Key features](#key-features)
+  - [Service EM - Service-scoped Landing Zones](#service-em---service-scoped-landing-zones)
   - [Videos and demos of EntraOps Privileged EAM](#videos-and-demos-of-entraops-privileged-eam)
   - [Documentation](#documentation)
   - [Changelog](#changelog)
@@ -11,13 +12,13 @@
 
 ## Introduction
 
-EntraOps is a community research project that demonstrates automated management of a Microsoft Entra ID tenant at scale using a DevOps approach. The PowerShell module and GitHub repository template analyze privileges and apply a customizable classification model to identify access sensitivity based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA). EntraOps requires PowerShell 7.4 or later and can run in GitHub Actions, custom automation, managed-identity hosts, or local environments.
+EntraOps is a community research project that demonstrates automated management of a Microsoft Entra ID tenant at scale using a DevOps approach. The PowerShell module and repository templates analyze privileges and apply a customizable classification model to identify access sensitivity based on [Microsoft's Enterprise Access Model](https://aka.ms/SPA). EntraOps requires PowerShell 7.4 or later and can run in GitHub Actions, Azure Pipelines, custom automation, managed-identity hosts, or local environments.
 
 Start with the **[EntraOps Docs](https://www.entraops.com/docs)** and guided **[Get Started setup guide](https://www.entraops.com/docs/get-started/index.html)** for an interactive run, a local configuration, or GitHub automation.
 
 ## Key features
 
-- 🚀 Automate deployment with GitHub, or run locally on any platform that supports PowerShell Core.
+- 🚀 Automate deployment with GitHub Actions or Azure Pipelines, or run locally on any platform that supports PowerShell Core.
 
 - ☑️ Track changes to privileged principals and their assignments as code.
 
@@ -31,7 +32,7 @@ Start with the **[EntraOps Docs](https://www.entraops.com/docs)** and guided **[
 
 - 📊 Build reports and queries that identify Enterprise Access Model tier breaches and privilege-escalation paths. Use the included workbook to visualize classified role assignments and objects classified with Custom Security Attributes.
 
-- 🖥️ EntraOps Reporting: a portal of ten static, self-contained, offline-capable web apps for classification, privileged identities, access paths, tier breaches, privilege history, tenant configuration, Conditional Access, EIDSCA findings, PIM request flows, and access-package flows. The apps visualize data as drill-down grids, graphs, or Sankey flows, and share a cross-tool Review list — no backend or Azure subscription required.
+- 🖥️ EntraOps Reporting: a portal of eleven static, self-contained, offline-capable web apps for classification, privileged identities, privileged assets, access paths, tier breaches, privilege history, tenant configuration, Conditional Access, EIDSCA findings, PIM request flows, and access-package flows. The apps visualize data as drill-down grids, graphs, or Sankey flows, and share a cross-tool Review list — no backend or Azure subscription required.
 
 - 🛡️ Assign privileged assets automatically to Conditional Access groups and Restricted Management Administrative Units (RMAUs). Privileged users and groups that are not already protected by an Administrative Unit, role-assignable group, or Entra ID role can be assigned to an RMAU named `UnprotectedObjects`.
 
@@ -54,7 +55,11 @@ Currently the following RBAC systems are supported:
 - 🖥️ Microsoft Intune RBAC
 - ☁️ Microsoft Azure RBAC
 
-The EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline, or in any automation/worker environment that supports PowerShell Core. Automated pipeline creation currently supports GitHub only.
+The EntraOps PowerShell module can be executed locally, as part of a CI/CD pipeline, or in any automation/worker environment that supports PowerShell Core. Shipped automation templates support both GitHub Actions and Azure Pipelines.
+
+## Service EM - Service-scoped Landing Zones
+
+**Service EM**, developed in collaboration with **Michael Soule**, provisions service-scoped Azure and Entra ID landing zones aligned with the Enterprise Access Model. It combines tiered groups, PIM for Groups, Entra ID Governance access packages, Azure RBAC, and ABAC-constrained delegation for least-privilege administration. See the [Service EM documentation](https://www.entraops.com/docs/service-em/index.html) for setup, governance models, configuration, and dependency diagrams.
 
 ## Videos and demos of EntraOps Privileged EAM
 
@@ -64,21 +69,23 @@ The EntraOps PowerShell module can be executed locally, as part of a CI/CD pipel
 ## Documentation
 
 Full documentation - including a **Get Started** guide, configuration reference and feature deep-dives for **Core**,
-**Privileged EAM** and **Reportings** - is available in the **[EntraOps Docs](./Docs/index.html)**.
+**Privileged EAM**, **Service EM**, and **Reportings** - is available in the **[EntraOps Docs](https://www.entraops.com/docs/index.html)**.
 
-- 🚩 [Get Started](./Docs/get-started/index.html) - prerequisites, sign-in options, and deploying EntraOps
-  interactively or as an automated GitHub pipeline.
-- ⚙️ [Core](./Docs/core/index.html) - authentication, the `EntraOpsConfig.json` reference, Tenant Governance
+- 🚩 [Get Started](https://www.entraops.com/docs/get-started/index.html) - prerequisites, sign-in options, and deploying EntraOps
+  interactively or as an automated GitHub Actions or Azure DevOps pipeline.
+- ⚙️ [Core](https://www.entraops.com/docs/core/index.html) - authentication, the `EntraOpsConfig.json` reference, Tenant Governance
   relationships and configuration snapshots, object classification by Custom Security Attributes or Alternate
   Tier Level Attributes, and updating the module.
-- 🛡️ [Privileged EAM](./Docs/privileged-eam/index.html) - collecting and exporting data, filtering examples,
+- 🛡️ [Privileged EAM](https://www.entraops.com/docs/privileged-eam/index.html) - collecting and exporting data, filtering examples,
   customizing classification with overwrite files, Identity Governance delegation, and automatic Control Plane scope
   updates.
-- 📊 [Reportings](./Docs/reportings/index.html) - ten static Reporting apps, including Classification Explorer, EAM
-  Dashboard, Access Path Map, Tier Breach Analyzer, Privilege History, Configuration Analyzer, Conditional Access
-  Analysis, EIDSCA Findings, PIM Request Flow, and Access Package Flow; plus Microsoft Sentinel/Unified SecOps
+- 🏗️ [Service EM](https://www.entraops.com/docs/service-em/index.html) - service-scoped Azure and Entra ID landing zones with tiered
+  groups, PIM for Groups, access packages, Azure RBAC, and constrained delegation.
+- 📊 [Reportings](https://www.entraops.com/docs/reportings/index.html) - eleven static Reporting apps, including Classification Explorer, EAM
+  Dashboard, Privileged Assets, Access Path Map, Tier Breach Analyzer, Privilege History, Configuration Analyzer,
+  Conditional Access Analysis, EIDSCA Findings, PIM Request Flow, and Access Package Flow; plus Microsoft Sentinel/Unified SecOps
   Platform and BloodHound OpenGraph integrations.
-- 🏢 [Tenant Governance](./Docs/tenant-governance/index.html) - cross-tenant delegated administration,
+- 🏢 [Tenant Governance](https://www.entraops.com/docs/tenant-governance/index.html) - cross-tenant delegated administration,
   Microsoft Graph UTCM configuration snapshots, permissions, scheduling, quotas, and Configuration Analyzer.
 
 Open [`Reports/index.html`](./Reports/index.html) to use the reporting apps directly.

@@ -10,6 +10,10 @@
 (function () {
     "use strict";
 
+    // Docs root, derived from this script's own URL (<docs>/js/search.js): result links then resolve correctly
+    // from pages at any depth, e.g. get-started/migration-guide/, also when the docs are opened from file://.
+    var scriptSrc = document.currentScript && document.currentScript.src;
+
     // Content keys (window.EODOCS_CONTENT) -> page metadata. "overview" (the Docs home page
     // intro) has no headings to index and is intentionally omitted.
     var ROUTES = {
@@ -18,6 +22,7 @@
         "core": { title: "Core", folder: "core", bodyPage: "core" },
         "tenant-governance": { title: "Tenant Governance", folder: "tenant-governance", bodyPage: "tenant-governance" },
         "privileged-eam": { title: "Privileged EAM", folder: "privileged-eam", bodyPage: "privileged-eam" },
+        "service-em": { title: "Service EM", folder: "service-em", bodyPage: "service-em" },
         "reportings": { title: "Reportings", folder: "reportings", bodyPage: "reportings" },
         "changelog": { title: "Changelog", folder: "changelog", bodyPage: "changelog" }
     };
@@ -37,8 +42,16 @@
 
     function hrefFor(contentKey, id) {
         var route = ROUTES[contentKey];
+        var path = route.folder + "/index.html#" + id;
+        if (scriptSrc) {
+            try {
+                return new URL("../" + path, scriptSrc).href;
+            } catch (e) {
+                // Fall back to the relative link below
+            }
+        }
         var base = isAtDocsRoot() ? "" : "../";
-        return base + route.folder + "/index.html#" + id;
+        return base + path;
     }
 
     function buildIndex() {

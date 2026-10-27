@@ -6,6 +6,36 @@
     Recovers information omitted by Tenant Governance snapshots: groupMembers user-set IDs,
     access package resource-role scopes, and current package assignments. The generated data is
     merged with the snapshot-only Configuration Analyzer dataset by the static report.
+
+.PARAMETER RepoRoot
+    Root of the EntraOps working folder with TenantGovernance/Snapshots, PrivilegedEAM and EntraOpsConfig.json.
+    Defaults to the EntraOps working folder ($EntraOpsBaseFolder).
+
+.PARAMETER SnapshotPath
+    Folder of the Tenant Governance snapshots. Defaults to <RepoRoot>/TenantGovernance/Snapshots. The folder must
+    exist; run Save-EntraOpsTenantGovernanceSnapshotJson first.
+
+.PARAMETER AppRoot
+    Folder of the Access Package Flow reporting app. Defaults to <RepoRoot>/Reports/AccessPackageFlow.
+
+.PARAMETER OutFile
+    Path of the generated data file. Defaults to <AppRoot>/data/access-package-assignments-data.js.
+
+.PARAMETER ResolveRequestorApproverTiers
+    Resolves the tiers of requestor and approver groups through transitive group membership and the Privileged EAM
+    export in <RepoRoot>/PrivilegedEAM, and the classification of access package targets. Defaults to
+    ConfigurationAnalyzer.ResolveGroupMembersForPrivilegedAssets of <RepoRoot>/EntraOpsConfig.json (true when not set).
+
+.PARAMETER PassThru
+    Returns the generated dataset in addition to writing the data file.
+
+.EXAMPLE
+    Generate the Access Package Flow enrichment data from the snapshots in the EntraOps working folder.
+    New-EntraOpsAccessPackageFlowData
+
+.EXAMPLE
+    Generate the data without resolving group tiers and return the dataset.
+    New-EntraOpsAccessPackageFlowData -ResolveRequestorApproverTiers $false -PassThru
 #>
 
 function New-EntraOpsAccessPackageFlowData {
@@ -38,7 +68,7 @@ function New-EntraOpsAccessPackageFlowData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
     if ([string]::IsNullOrWhiteSpace($SnapshotPath)) { $SnapshotPath = Join-Path $RepoRoot 'TenantGovernance/Snapshots' }
     if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepoRoot 'Reports/AccessPackageFlow' }
@@ -81,13 +111,13 @@ function New-EntraOpsAccessPackageFlowData {
     if ($ResolveRequestorApproverTiers) {
         $PrivilegedEamPath = Join-Path $RepoRoot 'PrivilegedEAM'
         if (Test-Path -LiteralPath $PrivilegedEamPath -PathType Container) {
-            $PrivilegedEamObjects = @(Get-EntraOpsPrivilegedEamDashboardObjects -ImportPath $PrivilegedEamPath)
+            $PrivilegedEamObjects = Get-EntraOpsPrivilegedEamDashboardObjects -ImportPath $PrivilegedEamPath
             foreach ($Object in $PrivilegedEamObjects) {
                 $ObjectId = "$($Object.objectId)"
                 if (-not $ObjectId) { continue }
                 $ObjectTierNames = @("$($Object.objectAdminTierLevelName)") +
-                    @($Object.classification | ForEach-Object { "$($_.adminTierLevelName)" }) +
-                    @($Object.roleAssignments | ForEach-Object { $_.classification } | ForEach-Object { "$($_.adminTierLevelName)" })
+                @($Object.classification | ForEach-Object { "$($_.adminTierLevelName)" }) +
+                @($Object.roleAssignments | ForEach-Object { $_.classification } | ForEach-Object { "$($_.adminTierLevelName)" })
                 foreach ($TierName in $ObjectTierNames | Where-Object { $TierRank.ContainsKey($_) }) {
                     if (-not $TierByObjectId.ContainsKey($ObjectId) -or $TierRank[$TierName] -lt $TierRank[$TierByObjectId[$ObjectId]]) {
                         $TierByObjectId[$ObjectId] = $TierName
@@ -104,7 +134,8 @@ function New-EntraOpsAccessPackageFlowData {
     $GroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($PolicyId in $PolicyIds) {
         try {
-            $Policy = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies/$PolicyId" -OutputType PSObject -ThrowOnFailure
+            # A deleted policy is reported once by the catch below, not again by the Graph helper
+            $Policy = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies/$PolicyId" -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
             if ($null -eq $Policy) { continue }
             $Requestors = @($Policy.requestorSettings.allowedRequestors)
             $Approvers = @($Policy.requestApprovalSettings.approvalStages | ForEach-Object { $_.primaryApprovers })
@@ -191,17 +222,22 @@ function New-EntraOpsAccessPackageFlowData {
                 $PackageAssignments = @(Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignments?`$filter=accessPackageId eq '${PackageId}'&`$expand=target" -OutputType PSObject -ThrowOnFailure)
                 foreach ($Assignment in $PackageAssignments) {
                     $Target = $Assignment.target
+                    # The beta accessPackageAssignment exposes assignmentState/assignmentStatus and
+                    # target.type; v1.0 names them state/status and target.subjectType.
+                    $AssignmentState = if ($Assignment.assignmentState) { $Assignment.assignmentState } else { $Assignment.state }
+                    $AssignmentStatus = if ($Assignment.assignmentStatus) { $Assignment.assignmentStatus } else { $Assignment.status }
+                    $SubjectType = if ($Target.type) { $Target.type } else { $Target.subjectType }
                     $Assignments.Add([ordered]@{
                             id                 = "$($Assignment.id)"
                             accessPackageId    = "$($Assignment.accessPackageId)"
                             assignmentPolicyId = "$($Assignment.assignmentPolicyId)"
-                            state              = "$($Assignment.state)"
-                            status             = "$($Assignment.status)"
+                            state              = "$AssignmentState"
+                            status             = "$AssignmentStatus"
                             target             = [ordered]@{
                                 objectId      = "$($Target.objectId)"
                                 displayName   = "$($Target.displayName)"
                                 principalName = "$($Target.principalName)"
-                                subjectType   = "$($Target.subjectType)"
+                                subjectType   = "$SubjectType"
                             }
                         })
                 }

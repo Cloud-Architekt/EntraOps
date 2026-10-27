@@ -13,7 +13,9 @@
     Checks:
       - initial domains (*.onmicrosoft.com) other than the documented placeholder tenants
       - e-mail addresses other than the documented placeholder and maintainer contact addresses
-      - Azure subscription resource paths with a non-zero subscription GUID
+      - Azure subscription resource paths with a subscription GUID that isn't a placeholder
+      - GUIDs assigned to tenant, object, principal, group, subscription or workspace ids (e.g. "TenantId":,
+        -ObjectId, ControlPlaneDelegationGroupId:) that aren't placeholders
       - a non-empty ExcludedPrincipalId list in the shipped Classification/Global.json
 
 .PARAMETER RepositoryRoot
@@ -42,8 +44,12 @@ $ExcludedPathPatterns = @(
     'Reports/*/data/'
     'Docs/data/'
     'EntraOpsConfig.json'
+    # Local npm and Playwright output (git-ignored) is not part of the shipped content.
+    'node_modules/'
+    'playwright-report/'
+    'test-results/'
     # This validator's own tests must contain the patterns it rejects.
-    'Tests/Test-EntraOpsReleaseContent.Tests.ps1'
+    'Tests/Reporting/Test-EntraOpsReleaseContent.Tests.ps1'
 )
 
 # Tenant and identity placeholders that are intentionally used in examples and fixtures.
@@ -54,6 +60,20 @@ $AllowedMailAddresses = @(
     'entraopsghactions@ghactions.com'
     'alex.wilber@outlook.com'
 )
+
+# Placeholders are built from repeated characters, such as 00000000-0000-0000-0000-000000000001,
+# 11111111-1111-1111-1111-111111111111 or aaaabbbb-0000-cccc-1111-dddd2222eeee (Microsoft Learn style);
+# a real id never has this little entropy.
+function Test-EntraOpsPlaceholderGuid {
+    param ([string]$Guid)
+    $Hex = ($Guid -replace '-', '').ToLowerInvariant()
+    if (@($Hex.ToCharArray() | Select-Object -Unique).Count -le 3) { return $true }
+    return $Hex -match '^(?:([0-9a-f])\1{3})+$'
+}
+$GuidPattern = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+# Keys and parameters whose value identifies an object of a specific tenant. Public ids such as built-in role
+# definition ids or first-party app ids are assigned to other keys and are not checked.
+$IdentityGuidPattern = "(?i)(?<Key>[A-Za-z]*(?:TenantId|ObjectId|PrincipalId|GroupId|SubscriptionId|WorkspaceId))[`"']?\s*(?::|=|\s)\s*[`"']?(?<Guid>$GuidPattern)"
 
 $Violations = [System.Collections.Generic.List[string]]::new()
 
@@ -108,6 +128,9 @@ foreach ($File in $Files) {
 
     foreach ($Match in [regex]::Matches($Content, '(?<Mail>[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})')) {
         $MailAddress = $Match.Groups['Mail'].Value.ToLowerInvariant()
+        if ($MailAddress -like '*@odata.bind') {
+            continue
+        }
         $MailDomain = $MailAddress.Split('@')[-1]
         if ($MailAddress -in $AllowedMailAddresses -or $MailDomain -in $AllowedMailDomains) {
             continue
@@ -116,14 +139,17 @@ foreach ($File in $Files) {
     }
 
     foreach ($Match in [regex]::Matches($Content, '/subscriptions/(?<Subscription>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})')) {
-        $SubscriptionId = $Match.Groups['Subscription'].Value
-        # Placeholders such as 00000000-0000-0000-0000-000000000001 or 11111111-1111-... are built from a
-        # repeated digit; a real subscription id never has this little entropy.
-        $Digits = $SubscriptionId -replace '-', ''
-        if (@($Digits.ToCharArray() | Select-Object -Unique).Count -le 2) {
+        if (Test-EntraOpsPlaceholderGuid -Guid $Match.Groups['Subscription'].Value) {
             continue
         }
         $Violations.Add("$RelativePath contains the subscription resource path '$($Match.Value)'. Replace it with a placeholder or remove the saved value.")
+    }
+
+    foreach ($Match in [regex]::Matches($Content, $IdentityGuidPattern)) {
+        if (Test-EntraOpsPlaceholderGuid -Guid $Match.Groups['Guid'].Value) {
+            continue
+        }
+        $Violations.Add("$RelativePath assigns the id '$($Match.Groups['Guid'].Value)' to '$($Match.Groups['Key'].Value)'. Use a placeholder such as 11111111-1111-1111-1111-111111111111.")
     }
 }
 

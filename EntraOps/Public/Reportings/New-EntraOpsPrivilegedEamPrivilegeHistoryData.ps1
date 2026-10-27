@@ -154,15 +154,6 @@ function New-EntraOpsPrivilegedEamPrivilegeHistoryData {
         return [ordered]@{ Years = $years; Months = $months; Days = $days }
     }
 
-    function Add-SnapshotInterval {
-        param([datetimeoffset]$Date, [System.Collections.Specialized.OrderedDictionary]$Interval)
-        $result = $Date
-        if ($Interval.Years -gt 0) { $result = $result.AddYears($Interval.Years) }
-        if ($Interval.Months -gt 0) { $result = $result.AddMonths($Interval.Months) }
-        if ($Interval.Days -gt 0) { $result = $result.AddDays($Interval.Days) }
-        return $result
-    }
-
     $SnapshotIntervalComponents = ConvertTo-SnapshotIntervalComponents -Interval $SnapshotInterval
 
     # Resolve the app/repository location relative to the module location:
@@ -174,12 +165,12 @@ function New-EntraOpsPrivilegedEamPrivilegeHistoryData {
     if ([string]::IsNullOrWhiteSpace($ModuleRoot)) {
         throw "Unable to resolve the EntraOps module location. Import the module with 'Import-Module <path-to-EntraOps> -Force' and try again."
     }
-    $RepositoryRoot = Split-Path -Parent $ModuleRoot
+    $RepositoryRoot = if (-not [string]::IsNullOrWhiteSpace($Global:EntraOpsBaseFolder)) { $Global:EntraOpsBaseFolder } else { Split-Path -Parent $ModuleRoot }
 
     if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = $RepositoryRoot }
-    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepositoryRoot 'Reports/PrivilegeHistory' }
+    if ([string]::IsNullOrWhiteSpace($AppRoot)) { $AppRoot = Join-Path $RepoRoot 'Reports/PrivilegeHistory' }
     if (-not (Test-Path -LiteralPath $AppRoot -PathType Container)) {
-        throw "Privilege History app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/PrivilegeHistory."
+        throw "Privilege History app folder not found: $AppRoot. Import the EntraOps module from a repository checkout that contains Reports/PrivilegeHistory, or run Install-EntraOpsReportingFolder to download the Reports folder."
     }
     if ([string]::IsNullOrWhiteSpace($ImportPath)) { $ImportPath = Join-Path $RepoRoot 'PrivilegedEAM' }
     if ([string]::IsNullOrWhiteSpace($OutFile)) { $OutFile = Join-Path $AppRoot 'data/privilege-history-data.js' }
@@ -241,17 +232,10 @@ function New-EntraOpsPrivilegedEamPrivilegeHistoryData {
     # Applied before any git archive/expand work happens (not just before the output is
     # written), so a coarse interval (the default is bi-weekly) also speeds up generation
     # over long, frequently-committed histories - not only the size of the resulting file.
+    # Shared with the Configuration Analyzer: a commit slightly earlier than one interval after the previously kept one
+    # still counts, so a job that runs on the interval's cadence keeps every snapshot.
     if ($null -ne $SnapshotIntervalComponents -and $commits.Count -gt 2) {
-        $thinned = [System.Collections.Generic.List[object]]::new()
-        $lastKeptDate = $null
-        for ($ci = 0; $ci -lt $commits.Count; $ci++) {
-            $commit = $commits[$ci]
-            $isLast = ($ci -eq $commits.Count - 1)
-            if ($null -eq $lastKeptDate -or $isLast -or $commit.Date -ge (Add-SnapshotInterval -Date $lastKeptDate -Interval $SnapshotIntervalComponents)) {
-                $thinned.Add($commit)
-                $lastKeptDate = $commit.Date
-            }
-        }
+        $thinned = Select-EntraOpsSnapshotIntervalCommit -Commit @($commits) -Years $SnapshotIntervalComponents.Years -Months $SnapshotIntervalComponents.Months -Days $SnapshotIntervalComponents.Days
         Write-Verbose "Snapshot interval '$SnapshotInterval' reduced $($commits.Count) commit(s) to $($thinned.Count) snapshot(s) (oldest and newest are always kept)."
         $commits = $thinned
     }
@@ -364,6 +348,7 @@ function New-EntraOpsPrivilegedEamPrivilegeHistoryData {
             # snapshots) - not the full live-dashboard schema, to keep repository size
             # bounded across potentially many historic commits.
             $snapshotObjects = @($objects | ForEach-Object {
+                    $snapshotObject = $_
                     [ordered]@{
                         objectId                 = $_.objectId
                         objectType               = $_.objectType
@@ -375,7 +360,8 @@ function New-EntraOpsPrivilegedEamPrivilegeHistoryData {
                                     roleAssignmentInstanceId = $_.roleAssignmentInstanceId
                                     roleAssignmentId   = $_.roleAssignmentId
                                     roleDefinitionName = $_.roleDefinitionName
-                                    roleSystem         = $_.roleSystem
+                                    # Dashboard role assignments carry no roleSystem of their own - it belongs to the parent object.
+                                    roleSystem         = $snapshotObject.roleSystem
                                     roleAssignmentType = $_.roleAssignmentType
                                     pimAssignmentType  = $_.pimAssignmentType
                                     classification     = @(@($_.classification) | ForEach-Object {

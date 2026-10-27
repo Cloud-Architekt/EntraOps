@@ -133,25 +133,28 @@ function Register-EntraOpsTenantGovernanceServicePrincipal {
     }
     #endregion
 
+    # -ThrowOnFailure: a failed lookup must not look like a missing object
     Write-Verbose "Get Microsoft Graph API App Roles..."
-    $MsGraph = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'" -OutputType PSObject -DisableCache) | Select-Object -First 1
+    $MsGraph = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'" -OutputType PSObject -DisableCache -ThrowOnFailure) | Select-Object -First 1
 
     # Some resource types (e.g. microsoft.securityandcompliance.*) are backed by the Office 365
     # Exchange Online API rather than Microsoft Graph, and require the "Exchange.ManageAsApp"
     # application permission granted on this resource service principal instead.
     Write-Verbose "Get Office 365 Exchange Online API App Roles..."
-    $ExchangeOnline = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals?`$filter=appId eq '00000002-0000-0ff1-ce00-000000000000'" -OutputType PSObject -DisableCache) | Select-Object -First 1
+    $ExchangeOnline = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals?`$filter=appId eq '00000002-0000-0ff1-ce00-000000000000'" -OutputType PSObject -DisableCache -ThrowOnFailure) | Select-Object -First 1
 
     #region Create the UTCM service principal if it does not exist
     Write-Output "Checking Microsoft Tenant Configuration Management (UTCM) service principal..."
-    $UtcmSp = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals?`$filter=appId eq '$UtcmAppId'" -OutputType PSObject -DisableCache) | Select-Object -First 1
+    $UtcmSp = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals?`$filter=appId eq '$UtcmAppId'" -OutputType PSObject -DisableCache -ThrowOnFailure) | Select-Object -First 1
     if (-not $UtcmSp) {
-        Write-Host "Creating Service Principal for Microsoft Tenant Configuration Management (AppId: $UtcmAppId)..."
-        $CreateSpBody = @{ appId = $UtcmAppId } | ConvertTo-Json -Depth 5
-        try {
-            $UtcmSp = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/servicePrincipals" -Body $CreateSpBody -OutputType PSObject -DisableCache
-        } catch {
-            throw "Failed to create Service Principal for Microsoft Tenant Configuration Management. Error: $_"
+        if ($PSCmdlet.ShouldProcess("Microsoft Tenant Configuration Management (AppId: $UtcmAppId)", "Create service principal")) {
+            Write-Host "Creating Service Principal for Microsoft Tenant Configuration Management (AppId: $UtcmAppId)..."
+            $CreateSpBody = @{ appId = $UtcmAppId } | ConvertTo-Json -Depth 5
+            try {
+                $UtcmSp = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/servicePrincipals" -Body $CreateSpBody -OutputType PSObject -DisableCache -ThrowOnFailure
+            } catch {
+                throw "Failed to create Service Principal for Microsoft Tenant Configuration Management. Error: $_"
+            }
         }
     } else {
         Write-Host "Service Principal for Microsoft Tenant Configuration Management already exists (Id: $($UtcmSp.id))"
@@ -176,14 +179,16 @@ function Register-EntraOpsTenantGovernanceServicePrincipal {
     $NonReadPermissions = @($RequiredUtcmPermissions | Where-Object { $_ -notmatch '\.Read(\.|$)' } | Sort-Object)
     if ($NonReadPermissions.Count -gt 0) {
         Write-Warning "The following permission(s) are NOT read-only and grant management capability to the Microsoft Tenant Configuration Management service principal: $($NonReadPermissions -join ', '). They are required by the resource type(s) selected in ResourcesToInclude."
-        if (-not $PSCmdlet.ShouldProcess("Microsoft Tenant Configuration Management service principal ($($UtcmSp.id))", "Grant non-read permission(s): $($NonReadPermissions -join ', ')")) {
+        # -WhatIf only reports the grant; a declined confirmation stops before anything is assigned.
+        if (-not $PSCmdlet.ShouldProcess("Microsoft Tenant Configuration Management service principal ($($UtcmSp.id))", "Grant non-read permission(s): $($NonReadPermissions -join ', ')") -and -not $WhatIfPreference) {
             throw "Aborted by user: remove the resource type(s) requiring $($NonReadPermissions -join ', ') from ResourcesToInclude, or re-run and confirm the grant."
         }
     }
 
     $ReadPermissionCount = $RequiredUtcmPermissions.Count - $NonReadPermissions.Count
     Write-Output "Assigning $($RequiredUtcmPermissions.Count) required permission(s) to the UTCM service principal ($ReadPermissionCount read, $($NonReadPermissions.Count) non-read)..."
-    $ExistingUtcmAssignments = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals/$($UtcmSp.id)/appRoleAssignments" -OutputType PSObject -DisableCache)
+    # Under -WhatIf a missing service principal was not created, so it has no assignments yet.
+    $ExistingUtcmAssignments = if ($UtcmSp.id) { @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals/$($UtcmSp.id)/appRoleAssignments" -OutputType PSObject -DisableCache -ThrowOnFailure) } else { @() }
     $AssignedCount = 0
     $AlreadyPresentCount = 0
     $FailedPermissions = [System.Collections.Generic.List[string]]::new()
@@ -202,6 +207,9 @@ function Register-EntraOpsTenantGovernanceServicePrincipal {
         }
         $IsAssigned = $ExistingUtcmAssignments | Where-Object { $_.appRoleId -eq $AppRole.id -and $_.resourceId -eq $ResourceSp.id }
         if (-not $IsAssigned) {
+            if (-not $PSCmdlet.ShouldProcess("Microsoft Tenant Configuration Management service principal", "Assign $($AppRole.value)")) {
+                continue
+            }
             Write-Host "- Assigning $($AppRole.value) to Microsoft Tenant Configuration Management service principal"
             $AssignmentBody = @{
                 principalId = $UtcmSp.id
@@ -209,7 +217,7 @@ function Register-EntraOpsTenantGovernanceServicePrincipal {
                 appRoleId   = $AppRole.id
             } | ConvertTo-Json -Depth 5
             try {
-                Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/servicePrincipals/$($UtcmSp.id)/appRoleAssignments" -Body $AssignmentBody -OutputType PSObject -DisableCache | Out-Null
+                Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/servicePrincipals/$($UtcmSp.id)/appRoleAssignments" -Body $AssignmentBody -OutputType PSObject -DisableCache -ThrowOnFailure | Out-Null
                 $AssignedCount++
             } catch {
                 Write-Warning "Failed to assign $($AppRole.value) to Microsoft Tenant Configuration Management service principal. This can happen if the signed-in account doesn't hold sufficient privilege to consent to this specific permission (some application permissions can only be admin-consented by a Global Administrator, even when signed in as Application Administrator or Privileged Role Administrator). Error: $_"
@@ -237,7 +245,7 @@ function Register-EntraOpsTenantGovernanceServicePrincipal {
             Write-Warning "Cannot grant ConfigurationMonitoring.ReadWrite.All: no valid ClientId found in '$ConfigFile'. Run New-EntraOpsWorkloadIdentity first, or pass -ConfigFile pointing to a populated config file."
         } else {
             Write-Output "Granting elevated 'ConfigurationMonitoring.ReadWrite.All' permission to the EntraOps workload identity (AppId: $($Config.ClientId))..."
-            $WorkloadIdentitySp = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals?`$filter=appId eq '$($Config.ClientId)'" -OutputType PSObject -DisableCache) | Select-Object -First 1
+            $WorkloadIdentitySp = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals?`$filter=appId eq '$($Config.ClientId)'" -OutputType PSObject -DisableCache -ThrowOnFailure) | Select-Object -First 1
             if (-not $WorkloadIdentitySp) {
                 Write-Warning "Could not find a service principal for AppId $($Config.ClientId) in the tenant."
             } else {
@@ -245,16 +253,18 @@ function Register-EntraOpsTenantGovernanceServicePrincipal {
                 if (-not $ReadWriteAppRole) {
                     Write-Warning "Could not find Microsoft Graph app role 'ConfigurationMonitoring.ReadWrite.All'."
                 } else {
-                    $ExistingWorkloadIdentityAssignments = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals/$($WorkloadIdentitySp.id)/appRoleAssignments" -OutputType PSObject -DisableCache)
+                    $ExistingWorkloadIdentityAssignments = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/v1.0/servicePrincipals/$($WorkloadIdentitySp.id)/appRoleAssignments" -OutputType PSObject -DisableCache -ThrowOnFailure)
                     $IsWorkloadIdentityAssigned = $ExistingWorkloadIdentityAssignments | Where-Object { $_.appRoleId -eq $ReadWriteAppRole.id -and $_.resourceId -eq $MsGraph.id }
-                    if (-not $IsWorkloadIdentityAssigned) {
+                    if (-not $IsWorkloadIdentityAssigned -and -not $PSCmdlet.ShouldProcess("EntraOps workload identity ($($Config.ClientId))", "Assign ConfigurationMonitoring.ReadWrite.All")) {
+                        Write-Verbose "Skipped ConfigurationMonitoring.ReadWrite.All assignment."
+                    } elseif (-not $IsWorkloadIdentityAssigned) {
                         $WorkloadIdentityAssignmentBody = @{
                             principalId = $WorkloadIdentitySp.id
                             resourceId  = $MsGraph.id
                             appRoleId   = $ReadWriteAppRole.id
                         } | ConvertTo-Json -Depth 5
                         try {
-                            Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/servicePrincipals/$($WorkloadIdentitySp.id)/appRoleAssignments" -Body $WorkloadIdentityAssignmentBody -OutputType PSObject -DisableCache | Out-Null
+                            Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/servicePrincipals/$($WorkloadIdentitySp.id)/appRoleAssignments" -Body $WorkloadIdentityAssignmentBody -OutputType PSObject -DisableCache -ThrowOnFailure | Out-Null
                             Write-Host "- Assigned ConfigurationMonitoring.ReadWrite.All to the EntraOps workload identity" -ForegroundColor Yellow
                             $ReadWriteGranted = $true
                         } catch {

@@ -17,7 +17,11 @@ if (Test-Path -LiteralPath $ArchivePath) { Remove-Item -LiteralPath $ArchivePath
 
 & zip -r $ArchivePath $ReportsPath -x '*.spec.mjs'
 if ($LASTEXITCODE -ne 0) { throw "Report archive creation failed with exit code $LASTEXITCODE." }
-& gh release create $Tag $ArchivePath --title "EntraOps Reporting $Tag" --notes "Automated EntraOps Privileged EAM reporting generated on $($Timestamp.ToString('yyyy-MM-dd HH:mm')) UTC." --latest
+# Tag the commit the reports were generated from: the next run uses its Privileged EAM export as EAM Dashboard change notification baseline
+$TargetCommit = & git rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($TargetCommit)) { throw "Could not resolve the report commit (exit code $LASTEXITCODE)." }
+$TargetCommit = $TargetCommit.Trim()
+& gh release create $Tag $ArchivePath --target $TargetCommit --title "EntraOps Reporting $Tag" --notes "Automated EntraOps Privileged EAM reporting generated on $($Timestamp.ToString('yyyy-MM-dd HH:mm')) UTC." --latest
 if ($LASTEXITCODE -ne 0) { throw "GitHub reporting release creation failed with exit code $LASTEXITCODE." }
 
 if ([string]::IsNullOrWhiteSpace($ReleasesToKeep)) { return }

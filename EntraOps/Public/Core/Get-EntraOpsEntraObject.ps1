@@ -13,7 +13,7 @@
 
 .EXAMPLE
     Details of Entra Object with a specific ObjectId
-    Get-EntraOpsEntraObject -AadObjectId "bdf10e92-30c7-4cc8-93e7-2982ea6cf371"
+    Get-EntraOpsEntraObject -AadObjectId "11111111-1111-1111-1111-111111111111"
 #>
 function Get-EntraOpsEntraObject {
     [cmdletbinding()]

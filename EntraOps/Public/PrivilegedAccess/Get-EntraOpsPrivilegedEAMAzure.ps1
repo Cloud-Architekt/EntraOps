@@ -560,8 +560,11 @@ function Get-EntraOpsPrivilegedEAMAzure {
         $AzureRbacAssignment = $AzureRbacAssignment | Select-Object -ExcludeProperty Classification
         $ClassificationKey = "$($AzureRbacAssignment.RoleDefinitionId)|$($AzureRbacAssignment.RoleAssignmentScopeId)"
         $Classification = @($ClassificationsByRoleAndScope[$ClassificationKey])
-        $Classification = $Classification | Select-Object -Unique AdminTierLevel, AdminTierLevelName, MatchedActions, ScopedObjects, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem |
-        Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy
+        # @() keeps a single classification an array (consistent JSON shape across RBAC systems);
+        # no classification stays $null as before.
+        $Classification = @($Classification | Select-Object -Unique AdminTierLevel, AdminTierLevelName, MatchedActions, ScopedObjects, Service, TaggedBy, TaggedByObjectIds, TaggedByObjectDisplayNames, TaggedByRoleSystem |
+            Sort-Object AdminTierLevel, AdminTierLevelName, Service, TaggedBy)
+        if ($Classification.Count -eq 0) { $Classification = $null }
         $AzureRbacAssignment | Add-Member -NotePropertyName "Classification" -NotePropertyValue $Classification -Force
 
         $AssignedRoleDefinitionForCondition = $RoleDefinitionCache["$($AzureRbacAssignment.RoleDefinitionId)"]
@@ -666,7 +669,7 @@ function Get-EntraOpsPrivilegedEAMAzure {
     # Applied after the constrained-delegation evaluation so an explicit operator pin always wins.
     $ClassificationOverwrites = Import-EntraOpsClassificationOverwrites -RbacSystem "Azure" -FolderClassification $FolderClassification
     if ($ClassificationOverwrites.RoleDefinitionOverwrites.Count -gt 0) {
-        Write-Host "Applying $($ClassificationOverwrites.RoleDefinitionOverwrites.Count) role definition classification overwrite(s) from Classification_RoleDefinitionOverwrites.json..." -ForegroundColor Yellow
+        Write-Host "Applying $($ClassificationOverwrites.RoleDefinitionOverwrites.Count) role definition classification overwrite(s) from $((@($ClassificationOverwrites.RoleDefinitionOverwrites.SourceFile) | Sort-Object -Unique) -join ', ')..." -ForegroundColor Yellow
         $AzureRbacClassifications = @(Invoke-EntraOpsClassificationRoleOverwrite -RbacClassifications $AzureRbacClassifications -RoleDefinitionOverwrites $ClassificationOverwrites.RoleDefinitionOverwrites -RoleSystem "Azure")
     }
 

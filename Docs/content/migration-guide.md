@@ -5,6 +5,10 @@ Upgrade that repository in place. Do **not** create a new repository from the Gi
 **not** run the new-deployment setup against a second repository: doing so creates a separate
 workload identity and an empty data history while leaving the current deployment behind.
 
+> [!NOTE]
+> Running EntraOps 1.0? Follow [Upgrade from EntraOps 1.0 to 1.1](#upgrade-from-1-0) instead of the
+> 0.x steps below.
+
 ## What remains in place
 
 The migration preserves the tenant-owned state in the existing repository when you keep these paths:
@@ -89,13 +93,13 @@ repository with Contents, Workflows, Pull requests, and Commit statuses write pe
 the `EntraOpsUpdateAppClientId` repository variable and `EntraOpsUpdateAppPrivateKey` repository
 secret, then add `./.github/workflows` to `AutomatedEntraOpsUpdate.TargetUpdateFolders` while retaining
 `./.github/actions` and `./.github/scripts`. See the
-[core update documentation](core.html#update-entraops-powershell-module-and-cicd) for the complete setup
+[core update documentation](../../core/index.html#update-entraops-powershell-module-and-cicd) for the complete setup
 and security behavior.
 
 ## 4. Keep and apply your existing EntraOpsConfig.json
 
 Retain your current `EntraOpsConfig.json`; do not replace it with a newly generated file. Add newly
-documented settings only when you need their feature. The [Configuration Wizard](../configuration/index.html)
+documented settings only when you need their feature. The [Configuration Wizard](../../configuration/index.html)
 can import the existing file and export an expanded version. It merges edited fields into the imported
 document so unknown extension properties and newer settings are retained; still review the semantic
 diff before replacing production configuration.
@@ -179,6 +183,65 @@ Merge through your normal review process. In GitHub Actions, run `Pull-EntraOpsP
 once, then confirm OIDC authentication succeeds and the run updates the existing `PrivilegedEAM/`
 paths. Verify any enabled `Push-EntraOpsPrivilegedEAM`, `Push-EntraOpsPrivilegedReporting`,
 `Pull-EntraOpsTenantGovernance`, and `Update-EntraOps` workflows afterwards.
+
+## Upgrade from EntraOps 1.0 to 1.1 {#upgrade-from-1-0}
+
+A 1.0 deployment is upgraded in place like a 0.x deployment: keep `EntraOpsConfig.json`, `PrivilegedEAM/`,
+`Classification/<TenantName>/` and `TenantGovernance/Snapshots/`, and work on a branch of the existing
+repository (see [1. Protect the current deployment](#1-protect-the-current-deployment)).
+
+**1. Update the repository including the workflow definitions.** The scheduled `Update-EntraOps` workflow and
+the default update targets don't include `./.github/workflows`, so a 1.0 deployment keeps its 1.0 workflows.
+1.1 reworks them, e.g. `Push-EntraOpsPrivilegedReporting` runs the report tests in a separate job without write
+permissions and Azure sign-in, and only the release job can write to the repository. Run the 1.0 cmdlet once,
+re-import the module, and run the 1.1 cmdlet with the workflow definitions as additional target; it re-applies
+the values of your `EntraOpsConfig.json` to the workflows:
+
+```powershell
+Import-Module ./EntraOps -Force
+Update-EntraOps -ConfigFile ./EntraOpsConfig.json
+Import-Module ./EntraOps -Force
+Update-EntraOps -ConfigFile ./EntraOpsConfig.json -TargetUpdateFolders @(
+    "./.github/actions", "./.github/agents", "./.github/scripts", "./.github/workflows",
+    "./Docs", "./EntraOps", "./Parsers", "./Queries", "./Reports", "./Samples", "./Tests", "./Workbooks",
+    "./package.json", "./package-lock.json", "./playwright.config.mjs", "./CHANGELOG.md", "./EntraOpsUpdateContract.json")
+```
+
+The second run re-applies the values of your `EntraOpsConfig.json` to the new workflows
+(`Update-EntraOpsRequiredWorkflowParameters`). Review `git diff .github/workflows`: changes you made to the 1.0
+workflows yourself (e.g. additional steps, runner labels or environments) aren't kept. Restore them, then run
+`Update-EntraOpsRequiredWorkflowParameters -ConfigFile ./EntraOpsConfig.json` again so the configured values are
+applied. Push with credentials that may change workflows (e.g. a token with the `workflow` scope), then start a new
+PowerShell session.
+
+**2. Keep your configuration.** Don't replace `EntraOpsConfig.json` with a newly generated file. 1.0
+configuration files keep working; the new settings are optional:
+
+- `AlternateObjectTierLevelAttributes.<User|ServicePrincipal|Group>.Enabled` replaces the former top-level
+  `Enabled` (still honored for users and service principals). The Configuration Wizard converts it on import.
+- `CustomSecurityAttributes.Enabled` and `ObjectClassificationFile` select the
+  [classification sources](../../core/index.html#classification-sources).
+- `ServiceEM` and `AzureDevOpsServiceConnection` are only needed for Service EM and Azure DevOps.
+- `ConfigurationAnalyzer.TimeRangeInDays` (default 365) and `ConfigurationAnalyzer.SnapshotInterval` (default
+  `P1W`) now bound the Configuration Analyzer dataset also when they are missing, and a stale Tenant Governance
+  snapshot only warns by default (`ConfigurationAnalyzer.StaleTenantGovernanceSnapshotAction`).
+
+**3. Redeploy the parsers and WatchLists** when you use the Microsoft Sentinel integration (WatchLists parser
+0.5, Custom Table parser 0.4). `Save-EntraOpsPrivilegedEAMInsightsCustomTable` now writes a completion marker
+record per RBAC system (`ObjectType` `EntraOpsIngestionRun`) to `PrivilegedEAM_CL`: queries that read the table
+directly instead of through the parser must exclude these records.
+
+**4. Review changed behavior.**
+
+- `Connect-EntraOps` loads `EntraOpsConfig.json` from the current folder, otherwise from the EntraOps
+  [working folder](../index.html#working-folder), when `-ConfigFilePath` isn't passed. A configuration set in the
+  session before is removed when no file is found.
+- `Test-EntraOpsGeneratedArtifacts` fails, instead of warning, when a `Classification`, `MatchedActions` or
+  `ScopedObjects` collection of the export is stored as a single value.
+
+**5. Verify.** The workload identity needs no new permissions for the 1.0 features. Run
+`Pull-EntraOpsPrivilegedEAM` manually and check that `Push-EntraOpsPrivilegedEAM` and
+`Push-EntraOpsPrivilegedReporting` follow it, as in [6. Commit and verify the in-place upgrade](#6-commit-and-verify-the-in-place-upgrade).
 
 ## Do not use the new deployment path
 

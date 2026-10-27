@@ -36,8 +36,10 @@ New-EntraOpsConfigFile -TenantName "contoso.onmicrosoft.com" -EnableTenantGovern
 ```
 
 The [Configuration Wizard](../configuration/index.html) can also create or import this section.
-After changing the configuration, run `Update-EntraOpsRequiredWorkflowParameters` to apply the
-settings to the GitHub Actions workflows.
+After changing the configuration, apply its schedules to your automation platform:
+
+- GitHub: run `Update-EntraOpsRequiredWorkflowParameters`.
+- Azure DevOps: run `Update-EntraOpsAzureDevOpsSchedules`.
 
 ### Cross-tenant delegated administration
 
@@ -131,17 +133,17 @@ keep their previous files and are marked `PreservedStale`. Both states keep `IsC
 
 `TenantGovernanceSnapshot` controls the feature:
 
-| Setting                                                                                | Purpose                                                                                                              |
-| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `EnableTenantGovernanceSnapshot`                                                       | Master switch; disabled by default.                                                                                  |
-| `ResourcesToInclude`                                                                   | Microsoft Entra resource types to capture. High-cardinality directory objects are supported but excluded by default. |
-| `SnapshotDisplayNamePrefix`                                                            | Cosmetic UTCM snapshot name prefix.                                                                                  |
-| `SnapshotResourceFileNaming`                                                           | `ResourceId` (new-config default) for stable paths across renames, or `DisplayName` for readable paths.              |
-| `SnapshotScheduledTrigger` | Enables or disables every scheduled snapshot run. Disabled by default and ignored while the master switch is disabled. |
-| `SnapshotScheduledCron` | Starts the UTCM snapshot job without waiting. Default: `0 6 * * *` (06:00 UTC daily). |
-| `SnapshotScheduledCronComplete` | First one-shot collection attempt. Default: `0 7 * * *` (07:00 UTC daily). |
-| `SnapshotScheduledCronCompleteRetry1` | First collection retry for jobs still running at the first attempt. Default: `30 7 * * *` (07:30 UTC daily). |
-| `SnapshotScheduledCronCompleteRetry2` | Final collection retry for jobs still running at the earlier attempts. Default: `0 8 * * *` (08:00 UTC daily). |
+| Setting                               | Purpose                                                                                                                |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `EnableTenantGovernanceSnapshot`      | Master switch; disabled by default.                                                                                    |
+| `ResourcesToInclude`                  | Microsoft Entra resource types to capture. High-cardinality directory objects are supported but excluded by default.   |
+| `SnapshotDisplayNamePrefix`           | Cosmetic UTCM snapshot name prefix.                                                                                    |
+| `SnapshotResourceFileNaming`          | `ResourceId` (new-config default) for stable paths across renames, or `DisplayName` for readable paths.                |
+| `SnapshotScheduledTrigger`            | Enables or disables every scheduled snapshot run. Disabled by default and ignored while the master switch is disabled. |
+| `SnapshotScheduledCron`               | Starts the UTCM snapshot job without waiting. Default: `0 6 * * *` (06:00 UTC daily).                                  |
+| `SnapshotScheduledCronComplete`       | First one-shot collection attempt. Default: `0 7 * * *` (07:00 UTC daily).                                             |
+| `SnapshotScheduledCronCompleteRetry1` | First collection retry for jobs still running at the first attempt. Default: `30 7 * * *` (07:30 UTC daily).           |
+| `SnapshotScheduledCronCompleteRetry2` | Final collection retry for jobs still running at the earlier attempts. Default: `0 8 * * *` (08:00 UTC daily).         |
 
 UTCM enforces service limits on the number of extracted resources per tenant and keeps snapshots
 server-side only for a limited period, and only a limited number of snapshot jobs stays visible at
@@ -198,11 +200,15 @@ Privileged Role Administrator alone.
   Test-EntraOpsTenantGovernancePrerequisite -ThrowOnFailure
   ```
 
-4. Apply the updated settings to the GitHub Actions workflows, then run the
-  `Pull-EntraOpsTenantGovernance` workflow manually once to verify end-to-end collection.
+4. Apply the updated settings to your automation platform, then run the Tenant Governance workflow
+  or pipeline manually once to verify end-to-end collection.
 
   ```powershell
+  # GitHub Actions
   Update-EntraOpsRequiredWorkflowParameters
+
+  # Azure DevOps
+  Update-EntraOpsAzureDevOpsSchedules
   ```
 
 ### Run a snapshot interactively
@@ -213,11 +219,17 @@ not write them. If you did not complete the workload-identity setup above, a Glo
 must first run `Register-EntraOpsTenantGovernanceServicePrincipal` once to configure the UTCM
 service principal for the resource types in `EntraOpsConfig.json`.
 
-| `-Operation` value | Behavior |
-| ------------------ | -------- |
-| `RunAndWait` (default) | Creates a job and waits up to `TimeoutInSeconds`. The default timeout is `900` seconds (15 minutes). |
-| `Start` | Creates a job, saves its Id, and returns immediately. It does not write snapshot resource files yet. |
-| `Collect` | Checks the saved pending job once. If complete, it downloads and writes the JSON files; otherwise, run `Collect` again later. |
+When a configuration is loaded by `Connect-EntraOps` (automatically or via `-ConfigFilePath`), `ResourcesToInclude`,
+`SnapshotDisplayNamePrefix` and `SnapshotResourceFileNaming` of `TenantGovernanceSnapshot` are used
+unless you pass the corresponding parameter, so manual runs name files the same way as the workflow.
+Without a loaded configuration, the defaults are the recommended resource set, `EntraOps TG` and
+`DisplayName`.
+
+| `-Operation` value     | Behavior                                                                                                                      |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `RunAndWait` (default) | Creates a job and waits up to `TimeoutInSeconds`. The default timeout is `900` seconds (15 minutes).                          |
+| `Start`                | Creates a job, saves its Id, and returns immediately. It does not write snapshot resource files yet.                          |
+| `Collect`              | Checks the saved pending job once. If complete, it downloads and writes the JSON files; otherwise, run `Collect` again later. |
 
 For each interactive run, connect Azure PowerShell and explicitly consent the delegated
 `ConfigurationMonitoring.ReadWrite.All` scope before connecting EntraOps:
@@ -226,7 +238,7 @@ For each interactive run, connect Azure PowerShell and explicitly consent the de
 Import-Module ./EntraOps -Force
 Connect-AzAccount -Tenant "<tenant-id>"
 Connect-MgGraph -TenantId "<tenant-id>" -Scopes "ConfigurationMonitoring.ReadWrite.All"
-Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso.onmicrosoft.com"
+Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso.onmicrosoft.com" -ConfigFilePath "./EntraOpsConfig.json"
 Save-EntraOpsTenantGovernanceSnapshotJson
 ```
 
@@ -303,8 +315,11 @@ Monday at 09:00 UTC and does not require a preceding pull.
 Tenant Governance snapshots are disabled by default. When enabled, the supplied workflow starts a
 UTCM job at 06:00 UTC and checks it at 07:00, 07:30, and 08:00 UTC. Collection never blocks while a
 Graph job is running, and a completed snapshot does not directly trigger reporting. The next
-reporting run reads the latest accepted snapshot; it requires a snapshot no older than 30 hours by
-default and can be configured to accept a partial snapshot with explicitly stale resource types.
+reporting run reads the latest accepted snapshot. A snapshot older than its maximum age (30 hours
+for a daily, 174 hours for a weekly schedule, or `ConfigurationAnalyzer.MaxTenantGovernanceSnapshotAgeHours`)
+is handled by `ConfigurationAnalyzer.StaleTenantGovernanceSnapshotAction` (default `Warn`: generate
+and mark the report as outdated). Reporting can also be configured to accept a partial snapshot with
+explicitly stale resource types.
 
 - **Start schedule**: creates a UTCM snapshot job and persists its id without polling.
 - **Collect schedules**: check the pending job once and publish it only after completion. The

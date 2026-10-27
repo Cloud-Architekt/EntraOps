@@ -63,6 +63,8 @@
     if (ASSIGNMENT_DATA && Array.isArray(ASSIGNMENT_DATA.assignments)) {
         ASSIGNMENT_DATA.assignments.forEach(function (a) {
             if (!a.accessPackageId) return;
+            // Expired assignments no longer grant access; datasets without a state keep every assignment.
+            if (String(a.state || "").toLowerCase() === "expired") return;
             if (!assignmentsByPackage.has(a.accessPackageId)) assignmentsByPackage.set(a.accessPackageId, []);
             assignmentsByPackage.get(a.accessPackageId).push(a);
         });
@@ -1206,7 +1208,7 @@
         if (navToggle && nav) navToggle.addEventListener("click", function () { nav.classList.toggle("open"); });
         document.querySelectorAll(".nav-item.section-item").forEach(function (item) {
             item.addEventListener("click", function () {
-                var target = $(item.getAttribute("data-target"));
+                var target = document.getElementById(item.getAttribute("data-target"));
                 if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
                 if (nav) nav.classList.remove("open");
             });
@@ -1227,8 +1229,8 @@
 
         renderControls();
         renderSankey();
-    window.addEventListener("hashchange", applyFlowDeepLink);
-    applyFlowDeepLink();
+        window.addEventListener("hashchange", applyFlowDeepLink);
+        applyFlowDeepLink();
 
         $("apSnapshot").addEventListener("change", function () {
             apState.snapshotIdx = Number(this.value);

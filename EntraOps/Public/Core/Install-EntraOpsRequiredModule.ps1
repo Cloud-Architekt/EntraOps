@@ -27,19 +27,26 @@ function Install-EntraOpsRequiredModule {
     )
 
     $module = Get-Module -Name $ModuleName -ListAvailable |
-        Where-Object { $_.Version -and ([string]::IsNullOrEmpty($MinimalVersion) -or [version]$_.Version -ge [version]$MinimalVersion) } |
-        Sort-Object Version |
-        Select-Object -Last 1
+    Where-Object { [string]::IsNullOrWhiteSpace($MinimalVersion) -or (-not [string]::IsNullOrWhiteSpace($_.Version) -and [version]$_.Version -ge [version]$MinimalVersion) } |
+    Sort-Object Version |
+    Select-Object -Last 1
     if ($null -ne $module) {
         Write-Output ('Module {0} (v{1}) is available.' -f $ModuleName, $module.Version)
-    }
-    else {
+    } elseif (Get-Command -Name 'Install-PSResource' -ErrorAction SilentlyContinue) {
+        $optionalArgs = @{}
+        if (-not [string]::IsNullOrWhiteSpace($MinimalVersion)) {
+            $optionalArgs['Version'] = '[{0},)' -f $MinimalVersion
+        }
+        Write-Warning ('Install module {0} (version [{1}]) within scope of the current user.' -f $ModuleName, $MinimalVersion)
+        Install-PSResource -Name $ModuleName @optionalArgs -Scope CurrentUser -TrustRepository
+    } else {
+        # Fallback when PSResourceGet is unavailable (e.g. removed or blocked).
         Import-Module -Name 'PowershellGet'
         $installedModule = Get-InstalledModule -Name $ModuleName -ErrorAction SilentlyContinue
         if ($null -ne $installedModule) {
             Write-Verbose ('Module [{0}] (v {1}) is installed.' -f $ModuleName, $installedModule.Version)
         }
-        if ($null -eq $installedModule -or (-not [string]::IsNullOrEmpty($MinimalVersion) -and [version]$installedModule.Version -lt [version]$MinimalVersion)) {
+        if ($null -eq $installedModule -or (-not [string]::IsNullOrWhiteSpace($MinimalVersion) -and $installedModule.Version -lt $MinimalVersion)) {
             Write-Verbose ('Module {0} min.vers {1}: not installed; check if nuget v2.8.5.201 or later is installed.' -f $ModuleName, $MinimalVersion)
             #First check if package provider NuGet is installed. Incase an older version is installed the required version is installed explicitly
             if ((Get-PackageProvider -Name NuGet -Force).Version -lt '2.8.5.201') {
@@ -47,7 +54,7 @@ function Install-EntraOpsRequiredModule {
                 Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force
             }
             $optionalArgs = New-Object -TypeName Hashtable
-            if (-not [string]::IsNullOrEmpty($MinimalVersion)) {
+            if (-not [string]::IsNullOrWhiteSpace($MinimalVersion)) {
                 $optionalArgs['MinimumVersion'] = $MinimalVersion
             }
             Write-Warning ('Install module {0} (version [{1}]) within scope of the current user.' -f $ModuleName, $MinimalVersion)

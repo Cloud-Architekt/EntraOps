@@ -711,7 +711,7 @@
         }
         document.querySelectorAll(".nav-item.section-item").forEach(function (item) {
             item.addEventListener("click", function () {
-                var target = $(item.getAttribute("data-target"));
+                var target = document.getElementById(item.getAttribute("data-target"));
                 if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
                 if (nav) nav.classList.remove("open");
             });

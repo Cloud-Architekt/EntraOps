@@ -1,7 +1,7 @@
 Parser:
   Title: PrivilegedEAM (Custom Table)
-  Version: 0.3
-  LastUpdated: 2026-07-02
+  Version: 0.4
+  LastUpdated: 2026-10-19
 Product:
   Name: EntraOps
 References:
@@ -11,23 +11,63 @@ Description: |
   This parser is used to have a standarized schema of EntraOps classification of Privileged EAM.
 ParserName: PrivilegedEAM
 ParserQuery: |
-  PrivilegedEAM_CL
-  | where TimeGenerated > ago(1d)
+  // Returns the latest completed run per RBAC system (completion marker after its last record).
+  // The lookback must cover the collection schedule.
+  let LookbackPeriod = 14d;
+  let IngestionWindow = 10m;
+  let RunMarkerType = "EntraOpsIngestionRun";
+  let EntraOpsData = PrivilegedEAM_CL
+      | where TimeGenerated > ago(LookbackPeriod);
+  let Records = EntraOpsData
+      | where ObjectType != RunMarkerType;
+  let RunMarkers = EntraOpsData
+      | where ObjectType == RunMarkerType
+      | project RoleSystem, MarkerTime = TimeGenerated;
+  let LatestRun = RunMarkers
+      | summarize LatestMarker = max(MarkerTime) by RoleSystem;
+  let PreviousRun = RunMarkers
+      | lookup kind=inner LatestRun on RoleSystem
+      | where MarkerTime < LatestMarker
+      | summarize PreviousMarker = max(MarkerTime) by RoleSystem;
+  let RunBounds = LatestRun
+      | lookup kind=leftouter PreviousRun on RoleSystem
+      | extend PreviousMarker = iff(isnull(PreviousMarker), LatestMarker - LookbackPeriod, PreviousMarker);
+  // A data collection rule that keeps TimeGenerated returns the records of the run with exactly the marker time.
+  // A rule that sets TimeGenerated at ingestion returns them between the previous and the latest marker.
+  let ExactRuns = Records
+      | lookup kind=inner RunBounds on RoleSystem
+      | summarize ExactRecords = countif(TimeGenerated == LatestMarker) by RoleSystem;
+  let CompletedRunRecords = Records
+      | lookup kind=inner RunBounds on RoleSystem
+      | lookup kind=leftouter ExactRuns on RoleSystem
+      | where (ExactRecords > 0 and TimeGenerated == LatestMarker)
+          or (coalesce(ExactRecords, 0) == 0 and TimeGenerated > PreviousMarker and TimeGenerated <= LatestMarker)
+      | project-away LatestMarker, PreviousMarker, ExactRecords;
+  // Data ingested before the completion marker existed: the latest ingestion of the RBAC system
+  let UnmarkedLatestIngestion = Records
+      | where RoleSystem !in ((RunMarkers | distinct RoleSystem))
+      | summarize LatestTimeGenerated = max(TimeGenerated) by RoleSystem;
+  let UnmarkedRecords = Records
+      | lookup kind=inner UnmarkedLatestIngestion on RoleSystem
+      | where TimeGenerated > LatestTimeGenerated - IngestionWindow
+      | project-away LatestTimeGenerated;
+  union CompletedRunRecords, UnmarkedRecords
   | summarize arg_max(TimeGenerated, *) by ObjectId,RoleSystem
   | project-away TenantId
   | extend Type = "EntraOps_CustomTable"
   | mv-apply RoleAssignments on
   (
-      extend RoleAssignments = bag_merge(
+      extend SubType = tostring(RoleAssignments.RoleAssignmentSubType)
+      | extend RoleAssignments = bag_merge(
           RoleAssignments,
           bag_pack(
               "EligibilityBy", case(
+                  RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible" and SubType in ("Eligible member", "Nested Eligible member", "Nested Eligible group member"), "PIM for Entra ID Roles and Groups",
                   RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible", "PIM for Entra ID Roles",
-                  RoleSystem == "EntraID" and RoleAssignments.PIMAssignmentType == "Eligible" and (RoleAssignments.RoleAssignmentSubType == "Nested Eligible member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member"), "PIM for Entra ID Roles and Groups",
                   RoleSystem == "Azure" and RoleAssignments.PIMAssignmentType == "Eligible", "PIM for Azure Roles",
-                  RoleAssignments.RoleAssignmentSubType == "Nested Eligible group member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member", "PIM for Groups",
+                  SubType in ("Eligible member", "Nested Eligible member", "Nested Eligible group member"), "PIM for Groups",
                   "N/A"),
-              "TransitiveByPim", iff((RoleAssignments.RoleAssignmentSubType == "Nested Eligible member" or RoleAssignments.RoleAssignmentSubType  == "Eligible member"), true, false)
+              "TransitiveByPim", SubType in ("Eligible member", "Nested Eligible member", "Nested Eligible group member")
               )
           )
       | summarize RoleAssignments = make_list(RoleAssignments)

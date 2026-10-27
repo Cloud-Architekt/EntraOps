@@ -38,7 +38,7 @@
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to WatchList in Microsoft Sentinel Workspace defined in parameter.
-    Save-EntraOpsPrivilegedEAMWatchLists -SentinelSubscriptionId "3f72a077-c32a-423c-8503-41b93d3b0737" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
+    Save-EntraOpsPrivilegedEAMWatchLists -SentinelSubscriptionId "11111111-1111-1111-1111-111111111111" -SentinelResourceGroupName "EntraOpsResourceGroup" -SentinelWorkspaceName "EntraOpsWorkspace"
 
 .EXAMPLE
     Save data of EntraOps Privileged EAM insights to WatchList in Microsoft Sentinel Workspace defined in config file and available in global variable.
@@ -86,14 +86,14 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
     )
 
     # --- Path safety: ensure ImportPath is under the expected base directory ---
-    $ResolvedImportPath = [System.IO.Path]::GetFullPath($ImportPath)
-    $ResolvedBaseFolder = [System.IO.Path]::GetFullPath($EntraOpsBaseFolder)
+    $ResolvedImportPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ImportPath)
+    $ResolvedBaseFolder = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EntraOpsBaseFolder)
     if (-not (Test-EntraOpsPathWithinRoot -Path $ImportPath -Root $EntraOpsBaseFolder -AllowRoot)) {
         throw "Security check failed: ImportPath '$ResolvedImportPath' is not under the expected base directory '$ResolvedBaseFolder'."
     }
 
     # --- Ensure ExportFolder exists so local WatchList CSVs have somewhere to land ---
-    $ResolvedExportFolder = [System.IO.Path]::GetFullPath($ExportFolder)
+    $ResolvedExportFolder = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ExportFolder)
     if (-not (Test-Path -LiteralPath $ResolvedExportFolder)) {
         try {
             New-Item -ItemType Directory -Path $ResolvedExportFolder -Force -ErrorAction Stop | Out-Null
@@ -155,9 +155,12 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                 foreach ( $RoleAssignment in $Privilege.RoleAssignments) {
                     # Extract classification into separate watchlist to avoid 10 KB item limit
                     $RoleAssignmentClassifications = $RoleAssignment.Classification
+                    # Same key as the parser join (RoleAssignmentId, scope, RoleSystem, RoleDefinitionId): a RoleAssignmentId
+                    # alone is not unique, e.g. for ResourceApps delegated grants
+                    $RoleAssignmentKey = "$($Rbac)_$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.RoleAssignmentScopeId)_$($RoleAssignment.RoleDefinitionId)"
                     if ($null -ne $RoleAssignmentClassifications) {
                         foreach ($ClassificationItem in $RoleAssignmentClassifications) {
-                            $ClassificationUniqueId = "$($RoleAssignment.RoleAssignmentId)_$($ClassificationItem.AdminTierLevelName)_$($ClassificationItem.Service)"
+                            $ClassificationUniqueId = "$($RoleAssignmentKey)_$($ClassificationItem.AdminTierLevelName)_$($ClassificationItem.Service)"
                             if (-not $SeenClassificationUniqueIds.Add($ClassificationUniqueId)) {
                                 continue
                             }
@@ -184,11 +187,13 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     # Remove Classification from RoleAssignment to reduce watchlist item size
                     $RoleAssignment.PSObject.Properties.Remove("Classification")
 
-                    if ($null -eq $RoleAssignment.TransitiveByObjectId ) {
-                        $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)" -Force
-                    } else {
-                        $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value "$($RoleAssignment.RoleAssignmentId)_$($RoleAssignment.PrincipalId)_$($RoleAssignment.TransitiveByObjectId)" -Force
+                    # One row per principal and assignment; unresolved ResourceApps grants fall back to the role name
+                    $RoleDefinitionKey = if ([string]::IsNullOrEmpty($RoleAssignment.RoleDefinitionId)) { $RoleAssignment.RoleDefinitionName } else { $RoleAssignment.RoleDefinitionId }
+                    $RoleAssignmentUniqueId = "$($Rbac)_$($RoleAssignment.RoleAssignmentId)_$($Privilege.ObjectId)_$($RoleDefinitionKey)_$($RoleAssignment.RoleAssignmentScopeId)"
+                    if (-not [string]::IsNullOrEmpty($RoleAssignment.TransitiveByObjectId)) {
+                        $RoleAssignmentUniqueId = "$($RoleAssignmentUniqueId)_$($RoleAssignment.TransitiveByObjectId)"
                     }
+                    $RoleAssignment | Add-Member -MemberType NoteProperty -Name "UniqueId" -Value $RoleAssignmentUniqueId -Force
                     $TagValue = @("$($Rbac)", "Role Assignment", "Automated Enrichment") | ConvertTo-Json -Depth 10 -Compress -AsArray
                     $RoleAssignment | Add-Member -MemberType NoteProperty -Name "RoleSystem" -Value $Rbac -Force
                     $RoleAssignment | Add-Member -MemberType NoteProperty -Name "Tags" -Value $TagValue -Force
