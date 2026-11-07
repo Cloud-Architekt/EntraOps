@@ -314,6 +314,20 @@ function New-EntraOpsServiceBootstrap {
             # Fail before any Entra object is created if the subscription isn't accessible in the current tenant
             Get-AzSubscription -SubscriptionId $SubscriptionId -TenantId $currentAzTenantId -ErrorAction Stop | Out-Null
         }
+        if (-not $SkipAzureResourceGroup -and $DeploymentScope -ne "Subscription" -and -not [string]::IsNullOrWhiteSpace($AzureRegion)) {
+            try {
+                $location = Get-AzLocation -Location $AzureRegion -ErrorAction Stop
+                if (-not $location) {
+                    throw "Azure region '$AzureRegion' is not valid."
+                }
+                if (-not @($location.Location).Contains($AzureRegion)) {
+                    throw "Azure region '$AzureRegion' is not available in the current subscription/tenant."
+                }
+                Write-Verbose "$logPrefix Validated Azure region '$AzureRegion'"
+            } catch {
+                throw "$logPrefix Azure region '$AzureRegion' is invalid or unavailable before provisioning begins: $($_.Exception.Message)"
+            }
+        }
 
         $report = @{
             ServiceName = $ServiceName
