@@ -64,7 +64,7 @@ function New-EntraOpsServiceEMCatalogResourceRole {
         [Parameter(Mandatory)]
         [string]$ServiceCatalogId,
 
-        [switch]$SkipControlPlaneDelegation,        
+        [switch]$SkipControlPlaneDelegation,
 
         [switch]$SkipCatalogOwnerAssignment,
 
@@ -88,7 +88,7 @@ displayName,id,filter
 Owner,ae79f266-94d4-4dab-b730-feca7e132178,*ControlPlane-Admins
 Reader,44272f93-9762-48e8-af59-1b5351b1d6b3,*WorkloadPlane-Admins
 ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
-"@| ConvertFrom-Csv
+"@ | ConvertFrom-Csv
     }
 
     process {
@@ -99,26 +99,57 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
             $catalogRoles = $catalogRoles | Where-Object { $_.displayName -ne "Owner" }
         }
 
-        Write-Verbose "$logPrefix Processing $(($catalogRoles|Measure-Object).Count) catalog resource role assignments"
+        Write-Verbose "$logPrefix Processing $(($catalogRoles | Measure-Object).Count) catalog resource role assignments"
         $assignmentFailures = [System.Collections.Generic.List[string]]::new()
+        $maxRetries = 4
         foreach ($catalogRole in $catalogRoles) {
+            $group = $ServiceGroups | Where-Object { $_.DisplayName -like $catalogRole.filter } | Select-Object -First 1
+            if (-not $group -or -not $group.Id) { continue }
+
             $catalogRoleParams = @{
-                principalId      = ($ServiceGroups | Where-Object { $_.DisplayName -like "$($catalogRole.filter)" }).Id
+                principalId      = $group.Id
                 roleDefinitionId = $catalogRole.id
                 appScopeId       = "/AccessPackageCatalog/$($ServiceCatalogId)"
             }
+            $assignmentKey = "$($catalogRoleParams.principalId)_$($catalogRoleParams.roleDefinitionId)"
+            $existingAssignmentKeys = @($catalogAssignments | ForEach-Object { "$($_.PrincipalId)_$($_.RoleDefinitionId)" })
+            if ($assignmentKey -in $existingAssignmentKeys) { continue }
 
-            try {
-                if (($ServiceGroups | Where-Object { $_.id -eq $catalogRoleParams.principalId }).DisplayName -like $catalogRole.filter) {
-                    $nr = $catalogRoleParams.principalId + "_" + $catalogRoleParams.roleDefinitionId
-                    $er = $catalogAssignments | ForEach-Object { $_.PrincipalId + "_" + $_.RoleDefinitionId }
-                    if ($nr -notin $er) {
-                        $catalogAssignments += Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/roleManagement/entitlementManagement/roleAssignments" -Body ($catalogRoleParams | ConvertTo-Json -Depth 10) -OutputType PSObject -ThrowOnFailure
+            $retryCount = 0
+            while ($true) {
+                try {
+                    $newAssignment = Invoke-EntraOpsMsGraphQuery -Method POST -Uri "/v1.0/roleManagement/entitlementManagement/roleAssignments" `
+                        -Body ($catalogRoleParams | ConvertTo-Json -Depth 6) -OutputType PSObject -ThrowOnFailure
+                    if ($newAssignment) { $catalogAssignments += $newAssignment }
+                    break
+                } catch {
+                    $errorRecord = $_
+                    $errorMessage = $errorRecord.Exception.Message
+                    $statusCode = $errorRecord.Exception.Data['StatusCode']
+                    $errorCode = $errorRecord.Exception.Data['ErrorCode']
+                    $subjectNotFound = $errorMessage -match 'SubjectNotFound' -or $errorCode -eq 'SubjectNotFound'
+                    $transientStatus = $statusCode -in @(429, 500, 502, 503, 504)
+                    if ((-not $subjectNotFound -and -not $transientStatus) -or $retryCount -ge $maxRetries) {
+                        Write-Verbose "$logPrefix Failed to assign catalog role $($catalogRole.displayName)"
+                        $assignmentFailures.Add("$($catalogRole.displayName) for $($catalogRoleParams.principalId): $errorMessage")
+                        break
+                    }
+
+                    $retryCount++
+                    $retryDelay = [Math]::Min([Math]::Pow(2, $retryCount) - 1, 30)
+                    Write-Verbose "$logPrefix Transient failure assigning catalog role $($catalogRole.displayName) to $($catalogRoleParams.principalId). Retry $retryCount/$maxRetries in $retryDelay seconds: $errorMessage"
+                    Start-Sleep -Seconds $retryDelay
+
+                    # The request may have been accepted even if its response failed. Refresh before retrying
+                    # so a successful first attempt is not submitted a second time.
+                    try {
+                        $catalogAssignments = @(Invoke-EntraOpsMsGraphQuery -Method GET -Uri $catalogRolesUri -OutputType PSObject -DisableCache -ThrowOnFailure)
+                        $existingAssignmentKeys = @($catalogAssignments | ForEach-Object { "$($_.PrincipalId)_$($_.RoleDefinitionId)" })
+                        if ($assignmentKey -in $existingAssignmentKeys) { break }
+                    } catch {
+                        Write-Verbose "$logPrefix Could not refresh catalog role assignments before retry: $($_.Exception.Message)"
                     }
                 }
-            } catch {
-                Write-Verbose "$logPrefix Failed to assign catalog role $($catalogRole.displayName)"
-                $assignmentFailures.Add("$($catalogRole.displayName) for $($catalogRoleParams.principalId): $($_.Exception.Message)")
             }
         }
         if ($assignmentFailures.Count -gt 0) {
@@ -129,7 +160,7 @@ ApAssignmentManager,e2182095-804a-4656-ae11-64734e9b7ae5,*ManagementPlane-Admins
         if ($assignmentManagerGroup.IsDelegated) {
             Write-Verbose "$logPrefix Delegated ManagementPlane-Admins ($($assignmentManagerGroup.Id)) hold 'Access package assignment manager'; their own membership isn't part of this catalog"
         } elseif ($assignmentManagerGroup) {
-            Write-Warning "$logPrefix ManagementPlane-Admins ($($assignmentManagerGroup.Id)) hold the permanent catalog role 'Access package assignment manager' on the catalog that also contains their own access package: members can directly assign every access package of the catalog without approval and add further ManagementPlane admins without the approval of ControlPlane-Admins (escalation within the ManagementPlane tier). Use -EnablePimForGroups to make this permission just-in-time, or the Centralized governance model (-GovernanceModel Centralized), where ManagementPlane-Admins is a tenant-wide group that is governed outside the service catalogs."
+            Write-Warning "$logPrefix ManagementPlane-Admins ($($assignmentManagerGroup.Id)) hold the permanent catalog role 'Access package assignment manager' on the catalog that also contains the ManagementPlane-Admins access package. Members can directly assign that package without its approval policy. Consider using the Centralized governance model or skipping this role where appropriate."
         }
     }
 
