@@ -316,7 +316,7 @@ function New-EntraOpsServiceBootstrap {
         }
         if (-not $SkipAzureResourceGroup -and $DeploymentScope -ne "Subscription" -and -not [string]::IsNullOrWhiteSpace($AzureRegion)) {
             try {
-                $location = Get-AzLocation -Location $AzureRegion -ErrorAction Stop
+                $location = Get-AzLocation -ErrorAction Stop | Where-Object { $_.Location -eq $AzureRegion }
                 if (-not $location) {
                     throw "Azure region '$AzureRegion' is not valid."
                 }
