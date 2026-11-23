@@ -565,6 +565,8 @@ function Invoke-EntraOpsPrivilegedEAM {
         if (-not $HadExistingEamData -and -not $ReuseControlPlaneScope -and $EffectiveClassificationScope.Count -gt 0) {
             Write-Host ""
             Write-Host "       First-run bootstrap: refreshing Control Plane scope from the fresh EAM export..." -ForegroundColor Yellow
+            # The API summary of the re-export counts this pass only
+            Reset-EntraOpsRetryStatistic
             # Same source as the first pass: narrowing to 'EntraOps' here would drop live-source-only
             # objects (e.g. XSPM-critical assets without classified roles) from the Control Plane scope.
             Update-EntraOpsClassificationControlPlaneScope @ScopeUpdateParameters

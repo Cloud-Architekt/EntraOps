@@ -947,7 +947,13 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson collection ordering' {
         Save-EntraOpsTenantGovernanceSnapshotJson `
             -ExportFolder $script:ExportFolder `
             -ResourcesToInclude @('unused-by-mock') `
-            -SkipPrerequisiteCheck -WarningAction SilentlyContinue | Out-Null
+            -SkipPrerequisiteCheck -WarningVariable Warnings -WarningAction SilentlyContinue | Out-Null
+
+        $PartialWarning = @($Warnings | Where-Object { "$_" -like '*per-resource export errors*' })
+        $PartialWarning.Count | Should -Be 1
+        "$($PartialWarning[0])" | Should -BeLike '*export errors (resources that could not be exported are kept from the previous snapshot): microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy.*'
+        "$($PartialWarning[0])" | Should -BeLike '*preserved as stale: microsoft.securityandcompliance.deviceconfigurationpolicy*'
+        Should -Invoke Get-EntraOpsTenantGovernanceSnapshot -Times 1 -Exactly -ParameterFilter { $SkipPartialSuccessWarning }
 
         (Get-Content -LiteralPath (Join-Path $TypeFolder 'Still exported.json') -Raw | ConvertFrom-Json).properties.Version | Should -Be 2
         (Get-Content -LiteralPath (Join-Path $TypeFolder 'Broken reference.json') -Raw | ConvertFrom-Json).properties.Version | Should -Be 1

@@ -16,10 +16,16 @@ function Write-EntraOpsWarningOnce {
         [string]$Message
     )
 
-    if ($null -eq $script:EntraOpsWarningsOnce) {
-        $script:EntraOpsWarningsOnce = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    # The session is shared with the parallel runspaces, a script variable is not
+    $Session = Get-Variable -Name __EntraOpsSession -ValueOnly -ErrorAction SilentlyContinue
+    $WarningsOnce = if ($Session) { $Session['WarningsOnce'] }
+    if ($null -eq $WarningsOnce) {
+        if ($null -eq $script:EntraOpsWarningsOnce) {
+            $script:EntraOpsWarningsOnce = [System.Collections.Concurrent.ConcurrentDictionary[string, byte]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        }
+        $WarningsOnce = $script:EntraOpsWarningsOnce
     }
-    if ($script:EntraOpsWarningsOnce.Add($Key)) {
+    if ($WarningsOnce.TryAdd($Key, 0)) {
         Write-Warning $Message
     } else {
         Write-Verbose $Message

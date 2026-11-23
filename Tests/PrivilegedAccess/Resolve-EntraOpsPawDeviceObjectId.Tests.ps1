@@ -56,3 +56,19 @@ Describe 'Resolve-EntraOpsPawDeviceObjectId' {
         Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly
     }
 }
+
+Describe 'Write-EntraOpsWarningOnce' {
+    It 'warns once across parallel runspaces that share the session' {
+        $Session = [hashtable]::Synchronized(@{
+                WarningsOnce = [System.Collections.Concurrent.ConcurrentDictionary[string, byte]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            })
+        $FunctionPath = "$script:TestRepositoryRoot/EntraOps/Private/Write-EntraOpsWarningOnce.ps1"
+        $WarningCounts = 1..6 | ForEach-Object -ThrottleLimit 3 -Parallel {
+            . $using:FunctionPath
+            $__EntraOpsSession = $using:Session
+            Write-EntraOpsWarningOnce -Key 'PawReferenceWithoutDevice|ref|user' -Message 'no device' -WarningVariable Warnings -WarningAction SilentlyContinue
+            @($Warnings).Count
+        }
+        ($WarningCounts | Measure-Object -Sum).Sum | Should -Be 1
+    }
+}

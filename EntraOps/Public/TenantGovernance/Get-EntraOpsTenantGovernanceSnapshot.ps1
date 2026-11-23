@@ -109,6 +109,10 @@ function Get-EntraOpsTenantGovernanceSnapshot {
         ,
         [Parameter(Mandatory = $false)]
         [switch]$SkipPrerequisiteCheck
+        ,
+        # Save-EntraOpsTenantGovernanceSnapshotJson writes a warning that names the resource types
+        [Parameter(Mandatory = $false, DontShow = $true)]
+        [switch]$SkipPartialSuccessWarning
     )
 
     $ErrorActionPreference = "Stop"
@@ -232,7 +236,7 @@ function Get-EntraOpsTenantGovernanceSnapshot {
                 PollingError       = $null
             }
         }
-        if ($SnapshotJob.status -eq "partiallySuccessful") {
+        if ($SnapshotJob.status -eq "partiallySuccessful" -and -not $SkipPartialSuccessWarning) {
             Write-Warning "Snapshot job $SnapshotJobId completed as 'partiallySuccessful' - one or more resource types may have failed to capture. Check the snapshot job details in the Microsoft Entra admin center for more information."
         }
     } else {
@@ -293,7 +297,7 @@ function Get-EntraOpsTenantGovernanceSnapshot {
                 PollingError       = $PollingErrorMessage
             }
         }
-        if ($SnapshotJob.status -eq "partiallySuccessful") {
+        if ($SnapshotJob.status -eq "partiallySuccessful" -and -not $SkipPartialSuccessWarning) {
             Write-Warning "Snapshot job $SnapshotJobId completed as 'partiallySuccessful' - one or more resource types may have failed to capture. Check the snapshot job details in the Microsoft Entra admin center for more information."
         }
     }

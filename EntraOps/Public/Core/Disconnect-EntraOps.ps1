@@ -60,14 +60,7 @@ function Disconnect-EntraOps {
     $__EntraOpsSession.Remove('ConfigFilePath')
     $__EntraOpsSession.Remove('SkippedConfigFilePath')
     if ($__EntraOpsSession.NonPimGroupIds) { $__EntraOpsSession.NonPimGroupIds.Clear() }
-    if ($__EntraOpsSession.RetryStatistics) {
-        $__EntraOpsSession.RetryStatistics.TotalRetries = 0
-        $__EntraOpsSession.RetryStatistics.ThrottledRequests = 0
-        $__EntraOpsSession.RetryStatistics.FailedRequests = 0
-        $__EntraOpsSession.RetryStatistics.NonRetryableRequests = 0
-        $__EntraOpsSession.RetryStatistics.FailedRequestDetails = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
-        $__EntraOpsSession.RetryStatistics.NonRetryableRequestDetails = [System.Collections.Concurrent.ConcurrentBag[object]]::new()
-    }
+    Reset-EntraOpsRetryStatistic
 
     # Remove the tenant-derived globals created by Connect-EntraOps so a later cmdlet cannot silently
     # keep operating against the previous tenant's context, configuration or output folders.

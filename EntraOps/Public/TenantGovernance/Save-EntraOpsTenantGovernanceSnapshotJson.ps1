@@ -330,7 +330,7 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
 
         Write-Output "Checking pending snapshot job $($PendingJob.SnapshotJobId) started at $($PendingJob.CreatedDateTime)..."
         try {
-            $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId $PendingJob.SnapshotJobId -ResourcesToInclude @($PendingJob.ResourcesToInclude) -SkipWaitForCompletion -SkipPrerequisiteCheck:$SkipPrerequisiteCheck
+            $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId $PendingJob.SnapshotJobId -ResourcesToInclude @($PendingJob.ResourcesToInclude) -SkipWaitForCompletion -SkipPrerequisiteCheck:$SkipPrerequisiteCheck -SkipPartialSuccessWarning
         } catch {
             # A job that can never be collected would block every later Start and Collect: record it as last attempt,
             # release the pending job and fail. Transient polling errors keep the pending job.
@@ -372,7 +372,7 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
             $SnapshotDisplayName = $SnapshotDisplayName.PadRight(8, '0')
         }
 
-        $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -ResourcesToInclude $ResourcesToInclude -SnapshotDisplayName $SnapshotDisplayName -TimeoutInSeconds $TimeoutInSeconds -SkipWaitForCompletion:($Operation -eq 'Start') -SkipPrerequisiteCheck:$SkipPrerequisiteCheck
+        $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -ResourcesToInclude $ResourcesToInclude -SnapshotDisplayName $SnapshotDisplayName -TimeoutInSeconds $TimeoutInSeconds -SkipWaitForCompletion:($Operation -eq 'Start') -SkipPrerequisiteCheck:$SkipPrerequisiteCheck -SkipPartialSuccessWarning
     }
     #endregion
 
@@ -1055,7 +1055,9 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
         Write-Output "Tenant Governance snapshot completed. $($Snapshot.ResourceCount) resource(s) captured and saved under $ExportFolder. Commit and push these files to track this point-in-time in Git history."
     } else {
         $StaleAge = Format-EntraOpsTenantGovernanceStaleAge -ResourceTypeStates $ResourceTypeStates
-        Write-Warning "Tenant Governance snapshot job $($Snapshot.SnapshotId) completed as '$SnapshotJobStatus'. $($PublishableResourceTypes.Count) resource type(s) were published ($($ResourceTypesWithRetainedResources.Count) of them with per-resource export errors) and $($StaleResourceTypes.Count) type(s) with Graph errors were preserved as stale$(if ($StaleAge) { ": $StaleAge" })."
+        $RetainedText = if ($ResourceTypesWithRetainedResources.Count -gt 0) { ", $($ResourceTypesWithRetainedResources.Count) of them with per-resource export errors (resources that could not be exported are kept from the previous snapshot): $($ResourceTypesWithRetainedResources -join ', ')" }
+        $StaleText = if ($StaleResourceTypes.Count -gt 0) { " $($StaleResourceTypes.Count) type(s) with Graph errors were preserved as stale: $(if ($StaleAge) { $StaleAge } else { $StaleResourceTypes -join ', ' })." }
+        Write-Warning "Tenant Governance snapshot job $($Snapshot.SnapshotId) completed as '$SnapshotJobStatus'. $($PublishableResourceTypes.Count) resource type(s) were published$RetainedText.$StaleText"
     }
     Write-Output ($SnapshotSummary | Format-List | Out-String)
     #endregion
