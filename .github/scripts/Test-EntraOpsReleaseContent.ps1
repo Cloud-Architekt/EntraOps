@@ -42,6 +42,7 @@ $ExcludedPathPatterns = @(
     'TenantGovernance/'
     'Review/'
     'Reports/*/data/'
+    'Reports/ClassificationExplorer/data-manifest.json'
     'Docs/data/'
     'EntraOpsConfig.json'
     # Local npm and Playwright output (git-ignored) is not part of the shipped content.
@@ -71,6 +72,9 @@ function Test-EntraOpsPlaceholderGuid {
     return $Hex -match '^(?:([0-9a-f])\1{3})+$'
 }
 $GuidPattern = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+# The tenants of Microsoft first-party applications, as EntraOps/Private/Findings/Test-EntraOpsMicrosoftFirstParty.ps1
+# recognizes them (Microsoft Services, Microsoft, PME and the tenant of Graph Command Line Tools and Graph Explorer).
+$MicrosoftTenantIds = @('f8cdef31-a31e-4b4a-93e4-5f571e91255a', '72f988bf-86f1-41af-91ab-2d7cd011db47', '33e01921-4d64-4f8c-a055-5bdaffd5e33d', 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2')
 # Keys and parameters whose value identifies an object of a specific tenant. Public ids such as built-in role
 # definition ids or first-party app ids are assigned to other keys and are not checked.
 $IdentityGuidPattern = "(?i)(?<Key>[A-Za-z]*(?:TenantId|ObjectId|PrincipalId|GroupId|SubscriptionId|WorkspaceId))[`"']?\s*(?::|=|\s)\s*[`"']?(?<Guid>$GuidPattern)"
@@ -147,6 +151,11 @@ foreach ($File in $Files) {
 
     foreach ($Match in [regex]::Matches($Content, $IdentityGuidPattern)) {
         if (Test-EntraOpsPlaceholderGuid -Guid $Match.Groups['Guid'].Value) {
+            continue
+        }
+        # Public tenants of Microsoft first-party applications (Test-EntraOpsMicrosoftFirstParty), for example as
+        # OriginTenantId of a service principal: they identify Microsoft, not a customer tenant.
+        if ($Match.Groups['Guid'].Value.ToLowerInvariant() -in $MicrosoftTenantIds) {
             continue
         }
         $Violations.Add("$RelativePath assigns the id '$($Match.Groups['Guid'].Value)' to '$($Match.Groups['Key'].Value)'. Use a placeholder such as 11111111-1111-1111-1111-111111111111.")

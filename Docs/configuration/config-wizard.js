@@ -45,6 +45,10 @@
         "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9", // User Access Administrator
         "f58310d9-a9f6-439a-9e8d-f62e7b41a168" // Role Based Access Control Administrator
     ];
+    // Azure role definition ids emitted by New-EntraOpsConfigFile for ServiceEM.WorkloadPlaneAdminRoles.
+    var SERVICEEM_WP_ADMIN_PERMANENT_ROLE_IDS = [
+        "acdd72a7-3385-48ef-bd42-f606fba81ae7" // Reader
+    ];
     var SERVICEEM_ALLOWED_ROLE_IDS = [
         "00482a5a-887f-4fb3-b363-3b7fe8e74483", // Key Vault Administrator
         "a4417e6f-fecd-4de8-b567-7b0420556985", // Key Vault Certificates Officer
@@ -311,10 +315,14 @@
             StaleTenantGovernanceSnapshotAction: "Warn",
             ConfigurationAnalyzerTimeRangeInDays: 365,
             ConfigurationAnalyzerSnapshotInterval: "P1W",
-            PimRequestFlowExcludedRiskFlags: [],
-            AccessPackageFlowExcludedRiskFlags: [],
             ConditionalAccessAnalysisExcludedFindings: [],
             EidscaExcludedFindings: "",
+            FindingsExcludedRules: "",
+            FindingsControlPlaneActivationMaxHours: 4,
+            FindingsEligibleAssignmentMaxDays: 365,
+            FindingsEmergencyAccessAccounts: "",
+            FindingsExceptionsFilePath: "./Classification/FindingExceptions.json",
+            FindingsExceptionMaxDays: 180,
 
             EnablePrivilegeHistory: true,
             PrivilegeHistoryTimeRangeInDays: "",
@@ -332,6 +340,7 @@
             TgExpandedResourceFamilies: { "microsoft.entra|Authentication method policy": true },
             TgSnapshotDisplayNamePrefix: "EntraOps TG",
             TgSnapshotResourceFileNaming: "ResourceId",
+            TgPendingJobMaxAgeInHours: 24,
             TgSnapshotScheduledTrigger: false,
             TgSnapshotScheduledCron: "0 6 * * *",
             TgSnapshotScheduledCronMode: null,
@@ -357,6 +366,8 @@
             SemAuWorkloadPlane: "",
             SemAuUserAccess: "",
             SemUpdateObjectClassificationFile: false,
+            SemWpAdminPermanentRoleDefinitionIds: SERVICEEM_WP_ADMIN_PERMANENT_ROLE_IDS.join("\n"),
+            SemWpAdminEligibleRoleDefinitionIds: "",
             SemMpExcludedRoleDefinitionIds: SERVICEEM_EXCLUDED_ROLE_IDS.join("\n"),
             SemMpAllowedTargetGroupFilter: "WorkloadPlane-Admins",
             SemWpAllowedRoleDefinitionIds: SERVICEEM_ALLOWED_ROLE_IDS.join("\n"),
@@ -647,8 +658,6 @@
                         { key: "StaleTenantGovernanceSnapshotAction", label: "When the Tenant Governance snapshot is older", type: "select", options: ["Warn", "Skip", "Fail"], default: "Warn", help: "Warn generates the Configuration Analyzer and marks it as outdated. Skip publishes all other reports without the Configuration Analyzer. Fail stops the reporting run before any report is generated." },
                         { key: "ConfigurationAnalyzerTimeRangeInDays", label: "Configuration Analyzer time range (days)", type: "number", default: 365, min: 1, placeholder: "unlimited", help: "Only Tenant Governance snapshots of the last N days are included. Leave empty for the full history; the dataset grows with every snapshot." },
                         { key: "ConfigurationAnalyzerSnapshotInterval", label: "Configuration Analyzer snapshot interval", type: "text", default: "P1W", help: "ISO 8601 duration between two analyzed snapshots, e.g. P1D = daily, P1W = weekly. None keeps every snapshot." },
-                        { key: "PimRequestFlowExcludedRiskFlags", label: "Exclude PIM Request Flow risk flags", type: "multiselect", options: ["noMfaActivation", "noApprovalActivation", "approverNotEnforced", "approverLowerTier", "authContextMissing", "permanentEligible", "permanentActive", "noMfaActiveAssign"], default: [], help: "Optional. Select findings to omit from PIM Request Flow. By default, every risk flag is reported." },
-                        { key: "AccessPackageFlowExcludedRiskFlags", label: "Exclude Access Package Flow risk flags", type: "multiselect", options: ["noApproval", "broadRequestor", "approverLowerTier", "assignedMorePrivileged"], default: [], help: "Optional. Select findings to omit from Access Package Flow. By default, every risk flag is reported." },
                         { key: "ConditionalAccessAnalysisExcludedFindings", label: "Exclude Conditional Access findings", type: "multiselect", options: ["policyNotEnforced", "legacyAuthentication", "allUserMfa", "privilegedRoleControls", "riskBasedPolicies", "deviceControls", "guestCoverage", "clientAppCoverage", "exclusionSurface"], default: [], help: "Optional. Select coverage findings to omit. By default, every finding is reported." },
                         { key: "EidscaExcludedFindings", label: "Exclude EIDSCA findings", type: "taglist", default: "", help: "Optional. Enter comma-separated EIDSCA check IDs to omit from EIDSCA Findings." }
                     ]
@@ -659,6 +668,17 @@
                         { key: "EnablePrivilegeHistory", label: "Enable Privilege History", type: "checkbox", default: true },
                         { key: "PrivilegeHistoryTimeRangeInDays", label: "Time range (days)", type: "number", placeholder: "unlimited", help: "Leave empty for the full git history." },
                         { key: "PrivilegeHistorySnapshotInterval", label: "Snapshot interval", type: "text", default: "P2W", help: "ISO 8601 duration, e.g. P2W = every 2 weeks, P1M = monthly." }
+                    ]
+                },
+                {
+                    title: "Findings",
+                    fields: [
+                        { key: "FindingsExcludedRules", label: "Exclude finding rules", type: "taglist", default: "", help: "Optional. Comma-separated EntraOps finding rules to exclude, by ID (e.g. EO.4008) or area and key (e.g. PrivilegedAssets.pawMissing). This is the one place to exclude rules, also the risk flags of PIM Request Flow and Access Package Flow (e.g. PimRequestFlow.noMfaActivation, AccessPackageFlow.broadRequestor). Get-EntraOpsFindingRule lists the rules. Excluded rules are not evaluated: the reports don't show them, and the EntraOps Maester Pack reports their tests as skipped." },
+                        { key: "FindingsControlPlaneActivationMaxHours", label: "Maximum Control Plane role activation (hours)", type: "number", default: 4, min: 1, max: 24, help: "Longer maximum activation durations of Control Plane roles in PIM are reported." },
+                        { key: "FindingsEligibleAssignmentMaxDays", label: "Maximum eligible assignment duration (days)", type: "number", default: 365, min: 1, max: 3650, help: "Longer expirations of eligible assignments of Control and Management Plane roles are reported." },
+                        { key: "FindingsEmergencyAccessAccounts", label: "Emergency access accounts", type: "taglist", default: "", help: "Optional. Comma-separated object IDs, user principal names or group display names that Conditional Access policies may exclude (EO.4003) and that keep permanent Control Plane roles (EO.3001, object IDs and user principal names only). When empty, nothing counts as emergency access: EO.4003 names the users excluded from every enabled policy as candidates." },
+                        { key: "FindingsExceptionsFilePath", label: "Finding Exceptions File", type: "text", default: "./Classification/FindingExceptions.json", help: "Path of the dismissed and risk-accepted findings, relative to the EntraOps repository root. The evaluation doesn't report them, and the EntraOps Maester Pack doesn't fail for them. Maintain the file in the Findings view of the Privileged Assets report (Accept at an affected object, then Export FindingExceptions.json) and commit it, or keep it in a local EntraOps folder." },
+                        { key: "FindingsExceptionMaxDays", label: "Maximum risk acceptance (days)", type: "number", default: 180, min: 0, max: 3650, help: "Longest time a risk can be accepted in the Finding Exceptions File. Later expiry dates are shortened, and expired exceptions report their findings again. 0 for no limit." }
                     ]
                 },
                 {
@@ -702,7 +722,8 @@
                         { key: "EnableTenantGovernanceSnapshot", label: "Enable Tenant Governance Snapshot", type: "checkbox", default: false, help: "Capture the tenant's Microsoft Entra/Intune/Security & Compliance configuration via the Microsoft Graph Tenant Configuration Management (UTCM) API and track every change as code in Git history. After enabling, run New-EntraOpsWorkloadIdentity (again) so the required Graph permission and the \"Microsoft Tenant Configuration Management\" service principal permissions are configured.", usedIn: "Save-EntraOpsTenantGovernanceSnapshotJson, Pull-EntraOpsTenantGovernance workflow" },
                         { key: "TgResourcesToInclude", label: "Resources to include", type: "resource-tree", options: TG_RESOURCES_ALL, default: TG_RESOURCES_DEFAULT, help: "Resource types captured in each snapshot. Start with a provider, then open a resource family to select its individual resource types. The recommended default covers the identity/access security posture (policies, roles, authentication methods). Directory object types (user, group, application, servicePrincipal, ...) are supported but excluded by default because they can consume the Microsoft Graph UTCM resource quota quickly. Check the current UTCM API limits before rollout, and use a weekly (or less frequent) cadence for large or high-cardinality resource sets.", usedIn: "Get-/Save-EntraOpsTenantGovernanceSnapshot, New-EntraOpsWorkloadIdentity (permission scoping)" },
                         { key: "TgSnapshotDisplayNamePrefix", label: "Snapshot display name prefix", type: "text", default: "EntraOps TG", help: "Prefix of the snapshot's display name on the Microsoft Graph side (visible in the Entra admin center). Purely cosmetic; the UTCM API only allows letters, numbers and spaces (8-32 characters) - anything else is sanitized automatically." },
-                        { key: "TgSnapshotResourceFileNaming", label: "Resource file naming", type: "select", options: ["ResourceId", "DisplayName"], default: "ResourceId", help: "\"ResourceId\" is the production-safe default and names files after the immutable resource id. \"DisplayName\" is human-readable but a rename changes the file path." }
+                        { key: "TgSnapshotResourceFileNaming", label: "Resource file naming", type: "select", options: ["ResourceId", "DisplayName"], default: "ResourceId", help: "\"ResourceId\" is the production-safe default and names files after the immutable resource id. \"DisplayName\" is human-readable but a rename changes the file path." },
+                        { key: "TgPendingJobMaxAgeInHours", label: "Release pending snapshot job after (hours)", type: "number", default: 24, min: 0, max: 8760, help: "A snapshot job that Microsoft Graph has not completed after this many hours is deleted and replaced by the next snapshot run, so a job that never starts can't keep the snapshot stale. 0 never releases a pending job by its age." }
                     ]
                 },
                 {
@@ -750,9 +771,16 @@
                 {
                     title: "Workload group classification",
                     fields: [
-                        { key: "SemAuWorkloadPlane", label: "WorkloadPlane administrative unit id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an administrative unit that ServiceEM adds the WorkloadPlane-Admins groups to. Classify them with an Alternate Tier Level Attributes filter for groups, e.g. WorkloadPlane: $Object.AssignedAdministrativeUnits.id -contains \"<id>\". Role-assignable and PIM-managed groups can't be added to a restricted management administrative unit (a warning is shown). Leave empty to skip.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
+                        { key: "SemAuWorkloadPlane", label: "WorkloadPlane administrative unit id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an administrative unit that ServiceEM adds the WorkloadPlane-Admins groups to. Classify them as ManagementPlane with an Alternate Tier Level Attributes filter for groups, e.g. ManagementPlane: $Object.AssignedAdministrativeUnits.id -contains \"<id>\". Role-assignable and PIM-managed groups can't be added to a restricted management administrative unit (a warning is shown). Leave empty to skip.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
                         { key: "SemAuUserAccess", label: "UserAccess administrative unit id", type: "text", placeholder: "00000000-0000-0000-0000-000000000000", help: "Object id of an administrative unit that ServiceEM adds the WorkloadPlane-Users groups to, e.g. for an Alternate Tier Level Attributes filter on UserAccess. Leave empty to skip.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap" },
-                        { key: "SemUpdateObjectClassificationFile", label: "Write workload groups to the Object Classification File", type: "checkbox", default: false, help: "Adds WorkloadPlane-Admins (WorkloadPlane) and WorkloadPlane-Users (UserAccess) to the Object Classification File of the repository; Remove-EntraOpsServiceCatalog removes them again. Can be combined with the administrative units. Existing entries with another tier are kept. Commit the file and enable the Object Classification File to use it. ControlPlane, ManagementPlane and administrator groups aren't classified by ServiceEM.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap, Remove-EntraOpsServiceCatalog" }
+                        { key: "SemUpdateObjectClassificationFile", label: "Write workload groups to the Object Classification File", type: "checkbox", default: false, help: "Adds WorkloadPlane-Admins (ManagementPlane) and WorkloadPlane-Users (UserAccess) to the Object Classification File of the repository; Remove-EntraOpsServiceCatalog removes them again. Can be combined with the administrative units. Existing entries with another tier are kept. Commit the file and enable the Object Classification File to use it. ControlPlane, ManagementPlane and administrator groups aren't classified by ServiceEM.", usedIn: "New-EntraOpsSubscriptionLandingZone, New-EntraOpsServiceBootstrap, Remove-EntraOpsServiceCatalog" }
+                    ]
+                },
+                {
+                    title: "WorkloadPlane-Admins Azure roles",
+                    fields: [
+                        { key: "SemWpAdminPermanentRoleDefinitionIds", label: "Permanent role definition ids", type: "taglist", rows: 2, default: SERVICEEM_WP_ADMIN_PERMANENT_ROLE_IDS.join("\n"), defaultLabel: "Reader", help: "Azure role definition ids that WorkloadPlane-Admins get as permanent (active) assignment on the landing zone resource group or subscription. An empty list assigns no permanent role, also no Reader. Owner, User Access Administrator and Role Based Access Control Administrator are rejected. Enter one id per line or a comma-separated list.", usedIn: "New-EntraOpsServiceAZContainer" },
+                        { key: "SemWpAdminEligibleRoleDefinitionIds", label: "PIM eligible role definition ids", type: "taglist", rows: 2, default: "", defaultLabel: "none", help: "Azure role definition ids that WorkloadPlane-Admins get as PIM eligible assignment on the landing zone resource group or subscription, in addition to the constrained Role Based Access Control Administrator. Empty by default, so ServiceEM assigns no privileged role. Contributor (b24988ac-6180-42a0-ab88-20f7382dd24c) equals ManagementPlane control of the scope; prefer resource-specific roles. Owner, User Access Administrator and Role Based Access Control Administrator are rejected. Enter one id per line or a comma-separated list.", usedIn: "New-EntraOpsServiceAZContainer" }
                     ]
                 },
                 {
@@ -1619,10 +1647,16 @@
                 StaleTenantGovernanceSnapshotAction: state.StaleTenantGovernanceSnapshotAction,
                 TimeRangeInDays: state.ConfigurationAnalyzerTimeRangeInDays === "" || state.ConfigurationAnalyzerTimeRangeInDays === null ? null : Number(state.ConfigurationAnalyzerTimeRangeInDays),
                 SnapshotInterval: state.ConfigurationAnalyzerSnapshotInterval || "None",
-                PimRequestFlowExcludedRiskFlags: state.PimRequestFlowExcludedRiskFlags,
-                AccessPackageFlowExcludedRiskFlags: state.AccessPackageFlowExcludedRiskFlags,
                 ConditionalAccessAnalysisExcludedFindings: state.ConditionalAccessAnalysisExcludedFindings,
                 EidscaExcludedFindings: commaListToArray(state.EidscaExcludedFindings)
+            },
+            Findings: {
+                ExcludedRules: commaListToArray(state.FindingsExcludedRules),
+                ControlPlaneActivationMaxHours: Number(state.FindingsControlPlaneActivationMaxHours) || 4,
+                EligibleAssignmentMaxDays: Number(state.FindingsEligibleAssignmentMaxDays) || 365,
+                EmergencyAccessAccounts: commaListToArray(state.FindingsEmergencyAccessAccounts),
+                ExceptionsFilePath: String(state.FindingsExceptionsFilePath || "").trim() || "./Classification/FindingExceptions.json",
+                ExceptionMaxDays: state.FindingsExceptionMaxDays === "" || state.FindingsExceptionMaxDays === null || isNaN(Number(state.FindingsExceptionMaxDays)) ? 180 : Number(state.FindingsExceptionMaxDays)
             },
             CustomSecurityAttributes: {
                 Enabled: state.CsaEnabled,
@@ -1681,6 +1715,7 @@
                 ResourcesToInclude: state.TgResourcesToInclude,
                 SnapshotDisplayNamePrefix: state.TgSnapshotDisplayNamePrefix,
                 SnapshotResourceFileNaming: state.TgSnapshotResourceFileNaming,
+                PendingJobMaxAgeInHours: state.TgPendingJobMaxAgeInHours === "" || state.TgPendingJobMaxAgeInHours === null || isNaN(Number(state.TgPendingJobMaxAgeInHours)) ? 24 : Number(state.TgPendingJobMaxAgeInHours),
                 SnapshotScheduledTrigger: state.TgSnapshotScheduledTrigger,
                 SnapshotScheduledCron: state.TgSnapshotScheduledCron,
                 SnapshotScheduledCronComplete: state.TgSnapshotScheduledCronComplete,
@@ -1705,6 +1740,10 @@
                     UserAccess: state.SemAuUserAccess
                 },
                 UpdateObjectClassificationFile: state.SemUpdateObjectClassificationFile,
+                WorkloadPlaneAdminRoles: {
+                    PermanentRoleDefinitionIds: commaListToArray(state.SemWpAdminPermanentRoleDefinitionIds),
+                    EligibleRoleDefinitionIds: commaListToArray(state.SemWpAdminEligibleRoleDefinitionIds)
+                },
                 ConstrainedDelegation: {
                     ManagementPlane: {
                         ExcludedRoleDefinitionIds: commaListToArray(state.SemMpExcludedRoleDefinitionIds),
@@ -1758,6 +1797,11 @@
             }
         };
         var merged = mergeConfig(deepClone(importedConfig || {}), cfg);
+        // The risk-flag exclusions of EntraOps 1.1.0 are imported into Findings.ExcludedRules.
+        if (merged.ConfigurationAnalyzer) {
+            delete merged.ConfigurationAnalyzer.PimRequestFlowExcludedRiskFlags;
+            delete merged.ConfigurationAnalyzer.AccessPackageFlowExcludedRiskFlags;
+        }
         // Per-type Enabled flags replace the legacy top-level switch of older config files.
         var alternate = merged.AlternateObjectTierLevelAttributes;
         delete alternate.Enabled;
@@ -1917,11 +1961,27 @@
             state.ConfigurationAnalyzerTimeRangeInDays = configurationAnalyzerSection.TimeRangeInDays === null ? "" : configurationAnalyzerSection.TimeRangeInDays;
         }
         state.ConfigurationAnalyzerSnapshotInterval = pick(cfg, "ConfigurationAnalyzer.SnapshotInterval", state.ConfigurationAnalyzerSnapshotInterval);
-        state.PimRequestFlowExcludedRiskFlags = pick(cfg, "ConfigurationAnalyzer.PimRequestFlowExcludedRiskFlags", state.PimRequestFlowExcludedRiskFlags);
-        state.AccessPackageFlowExcludedRiskFlags = pick(cfg, "ConfigurationAnalyzer.AccessPackageFlowExcludedRiskFlags", state.AccessPackageFlowExcludedRiskFlags);
         state.ConditionalAccessAnalysisExcludedFindings = pick(cfg, "ConfigurationAnalyzer.ConditionalAccessAnalysisExcludedFindings", state.ConditionalAccessAnalysisExcludedFindings);
         var eidscaExcluded = pick(cfg, "ConfigurationAnalyzer.EidscaExcludedFindings", null);
         state.EidscaExcludedFindings = Array.isArray(eidscaExcluded) ? eidscaExcluded.join(", ") : state.EidscaExcludedFindings;
+        var findingsExcluded = pick(cfg, "Findings.ExcludedRules", null);
+        // Deprecated (EntraOps 1.1.0): the excluded risk flags of PIM Request Flow and Access Package Flow are
+        // the finding rules PimRequestFlow.<flag> and AccessPackageFlow.<flag>.
+        var deprecatedExcluded = [];
+        [["ConfigurationAnalyzer.PimRequestFlowExcludedRiskFlags", "PimRequestFlow."], ["ConfigurationAnalyzer.AccessPackageFlowExcludedRiskFlags", "AccessPackageFlow."]].forEach(function (alias) {
+            var flags = pick(cfg, alias[0], null);
+            if (Array.isArray(flags)) flags.forEach(function (flag) { if (typeof flag === "string" && flag) deprecatedExcluded.push(alias[1] + flag); });
+        });
+        if (Array.isArray(findingsExcluded) || deprecatedExcluded.length) {
+            var excludedRules = (Array.isArray(findingsExcluded) ? findingsExcluded : []).concat(deprecatedExcluded);
+            state.FindingsExcludedRules = excludedRules.filter(function (rule, index) { return excludedRules.indexOf(rule) === index; }).join(", ");
+        }
+        state.FindingsControlPlaneActivationMaxHours = pick(cfg, "Findings.ControlPlaneActivationMaxHours", state.FindingsControlPlaneActivationMaxHours);
+        state.FindingsEligibleAssignmentMaxDays = pick(cfg, "Findings.EligibleAssignmentMaxDays", state.FindingsEligibleAssignmentMaxDays);
+        var emergencyAccess = pick(cfg, "Findings.EmergencyAccessAccounts", null);
+        state.FindingsEmergencyAccessAccounts = Array.isArray(emergencyAccess) ? emergencyAccess.join(", ") : state.FindingsEmergencyAccessAccounts;
+        state.FindingsExceptionsFilePath = pick(cfg, "Findings.ExceptionsFilePath", state.FindingsExceptionsFilePath);
+        state.FindingsExceptionMaxDays = pick(cfg, "Findings.ExceptionMaxDays", state.FindingsExceptionMaxDays);
 
         state.PrivilegedUserAttribute = pick(cfg, "CustomSecurityAttributes.PrivilegedUserAttribute", state.PrivilegedUserAttribute);
         state.PrivilegedUserPawAttribute = pick(cfg, "CustomSecurityAttributes.PrivilegedUserPawAttribute", state.PrivilegedUserPawAttribute);
@@ -1964,6 +2024,7 @@
         state.TgResourcesToInclude = pick(cfg, "TenantGovernanceSnapshot.ResourcesToInclude", state.TgResourcesToInclude);
         state.TgSnapshotDisplayNamePrefix = pick(cfg, "TenantGovernanceSnapshot.SnapshotDisplayNamePrefix", state.TgSnapshotDisplayNamePrefix);
         state.TgSnapshotResourceFileNaming = pick(cfg, "TenantGovernanceSnapshot.SnapshotResourceFileNaming", state.TgSnapshotResourceFileNaming);
+        state.TgPendingJobMaxAgeInHours = pick(cfg, "TenantGovernanceSnapshot.PendingJobMaxAgeInHours", state.TgPendingJobMaxAgeInHours);
         state.TgSnapshotScheduledTrigger = pick(cfg, "TenantGovernanceSnapshot.SnapshotScheduledTrigger", state.TgSnapshotScheduledTrigger);
         state.TgSnapshotScheduledCron = pick(cfg, "TenantGovernanceSnapshot.SnapshotScheduledCron", state.TgSnapshotScheduledCron);
         state.TgSnapshotScheduledCronComplete = pick(cfg, "TenantGovernanceSnapshot.SnapshotScheduledCronComplete", state.TgSnapshotScheduledCronComplete);
@@ -1976,6 +2037,10 @@
         state.SemManagementPlaneDelegationGroupId = pick(cfg, "ServiceEM.ManagementPlaneDelegationGroupId", state.SemManagementPlaneDelegationGroupId);
         state.SemManagementPlaneGroupName = pick(cfg, "ServiceEM.ManagementPlaneGroupName", state.SemManagementPlaneGroupName);
         state.SemAdministratorGroupId = pick(cfg, "ServiceEM.AdministratorGroupId", state.SemAdministratorGroupId);
+        var wpAdminPermanentRoleIds = pick(cfg, "ServiceEM.WorkloadPlaneAdminRoles.PermanentRoleDefinitionIds", null);
+        if (wpAdminPermanentRoleIds != null) state.SemWpAdminPermanentRoleDefinitionIds = asList(wpAdminPermanentRoleIds).join("\n");
+        var wpAdminEligibleRoleIds = pick(cfg, "ServiceEM.WorkloadPlaneAdminRoles.EligibleRoleDefinitionIds", null);
+        if (wpAdminEligibleRoleIds != null) state.SemWpAdminEligibleRoleDefinitionIds = asList(wpAdminEligibleRoleIds).join("\n");
         var excludedRoleIds = pick(cfg, "ServiceEM.ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds", null);
         if (excludedRoleIds != null) state.SemMpExcludedRoleDefinitionIds = asList(excludedRoleIds).join("\n");
         state.SemMpAllowedTargetGroupFilter = pick(cfg, "ServiceEM.ConstrainedDelegation.ManagementPlane.AllowedTargetGroupFilter", state.SemMpAllowedTargetGroupFilter);

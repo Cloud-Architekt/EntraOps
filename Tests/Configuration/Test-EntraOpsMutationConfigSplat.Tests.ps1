@@ -65,6 +65,38 @@ Describe "Mutation configuration workflow splatting" {
         }
     }
 
+    It "writes the Findings settings with their defaults" {
+        $ConfigPath = Join-Path $TestDrive 'EntraOpsConfig.json'
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -ConfigFilePath $ConfigPath | Out-Null
+        $Config = [System.IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json
+
+        @($Config.Findings.ExcludedRules).Count | Should -Be 0
+        $Config.Findings.ControlPlaneActivationMaxHours | Should -Be 4
+        $Config.Findings.EligibleAssignmentMaxDays | Should -Be 365
+        @($Config.Findings.EmergencyAccessAccounts).Count | Should -Be 0
+        $Config.Findings.ExceptionsFilePath | Should -Be './Classification/FindingExceptions.json'
+        $Config.Findings.ExceptionMaxDays | Should -Be 180
+
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -ConfigFilePath $ConfigPath -FindingsExcludedRules 'EO.4008', 'PrivilegedAssets.sponsorMissing' -FindingsControlPlaneActivationMaxHours 8 -FindingsEmergencyAccessAccounts 'breakglass@contoso.com' -FindingsExceptionsFilePath './Findings/Exceptions.json' -FindingsExceptionMaxDays 90 | Out-Null
+        $Config = [System.IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json
+        $Config.Findings.ExcludedRules | Should -Be @('EO.4008', 'PrivilegedAssets.sponsorMissing')
+        $Config.Findings.ControlPlaneActivationMaxHours | Should -Be 8
+        @($Config.Findings.EmergencyAccessAccounts) | Should -Be @('breakglass@contoso.com')
+        $Config.Findings.ExceptionsFilePath | Should -Be './Findings/Exceptions.json'
+        $Config.Findings.ExceptionMaxDays | Should -Be 90
+    }
+
+    It "writes the deprecated risk-flag exclusions of EntraOps 1.1.0 to Findings.ExcludedRules" {
+        $ConfigPath = Join-Path $TestDrive 'EntraOpsConfig.json'
+        New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -ConfigFilePath $ConfigPath -FindingsExcludedRules 'EO.4008' -PimRequestFlowExcludedRiskFlags 'noMfaActivation' -AccessPackageFlowExcludedRiskFlags 'broadRequestor', 'noApproval' -WarningVariable Warnings -WarningAction SilentlyContinue | Out-Null
+        $Config = [System.IO.File]::ReadAllText($ConfigPath) | ConvertFrom-Json
+
+        $Config.Findings.ExcludedRules | Should -Be @('EO.4008', 'PimRequestFlow.noMfaActivation', 'AccessPackageFlow.broadRequestor', 'AccessPackageFlow.noApproval')
+        $Config.ConfigurationAnalyzer.PSObject.Properties.Name | Should -Not -Contain 'PimRequestFlowExcludedRiskFlags'
+        $Config.ConfigurationAnalyzer.PSObject.Properties.Name | Should -Not -Contain 'AccessPackageFlowExcludedRiskFlags'
+        @($Warnings | Where-Object { "$_" -like '*deprecated*' }).Count | Should -Be 2
+    }
+
     It "disables descriptive console object details in generated configuration by default" {
         $ConfigPath = Join-Path $TestDrive 'EntraOpsConfig.json'
         New-EntraOpsConfigFile -TenantName 'contoso.onmicrosoft.com' -ConfigFilePath $ConfigPath | Out-Null

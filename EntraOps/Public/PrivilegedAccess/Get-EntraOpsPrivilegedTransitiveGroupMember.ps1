@@ -9,6 +9,10 @@
 .PARAMETER GroupObjectId
     Object ID of the security group in Microsoft Entra ID.
 
+.PARAMETER ThrowOnQueryFailure
+    Throw when a Microsoft Graph query for the group or its members fails, instead of returning the members that
+    could be read. For callers that must know whether the members were collected completely.
+
 .EXAMPLE
     Get a list of all direct and nested group members of a security group in Microsoft Entra ID:
     Get-EntaOpsPrivilegedTransitiveGroupMember -GroupObjectId "00000000-0000-0000-0000-000000000000"
@@ -31,8 +35,15 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
         [string[]]$AncestorObjectDisplayNames = @(),
 
         [Parameter(Mandatory = $False)]
-        [System.Collections.Generic.List[psobject]]$WarningMessages
+        [System.Collections.Generic.List[psobject]]$WarningMessages,
+
+        [Parameter(Mandatory = $False)]
+        [switch]$ThrowOnQueryFailure
     )
+
+    # Without -ThrowOnQueryFailure, a failed query returns $null and looks like a group without members.
+    $QueryFailure = @{}
+    if ($ThrowOnQueryFailure) { $QueryFailure.ThrowOnFailure = $true }
 
     # Guard against a genuine Entra ID nested-group cycle (e.g. Group A eligible-nests Group B,
     # Group B eligible-nests Group A back) - without this, the recursive expansion below would
@@ -49,7 +60,7 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
     # Check details for security group to identify synchronized groups
     try {
         $GroupUri = "/beta/groups/$($GroupObjectId)?`$select=id,displayName,onPremisesSyncEnabled"
-        $GroupDetails = Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $GroupUri -OutputType PSObject | select-object DisplayName, Id, onPremisesSyncEnabled
+        $GroupDetails = Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $GroupUri -OutputType PSObject @QueryFailure | select-object DisplayName, Id, onPremisesSyncEnabled
         Write-Verbose "Get transitive group members of $($GroupDetails.displayName)"
     } catch {
         Write-Error $_
@@ -103,28 +114,41 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
 
         # Query for roleAssignmentScheduleInstances to get permanent and active members
         $PimForGroupsMembersUri = "/beta/identityGovernance/privilegedAccess/group/assignmentScheduleInstances?`$filter=groupId eq `'$($GroupObjectId)`'&`$expand=principal"
-        $PimForGroupsMembers = (Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $PimForGroupsMembersUri -OutputType PSObject)
+        $PimForGroupsMembers = (Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $PimForGroupsMembersUri -OutputType PSObject @QueryFailure)
+
+        # Members only (accessId member): owners of the group are not members and do not hold its role assignments.
+        # assignmentType is 'assigned' (an assignment of its own) or 'activated' (the activation of an eligible
+        # membership); an assignment with an end date is time-bound, not permanent.
+        $PimForGroupsMemberInstances = @($PimForGroupsMembers | Where-Object { $null -ne $_ -and "$($_.accessId)" -in @('member', '') -and $null -ne $_.principal.Id })
 
         #Permanent Members in PIM-managed Group
         Write-Verbose "- Permanent membership"
-        $PermanentMembers = ($PimForGroupsMembers | Where-Object { $_.assignmentType -eq "assigned" -and $null -ne $_.principal.Id }).principal | select-object DisplayName, Id, '@odata.type'
+        $PermanentMembers = ($PimForGroupsMemberInstances | Where-Object { $_.assignmentType -eq "assigned" -and [string]::IsNullOrEmpty("$($_.endDateTime)") }).principal | select-object DisplayName, Id, '@odata.type'
         $PermanentMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Permanent member" -Force
 
-        #Active Members in PIM-managed Group
-        $ActiveMembers = ($PimForGroupsMembers | Where-Object { $_.assignmentType -eq "active" -and $null -ne $_.principal.Id }).principal | select-object DisplayName, Id, '@odata.type'
-        $ActiveMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Active member" -Force
+        #Time-bound Members in PIM-managed Group (active assignment with an end date)
+        $TimeBoundMembers = ($PimForGroupsMemberInstances | Where-Object { $_.assignmentType -eq "assigned" -and -not [string]::IsNullOrEmpty("$($_.endDateTime)") }).principal | select-object DisplayName, Id, '@odata.type'
+        $TimeBoundMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Time-bound member" -Force
+
 
         # Eligible Member
         Write-Verbose "- Direct eligible membership"
         $EligibleMembersUri = "/beta/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=groupId eq `'$($GroupObjectId)`'&`$expand=principal"
-        $EligibleMembers = (Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $EligibleMembersUri -OutputType PSObject | Where-Object { $_.status -eq "Provisioned" -and $_.accessId -eq "member" -and $null -ne $_.principal.Id }).principal | select-object DisplayName, Id, '@odata.type'
+        $EligibleMembers = (Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $EligibleMembersUri -OutputType PSObject @QueryFailure | Where-Object { $_.status -eq "Provisioned" -and $_.accessId -eq "member" -and $null -ne $_.principal.Id }).principal | select-object DisplayName, Id, '@odata.type'
         $EligibleMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Eligible member" -Force
+
+        #Active Members in PIM-managed Group: an activation is a temporary instance of an eligible membership, which
+        # Graph lists in the eligibility schedules as well. Only activations without that eligibility are added, so an
+        # eligible member keeps its label (and its role assignment instance ID) while it is activated.
+        $EligibleMemberIds = @($EligibleMembers | Where-Object { $null -ne $_ } | ForEach-Object { "$($_.Id)" })
+        $ActiveMembers = ($PimForGroupsMemberInstances | Where-Object { $_.assignmentType -in @("activated", "active") -and "$($_.principal.Id)" -notin $EligibleMemberIds }).principal | select-object DisplayName, Id, '@odata.type'
+        $ActiveMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Active member" -Force
 
         # Check if Eligible Member groups have nested permanent group assignments
         Write-Verbose "- Nested permanent group member of eligible group"
         $EligibleNestedPermanentMembers = $EligibleMembers | Where-Object { $_.'@odata.type' -eq "#microsoft.graph.group" } | ForEach-Object {
             $EligibleNestedPermanentMembersUri = "/beta/groups/$($_.id)/transitiveMembers?`$select=id,displayName,userPrincipalName"
-            $EligibleNestedPermanentMember = Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $EligibleNestedPermanentMembersUri -OutputType PSObject
+            $EligibleNestedPermanentMember = Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $EligibleNestedPermanentMembersUri -OutputType PSObject @QueryFailure
             $EligibleNestedPermanentMember | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Nested Eligible member" -Force
             $NestedNestingIds = $CurrentObjectIds + @($_.id)
             $NestedNestingNames = $CurrentObjectDisplayNames + @($_.displayName)
@@ -136,6 +160,7 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
         # Summarize all eligible and transitive eligible members of direct or direct nested groups
         $AllGroupMembers = @()
         $AllGroupMembers += $PermanentMembers
+        $AllGroupMembers += $TimeBoundMembers
         $AllGroupMembers += $ActiveMembers
         $AllGroupMembers += $EligibleMembers
         $AllGroupMembers += $EligibleNestedPermanentMembers
@@ -151,8 +176,14 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
             # call), so wrapping it in an additional loop here would just re-expand the same
             # group repeatedly without ever progressing to a deeper level.
             Write-Verbose "- Expand nesting for $($NestedMemberGroup.id)"
-            $NestedEligibleMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $NestedMemberGroup.id -TenantId $TenantId -AncestorObjectIds $CurrentObjectIds -AncestorObjectDisplayNames $CurrentObjectDisplayNames -WarningMessages $WarningMessages
-            $NestedEligibleMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Nested Eligible group member" -Force
+            $NestedEligibleMembers = Get-EntraOpsPrivilegedTransitiveGroupMember -GroupObjectId $NestedMemberGroup.id -TenantId $TenantId -AncestorObjectIds $CurrentObjectIds -AncestorObjectDisplayNames $CurrentObjectDisplayNames -WarningMessages $WarningMessages -ThrowOnQueryFailure:$ThrowOnQueryFailure
+            # A member is a standing member only when both are permanent: the membership of the nested group and the
+            # member's own membership in it. Everything else needs an activation (or ends) and counts as eligible.
+            $ViaPermanentNesting = "$($NestedMemberGroup.RoleAssignmentSubType)" -eq 'Permanent member'
+            foreach ($NestedMember in @($NestedEligibleMembers | Where-Object { $null -ne $_ })) {
+                $SubType = if ($ViaPermanentNesting -and "$($NestedMember.RoleAssignmentSubType)" -in @('Permanent member', 'Nested Permanent group member')) { 'Nested Permanent group member' } else { 'Nested Eligible group member' }
+                $NestedMember | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value $SubType -Force
+            }
 
             # Check if nested group is not already in the list
             $NestedEligibleMembers = $NestedEligibleMembers | Where-Object { $_.Id -notin $TransitiveNestedEligibleMembers.Id }
@@ -166,7 +197,7 @@ function Get-EntraOpsPrivilegedTransitiveGroupMember {
         # Permanent Transitive Member
         Write-Verbose "- Transitive permanent membership"
         $TransitivePermanentMembersUri = "/beta/groups/$($GroupObjectId)/transitiveMembers?`$select=id,displayName,userPrincipalName"
-        $TransitivePermanentMembers = Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $TransitivePermanentMembersUri -OutputType PSObject | Where-Object { $null -ne $_.Id } | select-object DisplayName, Id, '@odata.type'
+        $TransitivePermanentMembers = Invoke-EntraOpsMsGraphQuery -Method "Get" -Uri $TransitivePermanentMembersUri -OutputType PSObject @QueryFailure | Where-Object { $null -ne $_.Id } | select-object DisplayName, Id, '@odata.type'
         $TransitivePermanentMembers | Add-Member -MemberType NoteProperty -Name "RoleAssignmentSubType" -Value "Permanent member" -Force
 
         # No eligible members to add

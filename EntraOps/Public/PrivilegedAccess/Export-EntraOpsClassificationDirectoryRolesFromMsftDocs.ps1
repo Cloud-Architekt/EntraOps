@@ -11,6 +11,8 @@ function Export-EntraOpsClassificationDirectoryRolesFromMsftDocs {
         list of role actions from the include page table. The role actions are classified with the EntraOps
         classification (Classification_AadResources.json) in the same way as Export-EntraOpsClassificationDirectoryRoles.ps1
         and the result is exported in the schema of Classification_EntraIdDirectoryRoles.json.
+        Owner-only sections (such as "Owned application registrations") and rows explicitly conditioned on
+        '$SubjectIsOwner' are excluded, matching the Microsoft Graph exporter.
 
         This script does not require a connection to Microsoft Graph, it only needs internet access to raw.githubusercontent.com.
 
@@ -166,10 +168,28 @@ function Export-EntraOpsClassificationDirectoryRolesFromMsftDocs {
 
         #region Extract the role actions from the include page table
         $RolePermissionActions = New-Object System.Collections.Generic.List[string]
+        $OwnerSectionLevel = 0
         foreach ($IncludeLine in $IncludeLines) {
             # Normalize blockquote prefix
             $TableLine = ($IncludeLine -replace '^\s*>\s?', '').Trim()
+
+            # Learn documents SubjectIsOwner actions in separate "Owned ..." sections rather than
+            # exposing the Graph condition on each row. Skip the entire section, including subsections,
+            # until a heading at the same or a higher level restores the surrounding scope.
+            $Heading = [regex]::Match($TableLine, '^(?<level>#{1,6})\s+(?<title>.+?)\s*#*\s*$')
+            if ($Heading.Success) {
+                $HeadingLevel = $Heading.Groups['level'].Value.Length
+                if ($OwnerSectionLevel -gt 0 -and $HeadingLevel -le $OwnerSectionLevel) {
+                    $OwnerSectionLevel = 0
+                }
+                if ($OwnerSectionLevel -eq 0 -and $Heading.Groups['title'].Value -match '^(?i:Owned)\b|\$?SubjectIsOwner\b') {
+                    $OwnerSectionLevel = $HeadingLevel
+                }
+                continue
+            }
+            if ($OwnerSectionLevel -gt 0) { continue }
             if (-not $TableLine.StartsWith('|')) { continue }
+            if ($TableLine -match '\$?SubjectIsOwner\b') { continue }
 
             $Cells = $TableLine.Trim('|').Split('|')
             if ($Cells.Count -lt 1) { continue }

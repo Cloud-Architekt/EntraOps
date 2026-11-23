@@ -75,4 +75,19 @@ Describe 'Invoke-EntraOpsMsGraphQuery error details and cache' {
         $script:Calls | Should -Be 3
         $result.id | Should -Be 'result-3'
     }
+
+    It 'persists static data for long URIs under a file-system-safe cache file name' {
+        $PreviousCachePath = $script:Session.PersistentCachePath
+        $script:Session.PersistentCachePath = Join-Path $TestDrive 'cache'
+        New-Item -ItemType Directory -Path $script:Session.PersistentCachePath | Out-Null
+        try {
+            Invoke-EntraOpsMsGraphQuery -Method GET -Uri "https://graph.microsoft.com/beta/roleManagement/directory/roleDefinitions?`$select=id,displayName,description,rolePermissions,isBuiltIn,IsPrivileged,templateId" | Out-Null
+
+            $CacheFiles = @(Get-ChildItem -LiteralPath $script:Session.PersistentCachePath -Recurse -File)
+            $CacheFiles.Count | Should -Be 1
+            $CacheFiles[0].Name | Should -Match '^[0-9A-F]{64}\.json$'
+        } finally {
+            $script:Session.PersistentCachePath = $PreviousCachePath
+        }
+    }
 }

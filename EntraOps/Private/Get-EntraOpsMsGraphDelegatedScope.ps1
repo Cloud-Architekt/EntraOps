@@ -40,6 +40,7 @@ function Get-EntraOpsMsGraphDelegatedScope {
         'DirectoryRecommendations.Read.All',
         'EntitlementManagement.Read.All',
         'Group.Read.All',
+        'Group-XTenantIdentitySync.Read.All',
         'PrivilegedAccess.Read.AzureADGroup',
         'PrivilegedEligibilitySchedule.Read.AzureADGroup',
         'Policy.Read.All',

@@ -190,6 +190,10 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                         'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
                         'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
                         'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                        'OutsideOfHomeTenant'           = $ObjectDetails.OutsideOfHomeTenant
+                        'OriginType'                    = $ObjectDetails.OriginType
+                        'OriginTenantId'                = $ObjectDetails.OriginTenantId
+                        'OriginId'                      = $ObjectDetails.OriginId
                         'RoleSystem'                    = "ResourceApps"
                         'Classification'                = $Classification
                         'RoleAssignments'               = @($inheritablePermissionScopes | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
@@ -200,6 +204,7 @@ function Get-EntraOpsPrivilegedEamResourceApps {
                         'IdentityParent'                = $ObjectDetails.IdentityParent
                         'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
                         'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                        'AssociatedPawDeviceObjectId'   = $ObjectDetails.AssociatedPawDeviceObjectId
                     }
                 }
             }

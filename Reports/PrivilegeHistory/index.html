@@ -13,6 +13,7 @@
     <script src="../shared/theme.js"></script>
     <link rel="stylesheet" href="css/styles.css" />
     <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="../shared/filters.css" />
 </head>
 
 <body>
@@ -48,6 +49,8 @@
                     Assets</span></a>
             <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html"><span
                     class="ico">&#9636;</span><span>Overview</span></a>
+            <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html?view=findings"><span
+                    class="ico">&#9873;</span><span>Findings</span></a>
             <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html?view=classification"><span
                     class="ico">&#9998;</span><span>Object Classification</span></a>
             <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
@@ -104,34 +107,31 @@
             </div>
 
             <div id="tmContent" class="hidden">
-                <!-- Filters (RBAC System / Tier Level / Role) apply to the snapshot detail & compare
-                     tables below; the trend charts show totals across every RBAC system and tier since
-                     that's what was aggregated at generation time. -->
+                <div class="callout scope tm-folder-note" id="tmFolderNote" role="status" hidden></div>
+                <!-- Filters (RBAC System / Tier Level / Role) apply to the snapshot detail table below and
+                     count its privileged assets; the trend charts show totals across every RBAC system and tier
+                     since that's what was aggregated at generation time. The time range zooms the charts. -->
                 <section class="card card-pad" style="margin-bottom:16px;">
-                    <div class="eam-filter-row" id="tmFilterRow">
-                        <div class="eam-filter" id="tmFltRoleSystem"></div>
-                        <div class="eam-filter" id="tmFltTierLevel"></div>
-                        <div class="eam-filter grow">
-                            <label for="tmFltRole">Role</label>
-                            <div class="search">
-                                <span class="search-ico">&#128269;</span>
-                                <input type="text" id="tmFltRole" placeholder="Search role definition name&hellip;" />
-                            </div>
-                        </div>
+                    <div class="eo-searchbar tm-searchbar">
+                        <label class="eo-search">
+                            <svg class="eo-search-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 1a5.5 5.5 0 0 1 4.38 8.83l3.65 3.64a.75.75 0 0 1-1.06 1.06l-3.64-3.65A5.5 5.5 0 1 1 6.5 1Zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg>
+                            <input type="search" id="tmFltRole" aria-label="Search role"
+                                placeholder="Search role definition name&hellip;" autocomplete="off" />
+                        </label>
+                        <label class="eo-select">Time range<select id="tmRangeFrom" aria-label="Time range from"></select></label>
+                        <label class="eo-select">to<select id="tmRangeTo" aria-label="Time range to"></select></label>
+                        <button class="btn small" id="tmResetRange" type="button">Reset to full history</button>
                     </div>
-                    <div class="eam-filter-row" style="margin-top:12px;">
-                        <div class="eam-filter">
-                            <label for="tmRangeFrom">Time range from</label>
-                            <select id="tmRangeFrom"></select>
+                    <div class="eo-facets" id="tmFacets">
+                        <div class="eo-facet-row">
+                            <span class="eo-facet-label" id="tmFltRoleSystemLabel">RBAC System</span>
+                            <div class="eo-pills" id="tmFltRoleSystem" role="group" aria-labelledby="tmFltRoleSystemLabel"></div>
                         </div>
-                        <div class="eam-filter">
-                            <label for="tmRangeTo">to</label>
-                            <select id="tmRangeTo"></select>
+                        <div class="eo-facet-row">
+                            <span class="eo-facet-label" id="tmFltTierLevelLabel">RBAC Tier Level</span>
+                            <div class="eo-pills" id="tmFltTierLevel" role="group" aria-labelledby="tmFltTierLevelLabel"></div>
                         </div>
-                        <div class="eam-filter">
-                            <label>&nbsp;</label>
-                            <button class="btn small" id="tmResetRange">Reset to full history</button>
-                        </div>
+                        <div class="eo-facet-note" id="tmFacetScope"></div>
                     </div>
                 </section>
 
@@ -153,11 +153,15 @@
                             <div class="card-pad tm-chart-wrap" id="tmChartAssignments"></div>
                         </section>
                         <section class="card eam-col-50">
-                            <div class="card-head">Tier breaches
+                            <div class="card-head"><span class="ph-card-title">Tier breaches</span>
                                 <span class="hint">Role assignment reaches a more privileged tier than the
                                     principal's own tier</span>
                             </div>
                             <div class="card-pad tm-chart-wrap" id="tmChartBreaches"></div>
+                            <p class="tm-chart-note" id="tmBreachNote">Counts every role assignment above the object
+                                tier, including delegated permissions and Microsoft first-party apps. The finding EO.8002
+                                (new tier breaches) uses the rules of EO.1001 and EO.1003 instead: without delegated
+                                permissions and Microsoft apps, unclassified objects apart.</p>
                         </section>
                     </div>
                 </div>
@@ -165,7 +169,7 @@
                 <section class="card" style="margin-bottom:16px;" id="tmSnapshotPanel">
                     <div class="card-head">Snapshot detail
                         <span class="chip brand hidden" id="tmSnapshotChip"></span>
-                        <button class="btn small primary hidden" id="tmJumpToOverview">Open in EAM Dashboard
+                        <button class="btn small primary hidden" id="tmJumpToOverview" title="Opens today's data with the RBAC system, tier level and role search of this page. The EAM Dashboard lists privileged groups too; the Privilege History counts privileged assets without groups.">Open in EAM Dashboard
                             Overview</button>
                     </div>
                     <div class="card-pad" id="tmSnapshotBody">
@@ -179,21 +183,12 @@
                             live data from the EAM Dashboard)</span>
                     </div>
                     <div class="card-pad">
-                        <div class="eam-filter-row">
-                            <div class="eam-filter">
-                                <label for="tmCompareBaseline">Baseline</label>
-                                <select id="tmCompareBaseline"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="tmCompareCurrent">Current</label>
-                                <select id="tmCompareCurrent"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label>&nbsp;</label>
-                                <button class="btn small primary" id="tmCompareRun">Compare</button>
-                            </div>
+                        <div class="eo-searchbar">
+                            <label class="eo-select">Baseline<select id="tmCompareBaseline"></select></label>
+                            <label class="eo-select">Current<select id="tmCompareCurrent"></select></label>
+                            <button class="btn small primary" id="tmCompareRun" type="button">Compare</button>
                         </div>
-                        <div id="tmCompareResult" style="margin-top:12px;"></div>
+                        <div id="tmCompareResult"></div>
                     </div>
                 </section>
             </div>
@@ -209,6 +204,7 @@
          "then vs. now" deltas. Silently ignored when the EAM Dashboard app/data isn't present. -->
     <script defer src="../EamDashboard/data/eam-dashboard-data.js"></script>
     <script defer src="js/navCollapse.js"></script>
+    <script defer src="../shared/filters.js"></script>
     <script defer src="js/app.js"></script>
 </body>
 

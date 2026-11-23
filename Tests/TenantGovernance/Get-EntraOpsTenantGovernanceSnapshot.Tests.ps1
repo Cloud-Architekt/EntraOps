@@ -11,6 +11,8 @@ BeforeAll {
     . "$script:TestRepositoryRoot/EntraOps/Private/ConvertTo-EntraOpsSafeFilePathSegment.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/ConvertTo-EntraOpsSortedObject.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/ConvertFrom-EntraOpsTenantGovernanceSnapshotErrorDetail.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsTenantGovernanceResourceGraphState.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsTenantGovernanceStaleSince.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/TenantGovernance/Get-EntraOpsTenantGovernanceSnapshot.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/TenantGovernance/Save-EntraOpsTenantGovernanceSnapshotJson.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Show-EntraOpsWarningSummary.ps1"
@@ -261,11 +263,20 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson pending state' {
         }
 
         # The cmdlet also emits progress strings, so select the result object like the workflow does.
-        $Output = Save-EntraOpsTenantGovernanceSnapshotJson `
-            -ExportFolder $script:ExportFolder `
-            -ResourcesToInclude @('microsoft.entra.conditionalAccessPolicy') `
-            -TimeoutInSeconds 0 `
-            -SkipPrerequisiteCheck
+        $PreviousTenantIdContext = $Global:TenantIdContext
+        $PreviousTenantNameContext = $Global:TenantNameContext
+        try {
+            $Global:TenantIdContext = '00000000-0000-0000-0000-000000000001'
+            $Global:TenantNameContext = 'contoso.onmicrosoft.com'
+            $Output = Save-EntraOpsTenantGovernanceSnapshotJson `
+                -ExportFolder $script:ExportFolder `
+                -ResourcesToInclude @('microsoft.entra.conditionalAccessPolicy') `
+                -TimeoutInSeconds 0 `
+                -SkipPrerequisiteCheck
+        } finally {
+            $Global:TenantIdContext = $PreviousTenantIdContext
+            $Global:TenantNameContext = $PreviousTenantNameContext
+        }
         $Result = @($Output | Where-Object { $_ -isnot [string] }) | Select-Object -Last 1
 
         $PendingJobPath = Join-Path $script:ExportFolder '.PendingSnapshotJob.json'
@@ -275,6 +286,9 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson pending state' {
         $PendingJob.CreatedDateTime.ToUniversalTime().ToString('o') | Should -Be '2026-08-30T10:11:12.0000000Z'
         $PendingJob.LastKnownStatus | Should -Be 'unknown'
         $PendingJob.LastPollingError | Should -Match 'simulated polling outage'
+        # The tenant of the job, which Invoke-EntraOpsAssessment compares with the connected tenant
+        $PendingJob.TenantId | Should -Be '00000000-0000-0000-0000-000000000001'
+        $PendingJob.TenantName | Should -Be 'contoso.onmicrosoft.com'
         Test-Path (Join-Path $script:ExportFolder '.SnapshotManifest.json') | Should -BeFalse
         @(Get-ChildItem -Path $script:ExportFolder -Recurse -Force -Filter '*.json').Count | Should -Be 1
     }
@@ -303,6 +317,28 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson pending state' {
         Test-Path -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') | Should -BeFalse
     }
 
+    It 'does not collect or release the pending job of another tenant' {
+        $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder 'TenantGovernance/SnapshotsOtherTenant'
+        New-Item -ItemType Directory -Path $script:ExportFolder -Force | Out-Null
+        $PendingJobPath = Join-Path $script:ExportFolder '.PendingSnapshotJob.json'
+        @{ SnapshotJobId = 'job-fabrikam'; ResourcesToInclude = @('microsoft.entra.conditionalAccessPolicy'); CreatedDateTime = '2026-10-17T06:00:00Z'; TenantId = '00000000-0000-0000-0000-000000000002'; TenantName = 'fabrikam.onmicrosoft.com' } |
+            ConvertTo-Json | Set-Content -LiteralPath $PendingJobPath -Encoding utf8
+        Mock Get-EntraOpsTenantGovernanceSnapshot { throw 'must not be called' }
+
+        $PreviousTenantIdContext = $Global:TenantIdContext
+        try {
+            $Global:TenantIdContext = '00000000-0000-0000-0000-000000000001'
+            { Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('unused-by-mock') -Operation Collect -SkipPrerequisiteCheck } |
+                Should -Throw '*belongs to tenant fabrikam.onmicrosoft.com*The pending job is kept.'
+        } finally {
+            $Global:TenantIdContext = $PreviousTenantIdContext
+        }
+
+        Should -Invoke Get-EntraOpsTenantGovernanceSnapshot -Times 0
+        Test-Path -LiteralPath $PendingJobPath | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $script:ExportFolder '.LastAttemptManifest.json') | Should -BeFalse
+    }
+
     It 'keeps a pending job when its status can not be retrieved' {
         $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder 'TenantGovernance/SnapshotsTransient'
         New-Item -ItemType Directory -Path $script:ExportFolder -Force | Out-Null
@@ -316,6 +352,105 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson pending state' {
 
         Test-Path -LiteralPath $PendingJobPath | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $script:ExportFolder '.LastAttemptManifest.json') | Should -BeFalse
+    }
+}
+
+Describe 'Save-EntraOpsTenantGovernanceSnapshotJson expired pending job' {
+    BeforeEach {
+        $script:EntraOpsBaseFolder = Join-Path $TestDrive "EntraOpsExpired-$([guid]::NewGuid().Guid)"
+        $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder 'TenantGovernance/Snapshots'
+        New-Item -ItemType Directory -Path $script:ExportFolder -Force | Out-Null
+        $script:PendingJobPath = Join-Path $script:ExportFolder '.PendingSnapshotJob.json'
+        $script:LastAttemptPath = Join-Path $script:ExportFolder '.LastAttemptManifest.json'
+        $script:WritePendingJob = {
+            param([double]$AgeInHours)
+            @{ SnapshotJobId = 'job-stuck'; SnapshotDisplayName = 'Stuck Snapshot'; ResourcesToInclude = @('microsoft.entra.conditionalAccessPolicy'); CreatedDateTime = (Get-Date).ToUniversalTime().AddHours(-$AgeInHours).ToString('o'); LastKnownStatus = 'notStarted' } |
+                ConvertTo-Json | Set-Content -LiteralPath $script:PendingJobPath -Encoding utf8
+        }
+        $script:GraphCalls = [System.Collections.Generic.List[string]]::new()
+        Mock Invoke-EntraOpsMsGraphQuery {
+            param($Method, $Uri)
+            $script:GraphCalls.Add("$Method $Uri")
+        }
+    }
+
+    It 'releases a job that is still notStarted after PendingJobMaxAgeInHours on Collect and fails' {
+        & $script:WritePendingJob 96
+        Mock Get-EntraOpsTenantGovernanceSnapshot { [PSCustomObject]@{ SnapshotId = 'job-stuck'; Status = 'notStarted'; ResourcesToInclude = $ResourcesToInclude } }
+
+        { Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -Operation Collect -SkipPrerequisiteCheck -WarningAction SilentlyContinue } |
+            Should -Throw "*job-stuck is still 'notStarted' 96 hour(s)*next run starts a new snapshot job*"
+
+        Test-Path -LiteralPath $script:PendingJobPath | Should -BeFalse
+        $LastAttempt = Get-Content -LiteralPath $script:LastAttemptPath -Raw | ConvertFrom-Json
+        $LastAttempt.SnapshotId | Should -Be 'job-stuck'
+        $LastAttempt.SnapshotJobStatus | Should -Be 'notStarted'
+        $LastAttempt.Diagnostics[0].ErrorCode | Should -Be 'SnapshotJobTimedOut'
+        @($script:GraphCalls) | Should -Be @('DELETE /beta/admin/configurationManagement/configurationSnapshotJobs/job-stuck')
+    }
+
+    It 'keeps a job younger than PendingJobMaxAgeInHours on Collect' {
+        & $script:WritePendingJob 2
+        Mock Get-EntraOpsTenantGovernanceSnapshot { [PSCustomObject]@{ SnapshotId = 'job-stuck'; Status = 'running'; ResourcesToInclude = $ResourcesToInclude } }
+
+        $Result = @(Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -Operation Collect -SkipPrerequisiteCheck) | Where-Object { $_ -isnot [string] }
+
+        $Result.LastKnownStatus | Should -Be 'running'
+        Test-Path -LiteralPath $script:PendingJobPath | Should -BeTrue
+        Test-Path -LiteralPath $script:LastAttemptPath | Should -BeFalse
+        $script:GraphCalls.Count | Should -Be 0
+    }
+
+    It 'never releases a job by its age with PendingJobMaxAgeInHours 0 from the configuration' {
+        & $script:WritePendingJob 500
+        Mock Get-EntraOpsTenantGovernanceSnapshot { [PSCustomObject]@{ SnapshotId = 'job-stuck'; Status = 'notStarted'; ResourcesToInclude = $ResourcesToInclude } }
+        $Global:EntraOpsConfig = @{ TenantGovernanceSnapshot = @{ PendingJobMaxAgeInHours = 0 } }
+        try {
+            $null = Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('microsoft.entra.conditionalAccessPolicy') -Operation Collect -SkipPrerequisiteCheck
+        } finally {
+            $Global:EntraOpsConfig = $null
+        }
+
+        Test-Path -LiteralPath $script:PendingJobPath | Should -BeTrue
+        $script:GraphCalls.Count | Should -Be 0
+    }
+
+    It 'replaces an expired job on Start, also when Microsoft Graph cannot delete it' {
+        & $script:WritePendingJob 30
+        Mock Invoke-EntraOpsMsGraphQuery {
+            param($Method)
+            if ($Method -eq 'DELETE') { throw 'Forbidden' }
+        }
+        Mock Get-EntraOpsTenantGovernanceSnapshot { [PSCustomObject]@{ SnapshotId = 'job-new'; Status = 'notStarted'; DisplayName = $SnapshotDisplayName; CreatedDateTime = (Get-Date).ToUniversalTime().ToString('o'); ResourcesToInclude = $ResourcesToInclude } }
+
+        $Output = @(Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('microsoft.entra.conditionalAccessPolicy') -Operation Start -SkipPrerequisiteCheck -WarningVariable Warnings -WarningAction SilentlyContinue)
+
+        (Get-Content -LiteralPath $script:PendingJobPath -Raw | ConvertFrom-Json).SnapshotJobId | Should -Be 'job-new'
+        (Get-Content -LiteralPath $script:LastAttemptPath -Raw | ConvertFrom-Json).Diagnostics[0].ErrorCode | Should -Be 'SnapshotJobTimedOut'
+        ($Output | Where-Object { $_ -is [string] }) -join "`n" | Should -Match 'Released the expired snapshot job job-stuck'
+        ($Warnings -join "`n") | Should -Match 'could not be deleted in Microsoft Graph'
+        Should -Invoke Get-EntraOpsTenantGovernanceSnapshot -Times 1 -Exactly -ParameterFilter { [string]::IsNullOrEmpty($SnapshotJobId) }
+    }
+
+    It 'still refuses to start while a recent job is pending' {
+        & $script:WritePendingJob 3
+        Mock Get-EntraOpsTenantGovernanceSnapshot { throw 'must not be called' }
+
+        { Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('microsoft.entra.conditionalAccessPolicy') -Operation Start -SkipPrerequisiteCheck } |
+            Should -Throw '*job-stuck already exists*older than PendingJobMaxAgeInHours (24)*'
+
+        Test-Path -LiteralPath $script:PendingJobPath | Should -BeTrue
+        $script:GraphCalls.Count | Should -Be 0
+    }
+
+    It 'rejects an invalid PendingJobMaxAgeInHours in the configuration' {
+        $Global:EntraOpsConfig = @{ TenantGovernanceSnapshot = @{ PendingJobMaxAgeInHours = 'daily' } }
+        try {
+            { Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -Operation Collect -SkipPrerequisiteCheck } |
+                Should -Throw "*Invalid TenantGovernanceSnapshot.PendingJobMaxAgeInHours 'daily'*"
+        } finally {
+            $Global:EntraOpsConfig = $null
+        }
     }
 }
 
@@ -740,12 +875,24 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson collection ordering' {
             }
         }
 
-        Save-EntraOpsTenantGovernanceSnapshotJson `
-            -ExportFolder $script:ExportFolder `
-            -ResourcesToInclude @('unused-by-mock') `
-            -SkipPrerequisiteCheck -WarningAction SilentlyContinue | Out-Null
+        $PreviousTenantIdContext = $Global:TenantIdContext
+        $PreviousTenantNameContext = $Global:TenantNameContext
+        try {
+            $Global:TenantIdContext = '00000000-0000-0000-0000-000000000001'
+            $Global:TenantNameContext = 'contoso.onmicrosoft.com'
+            Save-EntraOpsTenantGovernanceSnapshotJson `
+                -ExportFolder $script:ExportFolder `
+                -ResourcesToInclude @('unused-by-mock') `
+                -SkipPrerequisiteCheck -WarningAction SilentlyContinue | Out-Null
+        } finally {
+            $Global:TenantIdContext = $PreviousTenantIdContext
+            $Global:TenantNameContext = $PreviousTenantNameContext
+        }
 
         $Manifest = Get-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') -Raw | ConvertFrom-Json
+        # The tenant of the snapshot: Invoke-EntraOpsAssessment never uses the snapshot of another tenant in a shared folder.
+        $Manifest.TenantId | Should -Be '00000000-0000-0000-0000-000000000001'
+        $Manifest.TenantName | Should -Be 'contoso.onmicrosoft.com'
         @($Manifest.AttemptResourceTypeCounts.PSObject.Properties.Name) | Should -Be @(
             'microsoft.entra.administrativeunit'
             'microsoft.entra.authorizationpolicy'
@@ -821,6 +968,50 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson collection ordering' {
         $State.Diagnostics[0].ErrorCode | Should -Be 'Request_ResourceNotFound'
         $StaleState = @($Manifest.ResourceTypeStates | Where-Object { $_.ResourceType -eq 'microsoft.securityandcompliance.deviceconfigurationpolicy' })[0]
         $StaleState.Status | Should -Be 'PreservedStale'
+    }
+
+    It 'keeps StaleSince while a resource type stays stale and names the stale age in the warning' {
+        $KeptType = 'microsoft.securityandcompliance.deviceconfigurationpolicy'
+        $NewType = 'microsoft.securityandcompliance.deviceconditionalaccesspolicy'
+        $script:EntraOpsBaseFolder = Join-Path $TestDrive 'EntraOpsStaleSince'
+        $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder 'TenantGovernance/Snapshots'
+        New-Item -ItemType Directory -Path $script:ExportFolder -Force | Out-Null
+        [ordered]@{
+            SnapshotId = 'job-previous'; SnapshotJobStatus = 'partiallySuccessful'; IsComplete = $false
+            ResourceTypeStates = @(
+                [ordered]@{ ResourceType = $KeptType; Status = 'PreservedStale'; StaleSince = '2026-08-01T00:00:00.0000000Z' }
+                [ordered]@{ ResourceType = $NewType; Status = 'Published'; PublishedSnapshotId = 'job-previous' }
+            )
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') -Encoding utf8
+
+        Mock Get-EntraOpsTenantGovernanceSnapshot {
+            [PSCustomObject]@{
+                SnapshotId = 'job-stale-since'; Status = 'Completed'; SnapshotJobStatus = 'partiallySuccessful'
+                DisplayName = 'Test Snapshot'; CreatedDateTime = '2026-09-07T10:11:12Z'
+                ResourcesToInclude = @('microsoft.securityandcompliance.deviceConfigurationPolicy', 'microsoft.securityandcompliance.deviceConditionalAccessPolicy', 'microsoft.entra.conditionalAccessPolicy')
+                ResourceCount = 1
+                ErrorDetails = @(
+                    'microsoft.securityandcompliance.deviceConfigurationPolicy: Errors encountered while establishing connection with underlying workload'
+                    'microsoft.securityandcompliance.deviceConditionalAccessPolicy: Errors encountered while establishing connection with underlying workload'
+                )
+                Resources = @([PSCustomObject]@{ resourceType = 'microsoft.entra.conditionalAccessPolicy'; displayName = 'CA-Policy'; properties = [PSCustomObject]@{ Id = 'ca-1' } })
+            }
+        }
+
+        Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('unused-by-mock') `
+            -SkipPrerequisiteCheck -WarningVariable Warnings -WarningAction SilentlyContinue | Out-Null
+
+        $Manifest = Get-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') -Raw | ConvertFrom-Json
+        $ToUtc = { param($Value) if ($Value -is [datetime]) { $Value.ToUniversalTime().ToString('o') } elseif ($Value) { [datetimeoffset]::Parse("$Value", [cultureinfo]::InvariantCulture).UtcDateTime.ToString('o') } }
+        $States = @{}
+        foreach ($State in $Manifest.ResourceTypeStates) { $States[$State.ResourceType] = $State }
+        & $ToUtc $States[$KeptType].StaleSince | Should -Be '2026-08-01T00:00:00.0000000Z'
+        & $ToUtc $States[$NewType].StaleSince | Should -Be '2026-09-07T10:11:12.0000000Z'
+        $States['microsoft.entra.conditionalaccesspolicy'].StaleSince | Should -BeNullOrEmpty
+        $StaleWarning = @($Warnings | Where-Object { "$_" -like '*preserved as stale*' })
+        $StaleWarning.Count | Should -Be 1
+        "$($StaleWarning[0])" | Should -BeLike "*$KeptType (stale since 2026-08-01, * day(s))*"
+        "$($StaleWarning[0])" | Should -BeLike "*$NewType (stale since 2026-09-07, * day(s))*"
     }
 
     It 'deduplicates legacy and ID-named files for a resource retained after an export error' {
@@ -1067,6 +1258,234 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson collection ordering' {
         @($LastAttempt.Diagnostics).Count | Should -Be 1
         $LastAttempt.Diagnostics[0].ErrorCategory | Should -Be 'DuplicateResourceIdentity'
         $LastAttempt.Diagnostics[0].ResourceType | Should -Be 'microsoft.entra.conditionalaccesspolicy'
+    }
+}
+
+Describe 'Get-EntraOpsTenantGovernanceResourceGraphState' {
+    BeforeAll {
+        # The file-level stub has no parameters; this one lets the parameter filters below see the requested Uri.
+        function Invoke-EntraOpsMsGraphQuery { param($Method, $Uri, $OutputType, [switch]$DisableCache, [switch]$ThrowOnFailure, $MaxRetries, [switch]$SuppressNotFoundWarning, [switch]$SuppressForbiddenWarning) }
+        # Same shape as the error Invoke-EntraOpsMsGraphQuery -ThrowOnFailure throws for a non-retryable answer
+        function New-TestGraphException([int]$StatusCode) {
+            $Exception = [System.InvalidOperationException]::new("Microsoft Graph query failed: HTTP $StatusCode")
+            $Exception.Data['StatusCode'] = $StatusCode
+            $Exception
+        }
+    }
+
+    It 'requests the resource by its own Id from the v1.0 assignmentPolicies endpoint and reports Exists' {
+        Mock Invoke-EntraOpsMsGraphQuery { [PSCustomObject]@{ id = 'policy-1' } }
+
+        $State = Get-EntraOpsTenantGovernanceResourceGraphState -ResourceType 'microsoft.entra.entitlementManagementAccessPackageAssignmentPolicy' -ResourceId 'policy-1'
+
+        $State.State | Should -Be 'Exists'
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter {
+            $Uri -eq '/v1.0/identityGovernance/entitlementManagement/assignmentPolicies/policy-1' -and $ThrowOnFailure -and $DisableCache
+        }
+    }
+
+    It 'reports NotFound only for HTTP 404' {
+        Mock Invoke-EntraOpsMsGraphQuery { throw (New-TestGraphException -StatusCode 404) }
+        (Get-EntraOpsTenantGovernanceResourceGraphState -ResourceType 'microsoft.entra.conditionalaccesspolicy' -ResourceId 'policy-1').State | Should -Be 'NotFound'
+    }
+
+    It 'reports Unknown for HTTP <StatusCode>' -ForEach @(@{ StatusCode = 429 }, @{ StatusCode = 500 }, @{ StatusCode = 503 }, @{ StatusCode = 403 }) {
+        Mock Invoke-EntraOpsMsGraphQuery { throw (New-TestGraphException -StatusCode $StatusCode) }
+        $State = Get-EntraOpsTenantGovernanceResourceGraphState -ResourceType 'microsoft.entra.conditionalaccesspolicy' -ResourceId 'policy-1'
+        $State.State | Should -Be 'Unknown'
+        $State.StatusCode | Should -Be $StatusCode
+    }
+
+    It 'reports Unknown for an error without status code (network error, persistent throttling) and for an empty answer' {
+        Mock Invoke-EntraOpsMsGraphQuery { throw 'An error occurred while sending the request.' }
+        (Get-EntraOpsTenantGovernanceResourceGraphState -ResourceType 'microsoft.entra.conditionalaccesspolicy' -ResourceId 'policy-1').State | Should -Be 'Unknown'
+        Mock Invoke-EntraOpsMsGraphQuery { $null }
+        (Get-EntraOpsTenantGovernanceResourceGraphState -ResourceType 'microsoft.entra.conditionalaccesspolicy' -ResourceId 'policy-1').State | Should -Be 'Unknown'
+    }
+
+    It 'reports Unsupported without a Graph request for a type without a known endpoint' {
+        Mock Invoke-EntraOpsMsGraphQuery { throw 'must not be called' }
+        (Get-EntraOpsTenantGovernanceResourceGraphState -ResourceType 'microsoft.entra.crossTenantAccessPolicyConfigurationPartner' -ResourceId 'tenant-1').State | Should -Be 'Unsupported'
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly
+    }
+
+    It 'escapes the Id so it stays one path segment' {
+        Mock Invoke-EntraOpsMsGraphQuery { [PSCustomObject]@{ id = 'x' } }
+        $null = Get-EntraOpsTenantGovernanceResourceGraphState -ResourceType 'microsoft.entra.namedlocationpolicy' -ResourceId '../../users?$top=1'
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -eq '/v1.0/identity/conditionalAccess/namedLocations/..%2F..%2Fusers%3F%24top%3D1' }
+    }
+}
+
+Describe 'Save-EntraOpsTenantGovernanceSnapshotJson removal of deleted retained resources' {
+    BeforeAll {
+        # The file-level stub has no parameters; this one lets the parameter filters below see the requested Uri.
+        function Invoke-EntraOpsMsGraphQuery { param($Method, $Uri, $OutputType, [switch]$DisableCache, [switch]$ThrowOnFailure, $MaxRetries, [switch]$SuppressNotFoundWarning, [switch]$SuppressForbiddenWarning) }
+        $script:PolicyType = 'microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy'
+        $script:CaType = 'microsoft.entra.conditionalaccesspolicy'
+        $script:ReturnedPolicyId = '11111111-1111-1111-1111-111111111111'
+        $script:DeletedPolicyId = '22222222-2222-2222-2222-222222222222'
+        $script:ExistingPolicyId = '33333333-3333-3333-3333-333333333333'
+
+        function New-TestGraphException([int]$StatusCode) {
+            $Exception = [System.InvalidOperationException]::new("Microsoft Graph query failed: HTTP $StatusCode")
+            $Exception.Data['StatusCode'] = $StatusCode
+            $Exception
+        }
+
+        # Earlier published files of the policy type: one returned again, one deleted in the tenant, one that still exists
+        # but fails to export because it references a deleted object.
+        function Initialize-TestPolicyFolder {
+            $script:PolicyFolder = Join-Path $script:ExportFolder "$script:PolicyType/AADEntitlementManagementAccessPackageAssignmentPolicy"
+            New-Item -ItemType Directory -Path $script:PolicyFolder -Force | Out-Null
+            foreach ($Previous in @(
+                    @{ Name = 'Returned.json'; Id = $script:ReturnedPolicyId }
+                    @{ Name = 'Deleted.json'; Id = $script:DeletedPolicyId }
+                    @{ Name = 'Broken reference.json'; Id = $script:ExistingPolicyId }
+                )) {
+                [ordered]@{ displayName = "AADEntitlementManagementAccessPackageAssignmentPolicy-$($Previous.Name -replace '\.json$')"; resourceType = $script:PolicyType; properties = [ordered]@{ Id = $Previous.Id } } |
+                ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $script:PolicyFolder $Previous.Name) -Encoding utf8
+            }
+        }
+
+        function New-TestPolicySnapshot {
+            [PSCustomObject]@{
+                SnapshotId = 'job-removal'; Status = 'Completed'; SnapshotJobStatus = 'partiallySuccessful'
+                DisplayName = 'Test Snapshot'; CreatedDateTime = '2026-11-17T10:11:12Z'
+                ResourcesToInclude = @('microsoft.entra.entitlementManagementAccessPackageAssignmentPolicy'); ResourceCount = 1
+                # The message is ambiguous: deleted policy or deleted referenced object
+                ErrorDetails = @(
+                    "microsoft.entra.entitlementManagementAccessPackageAssignmentPolicy: Error exporting resource [microsoft.entra.entitlementManagementAccessPackageAssignmentPolicy]. exceptionMessage(s):[Request_ResourceNotFound] : Resource '$script:DeletedPolicyId' does not exist or one of its queried reference-property objects are not present. ,[Request_ResourceNotFound] : Resource '44444444-4444-4444-4444-444444444444' does not exist or one of its queried reference-property objects are not present. ,"
+                )
+                Resources = @([PSCustomObject]@{ resourceType = 'microsoft.entra.entitlementManagementAccessPackageAssignmentPolicy'; displayName = 'AADEntitlementManagementAccessPackageAssignmentPolicy-Returned'; properties = [PSCustomObject]@{ Id = $script:ReturnedPolicyId } })
+            }
+        }
+    }
+
+    BeforeEach {
+        $script:EntraOpsBaseFolder = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder 'TenantGovernance/Snapshots'
+        New-Item -ItemType Directory -Path $script:ExportFolder -Force | Out-Null
+    }
+
+    It 'removes the file of a resource Graph answers 404 for, keeps one Graph returns and records the removal in the manifest' {
+        Initialize-TestPolicyFolder
+        Mock Get-EntraOpsTenantGovernanceSnapshot { New-TestPolicySnapshot }
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -like "*/$script:DeletedPolicyId") { throw (New-TestGraphException -StatusCode 404) }
+            [PSCustomObject]@{ id = ($Uri -split '/')[-1] }
+        }
+
+        Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('unused-by-mock') -SkipPrerequisiteCheck -WarningAction SilentlyContinue | Out-Null
+
+        Test-Path -LiteralPath (Join-Path $script:PolicyFolder 'Deleted.json') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $script:PolicyFolder 'Broken reference.json') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $script:PolicyFolder 'Returned.json') | Should -BeTrue
+        # Control request for the returned policy plus one request per policy the job did not return
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -eq "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies/$script:ReturnedPolicyId" }
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -eq "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies/$script:DeletedPolicyId" }
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -eq "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies/$script:ExistingPolicyId" }
+        # The GUID of the error message that is no snapshot resource is never requested
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly -ParameterFilter { $Uri -like '*44444444-4444-4444-4444-444444444444*' }
+
+        $Manifest = Get-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') -Raw | ConvertFrom-Json
+        @($Manifest.RemovedResources).Count | Should -Be 1
+        $Manifest.RemovedResources[0].ResourceType | Should -Be $script:PolicyType
+        $Manifest.RemovedResources[0].ResourceId | Should -Be $script:DeletedPolicyId
+        $Manifest.RemovedResources[0].DisplayName | Should -Be 'AADEntitlementManagementAccessPackageAssignmentPolicy-Deleted'
+        $Manifest.RemovedResources[0].File | Should -Be "$script:PolicyType/AADEntitlementManagementAccessPackageAssignmentPolicy/Deleted.json"
+        $Manifest.RemovedResources[0].Reason | Should -Be 'NotFound'
+        $Manifest.RemovedResources[0].Detail | Should -Match '404'
+        $State = $Manifest.ResourceTypeStates | Where-Object { $_.ResourceType -eq $script:PolicyType }
+        $State.Status | Should -Be 'PublishedWithErrors'
+        $State.RetainedResourceCount | Should -Be 1
+        $State.RemovedResourceCount | Should -Be 1
+        $State.PublishedResourceCount | Should -Be 2
+    }
+
+    It 'keeps the file when the check answers HTTP <StatusCode>' -ForEach @(@{ StatusCode = 429 }, @{ StatusCode = 500 }, @{ StatusCode = 403 }) {
+        Initialize-TestPolicyFolder
+        Mock Get-EntraOpsTenantGovernanceSnapshot { New-TestPolicySnapshot }
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -like "*/$script:ReturnedPolicyId") { return [PSCustomObject]@{ id = $script:ReturnedPolicyId } }
+            throw (New-TestGraphException -StatusCode $StatusCode)
+        }
+
+        Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('unused-by-mock') -SkipPrerequisiteCheck -WarningVariable Warnings -WarningAction SilentlyContinue | Out-Null
+
+        Test-Path -LiteralPath (Join-Path $script:PolicyFolder 'Deleted.json') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $script:PolicyFolder 'Broken reference.json') | Should -BeTrue
+        @($Warnings | Where-Object { "$_" -match 'could not be checked' }).Count | Should -Be 1
+        $Manifest = Get-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') -Raw | ConvertFrom-Json
+        @($Manifest.RemovedResources).Count | Should -Be 0
+        ($Manifest.ResourceTypeStates | Where-Object { $_.ResourceType -eq $script:PolicyType }).RetainedResourceCount | Should -Be 2
+    }
+
+    It 'keeps every file of the type when the control request for a returned resource is not answered with the resource' {
+        Initialize-TestPolicyFolder
+        Mock Get-EntraOpsTenantGovernanceSnapshot { New-TestPolicySnapshot }
+        # Every request answers 404, also for the policy the job just returned: the 404s can't be trusted.
+        Mock Invoke-EntraOpsMsGraphQuery { throw (New-TestGraphException -StatusCode 404) }
+
+        Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('unused-by-mock') -SkipPrerequisiteCheck -WarningAction SilentlyContinue | Out-Null
+
+        Test-Path -LiteralPath (Join-Path $script:PolicyFolder 'Deleted.json') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $script:PolicyFolder 'Broken reference.json') | Should -BeTrue
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly
+        @((Get-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') -Raw | ConvertFrom-Json).RemovedResources).Count | Should -Be 0
+    }
+
+    It 'keeps a Conditional Access policy whose export failed because a referenced group was deleted' {
+        $CaFolder = Join-Path $script:ExportFolder "$script:CaType/AADConditionalAccessPolicy"
+        New-Item -ItemType Directory -Path $CaFolder -Force | Out-Null
+        foreach ($Previous in @(@{ Name = '100 - Block unknown platforms.json'; Id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }, @{ Name = '101 - Require MFA.json'; Id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' })) {
+            [ordered]@{ resourceType = $script:CaType; properties = [ordered]@{ Id = $Previous.Id } } |
+            ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $CaFolder $Previous.Name) -Encoding utf8
+        }
+        Mock Get-EntraOpsTenantGovernanceSnapshot {
+            [PSCustomObject]@{
+                SnapshotId = 'job-ca-group'; Status = 'Completed'; SnapshotJobStatus = 'partiallySuccessful'
+                DisplayName = 'Test Snapshot'; CreatedDateTime = '2026-11-17T10:11:12Z'
+                ResourcesToInclude = @('microsoft.entra.conditionalAccessPolicy'); ResourceCount = 1
+                ErrorDetails = @("microsoft.entra.conditionalAccessPolicy: Error exporting resource [microsoft.entra.conditionalAccessPolicy]. exceptionMessage(s):Couldn't find ExcludedGroup 'cccccccc-cccc-cccc-cccc-cccccccccccc', that is defined in policy '100 - Block unknown platforms'. Skipping group. [Request_ResourceNotFound] : Resource 'cccccccc-cccc-cccc-cccc-cccccccccccc' does not exist or one of its queried reference-property objects are not present. ,")
+                Resources = @([PSCustomObject]@{ resourceType = 'microsoft.entra.conditionalAccessPolicy'; displayName = 'AADConditionalAccessPolicy-101 - Require MFA'; properties = [PSCustomObject]@{ Id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' } })
+            }
+        }
+        # The policy exists; only the referenced group is gone
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -like '*cccccccc-cccc-cccc-cccc-cccccccccccc*') { throw (New-TestGraphException -StatusCode 404) }
+            [PSCustomObject]@{ id = ($Uri -split '/')[-1] }
+        }
+
+        Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('unused-by-mock') -SkipPrerequisiteCheck -WarningAction SilentlyContinue | Out-Null
+
+        Test-Path -LiteralPath (Join-Path $CaFolder '100 - Block unknown platforms.json') | Should -BeTrue
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 1 -Exactly -ParameterFilter { $Uri -eq '/v1.0/identity/conditionalAccess/policies/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly -ParameterFilter { $Uri -like '*cccccccc-cccc-cccc-cccc-cccccccccccc*' }
+        $Manifest = Get-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') -Raw | ConvertFrom-Json
+        @($Manifest.RemovedResources).Count | Should -Be 0
+        $Manifest.ResourceTypeStates[0].RetainedResourceCount | Should -Be 1
+    }
+
+    It 'keeps retained files of a resource type without a known direct endpoint unchecked' {
+        $Type = 'microsoft.entra.group'
+        $GroupFolder = Join-Path $script:ExportFolder "$Type/AADGroup"
+        New-Item -ItemType Directory -Path $GroupFolder -Force | Out-Null
+        [ordered]@{ resourceType = $Type; properties = [ordered]@{ Id = 'group-missing' } } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $GroupFolder 'Missing.json') -Encoding utf8
+        Mock Get-EntraOpsTenantGovernanceSnapshot {
+            [PSCustomObject]@{
+                SnapshotId = 'job-unsupported'; Status = 'Completed'; SnapshotJobStatus = 'partiallySuccessful'
+                DisplayName = 'Test Snapshot'; CreatedDateTime = '2026-11-17T10:11:12Z'
+                ResourcesToInclude = @('microsoft.entra.group'); ResourceCount = 1
+                ErrorDetails = @("microsoft.entra.group: Error exporting resource [microsoft.entra.group]. exceptionMessage(s):[Request_ResourceNotFound] : Resource 'group-missing' does not exist. ,")
+                Resources = @([PSCustomObject]@{ resourceType = 'microsoft.entra.group'; displayName = 'AADGroup-Returned'; properties = [PSCustomObject]@{ Id = 'group-returned' } })
+            }
+        }
+        Mock Invoke-EntraOpsMsGraphQuery { throw (New-TestGraphException -StatusCode 404) }
+
+        Save-EntraOpsTenantGovernanceSnapshotJson -ExportFolder $script:ExportFolder -ResourcesToInclude @('unused-by-mock') -SkipPrerequisiteCheck -WarningAction SilentlyContinue | Out-Null
+
+        Test-Path -LiteralPath (Join-Path $GroupFolder 'Missing.json') | Should -BeTrue
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly
     }
 }
 

@@ -71,11 +71,19 @@ Update the module with `Update-PSResource EntraOps`. If you installed it with `I
 `Update-Module EntraOps` instead.
 
 The module package contains no classification templates, samples or reporting apps.
-`Initialize-EntraOpsWorkspace` downloads them (`Classification`, `Samples` and `Reports` from the
-`main` branch) into the working folder. Pass `-Ref` (or `-Branch`) with another branch, or with the release tag or commit that matches your
-module version, and use `-Force` after a module update to refresh them. It never writes into the
-module folder and never replaces `Classification/Global.json`, tenant classification folders or
-generated report data. `Update-EntraOps` only updates repository clones.
+`Initialize-EntraOpsWorkspace` downloads them (`Classification`, `Samples` and `Reports`) into the working
+folder, in the version of the module: the head of the `main` branch when its `EntraOps/EntraOps.psd1` has the
+module version, otherwise the release tag of the version or the newest commit of `main` with it. `Reports` and
+`Samples` alone come from the repository clone that contains the module, when there is one (only files tracked in
+git). When the branch has no content of the module version, for example for an Insiders or pre-release module, the
+branch head is installed with a warning; pass `-Ref` (or `-Branch`) with the branch or commit of your module, and
+`-Repository EntraOps-Insiders` (with `ENTRAOPS_PAT`) for an Insiders build. Without `-Repository`, the repository
+is `AutomatedEntraOpsUpdate.Repository` of `EntraOpsConfig.json` in the working folder (the release channel of
+your deployment), otherwise the public `EntraOps` repository; `EntraOps-Insiders` needs `ENTRAOPS_PAT` and fails
+without it. Use `-Force` after a module update to refresh them. The reporting apps record their source and version
+in `Reports/.EntraOpsContent.json`, unless existing app files were kept (without `-Force`). It never writes into the module folder and
+never replaces `Classification/Global.json`, tenant classification folders or generated report data.
+`Update-EntraOps` only updates repository clones.
 
 > [!IMPORTANT]
 > Run `Initialize-EntraOpsWorkspace` before `New-EntraOpsReportingData`: without the `Reports`
@@ -141,7 +149,7 @@ feature area) that covers it - the rest of this guide walks through them in orde
 
 | Phase                              | Goal                                                                          | What you enable                                                                                                                                                                                                               | Learn more                                                              |
 | ---------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| 1. Try it                          | See your Enterprise Access Model classification with no setup                 | Sign in interactively with `Connect-EntraOps`, then run `Invoke-EntraOpsPrivilegedEAM`                                                                                                                                        | [1. Try it with zero configuration](#try-it-with-zero-configuration)    |
+| 1. Try it                          | See your Enterprise Access Model classification with no setup                 | Run `Invoke-EntraOpsAssessment` for the export, reports and findings, or sign in with `Connect-EntraOps` and run `Invoke-EntraOpsPrivilegedEAM`                                                                              | [1. Try it with zero configuration](#try-it-with-zero-configuration)    |
 | 2. Verify output                   | Confirm classification and scope match expectations before automating         | Review the export with Classification Explorer or EAM Dashboard - no Sentinel or Azure subscription required                                                                                                                  | [2. Verify output with reports and workbooks](#phase-2-verify-output)   |
 | 3. Customize & automate collection | Tailor tiering to your tenant and make collection repeatable, tracked-as-code | Create `EntraOpsConfig.json`, add [role/action overwrites](../privileged-eam/index.html#customize-classification-by-overwrites), deploy a workload identity with federated credentials and scheduled GitHub Actions pipelines | [3. Customize and automate collection with GitHub](#deploy-with-github) |
 | 4. Ingest to Sentinel              | Centralize privileged access data for detection and hunting                   | Enable `IngestToLogAnalytics` / `IngestToWatchLists`                                                                                                                                                                          | [4. Ingest to Sentinel](#phase-4-ingest-to-sentinel)                    |
@@ -237,11 +245,85 @@ When tenant classification files from a previous run exist (e.g. after `-KeepCla
 
 Both `Reuse` and `Regenerate` rebuild the tenant classification files and the Control Plane scope
 reasoning, with the preserved overwrite files. Pass `Reuse` or `Regenerate` for repeat or unattended
-runs:
+runs.
+
+`-ControlPlaneScopeAction` controls the Control Plane scope of an earlier run:
+
+| Value              | Behavior                                                                                                                                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Refresh` (default) | Updates the Control Plane scope and the tenant classification files from the tenant (Azure Resource Graph, Exposure Management and the previous export).                                              |
+| `Reuse`            | Keeps the scope of an earlier run (`ScopeReasoning_ControlPlane.json` and the tenant classification files) and skips its update: faster and comparable with that run, without the changes of the tenant since then. |
+| `Prompt`           | Asks when such a scope exists and shows its age.                                                                                                                                                         |
+
+Without a complete scope of an earlier run, or when the templates are downloaded again (`Regenerate`), the
+scope is refreshed. An export of another tenant in the export folder (shared working folder) is never used for
+the Control Plane scope: the scope is built from the export of the run instead.
 
 ```powershell
 Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse
 ```
+
+### Complete assessment with one cmdlet {#complete-assessment}
+
+`Invoke-EntraOpsAssessment` runs a complete first assessment in one cmdlet, without a repository, a
+configuration file or experience with EntraOps. It produces the Privileged EAM export, a Tenant Governance
+snapshot, the data of all reporting apps and the [finding results](../reportings/index.html#findings) that the
+EntraOps Maester Pack reads:
+
+```powershell
+Install-PSResource -Name EntraOps -Repository PSGallery -Scope CurrentUser
+Invoke-EntraOpsAssessment -TenantName 'contoso.onmicrosoft.com' -OpenReport
+```
+
+| Step                    | What runs                                                                                                                                                                                                                                                       |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Working folder       | Installs the reporting apps into the [working folder](#working-folder) when they are missing, and updates apps of another version than the module or without the Findings view (`Install-EntraOpsReportingFolder`, generated data is kept). By default the apps of the module version: from the repository clone of the module, otherwise the newest commit of `main` with the module version; without such apps, existing apps are kept (missing apps come from the branch head, with a warning). `-ContentRef` and `-ContentRepository` select the content, for example `-ContentRepository EntraOps-Insiders -ContentRef <branch>` for an Insiders build; without `-ContentRepository`, `AutomatedEntraOpsUpdate.Repository` of the configuration file selects the repository when the apps are installed or updated (apps of the module version are kept: after a change of the setting, run `Install-EntraOpsReportingFolder -Force` or pass `-ContentRepository`). `-Path` selects another folder. |
+| 2. Sign-in              | `Connect-EntraOps`, interactive by default (`-AuthenticationType UserInteractive`, `DeviceAuthentication` or `AlreadyAuthenticated`). The configuration file it uses (`-ConfigFilePath` or the `EntraOpsConfig.json` it finds) applies to all steps.          |
+| 3. Tenant Governance    | Starts a snapshot when the tenant meets its [prerequisites](../tenant-governance/index.html), otherwise skips it with the next step. Microsoft Graph captures the snapshot in the background while steps 4 and 5 run. Only `-SetupTenantGovernance` changes the tenant to prepare it. `-TenantGovernanceSnapshotMaxAgeInHours` uses a recent snapshot instead of a new one. |
+| 4. Privileged EAM       | `Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles` while Microsoft Graph captures the snapshot. When the working folder has the classification of an earlier run of the tenant, an interactive run asks once after the sign-in: reuse the templates and the Control Plane scope (default when the scope is less than 24 hours old), reuse the templates and refresh the scope (default otherwise), or download the latest templates and refresh the scope. `-ExistingClassificationAction` and `-ControlPlaneScopeAction` choose without asking; unattended runs reuse the templates and refresh the scope. Without Azure access, Azure RBAC is skipped unless `-RbacSystems` or the configuration file selects it. |
+| 5. Reports and findings | `New-EntraOpsReportingData` generates the data of all reporting apps and `Reports/Findings/data/findings.json`. While the snapshot is still being captured, the reports that don't need it come first; then the cmdlet waits for the snapshot (timeout `-TenantGovernanceTimeoutInSeconds`, default 15 minutes from its start; press S to stop waiting) and generates Configuration Analyzer, Access Package Flow and the findings. Like the reporting workflow, a partially successful snapshot (summary `Partial`) is analyzed, with the resource types that Microsoft Graph couldn't capture kept from the previous snapshot and marked stale; `ConfigurationAnalyzer.AllowPartialTenantGovernanceSnapshot: false` turns this off. |
+
+The cmdlet ends with a summary: the snapshot status with the next step when it was skipped, the failed rules by
+severity (with the share of results that concern objects without a designated tier, see `EO.2001`), the paths of the reporting portal and of `findings.json`, and the Maester commands. It disconnects at
+the end (`-KeepConnection` keeps the session; with `-AuthenticationType AlreadyAuthenticated` the connections
+belong to the caller and stay, only the EntraOps cache is cleared) and returns the result with `-PassThru`.
+
+```powershell
+Install-MtPack Cloud-Architekt/EntraOps-MaesterPack
+Invoke-Maester -Pack EOPS -SkipBuiltIn -SkipGraphConnect
+```
+
+The pack reads `Reports/Findings/data` of the working folder (`ENTRAOPS_ROOT`, `<home>/EntraOps` or the current
+folder); for another folder, set `EntraOps.FindingsPath` in `maester-config.json`.
+
+The snapshot needs the Microsoft Tenant Configuration Management service principal with its read permissions
+(`Register-EntraOpsTenantGovernanceServicePrincipal`) and the permission `ConfigurationMonitoring.ReadWrite.All`.
+With an interactive sign-in, the cmdlet requests this delegated permission (with the consent prompt of Microsoft
+Graph) only when the tenant is otherwise prepared. Without a snapshot, Configuration Analyzer, PIM Request Flow and
+Access Package Flow and their findings are skipped; `-SkipTenantGovernanceSnapshot` skips it on purpose.
+
+To prepare the tenant in the same run, a Global Administrator or Privileged Role Administrator adds
+`-SetupTenantGovernance`. One consent prompt requests `Application.ReadWrite.All`,
+`AppRoleAssignment.ReadWrite.All` and `ConfigurationMonitoring.ReadWrite.All` (consent for your account, not on
+behalf of your organization); the cmdlet then creates the service principal, grants it the Microsoft Graph read
+permissions of the captured resource types and starts the snapshot:
+
+```powershell
+Invoke-EntraOpsAssessment -TenantName 'contoso.onmicrosoft.com' -SetupTenantGovernance
+```
+
+A snapshot that isn't complete in time, or when you stop waiting, stays pending: Microsoft Graph keeps capturing
+it, and the next run of `Invoke-EntraOpsAssessment` collects it first.
+
+A working folder holds one tenant. When its snapshot belongs to another tenant, the snapshot is neither collected
+nor used, and the report data of these three apps is removed: use one folder per tenant (`-Path`). The same holds
+for `EntraOpsConfig.json`: when the file of the working folder belongs to another tenant or is not valid JSON, the
+assessment stops after the sign-in, because the reports read the configuration of the working folder.
+
+The working folder doesn't need to be a git repository: Privilege History and Configuration Analyzer show the
+current export and snapshot without history and changes ([history source](../reportings/index.html#history-source)),
+and the summary shows `History: current run only`. Run the assessment again from a clone of your EntraOps
+repository, or commit the results, to build up the history.
 
 > [!TIP]
 > This is the fastest way to try EntraOps or produce a one-off export. Continue with [2. Verify output with reports and workbooks](#phase-2-verify-output) before you keep using it, or jump straight to [3. Customize and automate collection with GitHub](#deploy-with-github) for a repeatable, automated setup.
@@ -257,7 +339,7 @@ The apps use the export, with optional Microsoft Graph enrichment; no Log Analyt
 Azure subscription required:
 
 ```powershell
-Initialize-EntraOpsWorkspace -Ref '<release tag of your module version>' # module-only installations
+Initialize-EntraOpsWorkspace # module-only installations: content of the module version
 Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles -ExistingClassificationAction Reuse
 Connect-EntraOps -AuthenticationType "UserInteractive" -TenantName "contoso.onmicrosoft.com"
 New-EntraOpsReportingData
@@ -265,7 +347,9 @@ Disconnect-EntraOps
 ```
 
 The collection disconnects during teardown, so reconnect before generating reports to resolve
-linked identities and related objects through Microsoft Graph. For generation without Graph
+linked identities and related objects through Microsoft Graph, or keep the session with
+`Invoke-EntraOpsPrivilegedEAM -KeepConnection`. [`Invoke-EntraOpsAssessment`](#complete-assessment) runs these
+steps in one cmdlet. For generation without Graph
 lookups, see [Reporting apps](../reportings/index.html#entraops-reporting-apps).
 
 Azure Monitor workbooks are also available, but only once data has been ingested into Log

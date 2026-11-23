@@ -14,13 +14,16 @@ BeforeAll {
     . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsCustomSecurityAttributeClassificationEnabled.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsAlternateObjectTierLevelEnabled.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/PrivilegedAccess/Get-EntraOpsPrivilegedEntraObject.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Resolve-EntraOpsObjectOrigin.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsObjectOriginTenantInfo.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Findings/Test-EntraOpsMicrosoftFirstParty.ps1"
 }
 
 Describe 'Get-EntraOpsPrivilegedEntraObject resolution status' {
     BeforeEach {
         $global:TenantIdContext = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
         $global:EntraOpsConfig = [pscustomobject]@{
-            CustomSecurityAttributes = [pscustomobject]@{}
+            CustomSecurityAttributes           = [pscustomobject]@{}
             AlternateObjectTierLevelAttributes = $null
         }
 
@@ -31,7 +34,7 @@ Describe 'Get-EntraOpsPrivilegedEntraObject resolution status' {
         }
     }
 
-    It 'marks the CloudLab orphan as not found only after both identity endpoints return 404' {
+    It 'marks the orphan as not found only after both identity endpoints return 404' {
         $ObjectId = 'dddddddd-dddd-dddd-dddd-dddddddddddd'
 
         $Result = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $global:TenantIdContext
@@ -74,8 +77,8 @@ Describe 'Get-EntraOpsPrivilegedEntraObject resolution status' {
             if ($Uri -like "/beta/directoryObjects/$ObjectId?*") {
                 return [pscustomobject]@{
                     '@odata.type' = '#microsoft.graph.futureIdentity'
-                    id = $ObjectId
-                    displayName = 'Future identity'
+                    id            = $ObjectId
+                    displayName   = 'Future identity'
                 }
             }
             return @()

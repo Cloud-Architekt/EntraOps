@@ -29,19 +29,15 @@ function Save-EntraOpsWorkloadIdentityInfo {
     # Global Variables
     $ErrorActionPreference = "Stop"
 
-    try {
-        Import-Module "SentinelEnrichment" -ErrorAction Stop
-    } catch {
-        throw "Cannot load module SentinelEnrichment. Please install the module from the PowerShell gallery"
-    }
+    Install-EntraOpsRequiredModule -ModuleName 'SentinelEnrichment' -Import | Out-Null
 
     #region Connect to Azure and Microsoft Graph
     try {
         Write-Output "Sign-in with Managed Identity to Azure..."
-        Connect-AzAccount -Identity -Subscription $SentinelSubscriptionId
+        Connect-AzAccount -Identity -Subscription $SentinelSubscriptionId -Scope Process
         Write-Output "Succesfully logged into $SentinelSubscriptionId"
         Write-Output "Sign-in to Microsoft Graph with Managed Identity..."
-        Connect-MgGraph -Identity
+        Connect-MgGraph -Identity -ContextScope Process
         $MgContext = Get-MgContext
         Write-Output "Succesfully logged to Tenant $($MgContext.TenantId)"
     } catch {

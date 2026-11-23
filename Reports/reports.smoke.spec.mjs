@@ -160,3 +160,22 @@ for (const reportApp of ["ConfigurationAnalyzer", "PimRequestFlow"]) {
         await expect(health).not.toContainText("Partial Tenant Governance snapshot");
     });
 }
+
+test("the Tenant Governance health banner names a preserved resource type of an older snapshot in words", async ({ page }) => {
+    const reportUrl = pathToFileURL(join(reportsRoot, "ConfigurationAnalyzer", "index.html")).href;
+    await page.goto(reportUrl);
+    await page.evaluate(() => {
+        window.DATA = {
+            snapshotHealth: {
+                status: "partiallySuccessful", isComplete: false, capturedDateTime: "2026-01-01T00:00:00Z",
+                staleResourceTypes: ["microsoft.entra.conditionalaccesspolicy"],
+                resourceTypeStates: [{ resourceType: "microsoft.entra.conditionalaccesspolicy", status: "PreservedStale", publishedSource: "UnknownLegacySnapshot" }]
+            }
+        };
+        window.renderEntraOpsSnapshotHealth();
+    });
+    const health = page.locator(".entraops-snapshot-health");
+    await expect(health).toContainText("preserved from an earlier snapshot (source not recorded)");
+    await expect(health).not.toContainText("UnknownLegacySnapshot");
+    expect(await health.evaluate((element) => getComputedStyle(element).borderTopColor)).toBe("rgb(164, 38, 44)");
+});

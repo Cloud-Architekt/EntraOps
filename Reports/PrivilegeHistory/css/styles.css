@@ -330,6 +330,12 @@ mark {
     margin-left: auto;
 }
 
+/* A card title next to a long hint stays on one line; the hint wraps instead. */
+.card-head > .ph-card-title {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
 .grid {
     display: grid;
     gap: 16px;
@@ -534,38 +540,6 @@ mark {
     align-items: center;
     gap: 10px;
     margin-bottom: 16px;
-}
-
-.search {
-    position: relative;
-    flex: 1;
-    min-width: 240px;
-}
-
-.search input {
-    width: 100%;
-    height: 36px;
-    border: 1px solid var(--neutral-stroke-strong);
-    border-radius: var(--radius);
-    padding: 0 12px 0 36px;
-    font-family: inherit;
-    font-size: 14px;
-    background: var(--neutral-surface);
-    outline: none;
-}
-
-.search input:focus {
-    border-color: var(--brand);
-    box-shadow: 0 0 0 1px var(--brand);
-}
-
-.search .search-ico {
-    position: absolute;
-    left: 11px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--neutral-fg-secondary);
-    pointer-events: none;
 }
 
 select.filter,
@@ -2138,123 +2112,10 @@ a.nav-item:hover {
     }
 }
 
-/* Filter row (workbook parameter pills) */
-.eam-filter-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px 18px;
-    align-items: flex-end;
-}
-
-.eam-filter {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 150px;
-    /* All filters share the full row width evenly (same total width as the
-       full-width search row below) instead of leaving empty space behind
-       the last dropdown. */
-    flex: 1 1 0;
-}
-
-.eam-filter.grow {
-    flex: 1;
-    min-width: 220px;
-}
-
-/* Dropdown buttons stretch with their (flexed) filter column. */
-.eam-filter .dd,
-.eam-filter .dd-btn {
-    width: 100%;
-    max-width: none;
-}
-
-.eam-filter>label {
-    font-size: 11.5px;
-    font-weight: 600;
-    color: var(--neutral-fg-secondary);
-    text-transform: uppercase;
-    letter-spacing: .03em;
-}
-
-/* Multi-select dropdown */
-.dd {
-    position: relative;
-}
-
-.dd-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 150px;
-    max-width: 280px;
-    padding: 5px 10px;
-    background: var(--neutral-surface);
-    border: 1px solid var(--neutral-stroke-strong);
-    border-radius: 4px;
-    font: inherit;
-    font-size: 13px;
-    color: var(--neutral-fg);
-    cursor: pointer;
-    text-align: left;
-}
-
-.dd-btn:hover {
-    border-color: var(--brand);
-}
-
-.dd-btn .dd-val {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.dd-btn .dd-caret {
-    font-size: 10px;
-    color: var(--neutral-fg-secondary);
-}
-
-.dd-pop {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 60;
-    min-width: 230px;
-    max-width: 340px;
-    max-height: 300px;
-    overflow: auto;
-    background: var(--neutral-surface);
-    border: 1px solid var(--neutral-stroke-strong);
-    border-radius: 6px;
-    box-shadow: var(--shadow-8);
-    padding: 6px;
-}
-
-.dd-pop.hidden {
-    display: none;
-}
-
-.dd-pop label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 8px;
-    border-radius: 4px;
-    font-size: 13px;
-    cursor: pointer;
-    user-select: none;
-}
-
-.dd-pop label:hover {
-    background: var(--neutral-bg);
-}
-
-.dd-pop .dd-all {
-    border-bottom: 1px solid var(--neutral-stroke);
-    margin-bottom: 4px;
-    padding-bottom: 7px;
-    font-weight: 600;
+/* Search bar (shared/filters.css): a narrower search field keeps both time range dropdowns and the reset
+   button in one row. */
+.tm-searchbar .eo-search {
+    flex-basis: 240px;
 }
 
 /* Active exported-parameter chips (click-to-filter state) */
@@ -3135,4 +2996,20 @@ tr.cmp-row>td {
 .tm-delta.tm-flat {
     color: var(--neutral-fg-secondary);
     background: var(--neutral-surface-alt);
+}
+
+/* What the tier breach chart counts (it differs from the EO.8002 finding). */
+.tm-chart-note {
+    margin: 0;
+    padding: 0 20px 14px;
+    font-size: 12px;
+    color: var(--neutral-fg-secondary);
+}
+
+.tm-folder-note {
+    margin-bottom: 16px;
+}
+
+.tm-folder-note[hidden] {
+    display: none;
 }

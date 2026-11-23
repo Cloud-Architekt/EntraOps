@@ -7,6 +7,8 @@ BeforeDiscovery {
 Describe 'Classification template reuse' {
     BeforeAll {
         . (Join-Path $script:TestRepositoryRoot 'EntraOps/Public/Configuration/Update-EntraOpsClassificationFiles.ps1')
+        . (Join-Path $script:TestRepositoryRoot 'EntraOps/Private/Invoke-EntraOpsGitHubRequest.ps1')
+        . (Join-Path $script:TestRepositoryRoot 'EntraOps/Private/Get-EntraOpsRetryAfterSeconds.ps1')
     }
 
     BeforeEach {
@@ -58,6 +60,63 @@ Describe 'Classification template reuse' {
             Get-Content "$script:TemplateFolder/Classification_$Name.json" -Raw | Should -Match 'downloaded'
         }
         Should -Invoke Invoke-RestMethod -Times 3 -Exactly -ParameterFilter { $OutFile }
+    }
+
+    It 'skips deprecated upstream templates when Classifications is All' {
+        Mock Invoke-RestMethod {
+            @(
+                @{ Name = 'Classification_Azure.json'; download_url = 'https://example.test/Azure.json' }
+                @{ Name = 'Classification_AzBilling.json'; download_url = 'https://example.test/AzBilling.json' }
+                @{ Name = 'Classification_AzResources.json'; download_url = 'https://example.test/AzResources.json' }
+                @{ Name = 'Classification_AzResourcesByAzTags.json'; download_url = 'https://example.test/AzResourcesByAzTags.json' }
+            )
+        } -ParameterFilter { -not $OutFile }
+
+        $Verbose = Update-EntraOpsClassificationFiles -FolderClassification $script:TemplateFolder -Classifications All -IncludeOverwrites:$false -Verbose 4>&1 |
+            Where-Object { $_ -is [System.Management.Automation.VerboseRecord] } | ForEach-Object { $_.Message }
+
+        Get-Content "$script:TemplateFolder/Classification_Azure.json" -Raw | Should -Match 'downloaded'
+        foreach ($Name in 'AzBilling', 'AzResources', 'AzResourcesByAzTags') {
+            Test-Path "$script:TemplateFolder/Classification_$Name.json" | Should -BeFalse
+            @($Verbose | Where-Object { $_ -match "Classification_$Name\.json\] Skipped: deprecated" }).Count | Should -Be 1
+        }
+        Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter { $OutFile }
+    }
+}
+
+Describe 'Classification template listing unavailable' {
+    BeforeAll {
+        . (Join-Path $script:TestRepositoryRoot 'EntraOps/Public/Configuration/Update-EntraOpsClassificationFiles.ps1')
+        . (Join-Path $script:TestRepositoryRoot 'EntraOps/Private/Invoke-EntraOpsGitHubRequest.ps1')
+    }
+
+    BeforeEach {
+        $script:TemplateFolder = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:TemplateFolder | Out-Null
+        Set-Content "$script:TemplateFolder/Classification_Azure.json" -Value '[{"custom":"preserve"}]'
+        Mock Invoke-EntraOpsGitHubRequest { throw 'GitHub rate limit exceeded for https://api.github.com/repos/Cloud-Architekt/AzurePrivilegedIAM/contents/EntraOps_Classification?ref=main' }
+    }
+
+    It 'keeps and uses the local templates when every requested template exists' {
+        Update-EntraOpsClassificationFiles -FolderClassification $script:TemplateFolder -Classifications Azure -WarningVariable Warnings -WarningAction SilentlyContinue
+
+        Get-Content "$script:TemplateFolder/Classification_Azure.json" -Raw | Should -Match 'preserve'
+        ($Warnings -join ' ') | Should -Match 'rate limit exceeded.*existing templates .* are kept and used'
+        Should -Invoke Invoke-EntraOpsGitHubRequest -Times 1 -Exactly
+    }
+
+    It 'keeps any local template set for All' {
+        { Update-EntraOpsClassificationFiles -FolderClassification $script:TemplateFolder -Classifications All -WarningAction SilentlyContinue } | Should -Not -Throw
+    }
+
+    It 'fails when a requested template is missing locally' {
+        { Update-EntraOpsClassificationFiles -FolderClassification $script:TemplateFolder -Classifications Azure, AadResources } |
+            Should -Throw '*could not be listed*requested templates don''t exist*'
+    }
+
+    It 'fails with FailOnUnavailableRepository' {
+        { Update-EntraOpsClassificationFiles -FolderClassification $script:TemplateFolder -Classifications Azure -FailOnUnavailableRepository } |
+            Should -Throw '*could not be listed*rate limit exceeded*'
     }
 }
 

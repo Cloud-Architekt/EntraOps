@@ -20,8 +20,7 @@
     var caState = {
         snapshotIdx: -1,
         columns: new Set(["assignment", "policy", "target", "network", "condition", "grant"]),
-        states: new Set(["enabled", "reportOnly", "disabled"]),
-        metricFilter: "all",
+        states: [], // multi-select policy state facet, empty = all states
         grantFilter: "",
         clientAppFilter: "",
         assignmentFilter: "",
@@ -43,8 +42,12 @@
         grant: { label: "Grant controls", values: function (p) { return p.grants; } }
     };
 
+    var STATE_ORDER = ["enabled", "reportOnly", "disabled"];
     var STATE_LABELS = { enabled: "Enabled", reportOnly: "Report-only", disabled: "Disabled" };
     var STATE_COLORS = { enabled: "#0e700e", reportOnly: "#8a6d00", disabled: "#a19f9d" };
+    var CLIENT_APP_ORDER = ["browser", "mobileAppsAndDesktopClients", "exchangeActiveSync", "other"];
+    var ASSIGNMENT_TIERS = ["ControlPlane", "ManagementPlane", "UserAccess"];
+    var TIER_LABELS = { ControlPlane: "Control Plane", ManagementPlane: "Management Plane", UserAccess: "User Access" };
 
     var roleTierIndex = new Map();
     if (EAM_DATA && Array.isArray(EAM_DATA.objects)) {
@@ -92,22 +95,31 @@
         $("caStatReportOnly").textContent = policies.filter(function (policy) { return policy.state === "reportOnly"; }).length.toLocaleString();
         $("caStatDisabled").textContent = policies.filter(function (policy) { return policy.state === "disabled"; }).length.toLocaleString();
         document.querySelectorAll("[data-ca-metric]").forEach(function (tile) {
-            var selected = tile.getAttribute("data-ca-metric") === caState.metricFilter;
+            var selected = tile.getAttribute("data-ca-metric") === selectedMetric();
             tile.classList.toggle("selected", selected);
             tile.setAttribute("aria-pressed", String(selected));
         });
     }
 
-    function policyMatchesFilters(p) {
-        if (caState.metricFilter !== "all" && p.state !== caState.metricFilter) return false;
-        if (!caState.states.has(p.state)) return false;
-        if (caState.grantFilter && p.grants.indexOf(caState.grantFilter) === -1) return false;
-        if (caState.clientAppFilter) {
-            var covers = p.clientAppTypes.indexOf("all") !== -1 || p.clientAppTypes.indexOf(caState.clientAppFilter) !== -1;
-            if (!covers) return false;
-        }
+    // The metric tile that matches the policy state selection: "all" without a selection, the state when
+    // exactly one is selected, none otherwise.
+    function selectedMetric() {
+        if (!caState.states.length) return "all";
+        return caState.states.length === 1 ? caState.states[0] : null;
+    }
+
+    // The client app types a policy applies to ("all" covers every type).
+    function clientAppsOf(p) {
+        return p.clientAppTypes.indexOf("all") !== -1 ? CLIENT_APP_ORDER : p.clientAppTypes;
+    }
+
+    // skip leaves out one filter (a facet key of caState), for the counts of its pills.
+    function policyMatchesFilters(p, skip) {
+        if (skip !== "states" && !EntraOpsFilters.matchesFacet(caState, "states", p.state)) return false;
+        if (skip !== "grantFilter" && caState.grantFilter && p.grants.indexOf(caState.grantFilter) === -1) return false;
+        if (skip !== "clientAppFilter" && caState.clientAppFilter && clientAppsOf(p).indexOf(caState.clientAppFilter) === -1) return false;
         if (caState.assignmentFilter && p.assignments.indexOf(caState.assignmentFilter) === -1) return false;
-        if (caState.assignmentTierFilter && !assignmentTierDetails(p).some(function (detail) { return detail.tier === caState.assignmentTierFilter; })) return false;
+        if (skip !== "assignmentTierFilter" && caState.assignmentTierFilter && !assignmentTierDetails(p).some(function (detail) { return detail.tier === caState.assignmentTierFilter; })) return false;
         if (caState.targetFilter && p.targets.indexOf(caState.targetFilter) === -1) return false;
         if (caState.networkFilter && p.network.indexOf(caState.networkFilter) === -1) return false;
         if (caState.conditionFilter && p.conditions.indexOf(caState.conditionFilter) === -1) return false;
@@ -221,38 +233,9 @@
         });
         sel.innerHTML = html;
 
-        // State toggles
-        var stHtml = "";
-        ["enabled", "reportOnly", "disabled"].forEach(function (s) {
-            stHtml += '<span class="ca-toggle' + (caState.states.has(s) ? " on" : "") + '" role="button" tabindex="0" data-state="' + s + '">' + STATE_LABELS[s] + "</span>";
-        });
-        $("caStateToggles").innerHTML = stHtml;
-
-        // Column toggles
-        var colHtml = "";
-        COLUMN_ORDER.forEach(function (c) {
-            colHtml += '<span class="ca-toggle' + (caState.columns.has(c) ? " on" : "") + '" role="button" tabindex="0" data-col="' + c + '">' + COLUMNS[c].label + "</span>";
-        });
-        $("caColToggles").innerHTML = colHtml;
-
-        // Grant filter options (from the current snapshot's policy set)
-        var grants = {};
-        currentCaPolicies().forEach(function (p) { p.grants.forEach(function (g) { grants[g] = true; }); });
-        var gHtml = '<option value="">All grant controls</option>';
-        Object.keys(grants).sort().forEach(function (g) {
-            gHtml += '<option value="' + esc(g) + '"' + (g === caState.grantFilter ? " selected" : "") + ">" + esc(g) + "</option>";
-        });
-        $("caFltGrant").innerHTML = gHtml;
-
-        var cHtml = '<option value="">All client app types</option>';
-        ["browser", "mobileAppsAndDesktopClients", "exchangeActiveSync", "other"].forEach(function (c) {
-            cHtml += '<option value="' + c + '"' + (c === caState.clientAppFilter ? " selected" : "") + ">" + esc(CLIENT_APP_LABELS[c]) + "</option>";
-        });
-        $("caFltClientApp").innerHTML = cHtml;
-
         // Per-column value filters (Assignment / Target resource / Network / Condition):
-        // distinct values pulled from the current snapshot's policy set, same pattern as
-        // the grant control filter above.
+        // distinct values pulled from the current snapshot's policy set. Policy state, grant
+        // control, client app type and access level are pills (renderFacets).
         var colFilters = [
             { id: "caFltAssignment", col: "assignment", empty: "All assignments", stateKey: "assignmentFilter" },
             { id: "caFltTarget", col: "target", empty: "All target resources", stateKey: "targetFilter" },
@@ -268,6 +251,48 @@
             });
             $(cf.id).innerHTML = html;
         });
+    }
+
+    // Pills of the filters with few values, with the number of policies each would show (counted over the
+    // policies matching all other filters). Policy state is multi-select; the columns are view options.
+    function renderFacets() {
+        var all = currentCaPolicies();
+        function counts(facet, valueOf) { return EntraOpsFilters.facetCounts(all, facet, policyMatchesFilters, valueOf); }
+        function pill(facet, value, label, count, options) { return EntraOpsFilters.pill(caState, facet, value, label, count, options); }
+
+        var states = counts("states", function (p) { return p.state; });
+        $("caStateToggles").innerHTML = pill("states", "", "All", states.total, { multi: true }) +
+            STATE_ORDER.map(function (s) {
+                return pill("states", s, STATE_LABELS[s], states.counts[s] || 0, {
+                    multi: true,
+                    prefix: '<span class="ca-state-dot" style="background:' + STATE_COLORS[s] + ';" aria-hidden="true"></span>'
+                });
+            }).join("");
+
+        var grants = counts("grantFilter", function (p) { return p.grants; });
+        var grantValues = {};
+        all.forEach(function (p) { p.grants.forEach(function (g) { grantValues[g] = true; }); });
+        $("caGrantPills").innerHTML = pill("grantFilter", "", "All", grants.total) + Object.keys(grantValues).sort().map(function (g) {
+            return pill("grantFilter", g, g, grants.counts[g] || 0);
+        }).join("");
+
+        var clientApps = counts("clientAppFilter", clientAppsOf);
+        $("caClientAppPills").innerHTML = pill("clientAppFilter", "", "All", clientApps.total) + CLIENT_APP_ORDER.map(function (c) {
+            return pill("clientAppFilter", c, CLIENT_APP_LABELS[c], clientApps.counts[c] || 0);
+        }).join("");
+
+        var tiers = counts("assignmentTierFilter", function (p) {
+            return assignmentTierDetails(p).map(function (detail) { return detail.tier; }).filter(function (tier, i, list) { return list.indexOf(tier) === i; });
+        });
+        $("caAssignmentTierPills").innerHTML = pill("assignmentTierFilter", "", "All", tiers.total) + ASSIGNMENT_TIERS.map(function (tier) {
+            return EntraOpsFilters.tierPill(caState, "assignmentTierFilter", tier, TIER_LABELS[tier], tiers.counts[tier] || 0);
+        }).join("") + (EAM_DATA ? "" : '<span class="eo-facet-note">Access levels of users and roles come from the EAM Dashboard dataset: generate <code>Reports/EamDashboard/data/eam-dashboard-data.js</code> (New-EntraOpsPrivilegedEamDashboardData) to count them.</span>');
+
+        // A flow needs at least two columns: the last two columns that are on can't be switched off.
+        $("caColToggles").innerHTML = COLUMN_ORDER.map(function (c) {
+            var on = caState.columns.has(c), locked = on && caState.columns.size <= 2;
+            return EntraOpsFilters.toggle("column", c, COLUMNS[c].label, on, { disabled: locked, title: locked ? "A flow needs at least two columns" : "" });
+        }).join("");
     }
 
     var caSvg = null, caTooltip = null, tracePolicyIds = null;
@@ -323,8 +348,9 @@
         caTooltip = caTooltip || d3.select("#tooltip");
         var emptyEl = $("sankeyEmpty");
         var all = currentCaPolicies();
-        var policies = all.filter(policyMatchesFilters);
+        var policies = all.filter(function (p) { return policyMatchesFilters(p); });
         renderStats(all);
+        renderFacets();
         $("caFreshness").textContent = EntraOpsReportUtils.freshnessText(DATA, snapshots[caState.snapshotIdx]);
         $("caFilterSummary").textContent = " · " + policies.length + " of " + all.length + " policy path(s) shown";
         if (caState.traceNodeId) {
@@ -641,7 +667,8 @@
         });
 
         // 9. Exclusion surface
-        var exclusionCount = {};
+        // Names of excluded identities as keys: a map without prototype.
+        var exclusionCount = Object.create(null);
         policies.forEach(function (p) {
             p.exclusions.forEach(function (e) {
                 if (!exclusionCount[e]) exclusionCount[e] = 0;
@@ -673,26 +700,54 @@
         EntraOpsReportUtils.bindReviewControls(el);
     }
 
+    // A policy by its ID, case-insensitive (deep links can carry upper-case GUIDs).
+    function findPolicy(policyId) {
+        var wanted = String(policyId).toLowerCase();
+        return currentCaPolicies().filter(function (item) { return String(item.id).toLowerCase() === wanted; })[0];
+    }
+
+    // Clears the filters (like a snapshot change, plus policy states and search), so a deep-linked policy is never
+    // hidden behind them.
+    function clearFiltersForDeepLink() {
+        caState.states = [];
+        caState.grantFilter = "";
+        caState.clientAppFilter = "";
+        caState.assignmentFilter = "";
+        caState.assignmentTierFilter = "";
+        caState.targetFilter = "";
+        caState.networkFilter = "";
+        caState.conditionFilter = "";
+        caState.search = "";
+        $("caFltSearch").value = "";
+    }
+
     function applyFlowDeepLink() {
         var policyId = EntraOpsReportUtils.flowReferenceFromHash();
         if (!policyId) return;
-        var policy = currentCaPolicies().filter(function (item) { return item.id === policyId; })[0];
+        var policy = findPolicy(policyId);
         if (!policy) {
             var previousIdx = caState.snapshotIdx;
             var detailIdxs = detailedSnapshotOptions();
             for (var index = detailIdxs.length - 1; index >= 0 && !policy; index--) {
                 caState.snapshotIdx = detailIdxs[index];
-                policy = currentCaPolicies().filter(function (item) { return item.id === policyId; })[0];
+                policy = findPolicy(policyId);
             }
-            if (policy) renderCaControls();
-            else caState.snapshotIdx = previousIdx;
+            if (!policy) caState.snapshotIdx = previousIdx;
         }
-        if (!policy) return;
+        if (!policy) {
+            EntraOpsReportUtils.deepLinkNotFound("Conditional Access policy", policyId, "loaded snapshots");
+            return;
+        }
+        if (!policyMatchesFilters(policy)) clearFiltersForDeepLink();
+        renderCaControls();
+        policyId = policy.id;
         caState.traceNodeId = "policy|" + policyId;
         tracePolicyIds = new Set([policyId]);
         renderSankey();
         renderPolicyDetail(policyId);
-        $("secSankey").scrollIntoView({ block: "start" });
+        // On narrow screens the filters fill the first screen of the section: scroll to the policy detail instead.
+        var narrow = window.matchMedia && window.matchMedia("(max-width: 700px)").matches;
+        (narrow && !$("caPolicyDetail").classList.contains("hidden") ? $("caPolicyDetail") : $("secSankey")).scrollIntoView({ block: "start" });
     }
 
     // =====================================================================================
@@ -747,55 +802,35 @@
             caState.targetFilter = "";
             caState.networkFilter = "";
             caState.conditionFilter = "";
-            $("caFltAssignmentTier").value = "";
             $("caPolicyDetail").classList.add("hidden");
             renderCaControls();
             renderSankey();
         });
-        function toggleKeydown(ev) {
-            if (ev.key !== "Enter" && ev.key !== " ") return;
-            var t = ev.target.closest(".ca-toggle");
-            if (!t) return;
-            ev.preventDefault();
-            t.click();
-        }
-        $("caStateToggles").addEventListener("keydown", toggleKeydown);
-        $("caColToggles").addEventListener("keydown", toggleKeydown);
-        $("caStateToggles").addEventListener("click", function (ev) {
-            var t = ev.target.closest("[data-state]");
-            if (!t) return;
-            var s = t.getAttribute("data-state");
-            if (caState.states.has(s)) caState.states.delete(s); else caState.states.add(s);
-            renderCaControls();
-            renderSankey();
-        });
+        // Policy state (multi-select), grant control, client app type and access level pills.
+        EntraOpsFilters.bindPills($("caFacets"), caState, function () { renderSankey(); });
         $("caColToggles").addEventListener("click", function (ev) {
-            var t = ev.target.closest("[data-col]");
-            if (!t) return;
-            var c = t.getAttribute("data-col");
+            var t = ev.target.closest ? ev.target.closest('[data-toggle="column"]') : null;
+            if (!t || t.disabled) return;
+            var c = t.getAttribute("data-value");
             if (caState.columns.has(c)) {
                 if (caState.columns.size <= 2) return; // keep at least two columns
                 caState.columns.delete(c);
             } else caState.columns.add(c);
             caState.traceNodeId = null;
             tracePolicyIds = null;
-            renderCaControls();
             renderSankey();
+            var again = $("caColToggles").querySelector('[data-value="' + c + '"]');
+            if (again && !again.disabled) again.focus();
         });
-        $("caFltGrant").addEventListener("change", function () { caState.grantFilter = this.value; renderSankey(); });
-        $("caFltClientApp").addEventListener("change", function () { caState.clientAppFilter = this.value; renderSankey(); });
         $("caFltAssignment").addEventListener("change", function () { caState.assignmentFilter = this.value; renderSankey(); });
-        $("caFltAssignmentTier").addEventListener("change", function () { caState.assignmentTierFilter = this.value; renderSankey(); });
         $("caFltTarget").addEventListener("change", function () { caState.targetFilter = this.value; renderSankey(); });
         $("caFltNetwork").addEventListener("change", function () { caState.networkFilter = this.value; renderSankey(); });
         $("caFltCondition").addEventListener("change", function () { caState.conditionFilter = this.value; renderSankey(); });
         document.querySelectorAll("[data-ca-metric]").forEach(function (tile) {
             tile.addEventListener("click", function () {
                 var metric = tile.getAttribute("data-ca-metric");
-                caState.metricFilter = caState.metricFilter === metric || metric === "all" ? "all" : metric;
-                // A metric tile filters on a policy state - make sure that state toggle is on,
-                // otherwise the state filter would immediately hide every matching policy.
-                if (caState.metricFilter !== "all") caState.states.add(caState.metricFilter);
+                // A metric tile selects its policy state in the state pills (a second click shows all states).
+                caState.states = metric === "all" || selectedMetric() === metric ? [] : [metric];
                 caState.traceNodeId = null;
                 tracePolicyIds = null;
                 renderCaControls();
@@ -815,8 +850,7 @@
             renderSankey();
         });
         $("caResetFilters").addEventListener("click", function () {
-            caState.states = new Set(["enabled", "reportOnly", "disabled"]);
-            caState.metricFilter = "all";
+            caState.states = [];
             caState.grantFilter = "";
             caState.clientAppFilter = "";
             caState.assignmentFilter = "";
@@ -827,14 +861,13 @@
             caState.search = "";
             caState.traceNodeId = null;
             tracePolicyIds = null;
-            $("caFltAssignmentTier").value = "";
             $("caFltSearch").value = "";
             $("caPolicyDetail").classList.add("hidden");
             renderCaControls();
             renderSankey();
         });
         $("caExportFiltered").addEventListener("click", function () {
-            var rows = currentCaPolicies().filter(policyMatchesFilters).map(function (policy) {
+            var rows = currentCaPolicies().filter(function (p) { return policyMatchesFilters(p); }).map(function (policy) {
                 return { snapshot: snapshotLabel(snapshots[caState.snapshotIdx], caState.snapshotIdx), policy: policy.name, state: STATE_LABELS[policy.state], assignments: policy.assignments.join("; "), targets: policy.targets.join("; "), grants: policy.grants.join("; "), conditions: policy.conditions.join("; "), exclusions: policy.exclusions.join("; ") };
             });
             EntraOpsReportUtils.exportRows("entraops-conditional-access-filtered", rows);

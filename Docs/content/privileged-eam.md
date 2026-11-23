@@ -195,6 +195,27 @@ Convert-EntraOpsExportToSampleData `
 bundle from the anonymized export; `-ReportDestinationPath` changes its default location of
 `<DestinationPath>/Reports`.
 
+### Origin of privileged objects {#object-origin}
+
+Each object of the export names where it comes from. `OriginType` says how it came into the tenant,
+`OriginTenantId` the tenant it comes from and `OriginId` its ID there:
+
+| `OriginType`            | Object                                                                                                     | `OriginTenantId`                                                                                                                                   | `OriginId`                           |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `Cloud`                 | User or group created in this tenant                                                                       | This tenant                                                                                                                                        | Object ID                            |
+| `OnPremises`            | User or group synchronized from Active Directory (`onPremisesSyncEnabled`)                                 | This tenant                                                                                                                                        | SID (`onPremisesSecurityIdentifier`) |
+| `CrossTenantSync`       | User or group of cross-tenant synchronization                                                              | Source tenant (`originTenantInfo`)                                                                                                                 | ID in the source tenant              |
+| `B2BInvitation`         | Invited guest                                                                                              | Home tenant (`originTenantInfo`); empty for guests without Microsoft Entra home tenant (one-time passcode, Microsoft account, Google, SAML/WS-Fed) | ID in the home tenant, or empty      |
+| `TenantGovernance`      | Group or member of a governing tenant with access through Tenant Governance (also an Azure `ForeignGroup`) | Governing tenant                                                                                                                                   | ID in the governing tenant           |
+| `InternalApplication`   | Service principal of an application, managed identity or agent identity of this tenant                     | This tenant                                                                                                                                        | Application ID                       |
+| `ExternalApplication`   | Service principal of an application of another organization                                                | Tenant of the application                                                                                                                          | Application ID                       |
+| `FirstPartyApplication` | Service principal of a Microsoft application                                                               | Microsoft tenant                                                                                                                                   | Application ID                       |
+
+Empty values mean that the origin is unknown, for example a group read without the Microsoft Graph permission
+`Group-XTenantIdentitySync.Read.All`. An object whose management moved from Active Directory to the cloud
+(`onPremisesSyncEnabled` no longer `true`) is `Cloud`. Objects of another tenant by their origin are flagged
+`OutsideOfHomeTenant`, also members of cross-tenant synchronization without `#EXT#` in their user principal name.
+
 ## Filtering examples
 
 ### Filter on classification
@@ -232,6 +253,13 @@ External users with privileged role assignments:
 
 ```powershell
 $EntraOpsData | Where-Object { $_.ObjectSubType -eq "Guest"}
+```
+
+Privileged objects from other tenants by their origin (guests, cross-tenant synchronization, Tenant Governance):
+
+```powershell
+$EntraOpsData | Where-Object { $_.OriginType -in @("B2BInvitation", "CrossTenantSync", "TenantGovernance") } `
+  | Select-Object -Unique ObjectDisplayName, OriginType, OriginTenantId
 ```
 
 Hybrid identities with privileges (excluding the Directory Synchronization service account):
@@ -750,7 +778,7 @@ SensitiveEdges
 As described above, any Entra ID role assignment on the scope of critical assets in XSPM is
 classified as Control Plane.
 
-#### When Advanced Hunting Query Results via Microsoft Graph API is unavailable
+#### When Advanced Hunting Query Results via Microsoft Graph API is unavailable {#when-exposure-management-is-unavailable}
 
 The hunting query can fail, for example with a temporary HTTP 502 or a missing `ThreatHunting.Read.All`
 permission or license. Dropping the XSPM objects would silently narrow the Control Plane scope, so EntraOps

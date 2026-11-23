@@ -10,9 +10,9 @@
     single cmdlet. Use Remove-EntraOpsReportingData to clear the generated data again.
 
 .PARAMETER EntraOpsRoot
-    Path to the EntraOps repository root. Used as the classification-logic source
+    Path to the EntraOps repository root or working folder (alias: -Path). Used as the classification-logic source
     (Classification/Templates) for the Classification Explorer and as the PrivilegedEAM
-    source root for the Tier Breach Analyzer. Defaults to the repository this module lives in.
+    source root for the Tier Breach Analyzer. Defaults to the EntraOps working folder ($EntraOpsBaseFolder).
 
 .PARAMETER ConfigFilePath
     Configuration file used for Privilege History and Tenant Governance feature settings. Defaults
@@ -167,6 +167,18 @@
 .PARAMETER SkipAccessPackageFlow
     Do not generate Graph-backed group and resource enrichment for Access Package Flow.
 
+.PARAMETER SkipFindings
+    Do not save the finding results. By default, the results of all finding rules
+    (Invoke-EntraOpsFindingEvaluation) are saved to Reports/Findings/data/findings.json
+    (Save-EntraOpsFindingJson) after the report data, so the reporting pipelines publish them with the
+    reports, for example for the EntraOps Maester Pack.
+
+.PARAMETER HistorySource
+    Forwarded as -HistorySource to New-EntraOpsPrivilegedEamPrivilegeHistoryData and
+    New-EntraOpsTenantGovernanceConfigurationAnalyzerData: Auto (default) reads the snapshots from the git
+    history, adds the uncommitted export or snapshot, and falls back to the current folders (one snapshot, no
+    history) without git; Git requires the git history; Folder always uses the current folders.
+
 .PARAMETER PassThru
     Emit the result object of each generator (one per app) to the pipeline.
 
@@ -183,9 +195,9 @@
 .PARAMETER InstallMissingReportingFolder
     Download the reporting apps (Install-EntraOpsReportingFolder) and the classification templates
     required by the Classification Explorer (Initialize-EntraOpsWorkspace -Content Classification)
-    from the public EntraOps repository, main branch, when they are missing in the EntraOps working
-    folder, e.g. for a module-only installation from the PowerShell Gallery. Prefer
-    Initialize-EntraOpsWorkspace -Ref <release tag> beforehand, so the content matches the module version.
+    from the public EntraOps repository when they are missing in the EntraOps working folder, e.g. for a
+    module-only installation from the PowerShell Gallery. The content that matches the module version is
+    installed (newest commit of the main branch with the module version in EntraOps.psd1).
     Also repairs an incomplete Reports folder when a selected app is missing.
     Without this switch, missing reporting apps stop with an error and missing templates skip the
     Classification Explorer (error with -FailureAction Stop).
@@ -193,7 +205,12 @@
 .EXAMPLE
     New-EntraOpsReportingData
 
-    Regenerates the data for all reporting apps in this repository checkout.
+    Regenerates the data for all reporting apps in the EntraOps working folder.
+
+.EXAMPLE
+    New-EntraOpsReportingData -Path '~/EntraOps-Assessment'
+
+    Regenerates the data for all reporting apps in another working folder, for example of Invoke-EntraOpsAssessment -Path.
 
 .EXAMPLE
     New-EntraOpsReportingData -InstallMissingReportingFolder
@@ -216,6 +233,7 @@ function New-EntraOpsReportingData {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param (
         [Parameter(Mandatory = $false)]
+        [Alias('Path')]
         [System.String]$EntraOpsRoot,
 
         [Parameter(Mandatory = $false)]
@@ -318,6 +336,13 @@ function New-EntraOpsReportingData {
 
         [Parameter(Mandatory = $false)]
         [switch]$SkipAccessPackageFlow,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipFindings,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Auto', 'Git', 'Folder')]
+        [System.String]$HistorySource = 'Auto',
 
         [Parameter(Mandatory = $false)]
         [switch]$PassThru,
@@ -465,8 +490,7 @@ function New-EntraOpsReportingData {
             if ($MissingReports) { "reporting apps in '$ReportingFolder'$(if ($MissingAppPaths.Count) { " (missing: $($MissingAppPaths -join ', '))" })" }
             if ($MissingTemplates) { "classification templates folder '$ClassificationTemplatesFolder'" }
         ) -join ' and '
-        $ModuleVersion = $MyInvocation.MyCommand.Module.Version
-        $MissingContentMessage = "Missing EntraOps content: $MissingItems. Run Initialize-EntraOpsWorkspace -Ref <release tag of EntraOps $ModuleVersion> to install the content that matches your module$(if ($MissingTemplates -and -not $MissingReports) { ', or run Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles to keep the classification files used for the export' }). To repair an existing Reports folder, run Initialize-EntraOpsWorkspace -Content Reports -Force or Install-EntraOpsReportingFolder -Force. These installers preserve generated report data. -InstallMissingReportingFolder downloads missing content from the main branch instead."
+        $MissingContentMessage = "Missing EntraOps content: $MissingItems. Run Initialize-EntraOpsWorkspace to install the content that matches your module$(if ($MissingTemplates -and -not $MissingReports) { ', or run Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles to keep the classification files used for the export' }). To repair an existing Reports folder, run Initialize-EntraOpsWorkspace -Content Reports -Force or Install-EntraOpsReportingFolder -Force. These installers preserve generated report data. -InstallMissingReportingFolder downloads missing content from the main branch instead."
 
         if ($InstallMissingReportingFolder) {
             if ($MissingReports) {
@@ -479,7 +503,8 @@ function New-EntraOpsReportingData {
                 }
             }
             if ($MissingTemplates) {
-                Initialize-EntraOpsWorkspace -Path $EntraOpsRoot -Content Classification -KeepWorkingFolder | Out-Null
+                # Its notes on the working folder and the configuration don't belong to the report generation.
+                Initialize-EntraOpsWorkspace -Path $EntraOpsRoot -Content Classification -KeepWorkingFolder 6>$null | Out-Null
             }
         } elseif ($WhatIfPreference) {
             Write-Warning $MissingContentMessage
@@ -493,6 +518,12 @@ function New-EntraOpsReportingData {
     }
 
     $results = [System.Collections.Generic.List[object]]::new()
+    # The Configuration Analyzer and Access Package Flow data look up the same access package assignment policies. This
+    # run-scoped cache lets them request and report a deleted policy once per run; started anew on every run, so a
+    # long-lived session never reuses an earlier run's results. Summarised by Complete-EntraOpsReportingRunCache below.
+    $null = Start-EntraOpsReportingRunCache -Force -Owner $MyInvocation.MyCommand.Name
+    # Message of a failed Configuration Analyzer run (see the findings at the end).
+    $ConfigurationAnalyzerFailure = $null
 
     Write-Verbose "Starting reporting data generation. Skipped apps: TierBreachAnalyzer=$SkipTierBreachAnalyzer; EamDashboard=$SkipEamDashboard; PrivilegedAssets=$SkipPrivilegedAssets; PrivilegeHistory=$SkipPrivilegeHistory; ConfigurationAnalyzer=$SkipConfigurationAnalyzer; AccessPackageFlow=$SkipAccessPackageFlow; AccessPathMap=$SkipAccessPathMap; ClassificationExplorer=$SkipClassificationExplorer."
 
@@ -563,6 +594,7 @@ function New-EntraOpsReportingData {
         if ($null -ne $PrivilegeHistoryTimeRangeInDays) { $PrivilegeHistoryParams.TimeRangeInDays = $PrivilegeHistoryTimeRangeInDays }
         if (-not [string]::IsNullOrWhiteSpace($PrivilegeHistorySnapshotInterval)) { $PrivilegeHistoryParams.SnapshotInterval = $PrivilegeHistorySnapshotInterval }
         if ($PassThru) { $PrivilegeHistoryParams.PassThru = $true }
+        $PrivilegeHistoryParams.HistorySource = $HistorySource
 
         Write-Verbose "Generating Privilege History data..."
         try {
@@ -605,6 +637,7 @@ function New-EntraOpsReportingData {
             if (-not [string]::IsNullOrWhiteSpace($ConfigurationAnalyzerSnapshotInterval)) { $ConfigurationAnalyzerParams.SnapshotInterval = $ConfigurationAnalyzerSnapshotInterval }
             if ($null -ne $ConfigurationAnalyzerMaxSnapshotAgeHours) { $ConfigurationAnalyzerParams.MaxSnapshotAgeHours = $ConfigurationAnalyzerMaxSnapshotAgeHours }
             if ($PassThru) { $ConfigurationAnalyzerParams.PassThru = $true }
+            $ConfigurationAnalyzerParams.HistorySource = $HistorySource
 
             Write-Verbose "Generating Configuration Analyzer data..."
             try {
@@ -613,6 +646,8 @@ function New-EntraOpsReportingData {
             } catch {
                 if ($FailureAction -eq 'Stop') { throw }
                 Write-Warning "Skipped Configuration Analyzer data: $($_.Exception.Message)"
+                # The data of an earlier run may still be in place: the findings must not evaluate it as current.
+                $ConfigurationAnalyzerFailure = if ("$($_.Exception.Message)") { "$($_.Exception.Message)" } else { 'The Configuration Analyzer data failed without an error message.' }
             }
         } else {
             Write-Verbose "Skipping Configuration Analyzer data (no Tenant Governance snapshot folder at $TgSnapshotFolder and TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot is not enabled)."
@@ -673,6 +708,56 @@ function New-EntraOpsReportingData {
         $ClassificationExplorerResult = New-EntraOpsClassificationExplorerData @ClassificationExplorerParams
         $results.Add([pscustomobject]@{ App = 'ClassificationExplorer'; Result = $ClassificationExplorerResult })
     }
+
+    # The findings evaluate the report data generated above. The reports load each other's data from their
+    # sibling folders (../ConfigurationAnalyzer/data), so the Reports folder is the parent of the apps.
+    $FindingReportPath = if (-not [string]::IsNullOrWhiteSpace($ConfigurationAnalyzerAppRoot)) { Split-Path -Parent $ConfigurationAnalyzerAppRoot } else { Join-Path $EntraOpsRoot 'Reports' }
+    $FindingImportPath = if (-not [string]::IsNullOrWhiteSpace($EamDashboardImportPath)) { $EamDashboardImportPath } elseif (-not [string]::IsNullOrWhiteSpace($TierBreachImportPath)) { $TierBreachImportPath } else { Join-Path $EntraOpsRoot 'PrivilegedEAM' }
+    if (-not [string]::IsNullOrWhiteSpace($EamDashboardImportPath) -and -not [string]::IsNullOrWhiteSpace($TierBreachImportPath) -and $EamDashboardImportPath -ne $TierBreachImportPath) {
+        Write-Warning "The finding results evaluate the Privileged EAM export of -EamDashboardImportPath ($EamDashboardImportPath), not of -TierBreachImportPath."
+    }
+
+    # Last step: the PIM Request Flow and Access Package Flow findings evaluate the report data generated above.
+    # Not when the snapshot-based reports and the finding results are all skipped: nothing they evaluate was generated.
+    $SkipReportFindings = $SkipConfigurationAnalyzer -and $SkipAccessPackageFlow -and $SkipFindings
+    # Not when the Configuration Analyzer data failed in this run: the flow findings of the earlier data stay as they
+    # were (with their own generation time), instead of being evaluated again as if that data were current.
+    if ($ConfigurationAnalyzerFailure) {
+        Write-Warning "Skipped PIM Request Flow and Access Package Flow findings: the Configuration Analyzer data could not be generated in this run, so the reports keep the findings of the earlier data."
+    } elseif (-not $SkipReportFindings -and (Test-Path -LiteralPath (Join-Path $FindingReportPath 'ConfigurationAnalyzer/data/configuration-analyzer-data.js') -PathType Leaf)) {
+        Write-Verbose "Generating PIM Request Flow and Access Package Flow findings..."
+        try {
+            $ReportFindingResult = New-EntraOpsReportFindingData -RepoRoot $EntraOpsRoot -ReportPath $FindingReportPath -ConfigFilePath $ConfigFilePath -PassThru:$PassThru -Verbose:($VerbosePreference -eq 'Continue') -WhatIf:$WhatIfPreference -Confirm:$false
+            $results.Add([pscustomobject]@{ App = 'ReportFindings'; Result = $ReportFindingResult })
+        } catch {
+            if ($FailureAction -eq 'Stop') { throw }
+            Write-Warning "Skipped PIM Request Flow and Access Package Flow findings: $($_.Exception.Message)"
+        }
+    }
+
+    # Finding results of all rules, saved with the report data so the reporting pipelines publish them
+    # (artifact EntraOps-Reporting, Findings/data/findings.json), for example for the EntraOps Maester Pack.
+    if (-not $SkipFindings) {
+        $FindingParams = @{
+            ImportPath     = $FindingImportPath
+            ReportPath     = $FindingReportPath
+            ConfigFilePath = $ConfigFilePath
+        }
+        if ($ConfigurationAnalyzerFailure) {
+            $FindingParams.ReportDataSkipReason = "The Configuration Analyzer data could not be generated in this run, so the Tenant Governance data is not evaluated: $ConfigurationAnalyzerFailure"
+        }
+        Write-Verbose "Saving the finding results..."
+        try {
+            $FindingResult = Invoke-EntraOpsFindingEvaluation @FindingParams |
+                Save-EntraOpsFindingJson -ExportFolder (Join-Path $FindingReportPath 'Findings/data') -ConfigFilePath $ConfigFilePath -TenantName (Get-EntraOpsReportingTenantName -RepoRoot $EntraOpsRoot) -PassThru:$PassThru -WhatIf:$WhatIfPreference -Confirm:$false
+            $results.Add([pscustomobject]@{ App = 'Findings'; Result = $FindingResult })
+        } catch {
+            if ($FailureAction -eq 'Stop') { throw }
+            Write-Warning "Skipped the finding results: $($_.Exception.Message)"
+        }
+    }
+
+    Complete-EntraOpsReportingRunCache
 
     if ($results.Count -eq 0) {
         Write-Host "No EntraOps Reporting data was generated (all apps skipped)."

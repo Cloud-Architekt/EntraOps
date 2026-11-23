@@ -1,0 +1,418 @@
+{
+  "description": "Released EntraOps finding rules. Their IDs are Maester test IDs (MP.EOPS.<n>) and never change: Integrations/Maester/Build-EntraOpsMaesterPack.ps1 -Release adds the new rules of a release, and Tests/Findings/Get-EntraOpsFindingRule.Tests.ps1 fails when a released rule changes or is removed.",
+  "rules": [
+    {
+      "Id": "EO.1001",
+      "Area": "TierBreach",
+      "Key": "tier0Breach",
+      "Category": "TierBoundaries",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.1002",
+      "Area": "PrivilegedAssets",
+      "Key": "tierBreach",
+      "Category": "TierBoundaries",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.1003",
+      "Area": "TierBreach",
+      "Key": "breach",
+      "Category": "TierBoundaries",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.1004",
+      "Area": "PrivilegedAssets",
+      "Key": "ownerLowerTier",
+      "Category": "TierBoundaries",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.1005",
+      "Area": "PrivilegedAssets",
+      "Key": "ownsHigherTier",
+      "Category": "TierBoundaries",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.1006",
+      "Area": "PrivilegedEAM",
+      "Key": "auScopeLowerTier",
+      "Category": "TierBoundaries",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.1007",
+      "Area": "PrivilegedAssets",
+      "Key": "parentLowerTier",
+      "Category": "TierBoundaries",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.1008",
+      "Area": "PimRequestFlow",
+      "Key": "approverLowerTier",
+      "Category": "TierBoundaries",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.1009",
+      "Area": "AccessPackageFlow",
+      "Key": "approverLowerTier",
+      "Category": "TierBoundaries",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.1010",
+      "Area": "AccessPackageFlow",
+      "Key": "assignedMorePrivileged",
+      "Category": "TierBoundaries",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.2001",
+      "Area": "PrivilegedAssets",
+      "Key": "unclassified",
+      "Category": "Classification",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.2002",
+      "Area": "PrivilegedEAM",
+      "Key": "unclassifiedAssignment",
+      "Category": "Classification",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.2003",
+      "Area": "PimRequestFlow",
+      "Key": "approverUnclassified",
+      "Category": "Classification",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.2004",
+      "Area": "PrivilegedEAM",
+      "Key": "customRoleControlPlane",
+      "Category": "Classification",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.2005",
+      "Area": "AccessPackageFlow",
+      "Key": "unclassifiedTarget",
+      "Category": "Classification",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3001",
+      "Area": "PrivilegedEAM",
+      "Key": "permanentControlPlaneAssignment",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3002",
+      "Area": "PrivilegedEAM",
+      "Key": "permanentControlPlaneMembership",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3003",
+      "Area": "PrivilegedEAM",
+      "Key": "azureRootScopeAssignment",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3004",
+      "Area": "PimRequestFlow",
+      "Key": "permanentEligible",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3005",
+      "Area": "PimRequestFlow",
+      "Key": "permanentActive",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3006",
+      "Area": "PimRequestFlow",
+      "Key": "noMfaActivation",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3007",
+      "Area": "PimRequestFlow",
+      "Key": "noApprovalActivation",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3008",
+      "Area": "PimRequestFlow",
+      "Key": "noMfaActiveAssign",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3009",
+      "Area": "TenantGovernance",
+      "Key": "controlPlaneActivationAuthContext",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3010",
+      "Area": "PimRequestFlow",
+      "Key": "approverNotEnforced",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3011",
+      "Area": "PimRequestFlow",
+      "Key": "authContextMissing",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3012",
+      "Area": "TenantGovernance",
+      "Key": "eligibleAssignmentDuration",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3013",
+      "Area": "TenantGovernance",
+      "Key": "controlPlaneActivationDuration",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.3014",
+      "Area": "TenantGovernance",
+      "Key": "privilegedRoleAlert",
+      "Category": "JustInTimeAccess",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4001",
+      "Area": "PrivilegedAssets",
+      "Key": "hybridPrivileged",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4002",
+      "Area": "PrivilegedEAM",
+      "Key": "guestPrivileged",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4003",
+      "Area": "TenantGovernance",
+      "Key": "conditionalAccessControlPlaneExclusion",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4004",
+      "Area": "PrivilegedEAM",
+      "Key": "unprotectedPrivilegedGroup",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4005",
+      "Area": "PrivilegedAssets",
+      "Key": "restrictedManagementGap",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4006",
+      "Area": "PrivilegedEAM",
+      "Key": "hybridManagementPlane",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4007",
+      "Area": "PrivilegedAssets",
+      "Key": "deviceNotPaw",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4008",
+      "Area": "PrivilegedAssets",
+      "Key": "pawMissing",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4009",
+      "Area": "PrivilegedAssets",
+      "Key": "workAccountMissing",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4010",
+      "Area": "PrivilegedAssets",
+      "Key": "foreign",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.4011",
+      "Area": "PrivilegedEAM",
+      "Key": "foreignPrincipalControlPlane",
+      "Category": "AccountProtection",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.5001",
+      "Area": "PrivilegedEAM",
+      "Key": "foreignWorkloadControlPlane",
+      "Category": "WorkloadIdentities",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.5002",
+      "Area": "PrivilegedEAM",
+      "Key": "agentPrivileged",
+      "Category": "WorkloadIdentities",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.5003",
+      "Area": "PrivilegedAssets",
+      "Key": "sponsorMissing",
+      "Category": "WorkloadIdentities",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.5004",
+      "Area": "PrivilegedEAM",
+      "Key": "workloadControlPlane",
+      "Category": "WorkloadIdentities",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.5005",
+      "Area": "PrivilegedEAM",
+      "Key": "delegatedControlPlanePermission",
+      "Category": "WorkloadIdentities",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.6001",
+      "Area": "AccessPackageFlow",
+      "Key": "noApproval",
+      "Category": "AccessGovernance",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.6002",
+      "Area": "AccessPackageFlow",
+      "Key": "broadRequestor",
+      "Category": "AccessGovernance",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.6003",
+      "Area": "AccessPackageFlow",
+      "Key": "unauthorizedAccess",
+      "Category": "AccessGovernance",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.6004",
+      "Area": "AccessPackageFlow",
+      "Key": "missingAccess",
+      "Category": "AccessGovernance",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.6005",
+      "Area": "TenantGovernance",
+      "Key": "accessPackageExpiration",
+      "Category": "AccessGovernance",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.6006",
+      "Area": "TenantGovernance",
+      "Key": "accessPackageAccessReview",
+      "Category": "AccessGovernance",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.7001",
+      "Area": "PrivilegedEAM",
+      "Key": "privilegedWorkloadOwner",
+      "Category": "OwnershipAndDelegation",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.7002",
+      "Area": "PrivilegedEAM",
+      "Key": "privilegedGroupOwner",
+      "Category": "OwnershipAndDelegation",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.7003",
+      "Area": "PrivilegedEAM",
+      "Key": "unconstrainedRoleAssignmentDelegation",
+      "Category": "OwnershipAndDelegation",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.7004",
+      "Area": "PrivilegedEAM",
+      "Key": "nestedControlPlaneGroup",
+      "Category": "OwnershipAndDelegation",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.7005",
+      "Area": "TenantGovernance",
+      "Key": "dynamicPrivilegedAdministrativeUnit",
+      "Category": "OwnershipAndDelegation",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.8001",
+      "Area": "PrivilegeHistory",
+      "Key": "newControlPlaneAccess",
+      "Category": "Drift",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.8002",
+      "Area": "PrivilegeHistory",
+      "Key": "tierBreachIncrease",
+      "Category": "Drift",
+      "Since": "1.2.0"
+    },
+    {
+      "Id": "EO.8003",
+      "Area": "PrivilegeHistory",
+      "Key": "newDelegatedPrivilegedPermission",
+      "Category": "Drift",
+      "Since": "1.2.0"
+    }
+  ]
+}

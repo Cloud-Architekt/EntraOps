@@ -14,23 +14,24 @@
  * AADRoleSetting resource):
  *
  *   - "Activate eligible role"  (ActivationReq* / ApprovaltoActivate / ActivateApprover /
- *     AuthenticationContext* + the Eligible*Notification* group) - the self-service PIM
+ *     AuthenticationContext* + the EligibleAssignment*Notification* group) - the self-service PIM
  *     request: an eligible member activates the role for a limited time, optionally requiring
  *     MFA, justification, a ticket number, an authentication context and/or approval.
  *   - "Assign eligible role"   (ElegibilityAssignmentReq* / ExpireEligibleAssignment /
- *     PermanentEligibleAssignmentisExpirationRequired + the EligibleAssignment*Notification*
- *     group) - an administrator grants a principal eligibility for the role.
+ *     PermanentEligibleAssignmentisExpirationRequired + the Eligible*Notification* group) - an
+ *     administrator grants a principal eligibility for the role.
+ *   Note the M365DSC naming: EligibleAssignment*Notification* are the notifications "when eligible
+ *   members activate this role", Eligible*Notification* those "when members are assigned as eligible".
  *   - "Assign active role"     (AssignmentReq* / ExpireActiveAssignment /
  *     PermanentActiveAssignmentisExpirationRequired + the Active*Notification* group) - an
  *     administrator grants a principal the role directly as an active (non-eligible)
  *     assignment.
  *
  * The role definition (microsoft.entra.roledefinition, joined on Id/TemplateId) supplies the
- * role's description. The role's access tier (Control Plane / Management Plane / User Access)
- * starts with Classification Explorer's generated role catalog. The optional EAM Dashboard
- * dataset then overrides it with tenant/scope-specific classified assignment evidence and
- * resolves activation approvers. This reuses EntraOps classification output instead of
- * re-implementing the role-action classification rule engine client-side.
+ * role's description. The role's access tier (Control Plane / Management Plane / User Access), the
+ * resolved activation approvers and the risk flags come from EntraOps PowerShell
+ * (New-EntraOpsReportFindingData, data/pim-request-flow-findings.js), which evaluates the
+ * Classification Explorer role catalog and the EAM Dashboard data like the finding rules do.
  *
  * Reuses the snapshot/blob parsing model from ../ConfigurationAnalyzer/js/core.js (loaded
  * before this file - see index.html).
@@ -48,110 +49,6 @@
 
     var PATH_COLORS = { activation: "#0078d4", eligibleAssignment: "#5c2d91", activeAssignment: "#038387" };
     var APPROVAL_COLORS = { "Approval required": "#0e700e", "No approval required": "#c07807" };
-    var excludedRiskFlagIds = new Set((DATA && Array.isArray(DATA.pimRequestFlowExcludedRiskFlags) ? DATA.pimRequestFlowExcludedRiskFlags : []).map(String));
-
-    // ---- Role tier indexes from Classification Explorer, with optional EAM enrichment. ----
-    var roleDefinitionTierIndex = new Map();
-    var roleActionTierIndex = new Map();
-    (function buildRoleDefinitionTierIndex() {
-        var tierMapRoles = window.EOCE_TIER_MAP && Array.isArray(window.EOCE_TIER_MAP.roles) ? window.EOCE_TIER_MAP.roles : [];
-        tierMapRoles.forEach(function (role) {
-            if (String(role.sys).toLowerCase() !== "entraid" || !role.roleId || !role.roleClass || role.roleClass === "Unclassified") return;
-            roleDefinitionTierIndex.set(String(role.roleId).toUpperCase(), {
-                tierName: role.roleClass,
-                service: role.service || "Entra ID directory role catalog"
-            });
-        });
-        var tierMapPaths = window.EOCE_TIER_MAP && Array.isArray(window.EOCE_TIER_MAP.paths) ? window.EOCE_TIER_MAP.paths : [];
-        tierMapPaths.forEach(function (path) {
-            if (String(path.sys).toLowerCase() !== "entraid") return;
-            if (path.action && path.tier && path.tier !== "Unclassified") {
-                var actionKey = String(path.action).toLowerCase();
-                var actionCurrent = roleActionTierIndex.get(actionKey);
-                if (!actionCurrent || tierRank(path.tier) < tierRank(actionCurrent.tierName)) {
-                    roleActionTierIndex.set(actionKey, {
-                        tierName: path.tier,
-                        service: path.service || "Entra ID directory role action"
-                    });
-                }
-            }
-            if (!path.roleId) return;
-            var tierName = path.roleClass || path.tier;
-            if (!tierName || tierName === "Unclassified") return;
-            var key = String(path.roleId).toUpperCase();
-            var current = roleDefinitionTierIndex.get(key);
-            if (!current || tierRank(tierName) < tierRank(current.tierName)) {
-                roleDefinitionTierIndex.set(key, {
-                    tierName: tierName,
-                    service: path.service || "Entra ID directory role catalog"
-                });
-            }
-        });
-        if (!EAM_DATA) return;
-        (Array.isArray(EAM_DATA.roleDefinitions) ? EAM_DATA.roleDefinitions : []).forEach(function (role) {
-            if (!role.roleDefinitionId || !role.tierName) return;
-            roleDefinitionTierIndex.set(String(role.roleDefinitionId).toUpperCase(), {
-                tierName: role.tierName,
-                service: role.service || "Entra ID directory role"
-            });
-        });
-        if (!Array.isArray(EAM_DATA.objects)) return;
-        var votes = new Map(); // uppercased roleDefinitionId -> Map("tierName|service" -> count)
-        EAM_DATA.objects.forEach(function (o) {
-            (Array.isArray(o.roleAssignments) ? o.roleAssignments : []).forEach(function (ra) {
-                if (!ra.roleDefinitionId) return;
-                var cls = Array.isArray(ra.classification) ? ra.classification : [];
-                if (!cls.length) return;
-                // An assignment can match several classification entries (several services) -
-                // the most-privileged (lowest tierRank) one determines the role's tier for this
-                // assignment, same "worst case wins" rule the classification engine itself uses.
-                var best = cls.reduce(function (acc, c) {
-                    var r = tierRank(c.adminTierLevelName);
-                    return r < acc.rank ? { rank: r, tierName: c.adminTierLevelName, service: c.service } : acc;
-                }, { rank: TIER_ORDER.length, tierName: null, service: null });
-                if (!best.tierName) return;
-                var key = String(ra.roleDefinitionId).toUpperCase();
-                if (!votes.has(key)) votes.set(key, new Map());
-                var vkey = best.tierName + "|" + (best.service || "");
-                votes.get(key).set(vkey, (votes.get(key).get(vkey) || 0) + 1);
-            });
-        });
-        votes.forEach(function (m, key) {
-            var best = null;
-            m.forEach(function (count, vkey) {
-                var sep = vkey.indexOf("|");
-                var tierName = vkey.slice(0, sep), service = vkey.slice(sep + 1);
-                var rank = tierRank(tierName);
-                if (!best || rank < best.rank) best = { tierName: tierName, rank: rank, service: service };
-            });
-            // Classified assignment evidence includes tenant overwrites and scope-specific
-            // evaluation, so it supersedes the catalog fallback for assigned roles.
-            if (best) roleDefinitionTierIndex.set(key, { tierName: best.tierName, service: best.service });
-        });
-    })();
-
-    function tierForRoleDefinition(roleDef) {
-        if (!roleDef || !Array.isArray(roleDef.rolePermissions)) return null;
-        var actions = roleDef.rolePermissions.flatMap(function (permission) {
-            if (typeof permission === "string") return [permission];
-            return Array.isArray(permission.AllowedResourceActions) ? permission.AllowedResourceActions : [];
-        });
-        return actions.reduce(function (best, action) {
-            var candidate = roleActionTierIndex.get(String(action).toLowerCase());
-            return candidate && (!best || tierRank(candidate.tierName) < tierRank(best.tierName)) ? candidate : best;
-        }, null);
-    }
-
-    function describeApprover(upn) {
-        var upper = String(upn).toUpperCase();
-        var hit = objectUpnIndex.get(upper) || objectDisplayNameIndex.get(upper);
-        return {
-            label: hit ? hit.displayName + " (" + upn + ")" : String(upn),
-            tier: hit ? hit.tierName : "UserAccess", // not covered by EntraOps => User Access (see core.js identityTierFor)
-            resolved: !!hit,
-            source: hit ? "direct" : "default"
-        };
-    }
 
     function fmtIsoDuration(iso) {
         if (!iso) return "not set";
@@ -212,15 +109,14 @@
             key: "activation", order: 0, label: "Activate eligible role", shortLabel: "Activation",
             description: "Self-service PIM request: an eligible member activates the role for a limited time.",
             build: function (p, roleDef, resource, roleId, roleName) {
-                var approvers = (Array.isArray(p.ActivateApprover) ? p.ActivateApprover : []).map(describeApprover);
                 return {
                     id: (roleId || resource.p) + "|activation", path: "activation", pathOrder: 0, pathLabel: "Activate eligible role", pathShortLabel: "Activation",
                     roleId: roleId, roleName: roleName, resource: resource, roleDef: roleDef,
                     requirements: activationRequirements(p),
                     approvalRequired: !!p.ApprovaltoActivate,
                     approvalLabel: p.ApprovaltoActivate ? "Approval required" : "No approval required",
-                    approvers: approvers,
-                    notifications: notificationList(p, "Eligible", true),
+                    approvers: [],
+                    notifications: notificationList(p, "EligibleAssignment", false),
                     duration: "Max activation duration: " + fmtIsoDuration(p.ActivationMaxDuration),
                     raw: p
                 };
@@ -237,7 +133,7 @@
                     approvalRequired: false,
                     approvalLabel: "No approval workflow (admin-assigned)",
                     approvers: [],
-                    notifications: notificationList(p, "EligibleAssignment", false),
+                    notifications: notificationList(p, "Eligible", true),
                     duration: "Expires after: " + (p.PermanentEligibleAssignmentisExpirationRequired === false ? fmtIsoDuration(p.ExpireEligibleAssignment) + " (permanent allowed)" : fmtIsoDuration(p.ExpireEligibleAssignment) + " (expiration required)"),
                     raw: p
                 };
@@ -262,48 +158,27 @@
         }
     ];
 
-    function computeFlagsForFlow(flow, p, pathKey, roleTier) {
-        var flags = [];
-        var privileged = roleTier === "ControlPlane" || roleTier === "ManagementPlane";
-        var roleRank = tierRank(roleTier);
-        if (pathKey === "activation") {
-            if (privileged && !p.ActivationReqMFA) {
-                flags.push({ id: "noMfaActivation", severity: "fail", text: "Privileged role (" + roleTier + ") can be activated without requiring MFA." });
-            }
-            if (privileged && !p.ApprovaltoActivate) {
-                flags.push({ id: "noApprovalActivation", severity: "fail", text: "Privileged role (" + roleTier + ") can be activated without approval." });
-            }
-            if (!p.ApprovaltoActivate && Array.isArray(p.ActivateApprover) && p.ActivateApprover.length) {
-                flags.push({ id: "approverNotEnforced", severity: "warn", text: "Approver(s) are configured (" + p.ActivateApprover.length + ") but 'Require approval to activate' is disabled - the approver list has no effect." });
-            }
-            if (p.ApprovaltoActivate && roleRank < TIER_ORDER.length) {
-                var lowerTier = flow.approvers.filter(function (a) { return a.source === "direct" && a.tier && tierRank(a.tier) > roleRank; });
-                if (lowerTier.length) {
-                    flags.push({ id: "approverLowerTier", severity: "warn", text: "Approver(s) classified at a lower access tier than the role being activated: " + lowerTier.map(function (a) { return a.label; }).join(", ") + "." });
-                }
-            }
-            if (p.ApprovaltoActivate) {
-                var unresolvedApprovers = flow.approvers.filter(function (a) { return !a.resolved; });
-                if (unresolvedApprovers.length) {
-                    flags.push({ id: "approverUnclassified", severity: "warn", text: unresolvedApprovers.length + " approver(s) could not be resolved against the EAM dataset - tier comparison skipped for them." });
-                }
-            }
-            if (p.AuthenticationContextRequired && !p.AuthenticationContextName) {
-                flags.push({ id: "authContextMissing", severity: "warn", text: "Authentication context is required but no context is configured." });
-            }
-        } else if (pathKey === "eligibleAssignment") {
-            if (privileged && p.PermanentEligibleAssignmentisExpirationRequired === false) {
-                flags.push({ id: "permanentEligible", severity: "warn", text: "A permanent (non-expiring) eligible assignment is allowed for a privileged role (" + roleTier + ")." });
-            }
-        } else if (pathKey === "activeAssignment") {
-            if (privileged && p.PermanentActiveAssignmentisExpirationRequired === false) {
-                flags.push({ id: "permanentActive", severity: "warn", text: "A permanent (non-expiring) active assignment is allowed for a privileged role (" + roleTier + ")." });
-            }
-            if (privileged && !p.AssignmentReqMFA) {
-                flags.push({ id: "noMfaActiveAssign", severity: "warn", text: "Privileged role (" + roleTier + ") can be assigned directly as Active without requiring MFA at assignment time." });
-            }
-        }
-        return flags;
+    // Risk flags and role tiers are evaluated in PowerShell (New-EntraOpsReportFindingData) per snapshot. Without
+    // findings, or with findings evaluated from other datasets than this page shows (for example after only one
+    // generator ran again), the page shows no risk flags and tiers but a notice.
+    var FLOW_FINDINGS = window.EntraOpsFlowFindings.create(window.ENTRAOPS_PIM_REQUEST_FLOW_FINDINGS, { configurationAnalyzer: DATA && DATA.generatedAt, eam: EAM_DATA && EAM_DATA.generatedAt, tierMap: window.EOCE_TIER_MAP && window.EOCE_TIER_MAP.generatedUtc }, "risk flags and role tiers");
+    var reportFindingsForSnapshot = FLOW_FINDINGS.forSnapshot;
+    var riskFlagNotice = FLOW_FINDINGS.notice;
+    var FF = window.EntraOpsFlowFindings;
+    var tierLabel = FF.tierLabel;
+    // Flag texts with the display names of the tiers (older findings files wrote "ControlPlane").
+    function flagText(flag) { return FF.displayText(flag.text); }
+    // A flow by its ID, case-insensitive (deep links can carry upper-case GUIDs).
+    function findFlow(flows, flowId) { return flows.filter(function (item) { return FF.sameId(item.id, flowId); })[0]; }
+    function notEvaluatedNow() { return pimState.snapshotIdx >= 0 ? riskFlagNotice(snapshots[pimState.snapshotIdx]) : null; }
+    // One risk flag: icon, the text, and a line with its check (rule ID linked to the Findings view, title); an accepted
+    // flag is muted, with the state and expiry of its finding exception.
+    function flagRowHtml(flag, titleHtml, extraDetailHtml) {
+        var accepted = !!flag.state;
+        var icon = accepted ? '<span class="ca-gap-icon" title="Accepted by a finding exception">&#10003;</span>' :
+            '<span class="ca-gap-icon ' + (flag.severity === "fail" ? "fail" : "warn") + '">' + (flag.severity === "fail" ? "✕" : "!") + "</span>";
+        return '<div class="ca-gap-row' + (accepted ? " flow-flag-accepted" : "") + '">' + icon + "<div>" + (titleHtml ? '<div class="ca-gap-title">' + titleHtml + "</div>" : "") +
+            '<div class="ca-gap-detail">' + esc(flagText(flag)) + (extraDetailHtml || "") + "</div>" + FLOW_FINDINGS.ruleRefHtml(flag) + "</div></div>";
     }
 
     // ---- Parse one snapshot's role settings + role definitions into the flow model ----------
@@ -312,7 +187,8 @@
         var key = snap.commitSha + "|" + snap.commitDate;
         if (pimCache[key]) return pimCache[key];
 
-        var roleDefs = {}, roleSettings = [];
+        // Role IDs of the snapshot as keys: a map without prototype.
+        var roleDefs = Object.create(null), roleSettings = [];
         snap.resources.forEach(function (r) {
             var type = String(r.type).toLowerCase();
             if (type !== RT.roleSetting && type !== RT.roleDefinition) return;
@@ -328,21 +204,28 @@
         });
 
         var flows = [];
+        var snapshotFindings = reportFindingsForSnapshot(key);
+        var reportFlags = (snapshotFindings && snapshotFindings.flags) || {};
+        var roleModels = (snapshotFindings && snapshotFindings.roles) || {};
         roleSettings.forEach(function (item) {
             var p = item.p;
             var roleId = p.Id;
             var roleDef = roleId ? roleDefs[roleId] : null;
             var roleName = p.DisplayName || (roleDef ? roleDef.displayName : item.resource.name);
-            var tierHit = roleId ? roleDefinitionTierIndex.get(String(roleId).toUpperCase()) : null;
-            if (!tierHit) tierHit = tierForRoleDefinition(roleDef);
-            var roleTier = tierHit ? tierHit.tierName : null;
-            var roleTierService = tierHit ? tierHit.service : null;
+            var roleKey = roleId || item.resource.p;
+            var roleModel = Object.prototype.hasOwnProperty.call(roleModels, roleKey) ? roleModels[roleKey] : {};
+            // Approvers without findings are shown as captured, without tier.
+            var approvers = roleModel.approvers || (Array.isArray(p.ActivateApprover) ? p.ActivateApprover : []).map(function (upn) { return { label: String(upn), tier: null, resolved: false, source: null }; });
 
             PATH_DEFS.forEach(function (pathDef) {
                 var flow = pathDef.build(p, roleDef, item.resource, roleId, roleName);
-                flow.roleTier = roleTier;
-                flow.roleTierService = roleTierService;
-                flow.flags = computeFlagsForFlow(flow, p, pathDef.key, roleTier).filter(function (flag) { return !excludedRiskFlagIds.has(flag.id); });
+                flow.roleTier = roleModel.tier || null;
+                flow.roleTierService = roleModel.service || null;
+                if (pathDef.key === "activation") flow.approvers = approvers;
+                // With the flags whose exception has expired since the evaluation: they are open again.
+                flow.flags = (Object.prototype.hasOwnProperty.call(reportFlags, flow.id) ? reportFlags[flow.id] : []).concat(FLOW_FINDINGS.expiredFor(key, flow.id));
+                // Flags accepted by a finding exception: shown muted, not counted as flagged.
+                flow.accepted = FLOW_FINDINGS.acceptedFor(key, flow.id);
                 flows.push(flow);
             });
         });
@@ -358,7 +241,7 @@
     var pimState = {
         snapshotIdx: -1,
         columns: new Set(["role", "path", "requirement", "approval", "notification"]),
-        pathFilter: new Set(["activation", "eligibleAssignment", "activeAssignment"]),
+        pathFilter: [], // assignment paths (multi-select); empty = all
         tierFilter: "",
         approvalFilter: "",
         flagFilter: "",
@@ -367,7 +250,11 @@
         search: "",
         traceNodeId: null
     };
-    var pimFlagState = { groupBy: "tier", sortBy: "severity", search: "", collapsedGroups: new Set(), collapseStateGroupBy: null };
+    var pimFlagState = { groupBy: "tier", sortBy: "severity", search: "" };
+    var Filters = window.EntraOpsFilters;
+    // Groups of the risk flag list (key: grouping + group name), collapsed by their title and remembered.
+    var riskGroups = Filters.collapsible("entraops.pimRequestFlow.riskFlags.collapsed", function () { renderFlagsSummary(currentFlows()); });
+    var visibleRiskGroups = [];
 
     var COLUMN_ORDER = ["role", "path", "requirement", "approval", "notification"];
     var COLUMNS = {
@@ -383,14 +270,15 @@
         return pimModelForSnapshot(snapshots[pimState.snapshotIdx]).flows;
     }
 
-    function flowMatchesFilters(f) {
-        if (!pimState.pathFilter.has(f.path)) return false;
-        if (pimState.tierFilter) {
+    // skip leaves out one filter (a key of pimState), for the counts of its pills.
+    function flowMatchesFilters(f, skip) {
+        if (skip !== "pathFilter" && !Filters.matchesFacet(pimState, "pathFilter", f.path)) return false;
+        if (skip !== "tierFilter" && pimState.tierFilter) {
             var wantUnclassified = pimState.tierFilter === "Unclassified";
             if (wantUnclassified ? !!f.roleTier : f.roleTier !== pimState.tierFilter) return false;
         }
-        if (pimState.approvalFilter === "required" && !f.approvalRequired) return false;
-        if (pimState.approvalFilter === "none" && f.approvalRequired) return false;
+        if (skip !== "approvalFilter" && pimState.approvalFilter === "required" && !f.approvalRequired) return false;
+        if (skip !== "approvalFilter" && pimState.approvalFilter === "none" && f.approvalRequired) return false;
         if (pimState.flagFilter && !f.flags.some(function (fl) { return fl.id === pimState.flagFilter; })) return false;
         if (pimState.metricFilter === "anyRisk" && !f.flags.length) return false;
         if (pimState.requirementFilter && f.requirements.indexOf(pimState.requirementFilter) === -1) return false;
@@ -481,10 +369,18 @@
             if (f.flags.some(function (fl) { return fl.id === "noApprovalActivation"; })) roleIdsNoApproval[rid] = true;
             if (f.flags.length) roleIdsFlagged[rid] = true;
         });
-        $("pimStatNoMfa").textContent = Object.keys(roleIdsNoMfa).length.toLocaleString();
-        $("pimStatNoApproval").textContent = Object.keys(roleIdsNoApproval).length.toLocaleString();
-        $("pimStatFlagged").textContent = Object.keys(roleIdsFlagged).length.toLocaleString();
-        $("pimStatTierData").textContent = roleDefinitionTierIndex.size ? "loaded (" + roleDefinitionTierIndex.size + " role(s) classified)" : "not generated";
+        var notEvaluated = notEvaluatedNow();
+        // A tile of an excluded rule says "excluded" instead of 0; without evaluated flags the tiles are no filters.
+        [["pimStatNoMfa", roleIdsNoMfa, "noMfaActivation"], ["pimStatNoApproval", roleIdsNoApproval, "noApprovalActivation"], ["pimStatFlagged", roleIdsFlagged, null]].forEach(function (stat) {
+            var excluded = stat[2] && FLOW_FINDINGS.isExcluded(stat[2]);
+            $(stat[0]).textContent = notEvaluated ? "–" : excluded ? "excluded" : Object.keys(stat[1]).length.toLocaleString();
+            $(stat[0]).title = notEvaluated || (excluded ? "The check is excluded (Findings.ExcludedRules) and not evaluated." : "");
+            var tile = $(stat[0]).closest("[data-pim-metric]");
+            if (tile) tile.disabled = !!(notEvaluated || excluded);
+        });
+        var classifiedRoles = {};
+        if (model) model.flows.forEach(function (f) { if (f.roleTier) classifiedRoles[f.roleId || f.roleName] = true; });
+        $("pimStatTierData").textContent = !model ? "not generated" : notEvaluated ? "not evaluated" : Object.keys(classifiedRoles).length.toLocaleString() + " of " + model.roleCount.toLocaleString() + " role(s) classified";
         document.querySelectorAll("[data-pim-metric]").forEach(function (tile) {
             var metric = tile.getAttribute("data-pim-metric");
             var selected = metric === "all" ? !pimState.flagFilter && pimState.metricFilter === "all" : (metric === "anyRisk" ? pimState.metricFilter === "anyRisk" : pimState.flagFilter === metric);
@@ -502,26 +398,22 @@
         });
         sel.innerHTML = html;
 
-        var pathHtml = "";
-        PATH_DEFS.forEach(function (pd) {
-            pathHtml += '<span class="ca-toggle' + (pimState.pathFilter.has(pd.key) ? " on" : "") + '" role="button" tabindex="0" data-path="' + pd.key + '">' + esc(pd.shortLabel) + "</span>";
-        });
-        $("pimPathToggles").innerHTML = pathHtml;
-
         var colHtml = "";
         COLUMN_ORDER.forEach(function (c) {
-            colHtml += '<span class="ca-toggle' + (pimState.columns.has(c) ? " on" : "") + '" role="button" tabindex="0" data-col="' + c + '">' + COLUMNS[c].label + "</span>";
+            colHtml += Filters.toggle("col", c, COLUMNS[c].label, pimState.columns.has(c));
         });
         $("pimColToggles").innerHTML = colHtml;
 
         var flows = currentFlows();
         var flags = {};
-        flows.forEach(function (f) { f.flags.forEach(function (fl) { flags[fl.id] = fl.text.split(".")[0]; }); });
+        // Labelled by the rule (ID and title), not by the text of one of its flags.
+        flows.forEach(function (f) { f.flags.forEach(function (fl) { flags[fl.id] = FLOW_FINDINGS.flagLabel(fl); }); });
         var fHtml = '<option value="">All flags</option>';
-        Object.keys(flags).sort().forEach(function (id) {
+        Object.keys(flags).sort(function (a, b) { return flags[a].localeCompare(flags[b]); }).forEach(function (id) {
             fHtml += '<option value="' + esc(id) + '"' + (id === pimState.flagFilter ? " selected" : "") + ">" + esc(flags[id]) + "</option>";
         });
         $("pimFltFlag").innerHTML = fHtml;
+        $("pimFltFlag").disabled = !!notEvaluatedNow();
 
         var reqs = {};
         flows.forEach(function (f) { f.requirements.forEach(function (r) { reqs[r] = true; }); });
@@ -530,6 +422,40 @@
             rHtml += '<option value="' + esc(r) + '"' + (r === pimState.requirementFilter ? " selected" : "") + ">" + esc(r) + "</option>";
         });
         $("pimFltRequirement").innerHTML = rHtml;
+    }
+
+    var TIER_PILLS = [
+        { tier: "ControlPlane", label: "Control Plane" },
+        { tier: "ManagementPlane", label: "Management Plane" },
+        { tier: "WorkloadPlane", label: "Workload Plane" },
+        { tier: "UserAccess", label: "User Access" },
+        { tier: "Unclassified", label: "Unclassified", title: "Unclassified / unresolved" }
+    ];
+
+    // Pills of the filters with few values. Each pill counts the assignment paths that match all other filters.
+    function renderFacets() {
+        var flows = currentFlows();
+        var paths = Filters.facetCounts(flows, "pathFilter", flowMatchesFilters, function (f) { return f.path; });
+        // Assignment paths are a multi-select: any combination of them; none selected shows all.
+        $("pimPathToggles").innerHTML = Filters.pill(pimState, "pathFilter", "", "All", paths.total, { multi: true }) + PATH_DEFS.map(function (pd) {
+            return Filters.pill(pimState, "pathFilter", pd.key, pd.shortLabel, paths.counts[pd.key] || 0, { multi: true, title: pd.description });
+        }).join("");
+
+        // Without evaluated tiers every role would count as Unclassified: the facet is hidden instead.
+        var tiersNotEvaluated = !!notEvaluatedNow();
+        $("pimTierRow").hidden = tiersNotEvaluated;
+        if (tiersNotEvaluated) pimState.tierFilter = "";
+        var tiers = Filters.facetCounts(flows, "tierFilter", flowMatchesFilters, function (f) { return f.roleTier || "Unclassified"; });
+        $("pimTierPills").innerHTML = Filters.pill(pimState, "tierFilter", "", "All", tiers.total) + TIER_PILLS.filter(function (item) {
+            return item.tier !== "WorkloadPlane" || tiers.counts[item.tier] || pimState.tierFilter === item.tier;
+        }).map(function (item) {
+            return Filters.tierPill(pimState, "tierFilter", item.tier, item.label, tiers.counts[item.tier] || 0, { title: item.title });
+        }).join("");
+
+        var approvals = Filters.facetCounts(flows, "approvalFilter", flowMatchesFilters, function (f) { return f.approvalRequired ? "required" : "none"; });
+        $("pimApprovalPills").innerHTML = Filters.pill(pimState, "approvalFilter", "", "All", approvals.total) +
+            Filters.pill(pimState, "approvalFilter", "required", "Approval required", approvals.counts.required || 0) +
+            Filters.pill(pimState, "approvalFilter", "none", "No approval required", approvals.counts.none || 0);
     }
 
     var pimSvg = null, pimTooltip = null, pimTraceFlowIds = null;
@@ -572,7 +498,7 @@
         pimTooltip = pimTooltip || d3.select("#tooltip");
         var emptyEl = $("pimSankeyEmpty");
         var all = currentFlows();
-        var flows = all.filter(flowMatchesFilters);
+        var flows = all.filter(function (f) { return flowMatchesFilters(f); });
         if (pimState.traceNodeId) {
             flows = flows.filter(function (f) { return pimTraceFlowIds && pimTraceFlowIds.has(f.id); });
         }
@@ -580,6 +506,7 @@
         $("pimFilterSummary").textContent = " · " + flows.length + " of " + all.length + " assignment path(s) shown";
         $("pimClearTrace").classList.toggle("hidden", !pimState.traceNodeId);
 
+        renderFacets();
         renderStats();
         renderFlagsSummary(all);
 
@@ -665,9 +592,9 @@
                     var f = graph.flowsById.get(d.id.slice("path|".length));
                     if (f) {
                         extra = esc(f.roleName) + " – " + esc(f.pathShortLabel) +
-                            (f.roleTier ? "<br/>Role tier: " + esc(f.roleTier) : "<br/>Role tier: Unclassified") +
+                            (f.roleTier ? "<br/>Role tier: " + esc(tierLabel(f.roleTier)) : notEvaluatedNow() ? "<br/>Role tier: not evaluated" : "<br/>Role tier: Unclassified") +
                             "<br/>" + esc(f.approvalLabel) +
-                            (f.flags.length ? "<br/>" + f.flags.map(function (fl) { return "⚠ " + esc(fl.text); }).join("<br/>") : "") +
+                            (f.flags.length ? "<br/>" + f.flags.map(function (fl) { return "⚠ " + esc(flagText(fl)); }).join("<br/>") : "") +
                             "<br/><i>Click for full detail</i>";
                     }
                 } else {
@@ -730,7 +657,7 @@
     }
 
     function renderFlowDetail(flowId) {
-        var f = currentFlows().filter(function (x) { return x.id === flowId; })[0];
+        var f = findFlow(currentFlows(), flowId);
         var el = $("pimFlowDetail");
         if (!f) { el.classList.add("hidden"); return; }
 
@@ -741,16 +668,22 @@
         function tieredList(title, items) {
             if (!items || !items.length) return "";
             var html = items.map(function (it) {
-                var chip = it.tier ? ' <span class="status-chip modified" style="background:' + tierColor(it.tier) + ';color:#fff;">' + esc(it.tier) + "</span>" : "";
-                return esc(it.label) + chip;
+                var chip = it.tier ? ' <span class="status-chip modified" style="background:' + tierColor(it.tier) + ';color:#fff;">' + esc(tierLabel(it.tier)) + "</span>" : "";
+                // A group approver is protected like its least protected member: shown when it differs from its tier.
+                var protection = it.protectionTier && it.protectionTier !== it.tier ? ' <span class="flow-protection">protected as ' + esc(tierLabel(it.protectionTier)) +
+                    (it.protectionMember ? " (least protected member: " + esc(it.protectionMember) + ")" : "") + "</span>" : "";
+                return esc(it.label) + chip + protection;
             }).join(" · ");
             return "<div style='margin-bottom:6px;'><b>" + esc(title) + ":</b> " + html + "</div>";
         }
 
-        var borderColor = f.flags.some(function (fl) { return fl.severity === "fail"; }) ? "#a4262c" : (f.flags.length ? "#8a6d00" : "#0e700e");
+        // Without evaluated findings (notice at the top of the page) neither a green border nor "Unclassified" applies.
+        var notEvaluated = riskFlagNotice(snapshots[pimState.snapshotIdx]);
+        var borderColor = notEvaluated ? "var(--neutral-stroke-strong)" : f.flags.some(function (fl) { return fl.severity === "fail"; }) ? "#a4262c" : (f.flags.length ? "#8a6d00" : "#0e700e");
+        var tierChip = f.roleTier ? ' <span class="status-chip modified" style="background:' + tierColor(f.roleTier) + ';color:#fff;">' + esc(tierLabel(f.roleTier)) + "</span>" :
+            notEvaluated ? ' <span class="chip" title="' + esc(notEvaluated) + '">Tier not evaluated</span>' : ' <span class="status-chip modified" style="background:#a19f9d;color:#fff;">Unclassified</span>';
         var html = '<div class="card" style="border-left:4px solid ' + borderColor + ';">';
-        html += '<div class="card-head">' + esc(f.roleName) + " – " + esc(f.pathShortLabel) +
-            (f.roleTier ? ' <span class="status-chip modified" style="background:' + tierColor(f.roleTier) + ';color:#fff;">' + esc(f.roleTier) + "</span>" : ' <span class="status-chip modified" style="background:#a19f9d;color:#fff;">Unclassified</span>') +
+        html += '<div class="card-head">' + esc(f.roleName) + " – " + esc(f.pathShortLabel) + tierChip +
             '<span class="chip ' + (f.approvalRequired ? "brand" : "warn") + '">' + esc(f.approvalLabel) + "</span></div>";
         html += '<div class="card-pad" style="font-size:13px;">';
         var pd = PATH_DEFS.filter(function (x) { return x.key === f.path; })[0];
@@ -761,10 +694,8 @@
         html += tieredList("Approver(s)", f.approvers);
         html += list("Notification(s)", f.notifications);
         html += list("Duration / expiration", [f.duration]);
-        if (f.flags.length) {
-            html += "<div style='margin-top:8px;'>" + f.flags.map(function (fl) {
-                return '<div class="ca-gap-row"><span class="ca-gap-icon ' + (fl.severity === "fail" ? "fail" : "warn") + '">' + (fl.severity === "fail" ? "✕" : "!") + '</span><div class="ca-gap-detail">' + esc(fl.text) + "</div></div>";
-            }).join("") + "</div>";
+        if (f.flags.length || f.accepted.length) {
+            html += "<div style='margin-top:8px;'>" + f.flags.concat(f.accepted).map(function (fl) { return flagRowHtml(fl); }).join("") + "</div>";
         }
         html += '<div class="muted" style="font-size:12px;margin-top:4px;">Source: <code>' + esc(f.resource.p) + "</code></div>";
         html += "</div></div>";
@@ -776,10 +707,20 @@
     // Risk flags summary (mirrors the Access Package Flow / Conditional Access coverage lists)
     // =====================================================================================
     function renderFlagsSummary(flows) {
-        var el = $("pimFlagsBody");
-        if (!flows.length) { el.innerHTML = '<div class="muted">No microsoft.entra.rolesetting resources with embedded content in the selected snapshot.</div>'; return; }
+        visibleRiskGroups = [];
+        renderFlagsList(flows);
+        updateCollapseAll();
+    }
 
-        var flagged = flows.filter(function (f) { return f.flags.length > 0; });
+    function renderFlagsList(flows) {
+        var el = $("pimFlagsBody");
+        // The notice is shown once, at the top of the page, for the selected snapshot.
+        var notice = riskFlagNotice(snapshots[pimState.snapshotIdx]);
+        FLOW_FINDINGS.renderNotice($("pimFindingsNotice"), notice);
+        if (!flows.length) { el.innerHTML = '<div class="muted">No microsoft.entra.rolesetting resources with embedded content in the selected snapshot.</div>'; return; }
+        if (notice) { el.innerHTML = FLOW_FINDINGS.listPlaceholder(); return; }
+
+        var flagged = flows.filter(function (f) { return f.flags.length > 0 || f.accepted.length > 0; });
         if (!flagged.length) {
             el.innerHTML = '<div class="ca-gap-row"><span class="ca-gap-icon ok">✓</span><div><div class="ca-gap-title">No risk flags found</div><div class="ca-gap-detail">Every privileged role in this snapshot requires MFA and approval to activate, has no unenforced approver configuration, and does not allow permanent privileged assignments.</div></div></div>';
             return;
@@ -787,14 +728,15 @@
 
         var rows = [];
         flagged.forEach(function (f) {
-            f.flags.forEach(function (fl) {
-                rows.push({ flow: f, flag: fl, tier: f.roleTier || "Unclassified", service: f.roleTierService || "Unclassified / no service" });
+            // Accepted flags (finding exceptions) are listed muted after the open ones; they don't count.
+            f.flags.concat(f.accepted).forEach(function (fl) {
+                rows.push({ flow: f, flag: fl, accepted: !!fl.state, tier: f.roleTier || "Unclassified", service: f.roleTierService || "Unclassified / no service" });
             });
         });
         if (pimFlagState.search) {
             var query = pimFlagState.search.toLowerCase();
             rows = rows.filter(function (row) {
-                return [row.flow.roleName, row.flow.pathLabel, row.tier, row.service, row.flag.text].join(" ").toLowerCase().indexOf(query) !== -1;
+                return [row.flow.roleName, row.flow.pathLabel, tierLabel(row.tier), row.service, flagText(row.flag), FLOW_FINDINGS.ruleId(row.flag)].join(" ").toLowerCase().indexOf(query) !== -1;
             });
         }
         if (!rows.length) {
@@ -802,6 +744,7 @@
             return;
         }
         rows.sort(function (a, b) {
+            if (a.accepted !== b.accepted) return a.accepted ? 1 : -1;
             if (pimFlagState.sortBy === "severity") {
                 var severityOrder = { fail: 0, warn: 1 };
                 var severityDiff = severityOrder[a.flag.severity] - severityOrder[b.flag.severity];
@@ -815,7 +758,8 @@
             }
             return a.flow.roleName.localeCompare(b.flow.roleName) || a.flow.pathOrder - b.flow.pathOrder || a.flag.text.localeCompare(b.flag.text);
         });
-        var groups = {};
+        // Without prototype: a service may be named "constructor" or "toString".
+        var groups = Object.create(null);
         rows.forEach(function (row) {
             var key = pimFlagState.groupBy === "tier" ? row.tier : (pimFlagState.groupBy === "service" ? row.service : "All risk flags");
             if (!groups[key]) groups[key] = [];
@@ -825,49 +769,67 @@
         var groupNames = Object.keys(groups).sort(function (a, b) {
             return pimFlagState.groupBy === "tier" ? tierRank(a) - tierRank(b) : a.localeCompare(b);
         });
-        if (pimFlagState.collapseStateGroupBy !== pimFlagState.groupBy) {
-            pimFlagState.collapsedGroups = new Set(groupNames);
-            pimFlagState.collapseStateGroupBy = pimFlagState.groupBy;
-        }
+        visibleRiskGroups = groupNames.map(function (group) { return pimFlagState.groupBy + "|" + group; });
         groupNames.forEach(function (group) {
-            var isCollapsed = pimFlagState.collapsedGroups.has(group);
-            var groupId = "risk-group-" + pimFlagState.groupBy + "-" + group;
-            var severityCounts = { fail: 0, warn: 0 };
-            groups[group].forEach(function (row) { severityCounts[row.flag.severity]++; });
-            var pills = (severityCounts.fail ? '<span class="pim-risk-stat-pill fail">&#10005; ' + severityCounts.fail + '</span>' : "") +
-                (severityCounts.warn ? '<span class="pim-risk-stat-pill warn">! ' + severityCounts.warn + '</span>' : "");
-            html += '<div class="pim-risk-area"><button type="button" class="pim-risk-group-head" data-risk-group="' + esc(group) + '" aria-expanded="' + (!isCollapsed) + '" aria-controls="' + esc(groupId) + '">' +
-                '<span class="pim-risk-group-chevron" aria-hidden="true">' + (isCollapsed ? "&#9656;" : "&#9662;") + '</span><span class="pim-risk-group-title">' + esc(group) + '</span><span class="pim-risk-group-stats">' + pills + '</span></button>';
-            html += '<div class="pim-risk-group-items' + (isCollapsed ? " hidden" : "") + '" id="' + esc(groupId) + '">';
+            var key = pimFlagState.groupBy + "|" + group;
+            var severityCounts = { fail: 0, warn: 0, accepted: 0 };
+            groups[group].forEach(function (row) { severityCounts[row.accepted ? "accepted" : row.flag.severity === "fail" ? "fail" : "warn"]++; });
+            var pills = (severityCounts.fail ? '<span class="pim-risk-stat-pill fail" title="Fail">&#10005; ' + severityCounts.fail + '</span>' : "") +
+                (severityCounts.warn ? '<span class="pim-risk-stat-pill warn" title="Warning">! ' + severityCounts.warn + '</span>' : "") +
+                (severityCounts.accepted ? '<span class="flow-exception-state" title="Accepted by finding exceptions">' + severityCounts.accepted + " accepted</span>" : "");
+            var items = "";
             groups[group].forEach(function (row) {
                 var f = row.flow, fl = row.flag;
-                var metadata = f.pathShortLabel + ' · ' + row.tier + ' · ' + row.service;
-                html += '<div class="ca-gap-row"><span class="ca-gap-icon ' + (fl.severity === "fail" ? "fail" : "warn") + '">' + (fl.severity === "fail" ? "✕" : "!") + '</span>' +
-                    '<div><div class="ca-gap-title">' + esc(f.roleName) + ' <span class="muted" style="font-size:11px;">(' + esc(metadata) + ')</span> ' + EntraOpsReportUtils.reviewControl("pim-request-flow", f.id + "|" + fl.id) + '</div>' +
-                    '<div class="ca-gap-detail">' + esc(fl.text) + ' · <a href="../ConfigurationAnalyzer/index.html?view=resources#resource=' + pimState.snapshotIdx + "|" + encodeURIComponent(f.resource.p) + '">Inspect source resource</a></div></div></div>';
+                var metadata = f.pathShortLabel + ' · ' + tierLabel(row.tier) + ' · ' + row.service;
+                items += flagRowHtml(fl, esc(f.roleName) + ' <span class="muted" style="font-size:11px;">(' + esc(metadata) + ")</span> " + (row.accepted ? "" : EntraOpsReportUtils.reviewControl("pim-request-flow", f.id + "|" + fl.id)),
+                    ' · <a href="../ConfigurationAnalyzer/index.html?view=resources#resource=' + pimState.snapshotIdx + "|" + encodeURIComponent(f.resource.p) + '">Inspect source resource</a>');
             });
-            html += "</div></div>";
+            html += riskGroups.open(key) + riskGroups.head(key, pimFlagState.groupBy === "tier" ? tierLabel(group) : group, pills) + riskGroups.body(key, items) + "</div>";
         });
         html += '<p class="muted" style="font-size:12px;margin-top:10px;">Role tiers come from the generated Classification Explorer catalog and captured role actions. The optional EAM Dashboard dataset adds tenant-specific assignment evidence.</p>';
         el.innerHTML = html;
         EntraOpsReportUtils.bindReviewControls(el);
     }
 
+    // One button collapses all groups of the risk flag list, or expands them when all are collapsed.
+    function updateCollapseAll() {
+        $("pimCollapseAllRiskGroups").textContent = riskGroups.allCollapsed(visibleRiskGroups) ? "Expand all" : "Collapse all";
+        $("pimCollapseAllRiskGroups").disabled = !visibleRiskGroups.length;
+    }
+
+    // Clears the filters of the flow (like a snapshot change, plus paths, tier and search), so a deep-linked path
+    // is never hidden behind them.
+    function clearFiltersForDeepLink() {
+        pimState.pathFilter = [];
+        pimState.tierFilter = "";
+        pimState.approvalFilter = "";
+        pimState.flagFilter = "";
+        pimState.metricFilter = "all";
+        pimState.requirementFilter = "";
+        pimState.search = "";
+        $("pimFltSearch").value = "";
+    }
+
     function applyFlowDeepLink() {
         var flowId = EntraOpsReportUtils.flowReferenceFromHash();
         if (!flowId) return;
-        var flow = currentFlows().filter(function (item) { return item.id === flowId; })[0];
+        var flow = findFlow(currentFlows(), flowId);
         if (!flow) {
             var previousIdx = pimState.snapshotIdx;
             var detailIdxs = detailedSnapshotIdxs();
             for (var index = detailIdxs.length - 1; index >= 0 && !flow; index--) {
                 pimState.snapshotIdx = detailIdxs[index];
-                flow = currentFlows().filter(function (item) { return item.id === flowId; })[0];
+                flow = findFlow(currentFlows(), flowId);
             }
-            if (flow) renderControls();
-            else pimState.snapshotIdx = previousIdx;
+            if (!flow) pimState.snapshotIdx = previousIdx;
         }
-        if (!flow) return;
+        if (!flow) {
+            EntraOpsReportUtils.deepLinkNotFound("Assignment path", flowId, "loaded snapshots");
+            return;
+        }
+        if (!flowMatchesFilters(flow)) clearFiltersForDeepLink();
+        renderControls();
+        flowId = flow.id;
         pimState.traceNodeId = "path|" + flowId;
         pimTraceFlowIds = new Set([flowId]);
         renderSankey();
@@ -920,37 +882,15 @@
             pimState.approvalFilter = "";
             pimState.flagFilter = "";
             pimState.requirementFilter = "";
-            $("pimFltApproval").value = "";
             $("pimFlowDetail").classList.add("hidden");
             renderControls();
             renderSankey();
         });
-        function toggleKeydown(ev) {
-            if (ev.key !== "Enter" && ev.key !== " ") return;
-            var t = ev.target.closest(".ca-toggle");
-            if (!t) return;
-            ev.preventDefault();
-            t.click();
-        }
-        $("pimPathToggles").addEventListener("keydown", toggleKeydown);
-        $("pimColToggles").addEventListener("keydown", toggleKeydown);
-        $("pimPathToggles").addEventListener("click", function (ev) {
-            var t = ev.target.closest("[data-path]");
-            if (!t) return;
-            var k = t.getAttribute("data-path");
-            if (pimState.pathFilter.has(k)) {
-                if (pimState.pathFilter.size <= 1) return;
-                pimState.pathFilter.delete(k);
-            } else pimState.pathFilter.add(k);
-            pimState.traceNodeId = null;
-            pimTraceFlowIds = null;
-            renderControls();
-            renderSankey();
-        });
+        // Columns of the flow (view option, at least two).
         $("pimColToggles").addEventListener("click", function (ev) {
-            var t = ev.target.closest("[data-col]");
+            var t = ev.target.closest('[data-toggle="col"]');
             if (!t) return;
-            var c = t.getAttribute("data-col");
+            var c = t.getAttribute("data-value");
             if (pimState.columns.has(c)) {
                 if (pimState.columns.size <= 2) return;
                 pimState.columns.delete(c);
@@ -959,9 +899,16 @@
             pimTraceFlowIds = null;
             renderControls();
             renderSankey();
+            $("pimColToggles").querySelector('[data-value="' + c + '"]').focus();
         });
-        $("pimFltTier").addEventListener("change", function () { pimState.tierFilter = this.value; renderSankey(); });
-        $("pimFltApproval").addEventListener("change", function () { pimState.approvalFilter = this.value; renderSankey(); });
+        Filters.bindPills($("pimFacets"), pimState, function (facet) {
+            // Another set of assignment paths clears the node trace, as before.
+            if (facet === "pathFilter") {
+                pimState.traceNodeId = null;
+                pimTraceFlowIds = null;
+            }
+            renderSankey();
+        });
         $("pimFltFlag").addEventListener("change", function () { pimState.flagFilter = this.value; pimState.metricFilter = "all"; renderSankey(); });
         $("pimFltRequirement").addEventListener("change", function () { pimState.requirementFilter = this.value; renderSankey(); });
         document.querySelectorAll("[data-pim-metric]").forEach(function (tile) {
@@ -985,28 +932,8 @@
         });
         $("pimFlagGroup").addEventListener("change", function () { pimFlagState.groupBy = this.value; renderFlagsSummary(currentFlows()); });
         $("pimFlagSort").addEventListener("change", function () { pimFlagState.sortBy = this.value; renderFlagsSummary(currentFlows()); });
-        $("pimFlagsBody").addEventListener("click", function (ev) {
-            var groupHead = ev.target.closest("[data-risk-group]");
-            if (!groupHead) return;
-            var group = groupHead.getAttribute("data-risk-group");
-            if (pimFlagState.collapsedGroups.has(group)) pimFlagState.collapsedGroups.delete(group);
-            else pimFlagState.collapsedGroups.add(group);
-            renderFlagsSummary(currentFlows());
-        });
-        $("pimExpandAllRiskGroups").addEventListener("click", function () {
-            pimFlagState.collapsedGroups.clear();
-            renderFlagsSummary(currentFlows());
-        });
-        $("pimCollapseAllRiskGroups").addEventListener("click", function () {
-            var groups = new Set();
-            currentFlows().forEach(function (flow) {
-                flow.flags.forEach(function () {
-                    groups.add(pimFlagState.groupBy === "tier" ? (flow.roleTier || "Unclassified") : (pimFlagState.groupBy === "service" ? (flow.roleTierService || "Unclassified / no service") : "All risk flags"));
-                });
-            });
-            pimFlagState.collapsedGroups = groups;
-            renderFlagsSummary(currentFlows());
-        });
+        riskGroups.bind($("pimFlagsBody"));
+        $("pimCollapseAllRiskGroups").addEventListener("click", function () { riskGroups.setAll(visibleRiskGroups, !riskGroups.allCollapsed(visibleRiskGroups)); });
         var flagSearchTimer = null;
         $("pimFlagSearch").addEventListener("input", function () {
             var value = this.value;
@@ -1026,7 +953,7 @@
             renderSankey();
         });
         $("pimResetFilters").addEventListener("click", function () {
-            pimState.pathFilter = new Set(PATH_DEFS.map(function (path) { return path.key; }));
+            pimState.pathFilter = [];
             pimState.tierFilter = "";
             pimState.approvalFilter = "";
             pimState.flagFilter = "";
@@ -1035,8 +962,6 @@
             pimState.search = "";
             pimState.traceNodeId = null;
             pimTraceFlowIds = null;
-            $("pimFltTier").value = "";
-            $("pimFltApproval").value = "";
             $("pimFltSearch").value = "";
             $("pimFlagSearch").value = "";
             pimFlagState.search = "";
@@ -1045,8 +970,15 @@
             renderSankey();
         });
         $("pimExportFiltered").addEventListener("click", function () {
-            var rows = currentFlows().filter(flowMatchesFilters).map(function (flow) {
-                return { snapshot: snapshotLabel(snapshots[pimState.snapshotIdx], pimState.snapshotIdx), role: flow.roleName, path: flow.pathLabel, accessLevel: flow.roleTier || "Unclassified", approval: flow.approvalLabel, requirements: flow.requirements.join("; "), riskFlags: flow.flags.map(function (flag) { return flag.id; }).join("; ") };
+            // Without evaluated findings the export says so, instead of "Unclassified" and no risk flags.
+            var notEvaluated = notEvaluatedNow();
+            var rows = currentFlows().filter(function (f) { return flowMatchesFilters(f); }).map(function (flow) {
+                return {
+                    snapshot: snapshotLabel(snapshots[pimState.snapshotIdx], pimState.snapshotIdx), role: flow.roleName, path: flow.pathLabel,
+                    accessLevel: notEvaluated ? "not evaluated" : tierLabel(flow.roleTier) || "Unclassified", approval: flow.approvalLabel, requirements: flow.requirements.join("; "),
+                    riskFlags: notEvaluated ? "not evaluated" : flow.flags.map(function (flag) { return [FLOW_FINDINGS.ruleId(flag), flag.id].filter(Boolean).join(" "); }).join("; "),
+                    acceptedFlags: notEvaluated ? "" : flow.accepted.map(function (flag) { return [FLOW_FINDINGS.ruleId(flag), flag.id].filter(Boolean).join(" ") + " (" + FLOW_FINDINGS.exceptionLabel(flag) + ")"; }).join("; ")
+                };
             });
             EntraOpsReportUtils.exportRows("entraops-pim-request-flow-filtered", rows);
         });
@@ -1054,10 +986,15 @@
             var query = pimFlagState.search.toLowerCase();
             var rows = [];
             currentFlows().forEach(function (flow) {
-                flow.flags.forEach(function (flag) {
-                    var tier = flow.roleTier || "Unclassified", service = flow.roleTierService || "Unclassified / no service";
-                    if (query && [flow.roleName, flow.pathLabel, tier, service, flag.text].join(" ").toLowerCase().indexOf(query) === -1) return;
-                    rows.push({ snapshot: snapshotLabel(snapshots[pimState.snapshotIdx], pimState.snapshotIdx), role: flow.roleName, path: flow.pathLabel, accessLevel: tier, service: service, severity: flag.severity, flag: flag.id, detail: flag.text, sourceResource: flow.resource.p });
+                flow.flags.concat(flow.accepted).forEach(function (flag) {
+                    var tier = tierLabel(flow.roleTier) || "Unclassified", service = flow.roleTierService || "Unclassified / no service";
+                    if (query && [flow.roleName, flow.pathLabel, tier, service, flagText(flag)].join(" ").toLowerCase().indexOf(query) === -1) return;
+                    var rule = FLOW_FINDINGS.ruleFor(flag);
+                    rows.push({
+                        snapshot: snapshotLabel(snapshots[pimState.snapshotIdx], pimState.snapshotIdx), role: flow.roleName, path: flow.pathLabel, accessLevel: tier, service: service,
+                        severity: flag.severity, ruleId: FLOW_FINDINGS.ruleId(flag), rule: rule ? rule.title : "", flag: flag.id, detail: flagText(flag),
+                        exception: FLOW_FINDINGS.exceptionLabel(flag), sourceResource: flow.resource.p
+                    });
                 });
             });
             EntraOpsReportUtils.exportRows("entraops-pim-request-risk-flags", rows);

@@ -166,12 +166,12 @@ function New-EntraOpsWorkloadIdentity {
         "AppRoleAssignment.ReadWrite.All",
         "RoleManagement.ReadWrite.Directory"
     )
-    Connect-MgGraph -Scopes $GraphScopes -TenantId $Config.TenantId
+    Connect-MgGraph -Scopes $GraphScopes -TenantId $Config.TenantId -ContextScope Process
 
     Write-Host "Connect to Azure..."
     $AzContext = Get-AzContext
     if ($AzContext.Tenant.Id -ne $Config.TenantId) {
-        Connect-AzAccount -Tenant $Config.TenantId
+        Connect-AzAccount -Tenant $Config.TenantId -Scope Process
     }
     #endregion
 
@@ -273,6 +273,7 @@ function New-EntraOpsWorkloadIdentity {
         "DirectoryRecommendations.Read.All",
         "EntitlementManagement.Read.All",
         "Group.Read.All",
+        "Group-XTenantIdentitySync.Read.All",
         "RemoteTenantGroups.Read.All",
         "PrivilegedAccess.Read.AzureADGroup",
         "PrivilegedEligibilitySchedule.Read.AzureADGroup",

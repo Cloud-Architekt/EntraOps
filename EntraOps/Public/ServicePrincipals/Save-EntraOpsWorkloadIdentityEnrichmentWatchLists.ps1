@@ -47,11 +47,8 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
         [object]$WatchLists = "None"
     )
 
-    try {
-        Import-Module "SentinelEnrichment" -ErrorAction Stop
-    } catch {
-        throw "Issue to import SentinelEnrichment modul!"
-    }
+    Install-EntraOpsRequiredModule -ModuleName 'SentinelEnrichment' -Import | Out-Null
+    $WatchListResults = [System.Collections.Generic.List[psobject]]::new()
 
     #region Workload Identity Assignments
     if ($WatchLists -eq "All" -or $WatchLists -contains "ManagedIdentityAssignedResourceId") {
@@ -78,16 +75,15 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
             $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
             $MiAssignedResourceIdWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
             $Parameters = @{
-                WatchListFilePath        = $WatchListPath
-                DisplayName              = $WatchListName
-                itemsSearchKey           = $SearchKey
-                SubscriptionId           = $SentinelSubscriptionId
-                ResourceGroupName        = $SentinelResourceGroupName
-                WorkspaceName            = $SentinelWorkspaceName
-                DefaultDuration          = "P14D"
-                ReplaceExistingWatchlist = $true
+                WatchListFilePath = $WatchListPath
+                WatchListName     = $WatchListName
+                SearchKey         = $SearchKey
+                ExpectedItemCount = @($MiAssignedResourceIdWatchlistItems).Count
+                SubscriptionId    = $SentinelSubscriptionId
+                ResourceGroupName = $SentinelResourceGroupName
+                WorkspaceName     = $SentinelWorkspaceName
             }
-            New-GkSeAzSentinelWatchlist @Parameters
+            $WatchListResults.Add((Publish-EntraOpsSentinelWatchlist @Parameters))
             Remove-Item -Path $WatchListPath -Force
         }
     }
@@ -114,16 +110,15 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
             $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
             $WorkloadIdentityAttackPathsWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
             $Parameters = @{
-                WatchListFilePath        = $WatchListPath
-                DisplayName              = $WatchListName
-                itemsSearchKey           = $SearchKey
-                SubscriptionId           = $SentinelSubscriptionId
-                ResourceGroupName        = $SentinelResourceGroupName
-                WorkspaceName            = $SentinelWorkspaceName
-                DefaultDuration          = "P14D"
-                ReplaceExistingWatchlist = $true
+                WatchListFilePath = $WatchListPath
+                WatchListName     = $WatchListName
+                SearchKey         = $SearchKey
+                ExpectedItemCount = @($WorkloadIdentityAttackPathsWatchlistItems).Count
+                SubscriptionId    = $SentinelSubscriptionId
+                ResourceGroupName = $SentinelResourceGroupName
+                WorkspaceName     = $SentinelWorkspaceName
             }
-            New-GkSeAzSentinelWatchlist @Parameters
+            $WatchListResults.Add((Publish-EntraOpsSentinelWatchlist @Parameters))
             Remove-Item -Path $WatchListPath -Force
         }
     }
@@ -150,16 +145,15 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
             $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
             $WorkloadIdentityInfoWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
             $Parameters = @{
-                WatchListFilePath        = $WatchListPath
-                DisplayName              = $WatchListName
-                itemsSearchKey           = $SearchKey
-                SubscriptionId           = $SentinelSubscriptionId
-                ResourceGroupName        = $SentinelResourceGroupName
-                WorkspaceName            = $SentinelWorkspaceName
-                DefaultDuration          = "P14D"
-                ReplaceExistingWatchlist = $true
+                WatchListFilePath = $WatchListPath
+                WatchListName     = $WatchListName
+                SearchKey         = $SearchKey
+                ExpectedItemCount = @($WorkloadIdentityInfoWatchlistItems).Count
+                SubscriptionId    = $SentinelSubscriptionId
+                ResourceGroupName = $SentinelResourceGroupName
+                WorkspaceName     = $SentinelWorkspaceName
             }
-            New-GkSeAzSentinelWatchlist @Parameters
+            $WatchListResults.Add((Publish-EntraOpsSentinelWatchlist @Parameters))
             Remove-Item -Path $WatchListPath -Force
         }
     }
@@ -186,20 +180,26 @@ function Save-EntraOpsWorkloadIdentityEnrichmentWatchLists {
             $WatchListPath = Join-Path $PWD "$($WatchListName).csv"
             $WorkloadIdentityRecommendationsWatchlistItems | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
             $Parameters = @{
-                WatchListFilePath        = $WatchListPath
-                DisplayName              = $WatchListName
-                itemsSearchKey           = $SearchKey
-                SubscriptionId           = $SentinelSubscriptionId
-                ResourceGroupName        = $SentinelResourceGroupName
-                WorkspaceName            = $SentinelWorkspaceName
-                DefaultDuration          = "P14D"
-                ReplaceExistingWatchlist = $true
+                WatchListFilePath = $WatchListPath
+                WatchListName     = $WatchListName
+                SearchKey         = $SearchKey
+                ExpectedItemCount = @($WorkloadIdentityRecommendationsWatchlistItems).Count
+                SubscriptionId    = $SentinelSubscriptionId
+                ResourceGroupName = $SentinelResourceGroupName
+                WorkspaceName     = $SentinelWorkspaceName
             }
-            New-GkSeAzSentinelWatchlist @Parameters
+            $WatchListResults.Add((Publish-EntraOpsSentinelWatchlist @Parameters))
             Remove-Item -Path $WatchListPath -Force
         }
     }
     #endregion
+
+    $FailedWatchLists = @($WatchListResults | Where-Object { $null -ne $_.Issue })
+    if ($FailedWatchLists.Count -gt 0) {
+        # Non-terminating under the module's "Stop" preference; an -ErrorAction passed by the caller still applies
+        $ReportErrorAction = if ($PSBoundParameters.ContainsKey('ErrorAction')) { $PSBoundParameters['ErrorAction'] } elseif ($ErrorActionPreference -eq 'Stop') { 'Continue' } else { $ErrorActionPreference }
+        Write-Error -ErrorAction $ReportErrorAction -Message "$($FailedWatchLists.Count) watchlist(s) missing or empty after the upload: $(($FailedWatchLists | ForEach-Object { "$($_.WatchListName) ($($_.Issue))" }) -join ', '). Re-run the watchlist upload and check the watchlists in Microsoft Sentinel."
+    }
 
     if ($WatchLists -eq "None") {
         Write-Warning 'No WatchList scope defined. Please define the target WatchLists by using "-WatchLists" parameter and choose between the following values/options: "All", "ManagedIdentityAssignedResourceId", "WorkloadIdentityAttackPaths", "WorkloadIdentityInfo", "WorkloadIdentityRecommendations"'

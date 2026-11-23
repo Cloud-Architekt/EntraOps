@@ -53,6 +53,49 @@ Describe 'New-EntraOpsReportingData content preflight' {
         Should -Invoke -ModuleName EntraOps New-EntraOpsPrivilegedAssetsData -Times 1 -Exactly
     }
 
+    It 'saves the finding results with the report data, so the reporting pipelines publish them' {
+        New-EntraOpsReportingData @script:Parameters -InstallMissingReportingFolder
+
+        $FindingsFile = "$script:Workspace/Reports/Findings/data/findings.json"
+        $FindingsFile | Should -Exist
+        $Findings = Get-Content -LiteralPath $FindingsFile -Raw | ConvertFrom-Json
+        $Findings.SchemaVersion | Should -Be '1.0'
+        @($Findings.Rules).Count | Should -Be 59
+        # Without Privileged EAM export and report data, every rule is skipped with the reason.
+        @($Findings.Rules.Status | Select-Object -Unique) | Should -Be @('Skipped')
+        ($Findings.Rules | Where-Object Area -eq 'TierBreach')[0].Reason | Should -Match 'Save-EntraOpsPrivilegedEAMJson'
+        ($Findings.Rules | Where-Object Area -eq 'PimRequestFlow')[0].Reason | Should -Match 'New-EntraOpsReportingData'
+        # The same results as script for Privileged Assets, which loads ../Findings/data/findings.js.
+        "$script:Workspace/Reports/Findings/data/findings.js" | Should -Exist
+        Test-Path -LiteralPath "$script:Workspace/Reports/PrivilegedAssets/../Findings/data/findings.js" -PathType Leaf | Should -BeTrue
+    }
+
+    It 'does not evaluate the Tenant Governance data of an earlier run when the Configuration Analyzer data fails' {
+        New-Item -ItemType Directory -Path "$script:Workspace/TenantGovernance/Snapshots", "$script:Workspace/Reports/ConfigurationAnalyzer/data" -Force | Out-Null
+        Set-Content -LiteralPath "$script:Workspace/Reports/ConfigurationAnalyzer/index.html" -Value 'app'
+        Set-Content -LiteralPath "$script:Workspace/Reports/ConfigurationAnalyzer/data/configuration-analyzer-data.js" -Value 'window.ENTRAOPS_CONFIGANALYZER_DATA = {"snapshots":[]};'
+        Mock -ModuleName EntraOps New-EntraOpsTenantGovernanceConfigurationAnalyzerData { throw 'The newest snapshot is 31 hours old.' }
+        Mock -ModuleName EntraOps New-EntraOpsReportFindingData {}
+        $Parameters = $script:Parameters.Clone()
+        $Parameters.Remove('SkipConfigurationAnalyzer')
+
+        New-EntraOpsReportingData @Parameters -InstallMissingReportingFolder -WarningVariable Warnings -WarningAction SilentlyContinue
+
+        Should -Invoke -ModuleName EntraOps New-EntraOpsReportFindingData -Times 0
+        @($Warnings | Where-Object { "$_" -like 'Skipped PIM Request Flow and Access Package Flow findings*' }).Count | Should -Be 1
+        $Findings = Get-Content -LiteralPath "$script:Workspace/Reports/Findings/data/findings.json" -Raw | ConvertFrom-Json
+        foreach ($Area in 'TenantGovernance', 'PimRequestFlow', 'AccessPackageFlow') {
+            ($Findings.Rules | Where-Object Area -eq $Area)[0].Reason | Should -BeLike '*could not be generated in this run*31 hours old*'
+        }
+    }
+
+    It 'does not save the finding results with SkipFindings' {
+        New-EntraOpsReportingData @script:Parameters -InstallMissingReportingFolder -SkipFindings
+
+        "$script:Workspace/Reports/Findings/data/findings.json" | Should -Not -Exist
+        "$script:Workspace/Reports/Findings/data/findings.js" | Should -Not -Exist
+    }
+
     It 'checks and installs the reporting apps below an explicit EntraOpsRoot' {
         $OtherRoot = Join-Path $TestDrive "other-$([guid]::NewGuid().ToString('N'))"
         Copy-Item -LiteralPath $script:Workspace -Destination $OtherRoot -Recurse
@@ -63,6 +106,11 @@ Describe 'New-EntraOpsReportingData content preflight' {
 
         Should -Invoke -ModuleName EntraOps Install-EntraOpsReportingFolder -Times 1 -Exactly -ParameterFilter { [System.IO.Path]::GetFullPath($DestinationPath) -eq [System.IO.Path]::GetFullPath((Join-Path $OtherRoot 'Reports')) }
         Test-Path -LiteralPath "$OtherRoot/Reports/PrivilegedAssets/index.html" | Should -BeTrue
+    }
+
+    It 'takes the working folder as -Path, like Invoke-EntraOpsAssessment and Initialize-EntraOpsWorkspace' {
+        (Get-Command New-EntraOpsReportingData).Parameters['EntraOpsRoot'].Aliases | Should -Contain 'Path'
+        (Get-Command New-EntraOpsPrivilegedEamPrivilegeHistoryData).Parameters['RepoRoot'].Aliases | Should -Contain 'Path'
     }
 
     It 'resolves the default app folder of <Generator> below the given RepoRoot' -ForEach @(

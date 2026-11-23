@@ -47,6 +47,8 @@
                     Assets</span></a>
             <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html"><span
                     class="ico">&#9636;</span><span>Overview</span></a>
+            <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html?view=findings"><span
+                    class="ico">&#9873;</span><span>Findings</span></a>
             <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html?view=classification"><span
                     class="ico">&#9998;</span><span>Object Classification</span></a>
             <div class="nav-item active"><span class="ico">&#10565;</span><span>Access Path Map</span></div>
@@ -139,7 +141,7 @@
 
             <!-- Graph -->
             <section class="card" style="margin-bottom:16px;">
-                <div class="card-head">Attack path graph
+                <div class="card-head"><span class="apm-graph-title">Attack path graph</span>
                     <span class="chip brand hidden" id="graphFocus"></span>
                     <button class="btn small hidden" id="clearFocus">Clear focus</button>
                     <span class="chip warn hidden" id="graphTruncated"
@@ -207,6 +209,7 @@
          Optional at load time: when absent the app shows instructions instead of failing. -->
     <script src="data/access-path-map-data.js"></script>
     <script src="assets/vendor/d3.min.js"></script>
+    <script src="../shared/report-utils.js"></script>
     <script src="js/review.js"></script>
     <script src="js/navCollapse.js"></script>
     <script src="js/app.js"></script>

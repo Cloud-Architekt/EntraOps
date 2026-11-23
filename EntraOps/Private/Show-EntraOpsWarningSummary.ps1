@@ -30,6 +30,9 @@ function Show-EntraOpsWarningSummary {
     }
 
     $GuidPattern = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+    # A GUID right after "tenant" (e.g. "not owned by tenant <id>", "home tenant ID: <id>") names the tenant the
+    # message refers to, not an affected object: it stays part of the message instead of being listed as object ID.
+    $ObjectIdPattern = "(?i)(?<!\btenant(?:\s+id)?[\s:]+)$GuidPattern"
     $PrincipalNamePattern = '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b'
 
     Write-Host ""
@@ -47,7 +50,7 @@ function Show-EntraOpsWarningSummary {
         $NormalizedGroups = [ordered]@{}
         foreach ($WarningMessage in $TypeGroup.Group) {
             $Message = $WarningMessage.Message
-            $NormalizedMessage = [regex]::Replace([regex]::Replace($Message, $GuidPattern, '{id}'), $PrincipalNamePattern, '{principal}')
+            $NormalizedMessage = [regex]::Replace([regex]::Replace($Message, $ObjectIdPattern, '{id}'), $PrincipalNamePattern, '{principal}')
             if (-not $NormalizedGroups.Contains($NormalizedMessage)) {
                 $NormalizedGroups[$NormalizedMessage] = [PSCustomObject]@{
                     NormalizedMessage = $NormalizedMessage
@@ -58,7 +61,7 @@ function Show-EntraOpsWarningSummary {
             }
             $Entry = $NormalizedGroups[$NormalizedMessage]
             $Entry.Count++
-            foreach ($Id in ([regex]::Matches($Message, $GuidPattern) | ForEach-Object { $_.Value } | Select-Object -Unique)) {
+            foreach ($Id in ([regex]::Matches($Message, $ObjectIdPattern) | ForEach-Object { $_.Value } | Select-Object -Unique)) {
                 if (-not $Entry.DistinctIds.Contains($Id)) {
                     $Entry.DistinctIds.Add($Id)
                 }

@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="css/styles.css" />
     <link rel="stylesheet" href="css/inventory.css" />
     <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="../shared/filters.css" />
 </head>
 
 <body>
@@ -44,6 +45,8 @@
                     class="ico">&#9776;</span><span>Privileged Assets</span></a>
             <a class="nav-item nav-subitem" href="index.html" data-view-link="overview" data-view-nav="overview"><span
                     class="ico">&#9636;</span><span>Overview</span></a>
+            <a class="nav-item nav-subitem" href="index.html?view=findings" data-view-link="findings"
+                data-view-nav="findings"><span class="ico">&#9873;</span><span>Findings</span></a>
             <a class="nav-item nav-subitem" href="index.html?view=classification" data-view-link="classification"
                 data-view-nav="classification"><span class="ico">&#9998;</span><span>Object Classification</span></a>
             <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
@@ -72,6 +75,10 @@
                     class="ico">&#9636;</span><span>Metrics</span></div>
             <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiInventory"><span
                     class="ico">&#9776;</span><span>Inventory</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiRules"><span
+                    class="ico">&#9873;</span><span>Checks</span></div>
+            <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiExceptions"><span
+                    class="ico">&#10003;</span><span>Exceptions</span></div>
             <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiWorklist"><span
                     class="ico">&#9998;</span><span>Worklist</span></div>
             <div class="nav-item section-item" role="button" tabindex="0" data-target="secPaiScript"
@@ -93,6 +100,11 @@
                     to the <a href="../EamDashboard/index.html">EAM Dashboard</a> and
                     <a href="../AccessPathMap/index.html">Access Path Map</a>.
                 </p>
+                <p data-view="findings" hidden>The results of the EntraOps checks by category: the status and
+                    severity of every check, why a check was not evaluated, its description, remediation action,
+                    effort and user impact, and the affected objects with their evidence - linked to their details in the
+                    <a href="index.html" data-view-link="overview">Overview</a> and to the reporting app that shows
+                    them. The checks are also available as Maester tests in the EntraOps Maester Pack.</p>
                 <p data-view="classification" hidden>Maintain the target tier of privileged objects with the
                     classification method configured in <code>EntraOpsConfig.json</code>: compare the current
                     tier of each object with its target tier and the role assignments with the highest classification,
@@ -124,40 +136,56 @@
                         <span class="muted pai-head-meta" id="paiResultCount"></span>
                     </div>
                     <div class="card-pad">
-                        <div class="eam-filter-row pai-filters">
-                            <label class="eam-filter grow">Search
+                        <div class="eo-searchbar">
+                            <label class="eo-search">
+                                <svg class="eo-search-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 1a5.5 5.5 0 0 1 4.38 8.83l3.65 3.64a.75.75 0 0 1-1.06 1.06l-3.64-3.65A5.5 5.5 0 1 1 6.5 1Zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg>
+                                <span class="sr-only">Search</span>
                                 <input type="search" id="paiSearch" class="pai-input"
-                                    placeholder="Name, UPN, app id or object id" autocomplete="off" />
+                                    placeholder="Search name, UPN, app id, object id or finding" autocomplete="off" />
                             </label>
-                            <label class="eam-filter">Object type<select id="paiFilterType"
+                            <label class="pai-finding-filter"><span class="eo-facet-label">Findings</span><select id="paiFilterFinding"
                                     class="pai-input"></select></label>
-                            <label class="eam-filter">Sub type<select id="paiFilterSubType"
-                                    class="pai-input"></select></label>
-                            <label class="eam-filter">Object tier<select id="paiFilterTier"
-                                    class="pai-input"></select></label>
+                            <button type="button" class="btn small pai-more-toggle" id="paiMoreFilters"
+                                aria-expanded="false" aria-controls="paiMoreFilterPanel">More filters<span
+                                    class="pai-count-badge" id="paiMoreFilterCount" hidden></span></button>
+                        </div>
+                        <div class="eo-facets">
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="paiTypeLabel">Object type</span>
+                                <div class="eo-pills" id="paiTypePills" role="group" aria-labelledby="paiTypeLabel"></div>
+                            </div>
+                            <div class="eo-facet-row eo-facet-sub" id="paiSubTypeRow" hidden>
+                                <span class="eo-facet-label" id="paiSubTypeLabel">Sub type</span>
+                                <div class="eo-pills" id="paiSubTypePills" role="group" aria-labelledby="paiSubTypeLabel"></div>
+                            </div>
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="paiTierLabel">Classification</span>
+                                <div class="eo-pills" id="paiTierPills" role="group" aria-labelledby="paiTierLabel"></div>
+                            </div>
+                        </div>
+                        <div class="pai-more-filters" id="paiMoreFilterPanel" hidden>
                             <label class="eam-filter">Assignment tier<select id="paiFilterAssignmentTier"
                                     class="pai-input"></select></label>
-                        </div>
-                        <div class="eam-filter-row pai-filters">
                             <label class="eam-filter">Administrative unit<select id="paiFilterAu"
                                     class="pai-input"></select></label>
                             <label class="eam-filter">Restricted management<select id="paiFilterRestricted"
                                     class="pai-input"></select></label>
                             <label class="eam-filter">Sync source<select id="paiFilterSync"
                                     class="pai-input"></select></label>
-                            <label class="eam-filter">Finding<select id="paiFilterFinding"
-                                    class="pai-input"></select></label>
                             <label class="eam-filter">Worklist<select id="paiFilterWorklist"
                                     class="pai-input"></select></label>
                         </div>
                         <div class="pai-toolbar">
-                            <label class="pai-check"><input type="checkbox" id="paiWhatIf" /> What-if: evaluate
+                            <label class="pai-check pai-whatif"><input type="checkbox" id="paiWhatIf" /> What-if: evaluate
                                 findings with worklist target tiers</label>
+                            <span class="pai-whatif-note muted" id="paiWhatIfNote" hidden>Only the Privileged Assets
+                                findings are re-evaluated; the other findings show the saved evaluation.</span>
                             <span class="spacer"></span>
                             <button type="button" class="btn small" id="paiResetFilters">Reset filters</button>
                             <button type="button" class="btn small" id="paiExportInventory">Export inventory
                                 (CSV)</button>
                         </div>
+                        <div class="pai-findings-note" id="paiFindingsNote" hidden></div>
                         <div class="pai-bulk" id="paiBulk">
                             <span id="paiSelectionCount">0 selected</span>
                             <select id="paiBulkTier" class="pai-input" aria-label="Target tier"></select>
@@ -173,13 +201,13 @@
                                     <tr>
                                         <th class="no-sort pai-col-check"><input type="checkbox" id="paiSelectAll"
                                                 aria-label="Select all filtered objects" /></th>
-                                        <th data-sort="name">Object</th>
+                                        <th data-sort="name" class="pai-col-object">Object</th>
                                         <th data-sort="type">Type</th>
                                         <th data-sort="tier">Object tier</th>
                                         <th data-sort="assignmentTier">Assignment tiers</th>
                                         <th data-sort="relationships">Relationships</th>
                                         <th class="no-sort">Administrative units</th>
-                                        <th data-sort="findings">Findings</th>
+                                        <th data-sort="findings" class="pai-col-findings">Findings</th>
                                     </tr>
                                 </thead>
                                 <tbody id="paiTableBody"></tbody>
@@ -187,6 +215,101 @@
                         </div>
                         <div class="pager" id="paiPager"></div>
                     </div>
+                </section>
+
+                <section id="secPaiFindingsView" data-view="findings" hidden>
+                    <div class="callout scope pai-rule-not-found" id="paiRuleNotFound" role="status" hidden></div>
+                    <!-- Data gaps of the saved evaluation (DataGaps of findings.json), filled with textContent. -->
+                    <section class="callout scope pai-data-gaps" id="paiDataGaps" aria-label="Data gaps" hidden></section>
+                    <div class="grid pai-stat-grid" id="paiRuleStats" style="margin-bottom:16px;"></div>
+                    <section class="card pai-empty-card" style="margin-bottom:16px;" id="paiRuleEmpty" hidden>
+                        <div class="card-pad">
+                            <p><strong>No check results.</strong> The EntraOps checks are evaluated with the report
+                                data and saved to <code>Reports/Findings/data/findings.js</code>:</p>
+                            <p><code>New-EntraOpsReportingData</code></p>
+                            <p class="muted">For a first run in a new repository, <code>Invoke-EntraOpsAssessment</code>
+                                collects the data and evaluates the checks. Then reload this page.</p>
+                            <p class="muted" id="paiRuleEmptyNote"></p>
+                        </div>
+                    </section>
+                    <section class="card" style="margin-bottom:16px;" id="secPaiRules">
+                        <div class="card-head">Checks
+                            <span class="muted pai-head-meta" id="paiRuleCount"></span>
+                        </div>
+                        <div class="card-pad">
+                            <div class="pai-findings-note" id="paiRuleSource" hidden></div>
+                            <div class="pai-status-bar" id="paiRuleBar" aria-hidden="true"></div>
+                            <div class="eo-searchbar">
+                                <label class="eo-search">
+                                    <svg class="eo-search-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 1a5.5 5.5 0 0 1 4.38 8.83l3.65 3.64a.75.75 0 0 1-1.06 1.06l-3.64-3.65A5.5 5.5 0 1 1 6.5 1Zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg>
+                                    <span class="sr-only">Search checks</span>
+                                    <input type="search" id="paiRuleSearch" class="pai-input"
+                                        placeholder="Search check, rule ID, Maester test ID or affected object" autocomplete="off" />
+                                </label>
+                                <button type="button" class="btn small pai-more-toggle" id="paiRuleReset">Reset filters</button>
+                                <button type="button" class="btn small pai-more-toggle" id="paiRuleCollapseAll">Collapse all</button>
+                            </div>
+                            <div class="eo-facets" id="paiRuleFacets">
+                                <div class="eo-facet-row">
+                                    <span class="eo-facet-label" id="paiRuleStatusLabel">Status</span>
+                                    <div class="eo-pills" id="paiRuleStatusPills" role="group" aria-labelledby="paiRuleStatusLabel"></div>
+                                </div>
+                                <div class="eo-facet-row">
+                                    <span class="eo-facet-label" id="paiRuleSeverityLabel">Severity</span>
+                                    <div class="eo-pills" id="paiRuleSeverityPills" role="group" aria-labelledby="paiRuleSeverityLabel"></div>
+                                </div>
+                                <div class="eo-facet-row">
+                                    <span class="eo-facet-label" id="paiRuleCategoryLabel">Category</span>
+                                    <div class="eo-pills" id="paiRuleCategoryPills" role="group" aria-labelledby="paiRuleCategoryLabel"></div>
+                                </div>
+                            </div>
+                            <div id="paiRuleList"></div>
+                        </div>
+                    </section>
+                    <section class="card" style="margin-bottom:16px;" id="secPaiExceptions" hidden>
+                        <div class="card-head">Finding exceptions
+                            <span class="muted pai-head-meta" id="paiExceptionMeta"></span>
+                        </div>
+                        <div class="card-pad">
+                            <div class="callout" id="paiExceptionStatus"></div>
+                            <div class="callout scope pai-file-changed" id="paiExceptionFileChanged" role="status" hidden>
+                                <p><b>The exceptions file changed since the pending changes of this browser were made.</b> They are not
+                                    applied: the list shows the exceptions of the file, and the export is disabled until you keep or discard
+                                    them. Keeping them could undo the changes of the file, for example an exception a teammate renewed or
+                                    removed.</p>
+                                <ul class="pai-small" id="paiExceptionFileChangedList"></ul>
+                                <div class="pai-toolbar">
+                                    <button type="button" class="btn small" id="paiExceptionFileChangedDiscard">Discard my changes</button>
+                                    <button type="button" class="btn small" id="paiExceptionFileChangedKeep">Keep my changes</button>
+                                </div>
+                            </div>
+                            <div class="pai-toolbar">
+                                <label class="btn small pai-file-btn">Import JSON<input type="file" id="paiExceptionImport"
+                                        accept=".json,application/json" /></label>
+                                <button type="button" class="btn small primary" id="paiExceptionExport">Export
+                                    FindingExceptions.json</button>
+                                <span class="spacer"></span>
+                                <button type="button" class="btn small" id="paiExceptionReset">Discard local changes</button>
+                            </div>
+                            <div class="pai-import-result hidden" id="paiExceptionImportResult" role="status"></div>
+                            <div class="table-wrap pai-table-wrap">
+                                <table class="grid-table pai-table" id="paiExceptionTable">
+                                    <thead>
+                                        <tr>
+                                            <th class="no-sort">Check</th>
+                                            <th class="no-sort">Finding</th>
+                                            <th class="no-sort">State</th>
+                                            <th class="no-sort">Expires</th>
+                                            <th class="no-sort">Justification</th>
+                                            <th class="no-sort">Status</th>
+                                            <th class="no-sort"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="paiExceptionBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
                 </section>
 
                 <section class="card" style="margin-bottom:16px;" id="secPaiWorklist" data-view="classification" hidden>
@@ -282,7 +405,7 @@
     </div>
 
     <div id="paiDrawerBackdrop" class="drawer-backdrop"></div>
-    <aside id="paiDrawer" class="drawer" aria-label="Object details" aria-hidden="true">
+    <aside id="paiDrawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="paiDrawerTitle" aria-hidden="true" inert>
         <div class="drawer-head">
             <div class="title" id="paiDrawerTitle"></div>
             <button type="button" class="close" id="paiDrawerClose" aria-label="Close details">&times;</button>
@@ -291,7 +414,7 @@
     </aside>
 
     <div id="paiMaesterBackdrop" class="drawer-backdrop pai-blade-backdrop"></div>
-    <aside id="paiMaesterBlade" class="drawer pai-blade" aria-label="Maester finding details" aria-hidden="true">
+    <aside id="paiMaesterBlade" class="drawer pai-blade" role="dialog" aria-modal="true" aria-labelledby="paiMaesterTitle" aria-hidden="true" inert>
         <div class="drawer-head pai-blade-head">
             <div class="pai-blade-heading">
                 <div class="pai-blade-kicker" id="paiMaesterKicker"></div>
@@ -303,8 +426,26 @@
         <div class="drawer-body" id="paiMaesterBody"></div>
     </aside>
 
+    <div id="paiRuleBackdrop" class="drawer-backdrop pai-blade-backdrop"></div>
+    <aside id="paiRuleBlade" class="drawer pai-blade" role="dialog" aria-modal="true" aria-labelledby="paiRuleTitle" aria-hidden="true" inert>
+        <div class="drawer-head pai-blade-head">
+            <div class="pai-blade-heading">
+                <div class="pai-blade-kicker" id="paiRuleKicker"></div>
+                <div class="title" id="paiRuleTitle"></div>
+                <div class="pai-blade-chips" id="paiRuleChips"></div>
+            </div>
+            <button type="button" class="close" id="paiRuleClose" aria-label="Close check details">&times;</button>
+        </div>
+        <div class="drawer-body" id="paiRuleBody"></div>
+    </aside>
+
     <script src="data/privileged-assets-data.js"></script>
+    <!-- Optional: the results of all EntraOps checks (Save-EntraOpsFindingJson). -->
+    <script src="../Findings/data/findings.js"></script>
     <script src="js/navCollapse.js"></script>
+    <script src="js/findings.js"></script>
+    <script src="../shared/filters.js"></script>
+    <script src="../shared/report-utils.js"></script>
     <script src="js/app.js"></script>
 </body>
 

@@ -10,10 +10,11 @@
     subscription of the current Azure context. The following assignments
     are created:
 
-    - WorkloadPlane-Admins: permanent Reader and PIM eligible
-      constrained Role Based Access Control Administrator (may only assign the
-      ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds to WorkloadPlane-Users); resource-level
-      roles are assigned to them by ManagementPlane-Admins
+    - WorkloadPlane-Admins: the permanent roles of WorkloadPlaneAdminRoles.PermanentRoleDefinitionIds
+      (default: Reader), the PIM eligible roles of WorkloadPlaneAdminRoles.EligibleRoleDefinitionIds
+      (default: none) and the PIM eligible constrained Role Based Access Control Administrator (may only
+      assign the ConstrainedDelegation.WorkloadPlane.AllowedRoleDefinitionIds to WorkloadPlane-Users);
+      other roles are assigned to them by ManagementPlane-Admins
     - ManagementPlane-Admins: PIM eligible Contributor (skipped if inherited) and PIM eligible
       constrained Role Based Access Control Administrator (may assign any role except the
       ConstrainedDelegation.ManagementPlane.ExcludedRoleDefinitionIds to WorkloadPlane-Admins)
@@ -30,6 +31,11 @@
 
     Constrained delegation settings are read from
     EntraOpsConfig.ServiceEM.ConstrainedDelegation when available.
+
+    The roles of WorkloadPlane-Admins are read from EntraOpsConfig.ServiceEM.WorkloadPlaneAdminRoles.
+    A missing list means its default, an empty list assigns no role of this type. Both lists must not
+    contain Owner, User Access Administrator or Role Based Access Control Administrator, and a role
+    can't be in both lists. Roles removed from a list are not removed from the scope.
 
 .PARAMETER ServiceName
     Name of the service. The resource group will be created as "RG-<ServiceName>".
@@ -60,7 +66,7 @@
     Creates RG-MyService in West Europe and assigns the default PIM eligible roles:
     Contributor and constrained RBAC Administrator to ManagementPlane-Admins, constrained RBAC
     Administrator to WorkloadPlane-Admins, User Access Administrator to ControlPlane-Admins, plus
-    permanent Reader to WorkloadPlane-Admins.
+    permanent Reader to WorkloadPlane-Admins (WorkloadPlaneAdminRoles defaults).
 
 .EXAMPLE
     New-EntraOpsServiceAZContainer -ServiceName "MyService" -ServiceGroups $groups `
@@ -141,7 +147,6 @@ function New-EntraOpsServiceAZContainer {
         try {
             # Use -WarningAction SilentlyContinue to suppress Az.Resources breaking-change warnings
             # about flattened properties (Actions, NotActions, etc.) that this code does not use.
-            $reader = Get-AzRoleDefinition -Name Reader -WarningAction SilentlyContinue
             $userAccessAdmin = Get-AzRoleDefinition -Name "User Access Administrator" -WarningAction SilentlyContinue
             $contributor = Get-AzRoleDefinition -Name Contributor -WarningAction SilentlyContinue
             $rbacAdmin = Get-AzRoleDefinition -Name "Role Based Access Control Administrator" -WarningAction SilentlyContinue
@@ -186,20 +191,77 @@ function New-EntraOpsServiceAZContainer {
     process {
         Write-Verbose "$logPrefix Beginning AZ Container"
 
-        # Permanent Reader for WorkloadPlane-Admins; all other Azure roles are PIM eligible
+        # Never assignable through the ManagementPlane delegation, never allowed in the WorkloadPlane allow-list and never assigned to
+        # WorkloadPlane-Admins: each of them lets the group assign roles itself or take over the scope. ExcludedRoleDefinitionIds extends
+        # this list, it can't replace it.
+        $mandatoryExcludedRoleIds = @(
+            "8e3af657-a8ff-443c-a75c-2fe8c4bcb635",  # Owner
+            "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9",  # User Access Administrator
+            "f58310d9-a9f6-439a-9e8d-f62e7b41a168"   # Role Based Access Control Administrator
+        )
+
+        # Roles of WorkloadPlane-Admins on the scope, validated before anything is assigned. A missing list means the default
+        # (permanent Reader, no eligible role); an empty list assigns no role of this type.
+        $workloadAdminRoles = @{ Permanent = @(); Eligible = @() }
+        $workloadAdminRoleNames = @{}
         if ($workloadAdmins) {
+            foreach ($assignmentType in 'Permanent', 'Eligible') {
+                $configName = "ServiceEM.WorkloadPlaneAdminRoles.${assignmentType}RoleDefinitionIds"
+                $configuredRoleIds = Get-EntraOpsServiceEMConfigValue -Path "WorkloadPlaneAdminRoles.${assignmentType}RoleDefinitionIds"
+                $roleIds = if ($null -ne $configuredRoleIds) {
+                    @($configuredRoleIds | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") })
+                } elseif ($assignmentType -eq 'Permanent') {
+                    @("acdd72a7-3385-48ef-bd42-f606fba81ae7")  # Reader
+                } else {
+                    @()
+                }
+                $invalidRoleIds = @($roleIds | Where-Object { -not [guid]::TryParse([string]$_, [ref][guid]::Empty) })
+                if ($invalidRoleIds.Count -gt 0) {
+                    throw "$logPrefix $configName contains invalid GUIDs: $($invalidRoleIds -join ', ')"
+                }
+                $roleIds = @($roleIds | ForEach-Object { [guid]::Parse("$_").ToString('D') } | Select-Object -Unique)
+                $forbiddenRoleIds = @($roleIds | Where-Object { $_ -in $mandatoryExcludedRoleIds })
+                if ($forbiddenRoleIds.Count -gt 0) {
+                    throw "$logPrefix $configName must not contain Owner, User Access Administrator or Role Based Access Control Administrator: $($forbiddenRoleIds -join ', ')"
+                }
+                $workloadAdminRoles[$assignmentType] = $roleIds
+            }
+            $duplicateRoleIds = @($workloadAdminRoles.Eligible | Where-Object { $_ -in $workloadAdminRoles.Permanent })
+            if ($duplicateRoleIds.Count -gt 0) {
+                throw "$logPrefix ServiceEM.WorkloadPlaneAdminRoles lists the same role as permanent and eligible: $($duplicateRoleIds -join ', ')"
+            }
+            foreach ($roleId in @($workloadAdminRoles.Permanent) + @($workloadAdminRoles.Eligible)) {
+                $roleDefinition = $null
+                try {
+                    $roleDefinition = Get-AzRoleDefinition -Id $roleId -WarningAction SilentlyContinue -ErrorAction Stop
+                } catch {
+                    Write-Verbose "$logPrefix Failed to look up role definition ${roleId}: $_"
+                }
+                if (-not $roleDefinition) {
+                    throw "$logPrefix Role definition $roleId of ServiceEM.WorkloadPlaneAdminRoles wasn't found in the subscription of the current Azure context."
+                }
+                $workloadAdminRoleNames[$roleId] = $roleDefinition.Name
+            }
+        }
+
+        # Permanent roles of WorkloadPlane-Admins (default: Reader)
+        if ($workloadAdminRoles.Permanent.Count -gt 0) {
             $wlExisting = @()
             try {
                 $wlExisting = Get-AzRoleAssignment -Scope $scopeId -ObjectId $workloadAdmins.Id
             } catch {
-                Write-Verbose "$logPrefix Failed to check existing Reader assignment for WorkloadPlane-Admins: $_"
+                Write-Verbose "$logPrefix Failed to check existing role assignments for WorkloadPlane-Admins: $_"
             }
-            if ("$($workloadAdmins.Id)_$($reader.Id)" -notin ($wlExisting | ForEach-Object { "$($_.ObjectId)_$($_.RoleDefinitionId)" })) {
+            $wlExistingKeys = @($wlExisting | ForEach-Object { "$($_.ObjectId)_$($_.RoleDefinitionId)" })
+            foreach ($roleId in $workloadAdminRoles.Permanent) {
+                if ("$($workloadAdmins.Id)_$roleId" -in $wlExistingKeys) {
+                    continue
+                }
                 try {
-                    Write-Verbose "$logPrefix Creating permanent Reader assignment for WorkloadPlane-Admins: $($workloadAdmins.Id)"
-                    New-AzRoleAssignment -Scope $scopeId -RoleDefinitionName $reader.Name -ObjectId $workloadAdmins.Id | Out-Null
+                    Write-Verbose "$logPrefix Creating permanent $($workloadAdminRoleNames[$roleId]) assignment for WorkloadPlane-Admins: $($workloadAdmins.Id)"
+                    New-AzRoleAssignment -Scope $scopeId -RoleDefinitionId $roleId -ObjectId $workloadAdmins.Id | Out-Null
                 } catch {
-                    Write-Verbose "$logPrefix Failed to create Reader assignment for WorkloadPlane-Admins"
+                    Write-Verbose "$logPrefix Failed to create $($workloadAdminRoleNames[$roleId]) assignment for WorkloadPlane-Admins"
                     Write-Error $_
                 }
             }
@@ -271,7 +333,23 @@ function New-EntraOpsServiceAZContainer {
             }
         }
         if ($workloadAdmins -and -not $management) {
-            Write-Warning "$logPrefix No ManagementPlane-Admins for $scopeId; nobody gets Contributor from ServiceEM and WorkloadPlane-Admins stay restricted to Reader and the constrained RBAC Administrator."
+            Write-Warning "$logPrefix No ManagementPlane-Admins for $scopeId; nobody gets Contributor from ServiceEM and WorkloadPlane-Admins stay restricted to the roles of ServiceEM.WorkloadPlaneAdminRoles (default: Reader) and the constrained RBAC Administrator."
+        }
+
+        # PIM eligible roles of WorkloadPlane-Admins (default: none); skipped when already eligible on the scope or a parent scope
+        foreach ($roleId in $workloadAdminRoles.Eligible) {
+            if ($existing | Where-Object {
+                    $_.PrincipalId -eq $workloadAdmins.Id -and "$($_.RoleDefinitionId)" -like "*/$roleId" -and
+                    ($_.Scope -ieq $scopeId -or (& $isInheritedScope $_.Scope))
+                }) {
+                Write-Verbose "$logPrefix WorkloadPlane-Admins already has $($workloadAdminRoleNames[$roleId]) eligible — skipping assignment"
+                continue
+            }
+            $toAdd += @{
+                RoleDefinitionId = "$roleDefinitionPrefix/$roleId"
+                RoleId           = $roleId
+                PrincipalId      = $workloadAdmins.Id
+            }
         }
 
         # Condition of the constrained RBAC Administrator: write and delete of role assignments limited to the
@@ -329,14 +407,6 @@ function New-EntraOpsServiceAZContainer {
                     (& $isSameConstrainedCondition "$($_.Condition)" $Delegation)
                 })
         }
-
-        # Never assignable through the ManagementPlane delegation and never allowed in the WorkloadPlane allow-list: each of them
-        # lets the target group assign roles itself or take over the scope. ExcludedRoleDefinitionIds extends this list, it can't replace it.
-        $mandatoryExcludedRoleIds = @(
-            "8e3af657-a8ff-443c-a75c-2fe8c4bcb635",  # Owner
-            "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9",  # User Access Administrator
-            "f58310d9-a9f6-439a-9e8d-f62e7b41a168"   # Role Based Access Control Administrator
-        )
 
         # Constrained RBAC Administrator for ManagementPlane-Admins
         # May assign any role EXCEPT high-privileged roles, only to the WorkloadPlane-Admins group

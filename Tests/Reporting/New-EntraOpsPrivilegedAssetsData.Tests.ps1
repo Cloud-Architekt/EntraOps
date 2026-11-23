@@ -68,6 +68,24 @@ Describe 'New-EntraOpsPrivilegedAssetsData' {
         Test-Path -LiteralPath "$script:Root/App/data/privileged-assets-data.js" | Should -BeTrue
     }
 
+    It 'adds an object to the owned objects of its owners, as an owner of its app registration lists only the application' {
+        # App D names Admin A as owner (an owner of its app registration); Admin A lists only the application object.
+        $AppD = '77777777-7777-7777-7777-777777777777'
+        $Export = @(Get-Content -LiteralPath "$script:Root/PrivilegedEAM/EntraID/EntraID.json" -Raw | ConvertFrom-Json)
+        $Export += [pscustomobject]@{
+            ObjectId = $AppD; ObjectTenantId = 't1'; ObjectType = 'serviceprincipal'; ObjectSubType = 'Application'; ObjectDisplayName = 'App D'
+            ObjectAdminTierLevel = '0'; ObjectAdminTierLevelName = 'ControlPlane'; Owners = @($script:UserId); RoleAssignments = @()
+        }
+        $Export | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath "$script:Root/PrivilegedEAM/EntraID/EntraID.json"
+
+        $Payload = New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -PassThru 6>$null
+        $User = @($Payload.objects | Where-Object { $_.objectId -eq $script:UserId })[0]
+
+        @($User.ownedObjects) | Should -Contain $AppD
+        @($User.ownedObjects) | Should -Contain $script:AppId
+        @($User.ownedObjects | Where-Object { $_ -eq $script:AppId }).Count | Should -Be 1
+    }
+
     It 'resolves related objects from the export, by app id and through Microsoft Graph' {
         $Payload = New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -PassThru 6>$null
 
@@ -156,6 +174,18 @@ Describe 'New-EntraOpsPrivilegedAssetsData' {
             @((& $script:GetObject $Payload $script:AppRegId).maesterAssets.tests) | Should -Be @('MT.1003')
             @((& $script:GetObject $Payload $script:User2Id).maesterAssets.tests) | Should -Be @('MT.1003')
             (& $script:GetObject $Payload $script:AppId).Contains('maesterAssets') | Should -BeFalse
+        }
+
+        It 'ignores the tests of the EntraOps Maester Pack, whose findings the inventory shows already' {
+            $Result = & $script:NewMaesterResult | ConvertFrom-Json
+            $Result.Tests += [pscustomobject]@{ Id = 'MP.EOPS.1002'; Result = 'Failed'; Title = 'Privileged objects are classified at the tier of their role assignments.'; Severity = 'High' }
+            $Result.AffectedObjects[0].Tests += 'MP.EOPS.1002'
+            $Result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath "$script:MaesterRoot/TestResults-2026-10-04-103542.json"
+
+            $Payload = New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRelatedObjectIds $false -MaesterTestResultPath $script:MaesterRoot -PassThru 6>$null
+
+            @($Payload.maester.tests.Keys) | Should -Be @('MT.1001', 'MT.1003')
+            @((& $script:GetObject $Payload $script:UserId).maesterAssets.tests) | Should -Be @('MT.1001')
         }
 
         It 'uses the latest TestResults file of a folder' {

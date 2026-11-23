@@ -1180,7 +1180,9 @@
                 ],
                 "ExcludedRoleDefinitionActions": [
                     "*/read",
-                    "Microsoft.Storage/storageAccounts/blobServices/generateUserDelegationKey/action"
+                    "Microsoft.Storage/storageAccounts/blobServices/generateUserDelegationKey/action",
+                    "Microsoft.Support/*",
+                    "Microsoft.Insights/alertRules/*"
                 ]
             },
             {
@@ -1446,8 +1448,52 @@
                     "*/*"
                 ],
                 "ExcludedRoleDefinitionActions": [
-                    "*/read"
+                    "*/read",
+                    "Microsoft.DesktopVirtualization/applicationGroups/useApplications/action",
+                    "Microsoft.DesktopVirtualization/appAttachPackages/useApplications/action",
+                    "Microsoft.Compute/virtualMachines/login/action",
+                    "Microsoft.HybridCompute/machines/login/action",
+                    "Microsoft.Dashboard/grafana/ActAsGrafanaLimitedViewer/action",
+                    "Microsoft.PortalServices/copilotSettings/conversations/action"
                 ]
+            },
+            {
+                "Category": "Microsoft.Azure",
+                "Service": "End User Access to Privileged Resources",
+                "ActionType": "DataAction",
+                "RoleAssignmentScopeName": [
+                    <Tier0IncludedResourceScope>
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.DesktopVirtualization/applicationGroups/useApplications/action",
+                    "Microsoft.DesktopVirtualization/appAttachPackages/useApplications/action",
+                    "Microsoft.Compute/virtualMachines/login/action",
+                    "Microsoft.HybridCompute/machines/login/action",
+                    "Microsoft.Dashboard/grafana/ActAsGrafanaLimitedViewer/action",
+                    "Microsoft.PortalServices/copilotSettings/conversations/action"
+                ],
+                "ExcludedRoleDefinitionActions": []
+            },
+            {
+                "Category": "Microsoft.Azure",
+                "Service": "End User Access to Privileged Resources",
+                "ActionType": "DataAction",
+                "RoleAssignmentScopeName": [
+                    <Tier1IncludedResourceScope>
+                ],
+                "ExcludedRoleAssignmentScopeName": [
+                    <Tier0IncludedResourceScope>
+                ],
+                "RoleDefinitionActions": [
+                    "Microsoft.DesktopVirtualization/applicationGroups/useApplications/action",
+                    "Microsoft.DesktopVirtualization/appAttachPackages/useApplications/action",
+                    "Microsoft.Compute/virtualMachines/login/action",
+                    "Microsoft.HybridCompute/machines/login/action",
+                    "Microsoft.Dashboard/grafana/ActAsGrafanaLimitedViewer/action",
+                    "Microsoft.PortalServices/copilotSettings/conversations/action"
+                ],
+                "ExcludedRoleDefinitionActions": []
             }
         ]
     },
@@ -1485,7 +1531,7 @@
                     "Microsoft.Resources/subscriptions/resourceGroups/read",
                     "Microsoft.Resources/subscriptions/read",
                     "Microsoft.Authorization/*/read",
-                    "Microsoft.Insights/alertRules/read",
+                    "Microsoft.Insights/alertRules/*",
                     "Microsoft.Support/*"
                 ],
                 "ExcludedRoleDefinitionActions": []
@@ -1500,6 +1546,24 @@
                 "ExcludedRoleAssignmentScopeName": [],
                 "RoleDefinitionActions": [
                     "*/read"
+                ],
+                "ExcludedRoleDefinitionActions": []
+            },
+            {
+                "Category": "Microsoft.Azure",
+                "Service": "End User Access",
+                "ActionType": "DataAction",
+                "RoleAssignmentScopeName": [
+                    "/*"
+                ],
+                "ExcludedRoleAssignmentScopeName": [],
+                "RoleDefinitionActions": [
+                    "Microsoft.DesktopVirtualization/applicationGroups/useApplications/action",
+                    "Microsoft.DesktopVirtualization/appAttachPackages/useApplications/action",
+                    "Microsoft.Compute/virtualMachines/login/action",
+                    "Microsoft.HybridCompute/machines/login/action",
+                    "Microsoft.Dashboard/grafana/ActAsGrafanaLimitedViewer/action",
+                    "Microsoft.PortalServices/copilotSettings/conversations/action"
                 ],
                 "ExcludedRoleDefinitionActions": []
             }

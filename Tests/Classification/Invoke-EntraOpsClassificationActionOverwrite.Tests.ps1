@@ -213,3 +213,66 @@ Describe 'Invoke-EntraOpsClassificationActionOverwrite' {
     }
 }
 
+
+Describe 'API permission overwrites of one permission type' {
+    BeforeAll {
+        . "$script:TestRepositoryRoot/EntraOps/Public/PrivilegedAccess/Expand-EntraOpsPrivilegedEamJsonFile.ps1"
+        . "$script:TestRepositoryRoot/EntraOps/Private/Resolve-EntraOpsAppRoleAssignmentClassification.ps1"
+        $script:AppId = '00000003-0000-0ff1-ce00-000000000000'
+
+        # Classification_ApiPermissions.json: the permission for both types (ResourceScope All) in the Control Plane.
+        function New-ApiPermissionClassification {
+            param([array]$ExtraControlPlaneDefinitions = @())
+            @(
+                [PSCustomObject]@{
+                    EAMTierLevelName     = 'ControlPlane'
+                    EAMTierLevelTagValue = '0'
+                    TierLevelDefinition  = @(
+                        [PSCustomObject]@{ Category = 'Microsoft.Graph'; Service = 'SharePoint'; ResourceAppId = $script:AppId; ResourceScope = 'All'; RoleAssignmentScopeName = @('/'); RoleDefinitionActions = @('Sites.FullControl.All') }
+                    ) + $ExtraControlPlaneDefinitions
+                }
+                [PSCustomObject]@{ EAMTierLevelName = 'ManagementPlane'; EAMTierLevelTagValue = '1'; TierLevelDefinition = @() }
+            )
+        }
+
+        # The tier of each permission type at run time, after the overwrite was saved and loaded like a tenant file.
+        function Get-RuntimeTier {
+            param([array]$Classification)
+            $File = Join-Path $TestDrive "classification-$([guid]::NewGuid().ToString('N')).json"
+            $Classification | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $File
+            $Definitions = Expand-EntraOpsPrivilegedEAMJsonFile -FilePath $File
+            $Tiers = @{}
+            foreach ($RoleType in 'Application', 'Delegated') {
+                $Assignment = [PSCustomObject]@{ RoleDefinitionId = 'r1'; RoleAssignmentScopeId = 's1'; RoleDefinitionName = 'Sites.FullControl.All'; RoleType = $RoleType; ResourceAppId = $script:AppId }
+                $Tiers[$RoleType] = @((Resolve-EntraOpsAppRoleAssignmentClassification -AppRoleAssignments @($Assignment) -ClassificationDefinitions $Definitions).Classification.AdminTierLevelName)
+            }
+            $Tiers
+        }
+    }
+
+    It 'keeps the other permission type at its tier for an overwrite of the <Overwritten> permission' -ForEach @(
+        @{ Overwritten = 'Application'; ResourceScope = 'Application'; Kept = 'Delegated' }
+        @{ Overwritten = 'Delegated'; ResourceScope = 'Delegation'; Kept = 'Application' }
+    ) {
+        $Overwrite = [PSCustomObject]@{ EAMTierLevelName = 'ManagementPlane'; RoleDefinitionActions = @('Sites.FullControl.All'); ResourceAppId = $script:AppId; ResourceScope = $ResourceScope; RoleAssignmentScopeName = @('/') }
+
+        $Result = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition (New-ApiPermissionClassification) -RoleActionOverwrites @($Overwrite) 6>$null
+
+        $Tiers = Get-RuntimeTier -Classification $Result
+        $Tiers[$Overwritten] | Should -Be @('ManagementPlane')
+        $Tiers[$Kept] | Should -Be @('ControlPlane')
+        # The classification values of the permission types, not the RoleType of the assignment ("Delegated").
+        @($Result.TierLevelDefinition.ResourceScope | Where-Object { $_ }) | Should -Not -Contain 'Delegated'
+    }
+
+    It 'adds the kept delegated permission to an existing Delegation entry of the service' {
+        $Existing = [PSCustomObject]@{ Category = 'Microsoft.Graph'; Service = 'SharePoint'; ResourceAppId = $script:AppId; ResourceScope = 'Delegation'; RoleAssignmentScopeName = @('/'); RoleDefinitionActions = @('Sites.Manage.All') }
+        $Overwrite = [PSCustomObject]@{ EAMTierLevelName = 'ManagementPlane'; RoleDefinitionActions = @('Sites.FullControl.All'); ResourceAppId = $script:AppId; ResourceScope = 'Application'; RoleAssignmentScopeName = @('/') }
+
+        $Result = Invoke-EntraOpsClassificationActionOverwrite -ClassificationDefinition (New-ApiPermissionClassification -ExtraControlPlaneDefinitions @($Existing)) -RoleActionOverwrites @($Overwrite) 6>$null
+
+        $DelegationEntries = @(($Result | Where-Object EAMTierLevelName -eq 'ControlPlane').TierLevelDefinition | Where-Object ResourceScope -eq 'Delegation')
+        $DelegationEntries.Count | Should -Be 1
+        @($DelegationEntries[0].RoleDefinitionActions) | Should -Be @('Sites.Manage.All', 'Sites.FullControl.All')
+    }
+}

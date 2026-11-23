@@ -75,5 +75,46 @@ Describe 'Classification_Azure template coverage at ordinary scopes' {
         Resolve-AzureActionTier -Classification $Classification -Action $Action -ActionType $ActionType -Scope $script:OrdinaryScope |
             Should -Be 'ManagementPlane'
     }
-}
 
+    It 'keeps current alert rules (<Action>) at Management Plane in <Template>' -TestCases @(
+        foreach ($Template in @('Classification_Azure.json', 'Classification_Azure.Param.json')) {
+            @{ Template = $Template; Action = 'Microsoft.Insights/metricAlerts/write' }
+            @{ Template = $Template; Action = 'Microsoft.Insights/scheduledQueryRules/write' }
+        }
+    ) {
+        $Classification = Get-AzureClassification -Name $Template
+        Resolve-AzureActionTier -Classification $Classification -Action $Action -ActionType 'Action' -Scope $script:OrdinaryScope |
+            Should -Be 'ManagementPlane'
+    }
+
+    It 'keeps the data action <Action> at Management Plane in <Template>' -TestCases @(
+        foreach ($Template in @('Classification_Azure.json', 'Classification_Azure.Param.json')) {
+            @{ Template = $Template; Action = 'Microsoft.Compute/virtualMachines/loginAsAdmin/action' }
+            @{ Template = $Template; Action = 'Microsoft.HybridCompute/machines/loginAsAdmin/action' }
+            @{ Template = $Template; Action = 'Microsoft.Dashboard/grafana/ActAsGrafanaViewer/action' }
+            @{ Template = $Template; Action = 'Microsoft.Dashboard/grafana/ActAsGrafanaAdmin/action' }
+        }
+    ) {
+        $Classification = Get-AzureClassification -Name $Template
+        Resolve-AzureActionTier -Classification $Classification -Action $Action -ActionType 'DataAction' -Scope $script:OrdinaryScope |
+            Should -Be 'ManagementPlane'
+    }
+
+    It 'keeps the end user data action <Action> at Management Plane in a <Tier> scope of the parameterized template' -TestCases @(
+        foreach ($Tier in @('Tier0', 'Tier1')) {
+            @{ Tier = $Tier; Action = 'Microsoft.Compute/virtualMachines/login/action' }
+            @{ Tier = $Tier; Action = 'Microsoft.DesktopVirtualization/applicationGroups/useApplications/action' }
+        }
+    ) {
+        $Scopes = @{
+            Tier0 = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-tier0'
+            Tier1 = '/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-tier1'
+        }
+        $Raw = [System.IO.File]::ReadAllText((Resolve-Path "$script:TestRepositoryRoot/Classification/Templates/Classification_Azure.Param.json"))
+        $Raw = $Raw -replace '<Tier0IncludedResourceScope>', ('"' + $Scopes.Tier0 + '"')
+        $Raw = $Raw -replace '<Tier1IncludedResourceScope>', ('"' + $Scopes.Tier1 + '"')
+        $Classification = $Raw | ConvertFrom-Json -Depth 10
+        Resolve-AzureActionTier -Classification $Classification -Action $Action -ActionType 'DataAction' -Scope $Scopes[$Tier] |
+            Should -Be 'ManagementPlane'
+    }
+}

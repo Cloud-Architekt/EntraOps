@@ -146,7 +146,8 @@ function Get-EntraOpsPrivilegedEamIdGov {
     # Optimization: Pre-load classification files into memory to avoid N+1 File I/O
     $ClassificationCache = @{}
     foreach ($RbacSystem in $FilterClassifiedRbacs) {
-        $ClassificationSource = $FolderClassifiedObjects + $RbacSystem + "/" + $RbacSystem + ".json"
+        # Join-Path: $DefaultFolderClassifiedEam has no trailing separator (Connect-EntraOps / Invoke-EntraOpsPrivilegedEAM)
+        $ClassificationSource = Join-Path -Path $FolderClassifiedObjects -ChildPath "$RbacSystem/$RbacSystem.json"
         if (Test-Path $ClassificationSource) {
             Write-Verbose "Pre-loading classification file from $ClassificationSource..."
             try {
@@ -210,7 +211,7 @@ function Get-EntraOpsPrivilegedEamIdGov {
             })
     }
     # Pre-load EntraID roles specifically for DirectoryRole lookups
-    $EntraIdClassificationSource = $FolderClassifiedObjects + "EntraID/EntraID.json"
+    $EntraIdClassificationSource = Join-Path -Path $FolderClassifiedObjects -ChildPath "EntraID/EntraID.json"
     if (Test-Path $EntraIdClassificationSource) {
         try {
             $ClassificationCache["EntraIDRoles"] = @((Get-Content -Path $EntraIdClassificationSource | ConvertFrom-Json -Depth 10).RoleAssignments)

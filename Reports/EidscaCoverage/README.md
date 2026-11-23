@@ -17,6 +17,12 @@ dataset checked into this repository, not a generated build artifact.
 Pick a detailed snapshot and see, per EIDSCA control area, which checks pass/fail/are informational
 based on the resource content the Tenant Governance Snapshot already captured, plus which EIDSCA
 checks are not yet evaluable because their Graph endpoint has no matching UTCM resource type.
+Status and severity pills filter the results and show how many checks each would match, counted like the
+tiles: the checks of an area whose resource type is not captured (or whose content is not embedded) count as
+*Unknown*, and its gap row is listed only under the filters it matches (never under *Passing*). Failing checks are red,
+as failed checks in the other reports. The area navigation dot is red for failing, grey for unknown, green for passing
+and blue for an area with informational checks only. Every control area collapses to its summary, and the collapsed
+areas are remembered in the browser.
 
 ## Finding exclusions
 

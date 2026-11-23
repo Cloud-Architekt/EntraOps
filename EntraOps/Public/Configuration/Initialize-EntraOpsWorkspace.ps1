@@ -26,12 +26,17 @@
     Content to install: Classification (templates and Global.json), Samples and Reports. Defaults to all.
 
 .PARAMETER Repository
-    EntraOps distribution repository: the public 'EntraOps' release repository (default) or the
-    private 'EntraOps-Insiders' repository, which requires -PersonalAccessToken or ENTRAOPS_PAT.
+    EntraOps distribution repository: the public 'EntraOps' release repository or the private
+    'EntraOps-Insiders' repository, which requires -PersonalAccessToken or ENTRAOPS_PAT. Defaults to
+    AutomatedEntraOpsUpdate.Repository of EntraOpsConfig.json in -Path (the release channel of the
+    deployment), otherwise 'EntraOps'.
 
 .PARAMETER Ref
-    Branch, release tag or full commit SHA to download (alias: -Branch). Defaults to 'main'. Use the
-    ref that matches the installed module version.
+    Branch, release tag or full commit SHA to download (alias: -Branch). Without it, the content that
+    matches the module version is installed: the newest content of the main branch whose EntraOps.psd1
+    has the module version (branch head, release tag or commit; Reports and Samples alone also from the
+    repository checkout that contains the module, files tracked in git only). When the branch has no such commit (a module newer than the
+    branch, for example an Insiders build), the branch head is installed with a warning.
 
 .PARAMETER PersonalAccessToken
     GitHub token for the private 'EntraOps-Insiders' repository. Defaults to ENTRAOPS_PAT.
@@ -50,14 +55,14 @@
     Downloads the classification templates, samples and reporting apps into the EntraOps working folder.
 
 .EXAMPLE
-    Initialize-EntraOpsWorkspace -Path 'D:\EntraOps' -Ref 'v1.2.0'
+    Initialize-EntraOpsWorkspace -Path 'D:\EntraOps'
 
-    Installs the content of release v1.2.0 into D:\EntraOps and uses it as working folder for this session.
+    Installs the content that matches the module version into D:\EntraOps and uses it as working folder for this session.
 
 .EXAMPLE
-    $env:ENTRAOPS_ROOT = 'D:\EntraOps'; Import-Module EntraOps -Force; Initialize-EntraOpsWorkspace -Ref 'v1.2.0'
+    $env:ENTRAOPS_ROOT = 'D:\EntraOps'; Import-Module EntraOps -Force; Initialize-EntraOpsWorkspace
 
-    Uses D:\EntraOps as working folder and installs the content of release v1.2.0.
+    Uses D:\EntraOps as working folder and installs the content that matches the module version.
 
 .EXAMPLE
     Initialize-EntraOpsWorkspace -Branch 'dev' -Force
@@ -82,7 +87,7 @@ function Initialize-EntraOpsWorkspace {
         [Parameter(Mandatory = $false)]
         [Alias('Branch')]
         [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$')]
-        [System.String]$Ref = 'main',
+        [System.String]$Ref,
 
         [Parameter(Mandatory = $false)]
         [System.String]$PersonalAccessToken,
@@ -124,30 +129,55 @@ function Initialize-EntraOpsWorkspace {
         Reports        = @{ IncludePattern = $null; KeepPattern = '^[^/\\]+[/\\]data[/\\]' }
     }
 
-    $Archive = Get-EntraOpsSourceArchive -Repository $Repository -Ref $Ref -PersonalAccessToken $PersonalAccessToken
+    # Without -Repository, the content follows the release channel of the deployment.
+    if ($PSBoundParameters.ContainsKey('Repository')) {
+        $RepositoryReason = '-Repository'
+    } else {
+        $SelectedRepository = Resolve-EntraOpsContentRepository -ConfigFilePath (Join-Path $Path 'EntraOpsConfig.json')
+        $Repository = $SelectedRepository.Repository
+        $RepositoryReason = $SelectedRepository.Reason
+    }
+    Write-Host "Content repository: $Repository ($RepositoryReason)"
+
+    $Archive = Get-EntraOpsContentSource -Repository $Repository -Ref $Ref -PersonalAccessToken $PersonalAccessToken -Folder $Content
+    $SourceText = "$($Archive.Repository)$(if ($Archive.Ref) { " at '$($Archive.Ref)'" })"
+    if (-not $Archive.Matched) {
+        Write-Warning "The content of $SourceText is version $(if ($Archive.ContentVersion) { $Archive.ContentVersion } else { 'unknown' }), the EntraOps module is $($Archive.ModuleVersion): templates, samples and reporting apps can miss what this module version needs. Install matching content with -Ref <branch or commit> (with -Repository EntraOps-Insiders for an Insiders build)."
+    }
     try {
         foreach ($Name in $ContentDefinitions.Keys) {
             if ($Content -notcontains $Name) { continue }
             $Source = Join-Path $Archive.SourceRoot $Name
             if (-not (Test-Path -LiteralPath $Source -PathType Container)) {
-                Write-Warning "$($Archive.Repository) at '$Ref' doesn't contain the folder '$Name'. Skipped."
+                Write-Warning "$SourceText doesn't contain the folder '$Name'. Skipped."
                 continue
             }
             $Destination = Join-Path $Path $Name
-            if (-not $PSCmdlet.ShouldProcess($Destination, "Install $Name from $($Archive.Repository) at '$Ref'")) { continue }
+            if (-not $PSCmdlet.ShouldProcess($Destination, "Install $Name from $SourceText")) { continue }
             $Result = Copy-EntraOpsSourceFolder -Source $Source -Destination $Destination -KeepPattern $ContentDefinitions[$Name].KeepPattern -IncludePattern $ContentDefinitions[$Name].IncludePattern -Force:$Force
+            if ($Name -eq 'Reports') {
+                # The marker tells Invoke-EntraOpsAssessment that the apps are of this version, so it doesn't update them.
+                # Kept app files of an earlier version (without -Force) would be taken for current ones.
+                if ($Result.Skipped -eq 0) {
+                    Write-EntraOpsContentMarker -Path $Destination -Source $Archive
+                } else {
+                    Write-Warning "Kept $($Result.Skipped) existing reporting app file(s) in $Destination, which can be of another version than $SourceText. Run Initialize-EntraOpsWorkspace -Content Reports -Force to update them (generated report data is kept)."
+                }
+            }
             [pscustomobject]@{
                 Content       = $Name
                 Path          = $Destination
-                Repository    = $Archive.Repository
-                Ref           = $Ref
+                Repository     = $Archive.Repository
+                Ref            = $Archive.Ref
+                ContentVersion = $Archive.ContentVersion
+                Matched        = $Archive.Matched
                 InstalledFile = $Result.Installed
                 KeptFile      = $Result.Kept
                 SkippedFile   = $Result.Skipped
             }
         }
     } finally {
-        Remove-Item -LiteralPath $Archive.TemporaryFolder -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false
+        if ($Archive.TemporaryFolder) { Remove-Item -LiteralPath $Archive.TemporaryFolder -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false }
     }
 
     if (-not $WhatIfPreference) {

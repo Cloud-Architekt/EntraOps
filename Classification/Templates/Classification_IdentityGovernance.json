@@ -32,7 +32,8 @@
                 "RoleDefinitionActions": [
                     "microsoft.entitlementManagement/AccessPackageCatalog/Create",
                     "microsoft.entitlementManagement/AccessPackageCatalog/allEntities/Read",
-                    "microsoft.entitlementManagement/allEntities/Read"
+                    "microsoft.entitlementManagement/allEntities/Read",
+                    "microsoft.entitlementManagement/ConnectedOrganization/allTasks"
                 ]
             }
         ]

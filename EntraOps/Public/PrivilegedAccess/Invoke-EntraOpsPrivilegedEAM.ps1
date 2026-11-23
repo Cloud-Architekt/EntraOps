@@ -30,8 +30,9 @@
     can be authored/maintained outside of this cmdlet (e.g. via the ClassificationExplorer
     "Customize Overwrites" view, or manually) and are always preserved if present. Use
     -KeepClassificationFiles to keep all classification files for the reporting apps.
-    This cmdlet disconnects from Azure and Microsoft Graph during teardown. Reconnect before
-    generating reports with live Microsoft Graph enrichment, or disable the reporting object lookups.
+    This cmdlet disconnects from Azure and Microsoft Graph during teardown, unless -KeepConnection is
+    used. Reconnect before generating reports with live Microsoft Graph enrichment, or disable the
+    reporting object lookups.
 
 .PARAMETER RbacSystems
     RBAC systems to classify. Defaults to Azure, EntraID, IdentityGovernance,
@@ -68,6 +69,21 @@
     Both choices rebuild tenant classifications and Control Plane scope reasoning for the selected scope
     through Update-EntraOpsClassificationControlPlaneScope, using the preserved tenant overwrite files.
     Pass Reuse or Regenerate explicitly for unattended runs to avoid prompting.
+
+.PARAMETER ControlPlaneScopeAction
+    Refresh (default) updates the Control Plane scope and the tenant classification files from the current
+    tenant (Azure Resource Graph, Exposure Management and the previous Privileged EAM export). Reuse keeps the
+    scope of an earlier run (ScopeReasoning_ControlPlane.json and the tenant classification files of
+    -ClassificationParameterScope) and skips the update and the first-run bootstrap: faster and comparable with
+    the earlier run, but changes of the tenant since then (new privileged objects, devices or managed identity
+    hosts) aren't in the scope. Prompt asks when such a scope exists and shows its age. Without a complete scope
+    of an earlier run, or when the templates are downloaded again (-ExistingClassificationAction Regenerate), the
+    scope is refreshed.
+
+.PARAMETER KeepConnection
+    Keep the Azure and Microsoft Graph connections and the EntraOps cache after the run instead of
+    disconnecting, e.g. to generate the reports in the same session (Invoke-EntraOpsAssessment).
+    Run Disconnect-EntraOps afterwards.
 
 .EXAMPLE
     Run EntraOps with all defaults from an already-authenticated session.
@@ -121,6 +137,13 @@ function Invoke-EntraOpsPrivilegedEAM {
         [Parameter(Mandatory = $false)]
         [ValidateSet('Prompt', 'Reuse', 'Regenerate')]
         [string]$ExistingClassificationAction = 'Prompt'
+        ,
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Prompt', 'Refresh', 'Reuse')]
+        [string]$ControlPlaneScopeAction = 'Refresh'
+        ,
+        [Parameter(Mandatory = $false)]
+        [switch]$KeepConnection
     )
 
     $ErrorActionPreference = "Stop"
@@ -159,6 +182,12 @@ function Invoke-EntraOpsPrivilegedEAM {
                     Join-Path (Get-Location -PSProvider FileSystem).ProviderPath 'EntraOpsConfig.json'
                     if (-not [string]::IsNullOrWhiteSpace($EntraOpsBaseFolder)) { Join-Path $EntraOpsBaseFolder 'EntraOpsConfig.json' }
                 ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+                # Connect-EntraOps skipped this file (another tenant, or not valid JSON): the defaults apply here too.
+                $SkippedConfigFilePath = [string]$__EntraOpsSession['SkippedConfigFilePath']
+                if ($ConfigFilePath -and $SkippedConfigFilePath -and (Resolve-Path -LiteralPath $ConfigFilePath).ProviderPath -eq (Resolve-Path -LiteralPath $SkippedConfigFilePath -ErrorAction SilentlyContinue).ProviderPath) {
+                    Write-Host "  Config File  : $ConfigFilePath is not used (skipped by Connect-EntraOps)." -ForegroundColor Yellow
+                    $ConfigFilePath = $null
+                }
             }
             if ($ConfigFilePath) {
                 $ResolvedConfigPath = (Resolve-Path -LiteralPath $ConfigFilePath -ErrorAction Stop).ProviderPath
@@ -296,12 +325,13 @@ function Invoke-EntraOpsPrivilegedEAM {
         # Reuse configured session folders; standalone runs use the single-tenant layout.
         New-Variable -Name TenantIdContext            -Value $TenantId   -Scope Global -Force
         New-Variable -Name TenantNameContext          -Value $TenantName -Scope Global -Force
-        # Same "<base>/Classification/" form as Connect-EntraOps; Join-Path would emit '\' on Windows.
+        # Same "<base>/Classification" form as Connect-EntraOps; Join-Path would emit '\' on Windows.
         $ClassificationRoot = if ($UseSessionConfig -and -not [string]::IsNullOrWhiteSpace($DefaultFolderClassification)) {
             $DefaultFolderClassification
-        } else { "$EntraOpsBaseFolder/Classification/" }
+        } else { "$EntraOpsBaseFolder/Classification" }
         New-Variable -Name DefaultFolderClassification -Value $ClassificationRoot -Scope Global -Force
         New-Variable -Name XdrAvdHuntingAccess         -Value (($MgContext.Scopes) -contains "ThreatHunting.Read.All") -Scope Global -Force
+        if ($null -ne $MgContext) { $__EntraOpsSession['GroupOriginTenantInfoAccess'] = [bool](($MgContext.Scopes) -contains 'Group-XTenantIdentitySync.Read.All') }
         # Default the query mode only when Connect-EntraOps has not set it yet, so a previously
         # chosen -UseInvokeRestMethodOnly session setting is preserved
         if (-not $__EntraOpsSession.ContainsKey('UseInvokeRestMethodOnly')) {
@@ -317,7 +347,7 @@ function Invoke-EntraOpsPrivilegedEAM {
         } elseif ($UseSessionConfig -and -not [string]::IsNullOrWhiteSpace($DefaultFolderClassifiedEam)) {
             $DefaultFolderClassifiedEam
         } else {
-            "$EntraOpsBaseFolder/PrivilegedEAM/"
+            "$EntraOpsBaseFolder/PrivilegedEAM"
         }
         New-Variable -Name DefaultFolderClassifiedEam -Value $ResolvedExportFolder -Scope Global -Force
 
@@ -329,6 +359,19 @@ function Invoke-EntraOpsPrivilegedEAM {
         $HadExistingEamData = @($RbacSystems | Where-Object {
                 Test-Path -LiteralPath (Join-Path $ResolvedExportFolder $_ "$_.json") -PathType Leaf
             }).Count -eq @($RbacSystems).Count
+        # The export folder isn't separated by tenant: an export of another tenant (shared working folder) must not
+        # define this tenant's Control Plane scope. It has objects, but none of this tenant (only objects of a governing
+        # tenant have another ObjectTenantId).
+        $ForeignEamSystems = @(foreach ($System in $RbacSystems) {
+                $EamFile = Join-Path $ResolvedExportFolder $System "$System.json"
+                if (-not (Test-Path -LiteralPath $EamFile -PathType Leaf)) { continue }
+                $ExportTenantIds = try { @(@(Get-Content -LiteralPath $EamFile -Raw | ConvertFrom-Json).ObjectTenantId | Where-Object { $_ } | Select-Object -Unique) } catch { @() }
+                if ($ExportTenantIds.Count -gt 0 -and $ExportTenantIds -notcontains $TenantId) { $System }
+            })
+        if ($ForeignEamSystems.Count -gt 0) {
+            Write-Warning "The Privileged EAM export in $ResolvedExportFolder ($($ForeignEamSystems -join ', ')) belongs to another tenant than $TenantId. It isn't used for the Control Plane scope and is replaced by the export of this run. Use a working folder per tenant."
+            $HadExistingEamData = $false
+        }
 
         # Build a minimal default EntraOpsConfig in memory (no config file required)
         $DefaultEntraOpsConfig = @{
@@ -394,6 +437,33 @@ function Invoke-EntraOpsPrivilegedEAM {
             $ReuseExistingTemplates = $Answer -in @('', 'R', 'Reuse')
         }
 
+        # Control Plane scope of an earlier run: reused only when complete and built from the templates of this run.
+        $ReuseControlPlaneScope = $false
+        if ($ControlPlaneScopeAction -ne 'Refresh') {
+            $EarlierScope = Get-EntraOpsReusableControlPlaneScope -ClassificationTenantFolder $ClassificationTenant -ClassificationParameterScope @($ClassificationParameterScope | Where-Object { $_ -in $RbacSystems })
+            if (-not $EarlierScope.Reusable) {
+                if ($ControlPlaneScopeAction -eq 'Reuse') { Write-Warning "No complete Control Plane scope of an earlier run for '$TenantName' (missing: $($EarlierScope.MissingFiles -join ', ')). The scope is refreshed." }
+            } elseif (-not $ReuseExistingTemplates) {
+                Write-Warning 'The classification templates are downloaded again, so the Control Plane scope is refreshed with them instead of reused.'
+            } elseif ($ControlPlaneScopeAction -eq 'Reuse') {
+                $ReuseControlPlaneScope = $true
+            } else {
+                Write-Host "       Found the Control Plane scope of an earlier run for '$TenantName', updated $($EarlierScope.UpdatedAt.ToString('u')) ($($EarlierScope.AgeInHours) hour(s) ago)." -ForegroundColor Yellow
+                Write-Host '       Reuse skips its update (faster, comparable with that run, without changes of the tenant since then). Refresh updates it from the tenant.' -ForegroundColor Yellow
+                do {
+                    try {
+                        $Answer = Read-Host 'Reuse the Control Plane scope or refresh it? [U] Reuse / [F] Refresh (default)'
+                    } catch {
+                        throw "Unable to prompt for the Control Plane scope. Pass -ControlPlaneScopeAction Reuse or Refresh for unattended runs. $($_.Exception.Message)"
+                    }
+                    $Answer = ([string]$Answer).Trim()
+                    $ValidAnswer = $Answer -in @('', 'U', 'Reuse', 'F', 'Refresh')
+                    if (-not $ValidAnswer) { Write-Host '       Enter U to reuse or F to refresh.' -ForegroundColor Yellow }
+                } until ($ValidAnswer)
+                $ReuseControlPlaneScope = $Answer -in @('U', 'Reuse')
+            }
+        }
+
         # Ensure required directories exist; track newly created ones for cleanup
         New-EntraOpsDirectory -Path $ClassificationRoot      -Track $CreatedPaths
         New-EntraOpsDirectory -Path $ClassificationTemplates -Track $CreatedPaths
@@ -457,14 +527,28 @@ function Invoke-EntraOpsPrivilegedEAM {
         $ScopeUpdateParameters.PrivilegedObjectClassificationSource = $PrivilegedObjectClassificationSource
         $ScopeUpdateParameters.ClassificationParameterScope = $EffectiveClassificationScope
 
-        if ($EffectiveClassificationScope.Count -eq 0) {
+        if ($ReuseControlPlaneScope) {
+            Write-Host "       Reusing the Control Plane scope of $($EarlierScope.UpdatedAt.ToString('u')) ($($EarlierScope.AgeInHours) hour(s) old) and the tenant classification files in $ClassificationTenant." -ForegroundColor Gray
+        } elseif ($EffectiveClassificationScope.Count -eq 0) {
             Write-Host "       No classification files require generation for the selected scope." -ForegroundColor Gray
         } else {
             Write-Host "       Effective scope : $($EffectiveClassificationScope -join ', ')" -ForegroundColor Gray
-            Update-EntraOpsClassificationControlPlaneScope @ScopeUpdateParameters
+            # Without a previous export the missing EAM files are expected: the bootstrap pass below uses this run's export.
+            $FirstPassParameters = @{}
+            if ($ForeignEamSystems.Count -gt 0) {
+                # An empty export folder, so the export of another tenant can't add its objects to this scope.
+                $FirstPassEamFolder = Join-Path ([System.IO.Path]::GetTempPath()) "EntraOpsEam-$([guid]::NewGuid().ToString('N'))"
+                New-Item -ItemType Directory -Path $FirstPassEamFolder -Force | Out-Null
+                $FirstPassParameters.EntraOpsEamFolder = $FirstPassEamFolder
+            }
+            try {
+                Update-EntraOpsClassificationControlPlaneScope @ScopeUpdateParameters @FirstPassParameters -SkipMissingEamDataWarning:(-not $HadExistingEamData)
+            } finally {
+                if ($FirstPassParameters.EntraOpsEamFolder) { Remove-Item -LiteralPath $FirstPassParameters.EntraOpsEamFolder -Recurse -Force -ErrorAction SilentlyContinue }
+            }
         }
 
-        Write-Host "       Status : Control Plane scope updated." -ForegroundColor Green
+        Write-Host "       Status : Control Plane scope $(if ($ReuseControlPlaneScope) { 'reused' } else { 'updated' })." -ForegroundColor Green
 
         # ── Phase 6: Save EAM JSON ────────────────────────────────────────────────
         Write-Progress -Activity $Activity -Status "Phase 6/7: Running EntraOps classification and saving EAM JSON..." -PercentComplete 62
@@ -478,7 +562,7 @@ function Invoke-EntraOpsPrivilegedEAM {
 
         Write-Host "       Status : EAM JSON saved." -ForegroundColor Green
 
-        if (-not $HadExistingEamData -and $EffectiveClassificationScope.Count -gt 0) {
+        if (-not $HadExistingEamData -and -not $ReuseControlPlaneScope -and $EffectiveClassificationScope.Count -gt 0) {
             Write-Host ""
             Write-Host "       First-run bootstrap: refreshing Control Plane scope from the fresh EAM export..." -ForegroundColor Yellow
             # Same source as the first pass: narrowing to 'EntraOps' here would drop live-source-only
@@ -518,7 +602,14 @@ function Invoke-EntraOpsPrivilegedEAM {
     } finally {
         # ── Always: remove classification artefacts and disconnect ────────────────
         # Null-guards protect against early failures before path variables were set.
-        Write-Host "  [Teardown] Removing classification artefacts and disconnecting..." -ForegroundColor Cyan
+        # The header says what happens: -KeepClassificationFiles and -KeepConnection skip these steps.
+        $TeardownText = switch ("$([bool]$KeepClassificationFiles)/$([bool]$KeepConnection)") {
+            'False/False' { 'Removing classification artefacts and disconnecting...' }
+            'False/True' { 'Removing classification artefacts...' }
+            'True/False' { 'Disconnecting...' }
+            default { 'Keeping the classification files and the connection.' }
+        }
+        Write-Host "  [Teardown] $TeardownText" -ForegroundColor Cyan
 
         if ($KeepClassificationFiles) {
             Write-Host "       Kept    : classification files in $ClassificationRoot (-KeepClassificationFiles)" -ForegroundColor DarkGray
@@ -581,11 +672,15 @@ function Invoke-EntraOpsPrivilegedEAM {
         }
 
         # Clear EntraOps cache and disconnect from Azure / Microsoft Graph
-        try {
-            Disconnect-EntraOps -ClearEntraOpsCache All -ErrorAction SilentlyContinue
-            Write-Host "       Status : Cache cleared and session disconnected." -ForegroundColor Green
-        } catch {
-            Write-Warning "Disconnect-EntraOps encountered an error during teardown: $($_.Exception.Message)"
+        if ($KeepConnection) {
+            Write-Host "       Status : Session kept connected (-KeepConnection)." -ForegroundColor Green
+        } else {
+            try {
+                Disconnect-EntraOps -ClearEntraOpsCache All -ErrorAction SilentlyContinue
+                Write-Host "       Status : Cache cleared and session disconnected." -ForegroundColor Green
+            } catch {
+                Write-Warning "Disconnect-EntraOps encountered an error during teardown: $($_.Exception.Message)"
+            }
         }
         Write-Host ""
     }

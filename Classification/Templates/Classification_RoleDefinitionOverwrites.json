@@ -97,5 +97,14 @@
     "EAMTierLevelTagValue": "2",
     "Service": "Default member",
     "Justification": "Deprecated role with unpublished actions for nonadministrative device access."
+  },
+  {
+    "RbacSystem": "EntraID",
+    "RoleDefinitionId": "eb1d8c34-acf5-460d-8424-c1f1a6fbdb85",
+    "RoleDefinitionName": "AdHoc License Administrator",
+    "EAMTierLevelName": "ManagementPlane",
+    "EAMTierLevelTagValue": "1",
+    "Service": "License Management",
+    "Justification": "Deprecated role with unpublished actions to manage ad hoc (self-service) licenses, without actions to assign licenses to users or groups."
   }
 ]

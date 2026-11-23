@@ -70,7 +70,8 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         try {
             $CachedObject = Get-Content $CacheFile -Raw | ConvertFrom-Json
             $CurrentTime = [DateTime]::UtcNow
-            $ExpiryTime = [DateTime]::Parse($CachedObject.ExpiryTime)
+            # ConvertFrom-Json already returns a DateTime; [DateTime]::Parse would re-stringify it culture-specifically
+            $ExpiryTime = ([DateTimeOffset]$CachedObject.ExpiryTime).UtcDateTime
             
             if ($CurrentTime -lt $ExpiryTime) {
                 $CacheValid = $true
@@ -350,7 +351,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                         $Response = Invoke-EntraOpsMsGraphQuery -Method POST -Uri $Uri -Body $Body -OutputType PSObject
                         
                         foreach ($Obj in $Response) { 
-                            if (-not $DirObjLookup.ContainsKey($Obj.id)) {
+                            if ($null -ne $Obj.id -and -not $DirObjLookup.ContainsKey($Obj.id)) {
                                 $DirObjLookup[$Obj.id] = $Obj
                                 $TypeResolvedCount++
                             }
@@ -753,8 +754,9 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
     Write-Host "Get details of Entra ID Eligible Role Assignments..."
     Write-Host "Processing $($EligibleToProcess.Count) eligible assignments..." -ForegroundColor Gray
     
-    # Track progress for user feedback using thread-safe counter
-    $ProgressCounter = [System.Collections.Concurrent.ConcurrentBag[int]]::new()
+    # Progress is written on this thread as the results arrive: the console keys progress records by their
+    # source, so a bar written in a parallel runspace ignores -Completed from here and stays visible.
+    $ProcessedCount = 0
     $TotalCount = $EligibleToProcess.Count
     $ProgressInterval = [Math]::Max(1, [Math]::Floor($TotalCount / 20))  # Update every 5%
     
@@ -773,19 +775,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
         $GuidPattern = $using:GuidPattern
         $LocalWarnings = $using:ParallelWarningsEligible
         $LocalTenantId = $using:TenantId
-        
-        # Thread-safe progress tracking using ConcurrentBag
-        $LocalCounter = $using:ProgressCounter
-        $Total = $using:TotalCount
-        $Interval = $using:ProgressInterval
-        
-        $LocalCounter.Add(1)
-        $LocalCount = $LocalCounter.Count
-        if (($LocalCount % $Interval) -eq 0 -or $LocalCount -eq $Total) {
-            $PercentComplete = [Math]::Round(($LocalCount / $Total) * 100, 0)
-            Write-Progress -Activity "Processing Eligible Assignments" -Status "Processing $LocalCount of $Total eligible assignments" -PercentComplete $PercentComplete -Id 100
-        }
-        
+
         # Resolve Principal
         $ObjectType = "unknown"
         $PrincipalProfile = $null
@@ -884,8 +874,15 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
             TransitiveByNestingObjectIds          = $null
             TransitiveByNestingObjectDisplayNames = $null
         }
+    } | ForEach-Object {
+        $ProcessedCount++
+        if (($ProcessedCount % $ProgressInterval) -eq 0 -or $ProcessedCount -eq $TotalCount) {
+            $PercentComplete = [Math]::Round(($ProcessedCount / $TotalCount) * 100, 0)
+            Write-Progress -Activity "Processing Eligible Assignments" -Status "Processing $ProcessedCount of $TotalCount eligible assignments" -PercentComplete $PercentComplete -Id 100
+        }
+        $_
     }
-    
+
     # Merge thread-safe warnings back into main WarningMessages list
     foreach ($w in $ParallelWarningsEligible) {
         if ($null -ne $WarningMessages) { $WarningMessages.Add($w) }
@@ -1177,9 +1174,9 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                 }
             }
 
-            # Expand cross-tenant groups (requires Graph context switch per foreign tenant)
-            # Skip when $ExpandCrossTenantGroupMembers is $false — caller (e.g. Get-EntraOpsPrivilegedEAMEntraId)
-            # handles expansion and object resolution together in Stage 5b with a single auth prompt.
+            # Expand cross-tenant groups (requires Graph context switch per foreign tenant).
+            # Skipped when $ExpandCrossTenantGroupMembers is $false because the caller (e.g.
+            # Get-EntraOpsPrivilegedEAMEntraId) expands and resolves them in Stage 5b with one auth prompt.
             if ($CrossTenantGroups.Count -gt 0 -and $ExpandCrossTenantGroupMembers) {
                 $CrossTenantGroupsByTenant = $CrossTenantGroups | Group-Object ObjectTenantId
 
@@ -1213,6 +1210,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                     "CustomSecAttributeAssignment.Read.All",
                     "Directory.Read.All",
                     "Group.Read.All",
+                    "Group-XTenantIdentitySync.Read.All",
                     "GroupMember.Read.All",
                     "PrivilegedAccess.Read.AzureADGroup",
                     "PrivilegedEligibilitySchedule.Read.AzureADGroup",
@@ -1247,8 +1245,7 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                         if ($IsRestOnlyMode) {
                             $__EntraOpsSession['CurrentGraphTenantId'] = $ForeignTenantId
                         } else {
-                            # Always use Get-AzAccessToken for managing tenant (silent — Az session has
-                            # a cached token from Connect-EntraOps pre-auth, no browser/device prompt).
+                            # Always use Get-AzAccessToken for the managing tenant (silent via cached token from Connect-EntraOps).
                             $ForeignToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $ForeignTenantId -AsSecureString -ErrorAction Stop).Token
                             Connect-MgGraph -AccessToken $ForeignToken -NoWelcome -ErrorAction Stop
                         }
@@ -1290,16 +1287,12 @@ function Get-EntraOpsPrivilegedEntraIdRoles {
                                 })
                         }
                     } finally {
-                        # Restore home-tenant MgGraph context.
-                        # Interactive: Connect-MgGraph -TenantId hits the MSAL cache (full-scope token
-                        #              from Connect-EntraOps) — no prompt, no scope loss.
-                        # Non-interactive: Connect-MgGraph -AccessToken uses the Az app token which
-                        #              carries full application permissions.
+                        # Restore home-tenant MgGraph context (interactive uses MSAL cache; non-interactive uses Az app token).
                         try {
                             if ($IsRestOnlyMode) {
                                 $__EntraOpsSession.Remove('CurrentGraphTenantId')
                             } elseif ($IsInteractiveAuth) {
-                                Connect-MgGraph -TenantId $Global:TenantIdContext -Scopes $HomeTenantScopes -NoWelcome -ErrorAction Stop
+                                Connect-MgGraph -TenantId $Global:TenantIdContext -Scopes $HomeTenantScopes -NoWelcome -ErrorAction Stop -ContextScope Process
                             } elseif ($null -ne $HomeToken) {
                                 Connect-MgGraph -AccessToken $HomeToken -NoWelcome -ErrorAction Stop
                             }

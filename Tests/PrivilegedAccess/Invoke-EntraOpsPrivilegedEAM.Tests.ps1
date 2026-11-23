@@ -90,7 +90,7 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
         Mock -ModuleName EntraOps Write-Host {}
         Mock -ModuleName EntraOps Read-Host { 'R' }
 
-        Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports | Out-Null
+        Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports -Ref main -WarningAction SilentlyContinue | Out-Null
         Push-Location $script:Workspace
         $script:Config = @{
             TenantId = '00000000-0000-0000-0000-000000000001'
@@ -220,6 +220,23 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
         try { Invoke-EntraOpsPrivilegedEAM -KeepClassificationFiles } finally { Pop-Location }
 
         $Global:EntraOpsConfig.RbacSystems | Should -Contain 'Defender'
+    }
+
+    It 'uses the defaults instead of a configuration that Connect-EntraOps skipped' {
+        $script:Config.TenantId = 'another-tenant'
+        $ConfigPath = Join-Path $script:Workspace 'EntraOpsConfig.json'
+        $script:Config | ConvertTo-Json -Depth 10 | Set-Content $ConfigPath
+        & (Get-Module EntraOps) { param($Path) $__EntraOpsSession['SkippedConfigFilePath'] = $Path } $ConfigPath
+
+        try {
+            Invoke-EntraOpsPrivilegedEAM -RbacSystems EntraID
+        } finally {
+            & (Get-Module EntraOps) { $__EntraOpsSession.Remove('SkippedConfigFilePath') }
+        }
+
+        Should -Invoke Write-Host -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { "$Object" -match 'Zero-Config Run' }
+        Should -Invoke Write-Host -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { "$Object" -match 'is not used \(skipped by Connect-EntraOps\)' }
+        Should -Invoke Save-EntraOpsPrivilegedEAMJson -ModuleName EntraOps -Times 1
     }
 
     It 'rejects a config for another tenant before changing classification files' {
@@ -362,6 +379,21 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
         Get-Content "$TenantFolder/Classification_Azure.json" -Raw | Should -Match '^\{\}\s*$'
         Test-Path "$TenantFolder/Classification_DeviceManagement.json" | Should -BeTrue
         Should -Invoke Update-EntraOpsClassificationControlPlaneScope -ModuleName EntraOps -Times 2 -Exactly -ParameterFilter { @($ClassificationParameterScope).Count -eq 2 -and $ClassificationParameterScope -contains 'DeviceManagement' -and $ClassificationParameterScope -contains 'Azure' }
+        # Before the first export the missing EAM files are expected; the bootstrap pass reads the fresh export.
+        Should -Invoke Update-EntraOpsClassificationControlPlaneScope -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { $SkipMissingEamDataWarning }
+        Should -Invoke Update-EntraOpsClassificationControlPlaneScope -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { -not $SkipMissingEamDataWarning }
+    }
+
+    It 'describes the teardown that happens (KeepClassificationFiles: <KeepFiles>, KeepConnection: <KeepConnection>)' -ForEach @(
+        @{ KeepFiles = $false; KeepConnection = $false; Text = 'Removing classification artefacts and disconnecting...' }
+        @{ KeepFiles = $false; KeepConnection = $true; Text = 'Removing classification artefacts...' }
+        @{ KeepFiles = $true; KeepConnection = $false; Text = 'Disconnecting...' }
+        @{ KeepFiles = $true; KeepConnection = $true; Text = 'Keeping the classification files and the connection.' }
+    ) {
+        Invoke-EntraOpsPrivilegedEAM -RbacSystems EntraID -KeepClassificationFiles:$KeepFiles -KeepConnection:$KeepConnection
+
+        Should -Invoke Write-Host -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { "$Object" -match '\[Teardown\]' }
+        Should -Invoke Write-Host -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { "$Object" -eq "  [Teardown] $Text" }
     }
 
     It 'refreshes the selected existing classifications once when all prior EAM exports exist' {
@@ -379,8 +411,71 @@ Describe 'Invoke-EntraOpsPrivilegedEAM session working folder' {
         Get-Content "$TenantFolder/Classification_AadResources.json" -Raw | Should -Match '^\{\}\s*$'
         Get-Content "$TenantFolder/ScopeReasoning_EntraID.json" -Raw | Should -Match 'refreshed'
         Get-Content "$TenantFolder/Classification_Azure.json" -Raw | Should -Match 'outsideSelectedScope'
-        Should -Invoke Update-EntraOpsClassificationControlPlaneScope -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { @($ClassificationParameterScope).Count -eq 1 -and $ClassificationParameterScope -contains 'EntraID' }
+        Should -Invoke Update-EntraOpsClassificationControlPlaneScope -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { @($ClassificationParameterScope).Count -eq 1 -and $ClassificationParameterScope -contains 'EntraID' -and -not $SkipMissingEamDataWarning }
         Should -Invoke Save-EntraOpsPrivilegedEAMJson -ModuleName EntraOps -Times 1 -Exactly
+    }
+
+    It 'reuses the Control Plane scope of an earlier run without updating it (prior export: <WithExport>)' -ForEach @(@{ WithExport = $true }, @{ WithExport = $false }) {
+        $TenantFolder = Join-Path $script:Workspace 'Classification/contoso.onmicrosoft.com'
+        New-Item -ItemType Directory -Path $TenantFolder -Force | Out-Null
+        Set-Content "$TenantFolder/Classification_AadResources.json" -Value '[{"earlierScope":true}]'
+        Set-Content "$TenantFolder/ScopeReasoning_ControlPlane.json" -Value '{}'
+        if ($WithExport) {
+            New-Item -ItemType Directory -Path "$script:Workspace/PrivilegedEAM/EntraID" -Force | Out-Null
+            Set-Content "$script:Workspace/PrivilegedEAM/EntraID/EntraID.json" -Value '[]'
+        }
+
+        Invoke-EntraOpsPrivilegedEAM -ExistingClassificationAction Reuse -ControlPlaneScopeAction Reuse -RbacSystems EntraID -ClassificationParameterScope EntraID
+
+        Get-Content "$TenantFolder/Classification_AadResources.json" -Raw | Should -Match 'earlierScope'
+        # Neither the scope update nor the first-run bootstrap.
+        Should -Invoke Update-EntraOpsClassificationControlPlaneScope -ModuleName EntraOps -Times 0
+        Should -Invoke Save-EntraOpsPrivilegedEAMJson -ModuleName EntraOps -Times 1 -Exactly
+    }
+
+    It 'refreshes the Control Plane scope instead of reusing it when <Case>' -ForEach @(
+        @{ Case = 'no scope reasoning of an earlier run exists'; Reasoning = $false; Action = 'Reuse'; Warning = 'No complete Control Plane scope*ScopeReasoning_ControlPlane.json*' }
+        @{ Case = 'the templates are downloaded again'; Reasoning = $true; Action = 'Regenerate'; Warning = '*templates are downloaded again*' }
+    ) {
+        $TenantFolder = Join-Path $script:Workspace 'Classification/contoso.onmicrosoft.com'
+        New-Item -ItemType Directory -Path $TenantFolder, "$script:Workspace/PrivilegedEAM/EntraID" -Force | Out-Null
+        Set-Content "$TenantFolder/Classification_AadResources.json" -Value '[{"earlierScope":true}]'
+        if ($Reasoning) { Set-Content "$TenantFolder/ScopeReasoning_ControlPlane.json" -Value '{}' }
+        Set-Content "$script:Workspace/PrivilegedEAM/EntraID/EntraID.json" -Value '[]'
+
+        Invoke-EntraOpsPrivilegedEAM -ExistingClassificationAction $Action -ControlPlaneScopeAction Reuse -RbacSystems EntraID -ClassificationParameterScope EntraID -WarningVariable Warnings -WarningAction SilentlyContinue
+
+        @($Warnings | Where-Object { "$_" -like $Warning }).Count | Should -Be 1
+        Should -Invoke Update-EntraOpsClassificationControlPlaneScope -ModuleName EntraOps -Times 1 -Exactly
+    }
+
+    It 'asks whether to reuse the Control Plane scope with -ControlPlaneScopeAction Prompt' {
+        $TenantFolder = Join-Path $script:Workspace 'Classification/contoso.onmicrosoft.com'
+        New-Item -ItemType Directory -Path $TenantFolder, "$script:Workspace/PrivilegedEAM/EntraID" -Force | Out-Null
+        Set-Content "$TenantFolder/Classification_AadResources.json" -Value '[{"earlierScope":true}]'
+        Set-Content "$TenantFolder/ScopeReasoning_ControlPlane.json" -Value '{}'
+        Set-Content "$script:Workspace/PrivilegedEAM/EntraID/EntraID.json" -Value '[]'
+        Mock -ModuleName EntraOps Read-Host { 'U' } -ParameterFilter { "$Prompt" -like '*Control Plane scope*' }
+
+        Invoke-EntraOpsPrivilegedEAM -ExistingClassificationAction Reuse -ControlPlaneScopeAction Prompt -RbacSystems EntraID -ClassificationParameterScope EntraID
+
+        Should -Invoke Read-Host -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { "$Prompt" -like '*Control Plane scope*' }
+        Should -Invoke Update-EntraOpsClassificationControlPlaneScope -ModuleName EntraOps -Times 0
+    }
+
+    It 'does not use the export of another tenant for the Control Plane scope and refreshes it from the new export' {
+        foreach ($System in 'EntraID', 'Azure') {
+            New-Item -ItemType Directory -Path "$script:Workspace/PrivilegedEAM/$System" -Force | Out-Null
+            '[{"ObjectId":"1","ObjectTenantId":"99999999-9999-9999-9999-999999999999"}]' | Set-Content "$script:Workspace/PrivilegedEAM/$System/$System.json"
+        }
+
+        Invoke-EntraOpsPrivilegedEAM -ExistingClassificationAction Reuse -RbacSystems EntraID, Azure -ClassificationParameterScope EntraID -WarningVariable Warnings -WarningAction SilentlyContinue
+
+        @($Warnings | Where-Object { "$_" -like '*belongs to another tenant*' }).Count | Should -Be 1
+        # First pass with an empty export folder, then the bootstrap pass from this run's export.
+        Should -Invoke Update-EntraOpsClassificationControlPlaneScope -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { $SkipMissingEamDataWarning -and $EntraOpsEamFolder -and $EntraOpsEamFolder -notlike "$script:Workspace*" }
+        Should -Invoke Update-EntraOpsClassificationControlPlaneScope -ModuleName EntraOps -Times 1 -Exactly -ParameterFilter { -not $SkipMissingEamDataWarning -and -not $EntraOpsEamFolder }
+        Should -Invoke Save-EntraOpsPrivilegedEAMJson -ModuleName EntraOps -Times 2 -Exactly
     }
 
     It 'preserves reused templates, tenant overwrite files and refreshed definitions after export fails (Keep: <Keep>)' -ForEach @(@{ Keep = $true }, @{ Keep = $false }) {

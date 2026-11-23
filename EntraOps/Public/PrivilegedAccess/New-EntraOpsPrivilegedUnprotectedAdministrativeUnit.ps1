@@ -67,7 +67,7 @@ function New-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
             $PrivilegedEamObjects = Get-Content "$DefaultFolderClassifiedEam/$RbacSystem/$($RbacSystem).json" | ConvertFrom-Json
             $PrivilegedEamObjects | Where-Object {
                 $_.ObjectType -eq "user" -and
-                (@($_.OwnedDevices).Count -gt 0 -or @($_.AssociatedPawDevice).Count -gt 0)
+                (@($_.OwnedDevices).Count -gt 0 -or @(Get-EntraOpsPawDeviceObjectId -Object $_).Count -gt 0)
             } | ForEach-Object { $_.Classification.AdminTierLevelName }
         }
         $RequiredTierLevelNames += $DeviceTierLevelNames

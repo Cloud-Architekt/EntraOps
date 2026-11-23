@@ -11,6 +11,7 @@
 .PARAMETER Classifications
     Array of classification names which should be updated. Default is ("AadResources", "AadResources.Param", "Azure", "Azure.Param", "AppRoles", "ApiPermissions", "Defender", "IdentityGovernance") which are available from the public repository.
     Pass "All" (or include "All" in the array) to update every classification file found in the repository, regardless of the default/explicit list.
+    Deprecated templates still published upstream (AzBilling, AzResources, AzResourcesByAzTags) are always skipped.
 
 .PARAMETER IncludeParamFiles
     If set, automatically includes any matching .Param variant files found in the repository for each classification in $Classifications.
@@ -24,6 +25,12 @@
 .PARAMETER SkipExisting
     Reuse existing local templates and download only missing files. Defaults to false: existing files
     are overwritten with validated downloads unless -SkipExisting is explicitly enabled.
+
+.PARAMETER FailOnUnavailableRepository
+    Fail when the list of templates can't be read from GitHub (for example while its rate limit is exceeded),
+    even if the requested templates exist locally. By default, the existing local templates are kept and
+    used with a warning, as nothing was changed. Requests are authenticated with GITHUB_TOKEN or GH_TOKEN
+    when set, and rate limits and transient errors are retried.
 
 .EXAMPLE
     Update all classification files in default location (./EntraOps_Classification/Templates) with classifications from the public repository AzurePrivilegedIAM
@@ -58,16 +65,41 @@ function Update-EntraOpsClassificationFiles {
         ,
         [Parameter(Mandatory = $false)]
         [Switch]$SkipExisting = $false
+        ,
+        [Parameter(Mandatory = $false)]
+        [Switch]$FailOnUnavailableRepository = $false
     )
 
-    $ClassificationTemplates = Invoke-RestMethod -Method GET -Uri "https://api.github.com/repos/Cloud-Architekt/AzurePrivilegedIAM/contents/EntraOps_Classification?ref=$($Branch)"
+    try {
+        $ClassificationTemplates = Invoke-EntraOpsGitHubRequest -Uri "https://api.github.com/repos/Cloud-Architekt/AzurePrivilegedIAM/contents/EntraOps_Classification?ref=$($Branch)"
+    } catch {
+        $ListingError = $_.Exception.Message
+        # Nothing was downloaded, so the local templates are still one consistent set. They are used when every
+        # requested template exists ("All": any template), instead of failing the classification for an outage of GitHub.
+        $RequestedNames = @(@($Classifications) | Where-Object { $_ -and $_ -ne 'All' } | ForEach-Object { if ($_ -eq 'AppRoles') { 'ApiPermissions' } else { $_ } })
+        $LocalTemplatesComplete = if (@($Classifications) -contains 'All' -or $RequestedNames.Count -eq 0) {
+            @(Get-ChildItem -Path $FolderClassification -Filter 'Classification_*.json' -File -ErrorAction SilentlyContinue).Count -gt 0
+        } else {
+            @($RequestedNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $FolderClassification "Classification_$_.json") -PathType Leaf) }).Count -eq 0
+        }
+        if ($FailOnUnavailableRepository -or -not $LocalTemplatesComplete) {
+            throw "The classification templates could not be listed from Cloud-Architekt/AzurePrivilegedIAM ($Branch): $ListingError$(if (-not $LocalTemplatesComplete) { " The requested templates don't exist in $FolderClassification, so the classification can't continue with local copies." })"
+        }
+        Write-Warning "The classification templates could not be listed from Cloud-Architekt/AzurePrivilegedIAM ($Branch): $ListingError The existing templates in $FolderClassification are kept and used; they are updated by the next run."
+        return
+    }
+
+    # Deprecated classification templates that were removed from EntraOps (replaced by the Azure
+    # classification) but may still be published in the upstream repository. They are never downloaded,
+    # so "-Classifications All" does not bring them back into the Templates folder.
+    $DeprecatedClassifications = @('AzBilling', 'AzResources', 'AzResourcesByAzTags')
 
     # Support "All" as a shortcut to include every classification file available in the repository,
     # so newly added classifications (e.g. Defender, IdentityGovernance, DeviceManagement) are always
     # considered without requiring the default/explicit list to be kept in sync.
     if (@($Classifications) -contains "All") {
         $Classifications = $ClassificationTemplates | ForEach-Object { $_.Name.Replace("Classification_", "").Replace(".json", "") }
-        Write-Verbose "Classifications set to 'All': including all $(@($Classifications).Count) classification file(s) found in the repository."
+        Write-Verbose "Classifications set to 'All': including all $(@($Classifications).Count) classification file(s) found in the repository (deprecated templates are skipped)."
     } else {
         # Normalize Classifications: replace AppRoles with ApiPermissions, or remove it if ApiPermissions already present
         if ("AppRoles" -in $Classifications) {
@@ -103,7 +135,10 @@ function Update-EntraOpsClassificationFiles {
         # Parsing classification name by removing the prefix and suffix from file name
         $ClassificationName = $ClassificationTemplate.Name.Replace("Classification_", "").Replace(".json", "")
         if ($ClassificationName -in $Classifications) {
-
+            if (($ClassificationName -replace '\.Param$', '') -in $DeprecatedClassifications) {
+                Write-Verbose "[$($ClassificationTemplate.name)] Skipped: deprecated classification template (no longer supported by EntraOps, use the Azure classification instead)."
+                continue
+            }
 
             $LocalFilePath = "$($FolderClassification)/$($ClassificationTemplate.name)"
             if ($SkipExisting -and (Test-Path -LiteralPath $LocalFilePath -PathType Leaf)) {
@@ -119,7 +154,7 @@ function Update-EntraOpsClassificationFiles {
                     New-Item -Path $FolderClassification -ItemType Directory -Force | Out-Null
                 }
                 # Download to a temp file and swap atomically so a failed download never truncates the existing file
-                Invoke-RestMethod -Method GET -Uri $ClassificationTemplate.download_url -OutFile "$LocalFilePath.tmp"
+                Invoke-EntraOpsGitHubRequest -Uri $ClassificationTemplate.download_url -OutFile "$LocalFilePath.tmp"
 
                 # A truncated response or an error page must not replace a valid template. *.Param.json
                 # templates carry bare, unquoted placeholders (e.g. <Tier0IncludedResourceScope>) and only

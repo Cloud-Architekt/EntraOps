@@ -119,3 +119,59 @@ Describe "Get-EntraOpsIdGovScopeClassification AadApplication and SharePointOnli
     }
 }
 
+
+Describe "Get-EntraOpsIdGovScopeClassification deterministic output" {
+    BeforeAll {
+        $script:EamFolder = Join-Path $TestDrive "PrivilegedEAM-Order"
+        New-Item -ItemType Directory -Path (Join-Path $script:EamFolder "ResourceApps") -Force | Out-Null
+        $script:AppIds = @(
+            "aaaaaaaa-0000-0000-0000-000000000001"
+            "bbbbbbbb-0000-0000-0000-000000000002"
+            "cccccccc-0000-0000-0000-000000000003"
+            "dddddddd-0000-0000-0000-000000000004"
+        )
+        @(
+            for ($i = 0; $i -lt $script:AppIds.Count; $i++) {
+                [pscustomobject]@{
+                    ObjectId          = $script:AppIds[$i]
+                    ObjectDisplayName = "App $i"
+                    Classification    = @([pscustomobject]@{ AdminTierLevel = "0"; AdminTierLevelName = "ControlPlane"; Service = "Authentication" })
+                }
+            }
+        ) | ConvertTo-Json -Depth 5 -AsArray | Set-Content -Path (Join-Path $script:EamFolder "ResourceApps/ResourceApps.json")
+        $script:ClassificationFolder = Join-Path $TestDrive "Classification-Order"
+        New-Item -ItemType Directory -Path $script:ClassificationFolder -Force | Out-Null
+
+        # Graph return order for the catalog resources - changed per run to simulate Graph's unordered results.
+        $script:GraphOrder = @($script:AppIds)
+        Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Uri -like "*accessPackageCatalogs?*" } -MockWith {
+            @([pscustomobject]@{ id = "cat1"; displayName = "Order Catalog" })
+        }
+        Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Uri -like "*accessPackageCatalogs/cat1/accessPackageResources*" } -MockWith {
+            foreach ($Id in $script:GraphOrder) {
+                [pscustomobject]@{ originSystem = "AadApplication"; originId = $Id; displayName = "App $([array]::IndexOf($script:AppIds, $Id))" }
+            }
+        }
+        Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Uri -like "*accessPackageCatalogs('cat1')*" } -MockWith {
+            [pscustomobject]@{ id = "cat1"; displayName = "Order Catalog"; accessPackages = @() }
+        }
+
+        function Invoke-OrderedClassification {
+            $Warnings = [System.Collections.Generic.List[psobject]]::new()
+            @(Get-EntraOpsIdGovScopeClassification -EntraOpsEamFolder $script:EamFolder -FilterClassifiedRbacs @("Azure") -FolderClassification $script:ClassificationFolder -WarningMessages $Warnings) |
+                Where-Object { $_.ScopeType -eq "AccessPackageCatalog" }
+        }
+    }
+
+    It "produces the same ClassifiedResources order and Reason regardless of Graph return order" {
+        $script:GraphOrder = @($script:AppIds)
+        $Forward = Invoke-OrderedClassification
+        $script:GraphOrder = @($script:AppIds[3], $script:AppIds[1], $script:AppIds[0], $script:AppIds[2])
+        $Reversed = Invoke-OrderedClassification
+
+        @($Forward.ClassifiedResources.ResourceId) | Should -Be $script:AppIds
+        @($Reversed.ClassifiedResources.ResourceId) | Should -Be $script:AppIds
+        $Reversed.Reason | Should -Be $Forward.Reason
+        $Forward.Reason | Should -BeLike "*App 0*App 1*App 2*(+1 more)"
+    }
+}

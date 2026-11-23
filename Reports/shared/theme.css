@@ -2,6 +2,46 @@
     --viz-muted: var(--neutral-fg-secondary);
     --viz-flow-link: #5c2d91;
     --viz-node-stroke: rgba(0, 0, 0, 0.18);
+
+    /* Tier tints (the tier colors are defined by each report stylesheet). */
+    --tier-workload: #0078d4;
+    --tier-control-bg: rgba(164, 38, 44, .10);
+    --tier-management-bg: rgba(192, 120, 7, .10);
+    --tier-workload-bg: rgba(0, 120, 212, .10);
+    --tier-user-bg: rgba(14, 112, 14, .10);
+
+    /* Finding severities: the common security scale (Maester, Defender) - Critical dark red, High red, Medium orange,
+       Low yellow, Info gray. --sev-* fills dots, bars and the solid Critical badge, -fg is the text on the fill,
+       -text the text on the -bg tint of the other badges. All text pairs meet WCAG AA (4.5:1). */
+    --sev-critical: #750b1c;
+    --sev-critical-fg: #ffffff;
+    --sev-critical-text: #750b1c;
+    --sev-critical-bg: rgba(117, 11, 28, .10);
+    --sev-high: #d13438;
+    --sev-high-fg: #ffffff;
+    --sev-high-text: #b3262b;
+    --sev-high-bg: rgba(209, 52, 56, .10);
+    --sev-medium: #ca5010;
+    --sev-medium-fg: #ffffff;
+    --sev-medium-text: #a8430b;
+    --sev-medium-bg: rgba(202, 80, 16, .12);
+    --sev-low: #e8b00f;
+    --sev-low-fg: #3d2e00;
+    --sev-low-text: #7a5c00;
+    --sev-low-bg: rgba(232, 176, 15, .16);
+    --sev-info: var(--neutral-stroke-strong);
+    --sev-info-fg: var(--neutral-fg-secondary);
+    --sev-info-text: var(--neutral-fg-secondary);
+    --sev-info-bg: var(--neutral-surface-alt);
+
+    /* Check status, in the status colors of the other EntraOps reports (fail red, ok green, warn amber):
+       "Failed" the check has findings, "Passed" it has none, "Error" the evaluation failed (not a finding). */
+    --status-failed: #a4262c;
+    --status-failed-bg: #fde7e9;
+    --status-passed: #0e700e;
+    --status-passed-bg: #dff6dd;
+    --status-error: #8a6d00;
+    --status-error-bg: #fff4ce;
 }
 
 :root[data-theme="dark"] {
@@ -33,6 +73,33 @@
     --shadow-16: 0 6.4px 14.4px rgba(0, 0, 0, 0.50), 0 1.2px 3.6px rgba(0, 0, 0, 0.38);
     --viz-flow-link: #b394e7;
     --viz-node-stroke: rgba(255, 255, 255, 0.32);
+    --tier-workload: #82c7ff;
+    --tier-control-bg: rgba(241, 112, 122, .16);
+    --tier-management-bg: rgba(241, 189, 84, .16);
+    --tier-workload-bg: rgba(0, 120, 212, .18);
+    --tier-user-bg: rgba(115, 196, 123, .16);
+    --sev-critical: #c50f1f;
+    --sev-critical-fg: #ffffff;
+    --sev-critical-text: #ff9ca3;
+    --sev-critical-bg: rgba(224, 82, 94, .22);
+    --sev-high: #f1707a;
+    --sev-high-fg: #1f1f1f;
+    --sev-high-text: #ffaaa9;
+    --sev-high-bg: rgba(241, 112, 122, .16);
+    --sev-medium: #f7894a;
+    --sev-medium-fg: #1f1f1f;
+    --sev-medium-text: #ffb07a;
+    --sev-medium-bg: rgba(247, 137, 74, .16);
+    --sev-low: #f1cd4e;
+    --sev-low-fg: #1f1f1f;
+    --sev-low-text: #f3d670;
+    --sev-low-bg: rgba(241, 205, 78, .14);
+    --status-failed: #ff9ca3;
+    --status-failed-bg: rgba(241, 112, 122, .16);
+    --status-passed: #8fd496;
+    --status-passed-bg: rgba(115, 196, 123, .16);
+    --status-error: #f1bd54;
+    --status-error-bg: rgba(241, 189, 84, .14);
 }
 
 :root[data-theme="dark"] mark {
@@ -68,4 +135,60 @@
     background: rgba(255, 255, 255, 0.12);
     color: #fff;
     outline: none;
+}
+/* Page-level notice of the flow reports when their risk flags and tiers were not evaluated (shared/flow-findings.js). */
+.flow-findings-notice {
+    margin: 0 0 16px;
+    padding: 10px 14px;
+    border-bottom: none;
+}
+
+.flow-findings-notice[hidden] {
+    display: none;
+}
+
+/* Non-blocking notice for a deep link whose target is not in the loaded data (EntraOpsReportUtils.deepLinkNotFound). */
+.eo-deeplink-notice {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    z-index: 1200;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    max-width: min(560px, calc(100vw - 32px));
+    padding: 10px 12px 10px 16px;
+    border: 1px solid var(--neutral-stroke-strong);
+    border-left: 4px solid var(--brand);
+    border-radius: 6px;
+    background: var(--neutral-surface);
+    color: var(--neutral-fg);
+    box-shadow: var(--shadow-16);
+    font-size: 13px;
+    line-height: 1.45;
+    transform: translateX(-50%);
+}
+
+.eo-deeplink-notice[hidden] {
+    display: none;
+}
+
+.eo-deeplink-notice code {
+    overflow-wrap: anywhere;
+}
+
+.eo-deeplink-notice-close {
+    flex-shrink: 0;
+    border: 0;
+    background: transparent;
+    color: var(--neutral-fg-secondary);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+}
+
+.eo-deeplink-notice-close:hover,
+.eo-deeplink-notice-close:focus-visible {
+    color: var(--neutral-fg);
 }

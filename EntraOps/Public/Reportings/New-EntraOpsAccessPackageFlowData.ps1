@@ -7,8 +7,23 @@
     access package resource-role scopes, and current package assignments. The generated data is
     merged with the snapshot-only Configuration Analyzer dataset by the static report.
 
+    It also reads the access drift of the governed groups and applications (Microsoft Entra ID Governance >
+    Access Guardian > Reports > Access Drift, Microsoft Graph beta accessDriftSummary): members or application
+    role assignments without an access package assignment (unauthorized) and access package assignments without
+    the expected membership (missing), with up to five examples per resource. The access drift report is in
+    preview, needs a Microsoft Entra ID Governance or Microsoft Entra Suite license and EntitlementManagement.Read.All,
+    and is refreshed about once a day. When it cannot be read, accessDrift.status is 'unavailable' with the reason,
+    and the access drift finding rule is skipped.
+
+    The declared tiers of the target groups are written as objectClassifications, in the order of the Privileged EAM
+    classification: the Group filters of the Alternate Tier Level Attributes (AlternateObjectTierLevelAttributes.Group,
+    evaluated with Get-EntraOpsPrivilegedEntraObject, so the filters see the same details as in Privileged EAM), then
+    the Object Classification File (ObjectClassificationFile). The findings use them for groups without role
+    assignments, whose tier the Privileged EAM data cannot tell; declaredBy names the source and justification the
+    reason.
+
 .PARAMETER RepoRoot
-    Root of the EntraOps working folder with TenantGovernance/Snapshots, PrivilegedEAM and EntraOpsConfig.json.
+    Root of the EntraOps working folder with TenantGovernance/Snapshots, PrivilegedEAM and EntraOpsConfig.json (alias: -Path).
     Defaults to the EntraOps working folder ($EntraOpsBaseFolder).
 
 .PARAMETER SnapshotPath
@@ -43,6 +58,7 @@ function New-EntraOpsAccessPackageFlowData {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param (
         [Parameter(Mandatory = $false)]
+        [Alias('Path')]
         [System.String]$RepoRoot,
 
         [Parameter(Mandatory = $false)]
@@ -77,19 +93,52 @@ function New-EntraOpsAccessPackageFlowData {
     if (-not (Test-Path -LiteralPath $SnapshotPath -PathType Container)) {
         throw "Tenant Governance snapshot folder not found: $SnapshotPath. Run a successful Save-EntraOpsTenantGovernanceSnapshotJson capture first."
     }
+    $Config = $null
+    $ConfigFilePath = Join-Path $RepoRoot 'EntraOpsConfig.json'
+    if (Test-Path -LiteralPath $ConfigFilePath -PathType Leaf) {
+        try {
+            $Config = Get-Content -LiteralPath $ConfigFilePath -Raw | ConvertFrom-Json
+        } catch {
+            Write-Warning "Failed to read ConfigurationAnalyzer settings from ${ConfigFilePath}: $($_.Exception.Message). Group tier resolution remains enabled and the Object Classification File is not used."
+        }
+    }
     if (-not $PSBoundParameters.ContainsKey('ResolveRequestorApproverTiers')) {
         $ResolveRequestorApproverTiers = $true
-        $ConfigFilePath = Join-Path $RepoRoot 'EntraOpsConfig.json'
-        if (Test-Path -LiteralPath $ConfigFilePath -PathType Leaf) {
+        if ($null -ne $Config -and $null -ne $Config.ConfigurationAnalyzer -and $null -ne $Config.ConfigurationAnalyzer.ResolveGroupMembersForPrivilegedAssets) {
+            $ResolveRequestorApproverTiers = [bool]$Config.ConfigurationAnalyzer.ResolveGroupMembersForPrivilegedAssets
+        }
+    }
+
+    # The Object Classification File (ObjectClassificationFile of EntraOpsConfig.json) declares the tier of objects. A
+    # group without role assignments has no classification in the Privileged EAM data: the findings classify such an
+    # access package target by its declared tier (objectClassifications), and leave it unclassified without one.
+    $ObjectClassificationEntries = @{}
+    $ObjectClassificationSetting = if ($null -ne $Config) { $Config.ObjectClassificationFile } else { $null }
+    if ($null -ne $ObjectClassificationSetting -and $ObjectClassificationSetting.Enabled -eq $true -and -not [string]::IsNullOrWhiteSpace($ObjectClassificationSetting.FilePath)) {
+        try {
+            $ObjectClassificationEntries = Import-EntraOpsObjectClassificationFile -FilePath $ObjectClassificationSetting.FilePath -RootFolder $RepoRoot
+        } catch {
+            Write-Warning "The Object Classification File could not be read: $($_.Exception.Message) Access package target groups without role assignments stay unclassified."
+        }
+    }
+    $ObjectClassifications = [ordered]@{}
+    # The Group filters of the Alternate Tier Level Attributes classify groups before the Object Classification File,
+    # as in Privileged EAM (custom security attributes don't exist for groups).
+    $GroupFilterSetting = if ($null -ne $Config) { $Config.AlternateObjectTierLevelAttributes } else { $null }
+    $UseGroupFilters = $null -ne $GroupFilterSetting -and (Test-EntraOpsAlternateObjectTierLevelEnabled -ObjectType 'Group' -AlternateObjectTierLevelAttributes $GroupFilterSetting)
+    $GroupFilterTiers = @{}
+    function Get-GroupFilterTier([string]$GroupId) {
+        $Key = $GroupId.ToLowerInvariant()
+        if (-not $GroupFilterTiers.ContainsKey($Key)) {
+            $GroupFilterTiers[$Key] = $null
             try {
-                $Config = Get-Content -LiteralPath $ConfigFilePath -Raw | ConvertFrom-Json
-                if ($null -ne $Config.ConfigurationAnalyzer -and $null -ne $Config.ConfigurationAnalyzer.ResolveGroupMembersForPrivilegedAssets) {
-                    $ResolveRequestorApproverTiers = [bool]$Config.ConfigurationAnalyzer.ResolveGroupMembersForPrivilegedAssets
-                }
+                $GroupObject = Get-EntraOpsPrivilegedEntraObject -AadObjectId $GroupId -AlternateObjectTierLevelAttributes $GroupFilterSetting -ObjectClassificationFile $null -CustomSecurityAttributeClassification $false -ErrorAction Stop
+                if ($null -ne $GroupObject -and "$($GroupObject.ObjectType)" -eq 'group' -and "$($GroupObject.AdminTierLevelName)" -notin @('', 'Unclassified')) { $GroupFilterTiers[$Key] = "$($GroupObject.AdminTierLevelName)" }
             } catch {
-                Write-Warning "Failed to read ConfigurationAnalyzer settings from ${ConfigFilePath}: $($_.Exception.Message). Group tier resolution remains enabled."
+                Write-Warning "The Alternate Tier Level Attributes of the access package target group $GroupId could not be evaluated: $($_.Exception.Message)"
             }
         }
+        $GroupFilterTiers[$Key]
     }
 
     $PolicyIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -108,6 +157,7 @@ function New-EntraOpsAccessPackageFlowData {
     # order: ControlPlane < ManagementPlane < WorkloadPlane < UserAccess.
     $TierRank = @{ ControlPlane = 0; ManagementPlane = 1; WorkloadPlane = 2; UserAccess = 3 }
     $TierByObjectId = @{}
+    $PrivilegedEamObjects = $null
     if ($ResolveRequestorApproverTiers) {
         $PrivilegedEamPath = Join-Path $RepoRoot 'PrivilegedEAM'
         if (Test-Path -LiteralPath $PrivilegedEamPath -PathType Container) {
@@ -129,13 +179,25 @@ function New-EntraOpsAccessPackageFlowData {
         }
     }
 
+    # The groups of the Privileged EAM data have role assignments, which classify them: only the other target groups
+    # are evaluated by the Group filters (one Get-EntraOpsPrivilegedEntraObject per group).
+    $EamObjectIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($UseGroupFilters) {
+        $EamPath = Join-Path $RepoRoot 'PrivilegedEAM'
+        if ($null -eq $PrivilegedEamObjects -and (Test-Path -LiteralPath $EamPath -PathType Container)) { $PrivilegedEamObjects = Get-EntraOpsPrivilegedEamDashboardObjects -ImportPath $EamPath }
+        foreach ($Object in @($PrivilegedEamObjects)) { if ("$($Object.objectId)") { [void]$EamObjectIds.Add("$($Object.objectId)") } }
+    }
+
     $PolicyRequestorApprovers = [ordered]@{}
     $PackageIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $GroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    # Inside New-EntraOpsReportingData the run's cache is used, which the Configuration Analyzer data shares: a deleted
+    # policy is requested and reported once per run. Called on its own, this generator reports them.
+    $OwnsReportingRunCache = Start-EntraOpsReportingRunCache
     foreach ($PolicyId in $PolicyIds) {
         try {
-            # A deleted policy is reported once by the catch below, not again by the Graph helper
-            $Policy = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies/$PolicyId" -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
+            # $null for a deleted policy, which is reported once per run by Complete-EntraOpsReportingRunCache
+            $Policy = Get-EntraOpsAccessPackageAssignmentPolicyForReport -PolicyId $PolicyId
             if ($null -eq $Policy) { continue }
             $Requestors = @($Policy.requestorSettings.allowedRequestors)
             $Approvers = @($Policy.requestApprovalSettings.approvalStages | ForEach-Object { $_.primaryApprovers })
@@ -155,6 +217,7 @@ function New-EntraOpsAccessPackageFlowData {
             Write-Warning "Could not resolve access package assignment policy ${PolicyId}: $($_.Exception.Message)"
         }
     }
+    if ($OwnsReportingRunCache) { Complete-EntraOpsReportingRunCache }
 
     $Packages = [ordered]@{}
     $Assignments = [System.Collections.Generic.List[object]]::new()
@@ -201,7 +264,19 @@ function New-EntraOpsAccessPackageFlowData {
                     $CatalogResource = if ($CatalogId -and $CatalogResourcesByCatalogId.ContainsKey($CatalogId)) { $CatalogResourcesByCatalogId[$CatalogId][$OriginId] } else { $null }
                     $ResourceDisplayName = "$($CatalogResource.displayName)"
                     if (-not $ResourceDisplayName) { $ResourceDisplayName = "$($ResourceScope.displayName)" }
-                    if ("$($ResourceScope.originSystem)" -eq 'AadGroup' -and $OriginId) { [void]$GroupIds.Add($OriginId) }
+                    if ("$($ResourceScope.originSystem)" -eq 'AadGroup' -and $OriginId) {
+                        # The roll-up of a target group only lists its current members; it never sets the tier of the target.
+                        [void]$GroupIds.Add($OriginId)
+                        if (-not $ObjectClassifications.Contains($OriginId)) {
+                            $FilterTier = if ($UseGroupFilters -and -not $EamObjectIds.Contains($OriginId) -and $OriginId -match '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') { Get-GroupFilterTier $OriginId } else { $null }
+                            $Declared = $ObjectClassificationEntries[$OriginId.ToLowerInvariant()]
+                            if ($FilterTier) {
+                                $ObjectClassifications[$OriginId] = [ordered]@{ tierName = $FilterTier; justification = "Group filter for $FilterTier in AlternateObjectTierLevelAttributes of EntraOpsConfig.json"; declaredBy = 'Alternate Tier Level Attributes' }
+                            } elseif ($null -ne $Declared -and (-not $Declared.ObjectType -or $Declared.ObjectType -eq 'group')) {
+                                $ObjectClassifications[$OriginId] = [ordered]@{ tierName = $Declared.AdminTierLevelName; justification = $Declared.Justification; declaredBy = 'Object Classification File' }
+                            }
+                        }
+                    }
                     [ordered]@{
                         originId     = $OriginId
                         displayName  = $ResourceDisplayName
@@ -288,6 +363,8 @@ function New-EntraOpsAccessPackageFlowData {
                             id          = "$($Member.Id)"
                             displayName = "$($Member.DisplayName)"
                             tierName    = if ($TierByObjectId.ContainsKey("$($Member.Id)")) { $TierByObjectId["$($Member.Id)"] } else { 'UserAccess' }
+                            # user, servicePrincipal or group (a nested group: its members are listed as well).
+                            objectType  = "$($Member.'@odata.type')" -replace '^#microsoft\.graph\.', ''
                         }
                     }
                 )
@@ -295,6 +372,8 @@ function New-EntraOpsAccessPackageFlowData {
                     tierName              = $BestTier
                     displayName           = "$($Group.displayName)"
                     totalMembers          = $Members.Count
+                    # Members that can act themselves (users and service principals, not nested groups).
+                    principalCount        = @($Members | Where-Object { "$($_.'@odata.type')" -ne '#microsoft.graph.group' }).Count
                     privilegedMemberCount = $PrivilegedMembers.Count
                     members               = $MemberTiers
                 }
@@ -304,12 +383,64 @@ function New-EntraOpsAccessPackageFlowData {
         }
     }
 
+    # Access drift of the governed groups and applications (preview, Microsoft Graph beta). The summaries list only
+    # resources with drift; $expand=details adds up to five drift details per resource.
+    $DriftResources = [System.Collections.Generic.List[object]]::new()
+    $DriftStatus = 'collected'
+    $DriftReason = ''
+    foreach ($DriftResourceType in 'group', 'application') {
+        try {
+            $Filter = [uri]::EscapeDataString("resource/type eq '$DriftResourceType' and driftSource eq 'entra'")
+            $Summaries = @(Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/insights/accessDriftSummary?`$filter=$Filter&`$expand=details&`$top=100" -OutputType PSObject -ThrowOnFailure -SuppressForbiddenWarning -SuppressBadRequestWarning -SuppressNotFoundWarning)
+        } catch {
+            $DriftStatus = 'unavailable'
+            $DriftReason = $_.Exception.Message
+            Write-Warning "Access drift could not be read from Microsoft Graph (needs Microsoft Entra ID Governance or Microsoft Entra Suite and EntitlementManagement.Read.All): $DriftReason"
+            break
+        }
+        foreach ($Summary in $Summaries | Where-Object { $null -ne $_ -and $_.resource.identifier }) {
+            $DriftResources.Add([ordered]@{
+                    id              = "$($Summary.id)"
+                    resourceId      = "$($Summary.resource.identifier)"
+                    resourceName    = "$($Summary.resource.displayName)"
+                    resourceType    = "$($Summary.resource.type)"
+                    catalogId       = "$($Summary.resource.catalogIdentifier)"
+                    catalogName     = "$($Summary.resource.catalogName)"
+                    total           = [int]$Summary.driftCounts.total
+                    unauthorized    = [int]$Summary.driftCounts.unauthorized
+                    missing         = [int]$Summary.driftCounts.missing
+                    # ISO 8601 also when Graph returned the value as a date (the culture would format it otherwise).
+                    createdDateTime = $(if ($Summary.createdDateTime -is [datetime]) { $Summary.createdDateTime.ToUniversalTime().ToString('o', [cultureinfo]::InvariantCulture) } else { "$($Summary.createdDateTime)" })
+                    details         = @(foreach ($Detail in @($Summary.details | Where-Object { $null -ne $_ })) {
+                            [ordered]@{
+                                driftType         = "$($Detail.driftType)"
+                                assignedRole      = "$($Detail.assignedRole)"
+                                expectedRole      = "$($Detail.expectedRole)"
+                                accessPackageId   = "$($Detail.accessPackage.identifier)"
+                                accessPackageName = "$($Detail.accessPackage.displayName)"
+                                identities        = @(foreach ($Identity in @($Detail.identities | Where-Object { $null -ne $_ })) {
+                                        [ordered]@{ id = "$($Identity.identifier)"; principalName = "$($Identity.principalName)"; displayName = "$($Identity.displayName)"; identityType = "$($Identity.identityType)" }
+                                    })
+                            }
+                        })
+                })
+        }
+    }
+
     $Payload = [ordered]@{
         generatedAt              = (Get-Date).ToUniversalTime().ToString('o')
         policyRequestorApprovers = $PolicyRequestorApprovers
         packages                 = $Packages
         resolvedGroupTiers       = $ResolvedGroupTiers
+        # Declared tiers of the target groups (Object Classification File), by group ID.
+        objectClassifications    = $ObjectClassifications
         assignments              = @($Assignments)
+        accessDrift              = [ordered]@{
+            status    = $DriftStatus
+            reason    = $DriftReason
+            # @(if ...) keeps a single resource an array.
+            resources = @(if ($DriftStatus -eq 'collected') { $DriftResources })
+        }
     }
     $Content = "// Auto-generated by New-EntraOpsAccessPackageFlowData - do not edit by hand.`nwindow.ENTRAOPS_ACCESSPACKAGE_ASSIGNMENTS = $($Payload | ConvertTo-Json -Depth 20 -Compress);`n"
     if ($PSCmdlet.ShouldProcess($OutFile, 'Write Access Package Flow enrichment dataset')) {

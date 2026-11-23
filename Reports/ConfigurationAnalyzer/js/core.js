@@ -72,14 +72,16 @@ function renderEntraOpsSnapshotHealth(containerId) {
     if (!document.getElementById("entraopsSnapshotHealthStyles")) {
         var style = document.createElement("style");
         style.id = "entraopsSnapshotHealthStyles";
-        style.textContent = ".entraops-snapshot-health{border:2px solid #c50f1f;border-left-width:8px;background:#fff4f4;color:#4f1115;padding:14px 16px;margin:0 0 18px;border-radius:8px}.entraops-snapshot-health strong{color:#a4262c}.entraops-snapshot-health ul{margin:8px 0 0 20px}.entraops-snapshot-health code{overflow-wrap:anywhere}";
+        style.textContent = ".entraops-snapshot-health{border:2px solid #a4262c;border-left-width:8px;background:#fff4f4;color:#4f1115;padding:14px 16px;margin:0 0 18px;border-radius:8px}.entraops-snapshot-health strong{color:#a4262c}.entraops-snapshot-health ul{margin:8px 0 0 20px}.entraops-snapshot-health code{overflow-wrap:anywhere}";
         document.head.appendChild(style);
     }
     var states = Array.isArray(health.resourceTypeStates) ? health.resourceTypeStates : [];
     var staleStates = states.filter(function (item) { return item && item.status === "PreservedStale"; });
     var details = staleStates.map(function (item) {
-        var source = item.publishedSnapshotId || item.publishedSource || "unknown source";
-        return "<li><code>" + esc(item.resourceType) + "</code> — preserved from " + esc(source) + "</li>";
+        // Snapshots of older EntraOps versions record no source ("UnknownLegacySnapshot"): said in words.
+        var source = item.publishedSnapshotId || item.publishedSource || "";
+        var sourceText = !source || /^unknown/i.test(String(source)) ? "an earlier snapshot (source not recorded)" : source;
+        return "<li><code>" + esc(item.resourceType) + "</code> — preserved from " + esc(sourceText) + "</li>";
     }).join("");
     if (!details) {
         details = stale.map(function (resourceType) {
@@ -159,7 +161,7 @@ function blobContent(hash) {
 }
 
 function snapshotLabel(s, idx) {
-    var label = fmtDateShort(s.commitDate) + " · " + (s.workingTree ? "(working tree)" : (s.commitSha ? String(s.commitSha).slice(0, 8) : "working"));
+    var label = fmtDateShort(s.commitDate) + " · " + (s.workingTree ? (/^\(.+\)$/.test(String(s.commitSha || "")) ? String(s.commitSha) : "(working tree)") : (s.commitSha ? String(s.commitSha).slice(0, 8) : "working"));
     return "#" + (idx + 1) + " " + label;
 }
 
@@ -246,7 +248,8 @@ if (EAM_DATA && Array.isArray(EAM_DATA.objects)) {
         // Single min-scan instead of allocating and sorting an array per object - this runs for
         // every EAM object on the load path of five report apps.
         var TIER_RANK = { ControlPlane: 0, ManagementPlane: 1, WorkloadPlane: 2, UserAccess: 3, Unclassified: 4 };
-        var effectiveTier = null, effectiveRank = 6;
+        // Only tier names count: an unknown name (rank 5) never becomes the tier of the object (like Import-EntraOpsReportFindingData).
+        var effectiveTier = null, effectiveRank = 5;
         tierNames.forEach(function (t) {
             if (!t) return;
             var r = TIER_RANK[t] == null ? 5 : TIER_RANK[t];
@@ -498,7 +501,8 @@ function privilegedAssetsForSnapshot(snap) {
     var key = snap.commitSha + "|" + snap.commitDate;
     if (privilegedAssetsCache[key]) return privilegedAssetsCache[key];
 
-    var byType = {};
+    // Resource types of the snapshot as keys: a map without prototype.
+    var byType = Object.create(null);
     snap.resources.forEach(function (r) {
         var blob = blobContent(r.h);
         if (blob === undefined || blob === null) return;
@@ -582,7 +586,8 @@ var GRANT_LABELS = {
     domainJoinedDevice: "Require hybrid joined device",
     approvedApplication: "Require approved client app",
     compliantApplication: "Require app protection policy",
-    passwordChange: "Require password change"
+    passwordChange: "Require password change",
+    riskRemediation: "Require risk remediation"
 };
 var APP_LABELS = {
     All: "All resources (cloud apps)",

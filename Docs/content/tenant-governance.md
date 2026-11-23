@@ -57,6 +57,11 @@ EntraOps enumerates governance relationships and resolves principals from govern
 resolved principal retains its source tenant in `ObjectTenantId`, so downstream Privileged EAM
 queries and reports can distinguish home-tenant and foreign identities.
 
+The finding rules use the same settings: principals of the governing tenant (guests, members, groups and
+applications) are informational only. `EO.4002`, `EO.4011` and `EO.5001` don't report them, and `EO.4010` lists
+their role assignments as those of the managing tenant. A group of another tenant (a remote group) gets its tier
+from the Object Classification File, as it has no custom security attributes of this tenant. See [Findings](../reportings/index.html#findings).
+
 Use a multi-tenant workload identity for this scenario. Consent it in the governed tenants, grant
 the required Microsoft Graph application permissions in the governing tenant, and avoid relying on
 an interactive single-tenant session for scheduled collection.
@@ -125,9 +130,22 @@ of each resource the job did not return is retained, matched by resource identit
 resource is not kept twice. The manifest marks such types `PublishedWithErrors` with their
 `RetainedResourceCount` and lists them in `PublishedWithErrorsResourceTypes`; the capture
 diagnostics stay attached. A retained file is therefore last-known state, not evidence that the
-resource still exists - review the diagnostics and fix the referenced object in the tenant. Types
+resource still exists - review the diagnostics and fix the referenced object in the tenant.
+
+The export error alone never removes a retained file: `Request_ResourceNotFound` is also reported for a
+resource that exists but references a deleted object, such as a Conditional Access policy with a
+deleted excluded group. Before a file is retained, the resource is requested by its own Id
+(`properties.Id`) with a direct Microsoft Graph GET. Only an HTTP 404 for that resource removes the
+file; it is listed in the manifest's `RemovedResources` (type, Id, display name, file and reason) and
+counted in the type's `RemovedResourceCount`. The file is kept when Graph returns the resource, on
+throttling, service, network or permission errors (checked again by the next snapshot), and for
+resource types without a known direct endpoint. Covered are access package assignment policies,
+connected organizations, Conditional Access policies, named locations, authentication strengths,
+authentication contexts, administrative units and role definitions. Types
 whose backing workload could not be reached (`ConnectionError`) or that returned no resource at all
 keep their previous files and are marked `PreservedStale`. Both states keep `IsComplete` at `false`.
+A `PreservedStale` type records `StaleSince`, the time since which it has been stale in consecutive
+snapshots, and the warning of a partial snapshot names each stale type with that date and its age in days.
 
 ### Configuration
 
@@ -139,6 +157,7 @@ keep their previous files and are marked `PreservedStale`. Both states keep `IsC
 | `ResourcesToInclude`                  | Microsoft Entra resource types to capture. High-cardinality directory objects are supported but excluded by default.   |
 | `SnapshotDisplayNamePrefix`           | Cosmetic UTCM snapshot name prefix.                                                                                    |
 | `SnapshotResourceFileNaming`          | `ResourceId` (new-config default) for stable paths across renames, or `DisplayName` for readable paths.                |
+| `PendingJobMaxAgeInHours`             | Releases a pending snapshot job that Microsoft Graph hasn't completed after this many hours. Default: `24`; `0` never. |
 | `SnapshotScheduledTrigger`            | Enables or disables every scheduled snapshot run. Disabled by default and ignored while the master switch is disabled. |
 | `SnapshotScheduledCron`               | Starts the UTCM snapshot job without waiting. Default: `0 6 * * *` (06:00 UTC daily).                                  |
 | `SnapshotScheduledCronComplete`       | First one-shot collection attempt. Default: `0 7 * * *` (07:00 UTC daily).                                             |
@@ -242,6 +261,11 @@ Connect-EntraOps -AuthenticationType "AlreadyAuthenticated" -TenantName "contoso
 Save-EntraOpsTenantGovernanceSnapshotJson
 ```
 
+While `RunAndWait` waits, it shows the job status and the elapsed time as a progress bar, and writes when the job
+was created and how it completed, also without `-Verbose`. [`Invoke-EntraOpsAssessment`](../get-started/index.html#complete-assessment)
+requests the delegated scope itself during an interactive sign-in and captures the snapshot while the Privileged
+EAM classification runs.
+
 To allow more than the default 15 minutes, set the timeout explicitly:
 
 ```powershell
@@ -250,8 +274,8 @@ Save-EntraOpsTenantGovernanceSnapshotJson -Operation RunAndWait -TimeoutInSecond
 
 If the timeout expires, the local wait does not cancel the Graph job and EntraOps saves its Id in
 `TenantGovernance/Snapshots/.PendingSnapshotJob.json`. No snapshot resource files are written until
-the job completes. If polling failed, the pending state also records the latest polling error instead
-of claiming that the job is still running. Check and publish the job later with:
+the job completes. The pending state records the tenant of the job and, if polling failed, the latest
+polling error instead of claiming that the job is still running. Check and publish the job later with:
 
 ```powershell
 Save-EntraOpsTenantGovernanceSnapshotJson -Operation Collect
@@ -267,6 +291,14 @@ Save-EntraOpsTenantGovernanceSnapshotJson -Operation Collect
 
 `RunAndWait` and `Start` refuse to create another job while a pending job exists. Run `Collect` to
 finish that job before starting a new snapshot.
+
+A job that Microsoft Graph doesn't complete within `PendingJobMaxAgeInHours` (default 24 hours, counted
+from its creation) is released, so it can't keep the snapshot stale: EntraOps deletes the job in
+Microsoft Graph (best effort), records it in `.LastAttemptManifest.json` with the diagnostic
+`SnapshotJobTimedOut` and removes the pending state. `Collect` then fails, so the stuck job is visible
+in the workflow run; `Start` and `RunAndWait` start a new job instead. The published snapshot is
+unchanged. A pending job of another tenant is never released. Set `PendingJobMaxAgeInHours` to `0` to
+keep a pending job until it completes or fails.
 
 #### Repair an existing setup
 

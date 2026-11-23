@@ -10,7 +10,8 @@
  * (js/eidsca-controls.js) is a fixed reference dataset, not a generated build artifact.
  *
  * Three views, all driven by the same evaluateSnapshot() model:
- *   - Checks: collapsible per-area results for one selected snapshot (default view).
+ *   - Checks: per-area results for one selected snapshot (default view), filtered by status and
+ *     severity pills; the areas collapse (shared/filters.js), remembered in localStorage.
  *   - Trend: how ok/warn/info/unknown counts evolved across every snapshot in the dataset.
  *   - Compare: side-by-side diff of two snapshots, controls whose status changed only.
  */
@@ -25,13 +26,27 @@
         compareAIdx: -1,
         compareBIdx: -1,
         statusFilter: "",
-        severityFilter: "",
-        collapsed: {} // controlId -> bool, persists across re-renders/snapshot switches
+        severityFilter: ""
     };
 
     var EIDSCA_CONTROLS = window.ENTRAOPS_EIDSCA_CONTROLS || null;
     var EIDSCA_ICONS = { ok: "\u2713", warn: "!", info: "i", unknown: "?" };
     var STATUS_ORDER = ["warn", "unknown", "info", "ok"];
+    // A failing check ("warn") is red like a failed check in the other EntraOps reports; the amber warn icon
+    // stays for notices (for example a resource type the snapshot doesn't capture).
+    function statusIconClass(status) {
+        return "ca-gap-icon " + status + (status === "warn" ? " eidsca-failing" : "");
+    }
+    var STATUS_LABELS = { warn: "Failing", unknown: "Unknown", info: "Informational", ok: "Passing" };
+    var SEVERITY_ORDER = ["High", "Medium", "Low", "Informational", "Unspecified"];
+
+    // Collapsed control areas (area controlIds), kept in localStorage. Every area starts collapsed until the
+    // areas are expanded or collapsed for the first time.
+    var AREA_GROUPS_KEY = "entraops.eidscaCoverage.areas.collapsed";
+    var areaGroupsStored = true;
+    try { areaGroupsStored = localStorage.getItem(AREA_GROUPS_KEY) !== null; } catch (_) { areaGroupsStored = false; }
+    var areaGroups = EntraOpsFilters.collapsible(AREA_GROUPS_KEY, function () { renderChecksView(); });
+    var visibleAreaKeys = [];
 
     // EIDSCA's `Name` values are raw Microsoft Graph camelCase property names/paths, while the
     // Tenant Governance Snapshot (UTCM/M365DSC-based) sometimes flattens/renames or PascalCases
@@ -287,22 +302,70 @@
         var mitreHtml = mitreChips.length ? '<div class="eidsca-row-mitre">' + mitreChips.join(" ") + "</div>" : "";
         var sevHtml = c.severity ? '<span class="eidsca-severity eidsca-severity-' + esc(String(c.severity).toLowerCase()) + '">' + esc(c.severity) + "</span>" : "";
 
-        return '<div class="ca-gap-row"><span class="ca-gap-icon ' + status + '">' + EIDSCA_ICONS[status] + '</span><div><div class="ca-gap-title">' + esc(c.displayName || c.name) + ' <span class="muted" style="font-size:11px;">(' + esc(c.checkId) + ")</span> " + sevHtml + " " + EntraOpsReportUtils.reviewControl("eidsca-findings", c.checkId, status === "ok" ? "Remediated" : "Open", status === "ok") + '</div><div class="ca-gap-detail">' + detail + "</div>" + mitreHtml + "</div></div>";
+        return '<div class="ca-gap-row"><span class="' + statusIconClass(status) + '">' + EIDSCA_ICONS[status] + '</span><div><div class="ca-gap-title">' + esc(c.displayName || c.name) + ' <span class="muted" style="font-size:11px;">(' + esc(c.checkId) + ")</span> " + sevHtml + " " + EntraOpsReportUtils.reviewControl("eidsca-findings", c.checkId, status === "ok" ? "Remediated" : "Open", status === "ok") + '</div><div class="ca-gap-detail">' + detail + "</div>" + mitreHtml + "</div></div>";
+    }
+
+    function severityOf(result) {
+        return result.control.severity || "Unspecified";
+    }
+
+    // skip leaves out one filter ("statusFilter" or "severityFilter"), for the counts of its pills.
+    function resultMatches(result, skip) {
+        if (skip !== "statusFilter" && eidscaState.statusFilter && result.status !== eidscaState.statusFilter) return false;
+        if (skip !== "severityFilter" && eidscaState.severityFilter && severityOf(result) !== eidscaState.severityFilter) return false;
+        return true;
+    }
+
+    // The checks of an area that could not be evaluated (resource type not captured, or content not embedded) are
+    // Unknown, as in the tiles: they count in the status and severity pills like the evaluated checks.
+    function gapResults(area) {
+        return area.controls.map(function (control) { return { control: control, status: "unknown", gap: true }; });
+    }
+
+    function allControlResults(evalResult) {
+        var results = [];
+        evalResult.areaResults.forEach(function (area) {
+            if (area.noResourceType) { results.push.apply(results, gapResults(area.area)); return; }
+            area.resourceBlocks.forEach(function (block) {
+                results.push.apply(results, block.blobMissing ? gapResults(area.area) : (block.controlResults || []));
+            });
+        });
+        return results;
+    }
+
+    // A gap row is shown only when one of its (Unknown) checks matches the filters, so "Passing" never lists it.
+    function gapMatches(area) {
+        return gapResults(area).some(function (result) { return resultMatches(result); });
     }
 
     function areaBodyHtml(ar, areaIndex) {
         if (!ar.area.controls.length) return "";
-        if (ar.noResourceType) return renderAreaGapRow(ar.area, "type-missing");
+        if (ar.noResourceType) return gapMatches(ar.area) ? renderAreaGapRow(ar.area, "type-missing") : "";
         var html = "";
         ar.resourceBlocks.forEach(function (rb, resourceIndex) {
-            if (rb.blobMissing) { html += renderAreaGapRow(ar.area, "blob-missing"); return; }
+            if (rb.blobMissing) { if (gapMatches(ar.area)) html += renderAreaGapRow(ar.area, "blob-missing"); return; }
             rb.controlResults.forEach(function (cr) {
-                var severity = cr.control.severity || "Unspecified";
-                if ((!eidscaState.statusFilter || cr.status === eidscaState.statusFilter) &&
-                    (!eidscaState.severityFilter || severity === eidscaState.severityFilter)) html += renderControlRow(cr, areaIndex, resourceIndex);
+                if (resultMatches(cr)) html += renderControlRow(cr, areaIndex, resourceIndex);
             });
         });
         return html;
+    }
+
+    // Status and severity pills with the number of check results each would show (counted over the results
+    // matching the other filter).
+    function renderFacets(evalResult) {
+        var results = allControlResults(evalResult);
+        function pill(facet, value, label, count, prefix) { return EntraOpsFilters.pill(eidscaState, facet, value, label, count, { prefix: prefix }); }
+        var status = EntraOpsFilters.facetCounts(results, "statusFilter", resultMatches, function (result) { return result.status; });
+        $("eidscaStatusPills").innerHTML = pill("statusFilter", "", "All", status.total) + STATUS_ORDER.map(function (key) {
+            return pill("statusFilter", key, STATUS_LABELS[key], status.counts[key] || 0, '<span class="eidsca-navdot ' + key + '" aria-hidden="true"></span>');
+        }).join("");
+        var severity = EntraOpsFilters.facetCounts(results, "severityFilter", resultMatches, severityOf);
+        $("eidscaSeverityPills").innerHTML = pill("severityFilter", "", "All", severity.total) + SEVERITY_ORDER.filter(function (key) {
+            return results.some(function (result) { return severityOf(result) === key; }) || eidscaState.severityFilter === key;
+        }).map(function (key) {
+            return pill("severityFilter", key, key, severity.counts[key] || 0, '<span class="eidsca-sev-dot eidsca-severity-' + key.toLowerCase() + '" aria-hidden="true"></span>');
+        }).join("");
     }
 
     function areaStatPillsHtml(st) {
@@ -311,21 +374,15 @@
         }).join("");
     }
 
-    function setAllCollapsed(areaResults, val) {
-        areaResults.forEach(function (ar) { eidscaState.collapsed[ar.area.controlId] = val; });
-    }
-
     function renderQuickNav(areaResults) {
         var links = areaResults.map(function (ar, idx) {
             if (!ar.area.controls.length) return "";
             var st = ar.areaStats;
-            var dotClass = st.warn ? "warn" : (st.unknown ? "unknown" : "ok");
+            // Failing, else unknown, else passing; an area with informational checks only is blue, not green.
+            var dotClass = st.warn ? "warn" : st.unknown ? "unknown" : st.ok ? "ok" : "info";
             return '<a class="eidsca-navlink" href="#eidsca-area-' + idx + '"><span class="eidsca-navdot ' + dotClass + '"></span>' + esc(ar.area.controlName) + "</a>";
         }).join("");
-        return '<div class="eidsca-quicknav"><div class="eidsca-quicknav-actions">' +
-            '<button type="button" class="btn small" id="eidscaExpandAll">Expand all</button>' +
-            '<button type="button" class="btn small" id="eidscaCollapseAll">Collapse all</button>' +
-            '</div><div class="eidsca-quicknav-links">' + links + "</div></div>";
+        return '<div class="eidsca-quicknav"><div class="eidsca-quicknav-links">' + links + "</div></div>";
     }
 
     function renderDashboard(evalResult) {
@@ -378,29 +435,24 @@
         var el = $("eidscaBody");
         if (!el) return;
         if (!EIDSCA_CONTROLS) {
+            $("eidscaFacets").classList.add("hidden");
             el.innerHTML = '<div class="muted">EIDSCA control catalog (<code>js/eidsca-controls.js</code>) not loaded.</div>';
             return;
         }
         var snap = eidscaState.snapshotIdx >= 0 ? snapshots[eidscaState.snapshotIdx] : null;
+        $("eidscaFacets").classList.toggle("hidden", !snap);
         if (!snap) {
             el.innerHTML = '<div class="muted">Select a detailed snapshot above to evaluate EIDSCA checks against it.</div>';
             $("eidscaDashboard").classList.add("hidden");
+            $("eidscaCollapseAll").disabled = true;
             return;
         }
 
         var evalResult = evaluateSnapshot(snap);
         renderDashboard(evalResult);
+        renderFacets(evalResult);
 
-        var filteredCount = 0;
-        evalResult.areaResults.forEach(function (area) {
-            area.resourceBlocks.forEach(function (block) {
-                (block.controlResults || []).forEach(function (result) {
-                    var severity = result.control.severity || "Unspecified";
-                    if ((!eidscaState.statusFilter || result.status === eidscaState.statusFilter) &&
-                        (!eidscaState.severityFilter || severity === eidscaState.severityFilter)) filteredCount++;
-                });
-            });
-        });
+        var filteredCount = allControlResults(evalResult).filter(function (result) { return resultMatches(result); }).length;
         $("eidscaFreshness").textContent = EntraOpsReportUtils.freshnessText(DATA, snap);
         $("eidscaFilterSummary").textContent = " · " + filteredCount + " check result(s) shown";
 
@@ -409,21 +461,21 @@
             Math.round(100 * evalResult.reachableCount / totalControls) + '%). Checks sourced from <a href="https://github.com/Cloud-Architekt/AzureAD-Attack-Defense" target="_blank" rel="noopener noreferrer">EIDSCA</a> - "ok" reflects only what the snapshot captured, not a full assessment.</p>';
 
         var areaBlocks = "";
+        visibleAreaKeys = [];
         evalResult.areaResults.forEach(function (ar, idx) {
             var bodyHtml = areaBodyHtml(ar, idx);
             if (!bodyHtml) return;
-            var isCollapsed = eidscaState.collapsed[ar.area.controlId] !== false;
+            var key = ar.area.controlId;
+            visibleAreaKeys.push(key);
             var mitreHtml = (ar.area.mitreTactic || []).map(mitreTacticChip).join(" ");
-            areaBlocks += '<div class="eidsca-area" id="eidsca-area-' + idx + '">' +
-                '<button type="button" class="eidsca-area-head" data-idx="' + idx + '" aria-expanded="' + (!isCollapsed) + '">' +
-                '<span class="eidsca-area-chevron">' + (isCollapsed ? "&#9656;" : "&#9662;") + "</span>" +
-                '<span class="eidsca-area-title">' + esc(ar.area.controlName) + "</span>" +
-                (mitreHtml ? '<span class="eidsca-area-mitre">' + mitreHtml + "</span>" : "") +
-                '<span class="eidsca-area-stats">' + areaStatPillsHtml(ar.areaStats) + "</span>" +
-                "</button>" +
-                '<div class="eidsca-area-body' + (isCollapsed ? " collapsed" : "") + '" id="eidsca-body-' + idx + '">' + bodyHtml + "</div>" +
-                "</div>";
+            var summary = (mitreHtml ? '<span class="eidsca-area-mitre">' + mitreHtml + "</span>" : "") +
+                '<span class="eidsca-area-stats">' + areaStatPillsHtml(ar.areaStats) + "</span>";
+            areaBlocks += '<div class="eidsca-area" id="eidsca-area-' + idx + '">' + areaGroups.open(key) +
+                areaGroups.head(key, ar.area.controlName, summary) + areaGroups.body(key, bodyHtml) + "</div></div>";
         });
+        var collapseAll = $("eidscaCollapseAll");
+        collapseAll.disabled = !visibleAreaKeys.length;
+        collapseAll.textContent = areaGroups.allCollapsed(visibleAreaKeys) ? "Expand all" : "Collapse all";
 
         var notCoveredCount = totalNotCoveredControls();
         var notCoveredHtml = '<div class="muted" style="font-size:12px;margin-top:4px;">Not evaluable from the Tenant Governance Snapshot today (' + notCoveredCount + " EIDSCA check(s), no matching UTCM resource type yet): " +
@@ -455,21 +507,6 @@
             });
         });
 
-        el.querySelectorAll(".eidsca-area-head").forEach(function (head) {
-            head.addEventListener("click", function () {
-                var idx = Number(head.getAttribute("data-idx"));
-                var controlId = evalResult.areaResults[idx].area.controlId;
-                var collapsed = !eidscaState.collapsed[controlId];
-                eidscaState.collapsed[controlId] = collapsed;
-                var body = $("eidsca-body-" + idx);
-                body.classList.toggle("collapsed", collapsed);
-                head.setAttribute("aria-expanded", String(!collapsed));
-                head.querySelector(".eidsca-area-chevron").innerHTML = collapsed ? "&#9656;" : "&#9662;";
-            });
-        });
-        var expandAllBtn = $("eidscaExpandAll"), collapseAllBtn = $("eidscaCollapseAll");
-        if (expandAllBtn) expandAllBtn.addEventListener("click", function () { setAllCollapsed(evalResult.areaResults, false); renderChecksView(); });
-        if (collapseAllBtn) collapseAllBtn.addEventListener("click", function () { setAllCollapsed(evalResult.areaResults, true); renderChecksView(); });
     }
 
     // ---- Trend view: ok/warn/info/unknown counts across every snapshot ------------------
@@ -514,7 +551,7 @@
 
         var series = [
             { key: "ok", color: "#0e700e" },
-            { key: "warn", color: "#c07807" },
+            { key: "warn", color: "#a4262c" },
             { key: "info", color: "#0078d4" },
             { key: "unknown", color: "#a19f9d" }
         ];
@@ -590,8 +627,8 @@
                 var dispA = crA.curVal === undefined ? "<i>not found</i>" : esc(displayValue(crA.curVal));
                 var dispB = crB.curVal === undefined ? "<i>not found</i>" : esc(displayValue(crB.curVal));
                 rows += '<tr><td>' + esc(c.displayName || c.name) + ' <span class="muted" style="font-size:11px;">(' + esc(c.checkId) + ')</span></td>' +
-                    '<td><span class="ca-gap-icon ' + crA.status + '" style="width:18px;height:18px;font-size:11px;">' + EIDSCA_ICONS[crA.status] + "</span> " + dispA + "</td>" +
-                    '<td><span class="ca-gap-icon ' + crB.status + '" style="width:18px;height:18px;font-size:11px;">' + EIDSCA_ICONS[crB.status] + "</span> " + dispB + "</td></tr>";
+                    '<td><span class="' + statusIconClass(crA.status) + '" style="width:18px;height:18px;font-size:11px;">' + EIDSCA_ICONS[crA.status] + "</span> " + dispA + "</td>" +
+                    '<td><span class="' + statusIconClass(crB.status) + '" style="width:18px;height:18px;font-size:11px;">' + EIDSCA_ICONS[crB.status] + "</span> " + dispB + "</td></tr>";
             });
         });
 
@@ -643,6 +680,7 @@
             btn.classList.toggle("on", btn.getAttribute("data-view") === view);
         });
         $("eidscaSnapshotFilter").classList.toggle("hidden", view !== "checks");
+        $("eidscaCollapseAll").classList.toggle("hidden", view !== "checks");
         $("eidscaCompareFilterA").classList.toggle("hidden", view !== "compare");
         $("eidscaCompareFilterB").classList.toggle("hidden", view !== "compare");
         $("eidscaDashboard").classList.toggle("hidden", view !== "checks");
@@ -675,7 +713,12 @@
 
         renderSnapshotPicker();
         renderComparePickers();
-        renderChecksView();
+        // setAll re-renders the checks; without a remembered state every area starts collapsed.
+        if (!areaGroupsStored && EIDSCA_CONTROLS) areaGroups.setAll(EIDSCA_CONTROLS.covered.map(function (area) { return area.controlId; }), true);
+        else renderChecksView();
+        areaGroups.bind($("eidscaBody"));
+        EntraOpsFilters.bindPills($("eidscaFacets"), eidscaState, function () { renderChecksView(); });
+        $("eidscaCollapseAll").addEventListener("click", function () { areaGroups.setAll(visibleAreaKeys, !areaGroups.allCollapsed(visibleAreaKeys)); });
 
         $("eidscaSnapshot").addEventListener("change", function () {
             eidscaState.snapshotIdx = Number(this.value);
@@ -696,8 +739,7 @@
             evaluateSnapshot(snapshot).areaResults.forEach(function (area) {
                 area.resourceBlocks.forEach(function (block) {
                     (block.controlResults || []).forEach(function (result) {
-                        if (eidscaState.statusFilter && result.status !== eidscaState.statusFilter) return;
-                        if (eidscaState.severityFilter && (result.control.severity || "Unspecified") !== eidscaState.severityFilter) return;
+                        if (!resultMatches(result)) return;
                         rows.push({ snapshot: snapshotLabel(snapshot, eidscaState.snapshotIdx), area: area.area.controlName, checkId: result.control.checkId, finding: result.control.displayName || result.control.name, status: result.status, severity: result.control.severity || "", currentValue: result.curVal, recommendedValue: result.control.recommendedValue || "" });
                     });
                 });

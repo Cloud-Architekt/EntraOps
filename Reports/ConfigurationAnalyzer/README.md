@@ -19,11 +19,16 @@ entitlement management the same way.
   aggregated period bar, to inspect the applicable latest snapshot's changes.
 - **Snapshot changes & compare** - list of every added/modified/removed resource between two
   snapshots (the selected one vs. its predecessor, or any two snapshots of your choice), with
-  **property-level diffs** (old vs. new value) for snapshots with embedded content.
+  **property-level diffs** (old vs. new value) for snapshots with embedded content. Pills filter
+  by change (any combination of added, modified and removed) and access tier, with the number of
+  matching changes; category and classification stay dropdowns. *Snapshot changes* and *Compare
+  two snapshots* keep their own change filters, and each export writes the rows of its own section.
 - **Snapshot Resources** - a synchronized, keyboard-navigable snapshot browser. Select a
   timeline point or snapshot to set its baseline automatically, then browse all, changed, added,
-  modified, or removed resources by type, category, name, privilege tier, or classification. Each
-  resource shows its presence and content-change history across the captured snapshots.
+  modified, or removed resources by type, category, name, privilege tier, or classification. Resource
+  state and access tier are pills with the number of matching resources; snapshot, resource type,
+  category and classification are dropdowns next to the search. Each resource shows its presence and
+  content-change history across the captured snapshots.
 - **Configuration Assets** - per captured resource type, which resources reference a Control Plane /
   Management Plane / User Access identity (directly, or via a group's resolved transitive
   membership - see `-ResolveGroupMembersForPrivilegedAssets` below), from the specific fields
@@ -41,6 +46,13 @@ entitlement management the same way.
   **Classified Resource Types** filters to that resource type and tier and expands those matching
   branches for immediate review. Asset names link to EAM Dashboard, while snapshot objects open a
   structured property drawer with resolvable identity and resource references shown as deep links.
+
+## Deep links
+
+`#object=<id>` or `#object=<resource type>|<id>` (the links of the EntraOps findings) opens the resource of the newest
+detailed snapshot whose `Id` is the object ID. Without a type an ID can match several resources (a PIM role setting has
+the ID of its role definition): the role setting is opened first, then Conditional Access policies and access package
+assignment policies, then the other types in alphabetical order.
 
 ## Refresh the data
 

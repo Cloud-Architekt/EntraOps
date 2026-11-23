@@ -14,7 +14,9 @@ Describe 'Initialize-EntraOpsWorkspace' {
         Set-Content -LiteralPath "$ArchiveRoot/Samples/AadRoleManagementAssignments.json" -Value 'sample'
         Set-Content -LiteralPath "$ArchiveRoot/Reports/index.html" -Value 'portal'
         Set-Content -LiteralPath "$ArchiveRoot/Reports/EamDashboard/data/eam-dashboard-data.js" -Value 'upstream data'
-        Set-Content -LiteralPath "$ArchiveRoot/EntraOps/EntraOps.psd1" -Value 'module'
+        # The content version: the module version, as on the branch that matches the module.
+        $script:ModuleVersion = [version](Import-PowerShellDataFile (Join-Path $script:TestRepositoryRoot 'EntraOps/EntraOps.psd1')).ModuleVersion
+        Set-Content -LiteralPath "$ArchiveRoot/EntraOps/EntraOps.psd1" -Value "@{ ModuleVersion = '$script:ModuleVersion' }"
         Compress-Archive -Path $ArchiveRoot -DestinationPath (Join-Path $TestDrive 'source.zip') -Force
     }
 
@@ -22,8 +24,15 @@ Describe 'Initialize-EntraOpsWorkspace' {
         $script:Workspace = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         $script:OriginalBaseFolder = $Global:EntraOpsBaseFolder
         $script:OriginalEntraOpsRoot = $env:ENTRAOPS_ROOT
-        Mock -ModuleName EntraOps Invoke-WebRequest { Copy-Item -LiteralPath (Join-Path $TestDrive 'source.zip') -Destination $OutFile } -ParameterFilter { $OutFile }
+        Mock -ModuleName EntraOps Invoke-RestMethod { Copy-Item -LiteralPath (Join-Path $TestDrive 'source.zip') -Destination $OutFile } -ParameterFilter { $OutFile }
         Mock -ModuleName EntraOps Write-Host {}
+        Mock -ModuleName EntraOps Resolve-EntraOpsContentRef {
+            [pscustomobject]@{ Repository = $Repository; Branch = 'main'; Ref = 'main'; ModuleVersion = $ModuleVersion; BranchVersion = $ModuleVersion; ContentVersion = $ModuleVersion; Matched = $true; Resolution = 'BranchHead' }
+        }
+        # The module is imported from this repository checkout: download as for a module-only installation.
+        Mock -ModuleName EntraOps Test-EntraOpsRepositoryCheckout { $false }
+        Mock -ModuleName EntraOps Test-EntraOpsRepositoryCheckout { $true } -ParameterFilter { $Path -eq $script:TestRepositoryRoot -and $script:CheckoutGuard }
+        $script:CheckoutGuard = $false
     }
 
     AfterEach {
@@ -56,7 +65,8 @@ Describe 'Initialize-EntraOpsWorkspace' {
         Test-Path -LiteralPath "$script:Workspace/Reports/index.html" | Should -BeTrue
         Test-Path -LiteralPath "$script:Workspace/EntraOps" | Should -BeFalse
         Test-Path -LiteralPath "$script:Workspace/Classification/contoso.onmicrosoft.com" | Should -BeFalse
-        Should -Invoke -ModuleName EntraOps Invoke-WebRequest -Times 1 -ParameterFilter { $Uri -eq 'https://api.github.com/repos/Cloud-Architekt/EntraOps/zipball/main' }
+        Should -Invoke -ModuleName EntraOps Invoke-RestMethod -Times 1 -ParameterFilter { $Uri -eq 'https://github.com/Cloud-Architekt/EntraOps/archive/main.zip' }
+        (Get-Content -LiteralPath "$script:Workspace/Reports/.EntraOpsContent.json" -Raw | ConvertFrom-Json).ContentVersion | Should -Be "$script:ModuleVersion"
     }
 
     It 'keeps existing files without -Force' {
@@ -85,6 +95,70 @@ Describe 'Initialize-EntraOpsWorkspace' {
         Get-Content -LiteralPath "$script:Workspace/Reports/EamDashboard/data/eam-dashboard-data.js" | Should -Be 'tenant data'
     }
 
+    It 'records the version of the reporting apps only when all app files were installed' {
+        # Reporting apps of an earlier version, without a marker.
+        New-Item -ItemType Directory -Path "$script:Workspace/Reports" -Force | Out-Null
+        Set-Content -LiteralPath "$script:Workspace/Reports/index.html" -Value 'portal v1'
+
+        $Result = Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports -WarningVariable Warnings -WarningAction SilentlyContinue
+
+        $Result.SkippedFile | Should -Be 1
+        Get-Content -LiteralPath "$script:Workspace/Reports/index.html" | Should -Be 'portal v1'
+        # Invoke-EntraOpsAssessment would take the kept apps for apps of the module version and never update them.
+        Test-Path -LiteralPath "$script:Workspace/Reports/.EntraOpsContent.json" | Should -BeFalse
+        ($Warnings -join ' ') | Should -Match 'Kept 1 existing reporting app file\(s\).*-Force'
+
+        Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports -Force | Out-Null
+
+        Get-Content -LiteralPath "$script:Workspace/Reports/index.html" | Should -Be 'portal'
+        (Get-Content -LiteralPath "$script:Workspace/Reports/.EntraOpsContent.json" -Raw | ConvertFrom-Json).ContentVersion | Should -Be "$script:ModuleVersion"
+    }
+
+    It 'keeps the marker of an earlier version when app files were kept' {
+        New-Item -ItemType Directory -Path "$script:Workspace/Reports" -Force | Out-Null
+        Set-Content -LiteralPath "$script:Workspace/Reports/index.html" -Value 'portal v1'
+        @{ ContentVersion = '1.0.0' } | ConvertTo-Json | Set-Content -LiteralPath "$script:Workspace/Reports/.EntraOpsContent.json"
+
+        Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports -WarningAction SilentlyContinue | Out-Null
+
+        (Get-Content -LiteralPath "$script:Workspace/Reports/.EntraOpsContent.json" -Raw | ConvertFrom-Json).ContentVersion | Should -Be '1.0.0'
+    }
+
+    It 'takes the content repository from AutomatedEntraOpsUpdate.Repository of the working folder' {
+        New-Item -ItemType Directory -Path $script:Workspace -Force | Out-Null
+        @{ AutomatedEntraOpsUpdate = @{ Repository = 'EntraOps-Insiders' } } | ConvertTo-Json | Set-Content -LiteralPath "$script:Workspace/EntraOpsConfig.json"
+
+        Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports -PersonalAccessToken 'test-token' | Out-Null
+
+        Should -Invoke -ModuleName EntraOps Resolve-EntraOpsContentRef -Times 1 -Exactly -ParameterFilter { $Repository -eq 'EntraOps-Insiders' }
+        Should -Invoke -ModuleName EntraOps Invoke-RestMethod -Times 1 -Exactly -ParameterFilter { $Uri -like '*/EntraOps-Insiders/zipball/main' -and $Headers['Authorization'] -eq 'Bearer test-token' }
+        Should -Invoke -ModuleName EntraOps Write-Host -ParameterFilter { "$Object" -eq "Content repository: EntraOps-Insiders (AutomatedEntraOpsUpdate.Repository in $(Join-Path $script:Workspace 'EntraOpsConfig.json'))" }
+    }
+
+    It 'prefers -Repository over the configuration' {
+        New-Item -ItemType Directory -Path $script:Workspace -Force | Out-Null
+        @{ AutomatedEntraOpsUpdate = @{ Repository = 'EntraOps-Insiders' } } | ConvertTo-Json | Set-Content -LiteralPath "$script:Workspace/EntraOpsConfig.json"
+
+        Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports -Repository EntraOps | Out-Null
+
+        Should -Invoke -ModuleName EntraOps Invoke-RestMethod -Times 1 -Exactly -ParameterFilter { $Uri -eq 'https://github.com/Cloud-Architekt/EntraOps/archive/main.zip' }
+        Should -Invoke -ModuleName EntraOps Write-Host -ParameterFilter { "$Object" -eq 'Content repository: EntraOps (-Repository)' }
+    }
+
+    It 'fails for the configured Insiders repository without a token instead of installing the public content' {
+        New-Item -ItemType Directory -Path $script:Workspace -Force | Out-Null
+        @{ AutomatedEntraOpsUpdate = @{ Repository = 'EntraOps-Insiders' } } | ConvertTo-Json | Set-Content -LiteralPath "$script:Workspace/EntraOpsConfig.json"
+        $PreviousPat = $env:ENTRAOPS_PAT
+        try {
+            $env:ENTRAOPS_PAT = $null
+            { Initialize-EntraOpsWorkspace -Path $script:Workspace -Content Reports } | Should -Throw "*'EntraOps-Insiders' is private and requires -PersonalAccessToken or ENTRAOPS_PAT*"
+            Should -Invoke -ModuleName EntraOps Invoke-RestMethod -Times 0
+            Test-Path -LiteralPath "$script:Workspace/Reports" | Should -BeFalse
+        } finally {
+            $env:ENTRAOPS_PAT = $PreviousPat
+        }
+    }
+
     It 'changes nothing with -WhatIf' {
         Initialize-EntraOpsWorkspace -Path $script:Workspace -WhatIf
 
@@ -92,8 +166,9 @@ Describe 'Initialize-EntraOpsWorkspace' {
     }
 
     It 'refuses the repository checkout that contains the module' {
+        $script:CheckoutGuard = $true
         { Initialize-EntraOpsWorkspace -Path $script:TestRepositoryRoot } | Should -Throw '*Use Update-EntraOps*'
         { Initialize-EntraOpsWorkspace -Path (Join-Path $script:TestRepositoryRoot 'EntraOps/Private') } | Should -Throw '*inside the EntraOps module folder*'
-        Should -Invoke -ModuleName EntraOps Invoke-WebRequest -Times 0
+        Should -Invoke -ModuleName EntraOps Invoke-RestMethod -Times 0
     }
 }

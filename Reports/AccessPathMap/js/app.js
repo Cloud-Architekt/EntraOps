@@ -978,6 +978,7 @@
         const clear = document.getElementById("clearFocus");
         if (state.focusNodeId && nodesById.has(state.focusNodeId)) {
             chip.textContent = "\u25C9 " + nodesById.get(state.focusNodeId).label;
+            chip.title = "Focus: " + nodesById.get(state.focusNodeId).label;
             chip.classList.remove("hidden");
             clear.classList.remove("hidden");
         } else {
@@ -1485,6 +1486,8 @@
                 applyFocusStyles();
                 openNodeDrawer(nodesById.get(id));
                 document.querySelector(".apm-canvas-wrap").scrollIntoView({ behavior: "smooth", block: "center" });
+            } else if (window.EntraOpsReportUtils) {
+                EntraOpsReportUtils.deepLinkNotFound("Object", id, "access path graph");
             }
             return;
         }

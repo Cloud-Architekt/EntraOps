@@ -168,6 +168,15 @@ function Get-EntraOpsPrivilegedEamDefender {
     $UniqueRoleDefs = $DefenderRbacAssignments | Select-Object -Unique RoleDefinitionId, RoleAssignmentScopeId, CloudSetSubscriptionScopes
     $TotalRoleDefs = $UniqueRoleDefs.Count
     $WarnedUserAccessCloudSets = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $WarnedEmptyCloudSets = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    # CloudSets that Defender resolved (by customAppScopes or zone) - used to tell a resolved-but-empty
+    # CloudSet apart from an unresolved app scope, which Get-EntraOpsPrivilegedDefenderRoles already reports.
+    $ResolvedCloudSetScopeIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($Assignment in @($DefenderRbacAssignments)) {
+        if ("$($Assignment.RoleAssignmentScopeId)" -match '(?i)^/cloudset/' -and "$($Assignment.ScopeResolutionStatus)" -eq 'Resolved') {
+            $ResolvedCloudSetScopeIds.Add("$($Assignment.RoleAssignmentScopeId)") | Out-Null
+        }
+    }
 
     $DefenderRbacClassificationsByJSON += foreach ($DefenderRbacAssignment in $UniqueRoleDefs) {
         $ProcessedRoleDefs++
@@ -246,6 +255,15 @@ function Get-EntraOpsPrivilegedEamDefender {
                         })
                 }
             }
+        } elseif ($ResolvedCloudSetScopeIds.Contains("$($DefenderRbacAssignment.RoleAssignmentScopeId)") -and $WarnedEmptyCloudSets.Add("$($DefenderRbacAssignment.RoleAssignmentScopeId)")) {
+            # Resolved CloudSet without any Azure subscription: no CloudSet-based tier can be derived, so the
+            # assignment is classified by its role actions only. Usually a failed Security Exposure Management zone
+            # lookup (missing Zone.Read.All, see CloudSetZoneResolutionError) or a zone without Azure subscriptions.
+            $WarningMessages.Add([PSCustomObject]@{
+                    Type     = 'CloudSetWithoutSubscriptionScope'
+                    ObjectId = "$($DefenderRbacAssignment.RoleAssignmentScopeId)"
+                    Message  = "CloudSet '$($DefenderRbacAssignment.RoleAssignmentScopeId)' was resolved, but contains 0 Azure subscription scope(s). No CloudSet-based classification was generated; check Zone.Read.All consent and the Security Exposure Management zone's Azure subscriptions."
+                })
         }
 
         # Check if role action and scope exists in JSON definition

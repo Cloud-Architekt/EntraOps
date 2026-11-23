@@ -12,6 +12,9 @@ Describe 'New-EntraOpsAccessPackageFlowData' {
         $script:UnprivilegedUserId = '33333333-3333-3333-3333-333333333333'
         $script:GroupId = '44444444-4444-4444-4444-444444444444'
         $script:AssignmentsResponse = @()
+        $script:ScopesResponse = @()
+        $script:DriftResponse = @{ group = @(); application = @() }
+        $script:DriftError = $null
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid())
         New-Item -ItemType Directory -Path "$script:Root/PrivilegedEAM/EntraID", "$script:Root/TenantGovernance/Snapshots", "$script:Root/App" -Force | Out-Null
 
@@ -47,10 +50,21 @@ Describe 'New-EntraOpsAccessPackageFlowData' {
                         requestApprovalSettings = [pscustomobject]@{ approvalStages = @() }
                     }
                 }
+                '*/accessPackageAssignmentPolicies/deleted-policy' {
+                    # Same shape as the error Invoke-EntraOpsMsGraphQuery -ThrowOnFailure throws for a 404
+                    $Exception = [System.InvalidOperationException]::new("Microsoft Graph query '$Uri' failed: Response status code does not indicate success: NotFound (Not Found).")
+                    $Exception.Data['StatusCode'] = 404
+                    throw $Exception
+                }
                 '*/accessPackages/package1' { return [pscustomobject]@{ displayName = 'Package 1'; catalogId = '' } }
-                '*/accessPackages/package1?*' { return [pscustomobject]@{ accessPackageResourceRoleScopes = @() } }
+                '*/accessPackages/package1?*' { return [pscustomobject]@{ accessPackageResourceRoleScopes = $script:ScopesResponse } }
                 '*/accessPackageAssignments?*' { return $script:AssignmentsResponse }
                 '*/groups/44444444-4444-4444-4444-444444444444*' { return [pscustomobject]@{ id = '44444444-4444-4444-4444-444444444444'; displayName = 'Requestor Group' } }
+                '*/identityGovernance/insights/accessDriftSummary?*' {
+                    if ($script:DriftError) { throw $script:DriftError }
+                    $Type = if ([uri]::UnescapeDataString($Uri) -match "resource/type eq '(\w+)'") { $Matches[1] } else { '' }
+                    return $script:DriftResponse[$Type]
+                }
                 default { throw "Unexpected Graph request in test: $Uri" }
             }
         }
@@ -81,6 +95,82 @@ Describe 'New-EntraOpsAccessPackageFlowData' {
         $MemberTiers[$script:UnprivilegedUserId] | Should -Be 'UserAccess'
     }
 
+    It 'writes the tiers the Object Classification File declares for the target groups' {
+        $Declared = '55555555-5555-5555-5555-555555555555'
+        $NotDeclared = '66666666-6666-6666-6666-666666666666'
+        $DeclaredAsUser = '77777777-7777-7777-7777-777777777777'
+        $Scope = { param($Id, $Name) [pscustomobject]@{ accessPackageResourceRole = [pscustomobject]@{ displayName = 'Member'; originId = "Member_$Id" }; accessPackageResourceScope = [pscustomobject]@{ originId = $Id; originSystem = 'AadGroup'; displayName = $Name } } }
+        $script:ScopesResponse = @((& $Scope $Declared 'Declared Group'), (& $Scope $NotDeclared 'Other Group'), (& $Scope $DeclaredAsUser 'Group Declared As User'))
+        New-Item -ItemType Directory -Path "$script:Root/Classification" -Force | Out-Null
+        @{ ObjectClassificationFile = @{ Enabled = $true; FilePath = './Classification/ObjectClassification.json' } } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$script:Root/EntraOpsConfig.json"
+        @(
+            [ordered]@{ ObjectId = $Declared; ObjectType = 'group'; ObjectDisplayName = 'Declared Group'; AdminTierLevelName = 'ManagementPlane'; Justification = 'Landing zone 01' }
+            # An entry for another object type does not classify the group.
+            [ordered]@{ ObjectId = $DeclaredAsUser; ObjectType = 'user'; ObjectDisplayName = 'Someone'; AdminTierLevelName = 'ControlPlane'; Justification = 'Wrong type' }
+        ) | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$script:Root/Classification/ObjectClassification.json"
+
+        $Result = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningAction SilentlyContinue
+
+        @($Result.objectClassifications.Keys) | Should -Be @($Declared)
+        $Result.objectClassifications[$Declared].tierName | Should -Be 'ManagementPlane'
+        $Result.objectClassifications[$Declared].justification | Should -Be 'Landing zone 01'
+        $Result.objectClassifications[$Declared].declaredBy | Should -Be 'Object Classification File'
+        @($Result.packages['package1'].targets.originSystem | Select-Object -Unique) | Should -Be @('AadGroup')
+    }
+
+    It 'classifies target groups by the Group filters of the Alternate Tier Level Attributes before the Object Classification File' {
+        $Filtered = '55555555-5555-5555-5555-555555555555'
+        $FileOnly = '66666666-6666-6666-6666-666666666666'
+        $Scope = { param($Id, $Name) [pscustomobject]@{ accessPackageResourceRole = [pscustomobject]@{ displayName = 'Member'; originId = "Member_$Id" }; accessPackageResourceScope = [pscustomobject]@{ originId = $Id; originSystem = 'AadGroup'; displayName = $Name } } }
+        $script:ScopesResponse = @((& $Scope $Filtered 'SG-LZ01-Users'), (& $Scope $FileOnly 'Other Group'))
+        New-Item -ItemType Directory -Path "$script:Root/Classification" -Force | Out-Null
+        @{
+            ObjectClassificationFile           = @{ Enabled = $true; FilePath = './Classification/ObjectClassification.json' }
+            AlternateObjectTierLevelAttributes = @{ Group = @{ Enabled = $true; ManagementPlane = '$Object.ObjectDisplayName -like "SG-LZ*"' } }
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$script:Root/EntraOpsConfig.json"
+        @(
+            [ordered]@{ ObjectId = $Filtered; ObjectType = 'group'; AdminTierLevelName = 'UserAccess'; Justification = 'From the file' }
+            [ordered]@{ ObjectId = $FileOnly; ObjectType = 'group'; AdminTierLevelName = 'ControlPlane'; Justification = 'Emergency access' }
+        ) | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$script:Root/Classification/ObjectClassification.json"
+        # Get-EntraOpsPrivilegedEntraObject evaluates the filters like in Privileged EAM: here the first group matches.
+        Mock -ModuleName EntraOps Get-EntraOpsPrivilegedEntraObject {
+            [pscustomobject]@{ ObjectId = $AadObjectId; ObjectType = 'group'; AdminTierLevelName = $(if ($AadObjectId -eq '55555555-5555-5555-5555-555555555555') { 'ManagementPlane' } else { 'Unclassified' }) }
+        }
+
+        $Result = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningAction SilentlyContinue
+
+        $Result.objectClassifications[$Filtered].tierName | Should -Be 'ManagementPlane'
+        $Result.objectClassifications[$Filtered].declaredBy | Should -Be 'Alternate Tier Level Attributes'
+        $Result.objectClassifications[$FileOnly].tierName | Should -Be 'ControlPlane'
+        $Result.objectClassifications[$FileOnly].declaredBy | Should -Be 'Object Classification File'
+        # Only the filters are evaluated there (the file is read here, with its justification).
+        Should -Invoke -ModuleName EntraOps Get-EntraOpsPrivilegedEntraObject -Times 2 -Exactly -ParameterFilter { $null -eq $ObjectClassificationFile -and $AlternateObjectTierLevelAttributes.Group.Enabled }
+    }
+
+    It 'does not look up the target groups when no Group filter is enabled' {
+        $Id = '55555555-5555-5555-5555-555555555555'
+        $script:ScopesResponse = @([pscustomobject]@{ accessPackageResourceRole = [pscustomobject]@{ displayName = 'Member'; originId = "Member_$Id" }; accessPackageResourceScope = [pscustomobject]@{ originId = $Id; originSystem = 'AadGroup'; displayName = 'Group' } })
+        @{ AlternateObjectTierLevelAttributes = @{ Group = @{ Enabled = $false; ManagementPlane = '$true' } } } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$script:Root/EntraOpsConfig.json"
+        Mock -ModuleName EntraOps Get-EntraOpsPrivilegedEntraObject {}
+
+        $Result = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningAction SilentlyContinue
+
+        $Result.objectClassifications.Count | Should -Be 0
+        Should -Invoke -ModuleName EntraOps Get-EntraOpsPrivilegedEntraObject -Times 0
+    }
+
+    It 'writes no declared tiers when the Object Classification File is disabled' {
+        $Id = '55555555-5555-5555-5555-555555555555'
+        $script:ScopesResponse = @([pscustomobject]@{ accessPackageResourceRole = [pscustomobject]@{ displayName = 'Member'; originId = "Member_$Id" }; accessPackageResourceScope = [pscustomobject]@{ originId = $Id; originSystem = 'AadGroup'; displayName = 'Declared Group' } })
+        New-Item -ItemType Directory -Path "$script:Root/Classification" -Force | Out-Null
+        @{ ObjectClassificationFile = @{ Enabled = $false; FilePath = './Classification/ObjectClassification.json' } } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$script:Root/EntraOpsConfig.json"
+        @([ordered]@{ ObjectId = $Id; ObjectType = 'group'; AdminTierLevelName = 'ManagementPlane'; Justification = 'x' }) | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$script:Root/Classification/ObjectClassification.json"
+
+        $Result = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningAction SilentlyContinue
+
+        $Result.objectClassifications.Count | Should -Be 0
+    }
+
     It 'maps the beta assignment state, status and subject type' {
         $script:AssignmentsResponse = @(
             [pscustomobject]@{
@@ -104,5 +194,61 @@ Describe 'New-EntraOpsAccessPackageFlowData' {
         $Expired = @($Result.assignments | Where-Object { $_.id -eq 'assignment2' })[0]
         $Expired.state | Should -Be 'Expired'
         $Expired.target.subjectType | Should -Be 'user'
+    }
+
+    It 'reads the access drift of the governed groups and applications' {
+        $script:DriftResponse.group = @(
+            [pscustomobject]@{
+                id              = 'v1_summary1'
+                resource        = [pscustomobject]@{ identifier = $script:GroupId; displayName = 'CP Group'; type = 'group'; catalogIdentifier = 'cat1'; catalogName = 'Tier0' }
+                driftSource     = 'entra'
+                driftCounts     = [pscustomobject]@{ total = 7; unauthorized = 5; missing = 2 }
+                createdDateTime = '2026-10-26T03:15:42Z'
+                details         = @([pscustomobject]@{
+                        driftType = 'unauthorized'; assignedRole = 'Member'; expectedRole = 'None'
+                        accessPackage = [pscustomobject]@{ identifier = 'package1'; displayName = 'Package 1' }
+                        identities = @([pscustomobject]@{ identifier = $script:UnprivilegedUserId; principalName = 'user@contoso.com'; displayName = 'Regular User'; identityType = 'user' })
+                    })
+            }
+        )
+
+        $Result = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningAction SilentlyContinue
+
+        $Result.accessDrift.status | Should -Be 'collected'
+        @($Result.accessDrift.resources).Count | Should -Be 1
+        $Drift = $Result.accessDrift.resources[0]
+        $Drift.resourceId | Should -Be $script:GroupId
+        $Drift.catalogId | Should -Be 'cat1'
+        $Drift.unauthorized | Should -Be 5
+        $Drift.missing | Should -Be 2
+        $Drift.details[0].accessPackageName | Should -Be 'Package 1'
+        $Drift.details[0].identities[0].principalName | Should -Be 'user@contoso.com'
+    }
+
+    It 'reports the access drift as unavailable with the reason when Microsoft Graph refuses it' {
+        $script:DriftError = 'Forbidden: the tenant has no Microsoft Entra ID Governance license.'
+
+        $Result = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningVariable Warnings -WarningAction SilentlyContinue
+
+        $Result.accessDrift.status | Should -Be 'unavailable'
+        $Result.accessDrift.reason | Should -Match 'no Microsoft Entra ID Governance license'
+        @($Result.accessDrift.resources).Count | Should -Be 0
+        @($Warnings | Where-Object { "$_" -like 'Access drift could not be read*' }).Count | Should -Be 1
+    }
+
+    It 'skips a deleted assignment policy with one summarised warning and unchanged data' {
+        $Expected = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningAction SilentlyContinue
+        @{
+            resourceType = 'microsoft.entra.entitlementManagementAccessPackageAssignmentPolicy'
+            properties   = @{ Id = 'deleted-policy' }
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$script:Root/TenantGovernance/Snapshots/deleted-policy.json"
+
+        $Result = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningVariable Warnings -WarningAction SilentlyContinue
+
+        $PolicyWarnings = @($Warnings | Where-Object { "$_" -match 'deleted-policy' })
+        $PolicyWarnings.Count | Should -Be 1
+        "$($PolicyWarnings[0])" | Should -Match 'NotFound'
+        "$($PolicyWarnings[0])" | Should -Not -Match 'Could not resolve'
+        ($Result | ConvertTo-Json -Depth 20) -replace '"generatedAt":\s*"[^"]*"' | Should -Be (($Expected | ConvertTo-Json -Depth 20) -replace '"generatedAt":\s*"[^"]*"')
     }
 }

@@ -58,6 +58,7 @@ function Disconnect-EntraOps {
     $__EntraOpsSession['AuthenticationType'] = $null
     $__EntraOpsSession.Remove('UseInvokeRestMethodOnly')
     $__EntraOpsSession.Remove('ConfigFilePath')
+    $__EntraOpsSession.Remove('SkippedConfigFilePath')
     if ($__EntraOpsSession.NonPimGroupIds) { $__EntraOpsSession.NonPimGroupIds.Clear() }
     if ($__EntraOpsSession.RetryStatistics) {
         $__EntraOpsSession.RetryStatistics.TotalRetries = 0

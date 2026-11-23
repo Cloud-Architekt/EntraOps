@@ -1,0 +1,414 @@
+/*
+ * Shared filter controls of the reporting apps (shared/filters.js): the search bar, facet rows of pills with
+ * counts, and collapsible groups. Load it after the styles of the app; it only uses the variables of theme.css.
+ */
+
+/* Search bar: a search field with an icon, followed by filters and buttons of the same height. */
+.eo-searchbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.eo-search {
+    position: relative;
+    display: flex;
+    flex: 1 1 320px;
+    min-width: 0;
+}
+
+.eo-search input {
+    width: 100%;
+    height: 38px;
+    padding: 0 10px 0 36px;
+    border: 1px solid var(--neutral-stroke-strong);
+    border-radius: 8px;
+    background: var(--neutral-surface);
+    color: var(--neutral-fg);
+    font: inherit;
+    font-size: 13.5px;
+    min-width: 0;
+}
+
+/* A long placeholder ends in an ellipsis on narrow screens instead of being cut off. */
+.eo-search input,
+.eo-search input::placeholder {
+    text-overflow: ellipsis;
+}
+
+.eo-search input:focus {
+    outline: none;
+    border-color: var(--brand);
+    box-shadow: 0 0 0 1px var(--brand);
+}
+
+.eo-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    width: 15px;
+    height: 15px;
+    transform: translateY(-50%);
+    fill: var(--neutral-fg-secondary);
+    pointer-events: none;
+}
+
+.eo-searchbar > .btn,
+.eo-searchbar > select,
+.eo-searchbar .eo-select select {
+    height: 38px;
+    border-radius: 8px;
+}
+
+/* A labelled dropdown in the search bar, for filters with many values (snapshots, roles, flags). */
+.eo-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--neutral-fg-secondary);
+}
+
+.eo-select select {
+    min-width: 0;
+    max-width: 320px;
+    padding: 0 8px;
+    border: 1px solid var(--neutral-stroke-strong);
+    background: var(--neutral-surface);
+    color: var(--neutral-fg);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
+/* Facets: one row of pills per filter with few values; a pill shows the number of matching items.
+   Pages with longer facet labels set --eo-facet-label-width on the facets container. */
+.eo-facets {
+    display: grid;
+    gap: 10px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 10px;
+    background: var(--neutral-surface-alt);
+}
+
+.eo-facet-row {
+    display: grid;
+    grid-template-columns: var(--eo-facet-label-width, 112px) minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+}
+
+/* The label lines up with the first line of pills (not the middle of a wrapped block), so it sits next to its own "All" pill. */
+.eo-facet-label {
+    display: flex;
+    align-items: center;
+    min-height: 30px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--neutral-fg-secondary);
+}
+
+.eo-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+}
+
+.eo-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    padding: 0 6px 0 12px;
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 999px;
+    background: var(--neutral-surface);
+    color: var(--neutral-fg);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color .12s ease, background-color .12s ease, color .12s ease, box-shadow .12s ease;
+}
+
+.eo-pill:hover:not(:disabled) {
+    border-color: var(--brand);
+    box-shadow: var(--shadow-2);
+}
+
+.eo-pill:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+}
+
+.eo-pill:disabled {
+    opacity: .45;
+    cursor: default;
+}
+
+.eo-pill-count {
+    min-width: 22px;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: var(--neutral-surface-alt);
+    color: var(--neutral-fg-secondary);
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 20px;
+    text-align: center;
+}
+
+.eo-pill.active {
+    border-color: var(--brand);
+    background: var(--brand-bg);
+    color: var(--brand);
+    font-weight: 600;
+}
+
+.eo-pill.active .eo-pill-count {
+    background: var(--brand);
+    color: #fff;
+}
+
+.eo-pill-toggle {
+    padding-right: 12px;
+}
+
+/* A note under the facets, for example which snapshot the counts are of. */
+.eo-facet-note {
+    font-size: 12px;
+    color: var(--neutral-fg-secondary);
+}
+
+.eo-pill-icon {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.eo-facet-sub .eo-pill {
+    height: 26px;
+    font-size: 12.5px;
+}
+
+.eo-facet-sub .eo-facet-label {
+    min-height: 26px;
+}
+
+/* Tier pills (filters.js tierPrefix): a tier dot, tinted in the tier color when active. */
+.eo-pill-tier .eo-tier-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--tier-unclassified);
+}
+
+.eo-tier-controlplane .eo-tier-dot { background: var(--tier-control); }
+.eo-tier-managementplane .eo-tier-dot { background: var(--tier-management); }
+.eo-tier-workloadplane .eo-tier-dot { background: var(--tier-workload); }
+.eo-tier-useraccess .eo-tier-dot { background: var(--tier-user); }
+
+.eo-pill-tier.active.eo-tier-controlplane { color: var(--tier-control); border-color: var(--tier-control); background: var(--tier-control-bg); }
+.eo-pill-tier.active.eo-tier-managementplane { color: var(--tier-management); border-color: var(--tier-management); background: var(--tier-management-bg); }
+.eo-pill-tier.active.eo-tier-workloadplane { color: var(--tier-workload); border-color: var(--tier-workload); background: var(--tier-workload-bg); }
+.eo-pill-tier.active.eo-tier-useraccess { color: var(--tier-user); border-color: var(--tier-user); background: var(--tier-user-bg); }
+.eo-pill-tier.active.eo-tier-unclassified { color: var(--neutral-fg); border-color: var(--neutral-stroke-strong); background: var(--neutral-surface); }
+
+.eo-pill-tier.active.eo-tier-controlplane .eo-pill-count { background: var(--tier-control); }
+.eo-pill-tier.active.eo-tier-managementplane .eo-pill-count { background: var(--tier-management); }
+.eo-pill-tier.active.eo-tier-workloadplane .eo-pill-count { background: var(--tier-workload); }
+.eo-pill-tier.active.eo-tier-useraccess .eo-pill-count { background: var(--tier-user); }
+.eo-pill-tier.active.eo-tier-unclassified .eo-pill-count { background: var(--neutral-stroke-strong); }
+
+[data-theme="dark"] .eo-pill-tier.active .eo-pill-count { color: #1f1f1f; }
+
+/* Collapsible groups (filters.js collapsible): the title toggles the body; the summary stays visible. */
+.eo-group {
+    margin-bottom: 18px;
+}
+
+.eo-group.collapsed {
+    margin-bottom: 10px;
+}
+
+.eo-group-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 14px;
+    padding: 0 2px 8px;
+}
+
+.eo-group-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    background: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+.eo-group-toggle:hover .eo-group-title {
+    text-decoration: underline;
+}
+
+.eo-group-toggle:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.eo-group-chevron {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    align-self: center;
+    fill: none;
+    stroke: var(--neutral-fg-secondary);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform .15s ease;
+}
+
+.eo-group.collapsed .eo-group-chevron {
+    transform: rotate(-90deg);
+}
+
+.eo-group-title {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.eo-group-meta {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 12.5px;
+    color: var(--neutral-fg-secondary);
+}
+
+/* Phones: the label above its pills; the pills wrap onto more lines (a sideways-scrolling row hid pills without a hint). */
+@media (max-width: 760px) {
+    .eo-facets {
+        padding: 10px;
+        gap: 8px;
+    }
+
+    .eo-facet-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
+
+    .eo-facet-label {
+        min-height: 0;
+    }
+
+    .eo-pill {
+        max-width: 100%;
+    }
+
+    /* The label (just before the count) of a pill wider than the screen ends in an ellipsis. */
+    .eo-pill > span:nth-last-child(2) {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .eo-select {
+        flex-basis: 100%;
+    }
+
+    .eo-select select {
+        flex: 1;
+        max-width: none;
+    }
+}
+
+/* ---------- Flow reports: risk flags (shared/flow-findings.js) ---------- */
+/* A flag accepted by a finding exception: muted, with its state and expiry; it does not count as flagged. */
+.flow-flag-accepted {
+    opacity: .72;
+}
+
+.flow-flag-accepted .ca-gap-icon {
+    background: var(--neutral-stroke-strong);
+}
+
+/* The exception of a flag expired since the evaluation: the flag is open again, with a note to evaluate again. */
+.flow-exception-state.flow-exception-expired {
+    border-color: var(--status-error);
+    background: var(--status-error-bg);
+    color: var(--status-error);
+}
+
+.flow-exception-stale {
+    font-size: 11px;
+    color: var(--neutral-fg-secondary);
+}
+
+.flow-exception-state {
+    display: inline-block;
+    padding: 0 7px;
+    border: 1px solid var(--neutral-stroke-strong);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--neutral-fg-secondary);
+    white-space: nowrap;
+}
+
+/* The check of a flag under its text: rule ID (linked to the Privileged Assets Findings view) and title. */
+.flow-rule-ref {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    margin-top: 2px;
+    font-size: 11.5px;
+    color: var(--neutral-fg-secondary);
+}
+
+.flow-rule-link {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+}
+
+/* The protection tier of an approver (its least protected member) next to its access tier. */
+.flow-protection {
+    font-size: 12px;
+    color: var(--neutral-fg-secondary);
+}
+
+/* A facet that does not apply (tiers that were not evaluated) is hidden with its label. */
+.eo-facet-row[hidden] {
+    display: none;
+}
+
+/* A metric tile without evaluated data is not a filter. */
+.stat-action:disabled {
+    cursor: default;
+    opacity: .75;
+}

@@ -465,8 +465,10 @@
         return state.syncSource === "*" || o.syncSource === state.syncSource;
     }
 
+    // state.objectTier is "*", one tier (a classification tile) or several tiers separated by commas (the hand-over
+    // of the Privilege History tier level filter).
     function objectTierMatch(o) {
-        return state.objectTier === "*" || o.objectAdminTierLevelName === state.objectTier;
+        return state.objectTier === "*" || String(state.objectTier).split(",").indexOf(o.objectAdminTierLevelName) !== -1;
     }
 
     function accessTierMatch(o) {
@@ -745,7 +747,7 @@
         const active = EXPORTS.filter(([k]) => state[k] !== "*");
         const chips = active.map(
             ([k, lbl]) =>
-                `<span class="chip brand">${esc(lbl)}: ${esc(state[k])}<span class="chip-x" data-k="${k}">&#10005;</span></span>`
+                `<span class="chip brand">${esc(lbl)}: ${esc(k === "objectTier" ? String(state[k]).split(",").map((t) => TIER_TEXT[t] || t).join(", ") : state[k])}<span class="chip-x" data-k="${k}">&#10005;</span></span>`
         );
         if (state.selectedObjectId !== "*") {
             chips.push(
@@ -950,6 +952,9 @@
                     linkedIdentity: asArray(o.associatedWorkAccount),
                     privilegedType: privilegedTypeOf(o),
                     outsideOfHomeTenant: !!o.outsideOfHomeTenant,
+                    originType: o.originType || "",
+                    originTenantId: o.originTenantId || "",
+                    originId: o.originId || "",
                     objClassification: new Map(), // tier|service -> object-level classification entry
                     controlPlaneReasoning: new Map(),
                     assignmentEvidence: new Map(),
@@ -1854,18 +1859,52 @@
     // ---- Deep links (#assignment=<id> jumps back to a starred assignment,
     //      #asset=<id> jumps to a starred principal, #compare=<id,id,..> opens
     //      the principal comparison) --------------------------------------------
+    // Resets every filter (like Tier Breach Analyzer), so a deep-linked asset or assignment that the current filters
+    // hide is shown instead of reported as not found.
+    function clearFiltersForDeepLink() {
+        state.roleSystems = null;
+        state.tierLevels = null;
+        state.services = null;
+        state.objectTypes = null;
+        state.privilegedTypes = null;
+        state.linkedIdentity = "";
+        state.displayName = "";
+        EXPORTS.forEach(([k]) => { state[k] = "*"; });
+        resetSelection();
+        const searchInput = document.getElementById("fltDisplayName");
+        if (searchInput) searchInput.value = "";
+        buildMultiSelect("fltRoleSystem", "RBAC System", allSystems, "roleSystems");
+        buildMultiSelect("fltTierLevel", "RBAC Tier Level", allTiers, "tierLevels");
+        buildMultiSelect("fltService", "Service", serviceOptions(), "services");
+        buildMultiSelect("fltObjectType", "Principal Type", allTypes, "objectTypes");
+        buildLinkedIdentitySelect();
+        buildMultiSelect("fltPrivilegedType", "Privileged Type", PRIVILEGED_TYPES, "privilegedTypes");
+        resetPagination();
+        render();
+    }
+
     function applyDeepLink() {
         const h = location.hash || "";
         let m = h.match(/^#asset=(.+)$/);
         if (m) {
             const wanted = decodeURIComponent(m[1]);
-            const idx = currentAssets.findIndex((r) => r.objectId === wanted);
-            if (idx === -1) return;
+            const sameAsset = (r) => String(r.objectId).toLowerCase() === wanted.toLowerCase();
+            let idx = currentAssets.findIndex(sameAsset);
+            if (idx === -1 && DATA.objects.some(sameAsset)) {
+                clearFiltersForDeepLink();
+                idx = currentAssets.findIndex(sameAsset);
+            }
+            if (idx === -1) {
+                if (window.EntraOpsReportUtils) {
+                    EntraOpsReportUtils.deepLinkNotFound("Privileged asset", wanted, "Privileged EAM data");
+                }
+                return;
+            }
             if (idx >= state.limits.asset) {
                 state.limits.asset = idx + 25;
                 renderAssetTable();
             }
-            const tr = document.querySelector(`#assetTable tbody tr[data-id="${CSS.escape(wanted)}"]`);
+            const tr = document.querySelector(`#assetTable tbody tr[data-id="${CSS.escape(currentAssets[idx].objectId)}"]`);
             if (!tr) return;
             tr.scrollIntoView({ behavior: "smooth", block: "center" });
             tr.classList.remove("eo-flash");
@@ -1883,11 +1922,21 @@
             }
             return;
         }
-        m = h.match(/^#assignment=(.+)$/);
+        m = h.match(/^#assignment=([^&]+)(?:&action=(.+))?$/);
         if (!m) return;
         const wanted = decodeURIComponent(m[1]);
-        const idx = currentAssignments.findIndex((r) => r.roleAssignmentInstanceId === wanted || r.roleAssignmentId === wanted);
-        if (idx === -1) return;
+        const wantedAction = m[2] ? decodeURIComponent(m[2]) : null;
+        const sameAssignment = (r) => r.roleAssignmentInstanceId === wanted || r.roleAssignmentId === wanted;
+        let idx = currentAssignments.findIndex(sameAssignment);
+        if (idx === -1) {
+            // Hidden by the filters? Clear them and look again.
+            clearFiltersForDeepLink();
+            idx = currentAssignments.findIndex(sameAssignment);
+        }
+        if (idx === -1) {
+            if (window.EntraOpsReportUtils) EntraOpsReportUtils.deepLinkNotFound("Role assignment", wanted, "Privileged EAM data");
+            return;
+        }
         if (idx >= state.limits.assignment) {
             state.limits.assignment = idx + 25;
             renderAssignmentTable();
@@ -1898,6 +1947,20 @@
         tr.classList.remove("eo-flash");
         void tr.offsetWidth; // restart the flash animation
         tr.classList.add("eo-flash");
+        if (wantedAction) {
+            openAssignmentClassification(currentAssignments[idx]);
+            const button = Array.from(drawerBodyEl.querySelectorAll("[data-review-action]")).find((el) =>
+                JSON.parse(el.dataset.reviewAction).name === wantedAction
+            );
+            if (button) {
+                const details = button.closest("details");
+                if (details) details.open = true;
+                button.scrollIntoView({ behavior: "smooth", block: "center" });
+                button.focus();
+            } else if (window.EntraOpsReportUtils) {
+                EntraOpsReportUtils.deepLinkNotFound("Role action", wantedAction, "assignment classification evidence");
+            }
+        }
     }
 
     document.getElementById("assignmentSelClear").addEventListener("click", () => {
@@ -1993,7 +2056,18 @@
                             asArray(c.matchedActions).join(","),
                             asArray(c.scopedObjects).map((obj) => `${obj.id}|${obj.displayName}`).join(","),
                         ].join("|");
-                        row.classificationEntries.set(classificationKey, c);
+                        if (!row.classificationEntries.has(classificationKey)) {
+                            row.classificationEntries.set(classificationKey, { ...c, reviewAssignments: new Map() });
+                        }
+                        row.classificationEntries.get(classificationKey).reviewAssignments.set(
+                            `${o.roleSystem}|${assignmentKey(ra)}|${ra.roleAssignmentScopeId || scopeName}`,
+                            {
+                                roleSystem: o.roleSystem,
+                                roleAssignmentInstanceId: assignmentKey(ra),
+                                roleAssignmentScopeId: ra.roleAssignmentScopeId,
+                                roleAssignmentScopeName: scopeName,
+                            }
+                        );
                         row.principals.set(o.objectId, o.objectDisplayName || o.objectId);
                     });
                 });
@@ -2086,6 +2160,13 @@
     const drawerBodyEl = document.getElementById("drawerBody");
 
     drawerBodyEl.addEventListener("click", (e) => {
+        const star = e.target.closest("[data-review-action]");
+        if (star) {
+            e.stopPropagation();
+            const on = EOReview.toggle(JSON.parse(star.dataset.reviewAction));
+            EOReview.updateStar(star, on);
+            return;
+        }
         const jump = e.target.closest("[data-jump-evidence]");
         if (!jump) return;
         e.preventDefault();
@@ -2399,14 +2480,44 @@
         );
     }
 
-    function monoList(items) {
-        const arr = asArray(items).filter(Boolean);
-        if (!arr.length) return '<div class="muted">&mdash;</div>';
-        return (
-            `<ul class="list-reset drawer-list">` +
-            arr.map((i) => `<li><span class="cell-mono" style="font-size:12px;word-break:break-all;">${esc(i)}</span></li>`).join("") +
-            `</ul>`
-        );
+    // Scopes listed per action in the evidence of a classification row (starred scopes are always listed).
+    const REVIEW_ACTION_SCOPE_LIMIT = 5;
+
+    function reviewActionList(actions, assignments, tier) {
+        const reviewIds = window.EOReview ? EOReview.idsSet() : new Set();
+        return '<ul class="list-reset drawer-list">' + actions.map((action) => {
+            if (!window.EOReview) {
+                return `<li><span class="cell-mono" style="word-break:break-all;">${esc(action)}</span></li>`;
+            }
+            const contexts = new Map();
+            assignments.forEach((assignment) => {
+                const scope = assignment.roleAssignmentScopeId || assignment.roleAssignmentScopeName || "";
+                const id = EOReview.makeId("action", assignment.roleSystem, action, scope);
+                if (!contexts.has(id)) contexts.set(id, {
+                    id, kind: "Role action", system: assignment.roleSystem, name: action, scope, tier,
+                    hash: "#assignment=" + encodeURIComponent(assignment.roleAssignmentInstanceId) +
+                        "&action=" + encodeURIComponent(action),
+                });
+            });
+            if (!contexts.size) {
+                return `<li><span class="cell-mono" style="word-break:break-all;">${esc(action)}</span></li>`;
+            }
+            // A classification row can cover many assignment scopes: starred scopes first, then up to the
+            // limit, so a role with many actions and scopes doesn't render thousands of rows.
+            const items = Array.from(contexts.values());
+            const shown = items.filter((item) => reviewIds.has(item.id))
+                .concat(items.filter((item) => !reviewIds.has(item.id)))
+                .slice(0, Math.max(REVIEW_ACTION_SCOPE_LIMIT, items.filter((item) => reviewIds.has(item.id)).length));
+            const more = items.length - shown.length;
+            return shown.map((item) => {
+                const star = EOReview.starHtml(item.id, undefined, reviewIds.has(item.id)).replace("<button ",
+                    `<button data-eo-id="${escAttr(item.id)}" data-review-action="${escAttr(JSON.stringify(item))}" `);
+                return `<li>${star} <span class="cell-mono" style="word-break:break-all;">${esc(action)}</span>` +
+                    `<div class="muted cell-mono" style="word-break:break-all;">${esc(item.system)} &middot; ${esc(item.scope || "Scope not available")}</div></li>`;
+            }).join("") + (more > 0
+                ? `<li class="muted" data-review-action-more>${esc(more.toLocaleString())} more scope(s) of this action: star it in the classification reasoning of its role assignment.</li>`
+                : "");
+        }).join("") + "</ul>";
     }
 
     function principalList(principals) {
@@ -2432,7 +2543,7 @@
         );
     }
 
-    function classificationEvidenceHtml(entries) {
+    function classificationEvidenceHtml(entries, assignment) {
         const classifications = sortedClassificationEntries(entries);
         if (!classifications.length) {
             return '<div class="muted">No persisted classification evidence is available.</div>';
@@ -2453,7 +2564,10 @@
                         ["Scoped objects", scopedObjects.map((obj) => `${esc(obj.displayName || obj.id)} <span class="cell-mono muted">(${esc(obj.id || "")})</span>`).join("<br>")],
                         ["Role actions leading to this access level", actions.length ? esc(actions.length.toLocaleString() + " action(s)") : ""],
                     ]) +
-                    (actions.length ? monoList(actions) : '<div class="muted">No matched role actions were persisted for this classification entry.</div>')
+                    (actions.length ? reviewActionList(actions,
+                        assignment ? [assignment] : Array.from(classification.reviewAssignments.values()),
+                        classification.adminTierLevelName || "Unclassified")
+                        : '<div class="muted">No matched role actions were persisted for this classification entry.</div>')
                 );
             })
             .join("");
@@ -2482,7 +2596,7 @@
                 ["Product/application scopes", asArray(r.applicationScopes).map(esc).join("<br>")],
             ]) +
             sectionTitle("Condition evidence") + conditionEvidenceHtml(r) +
-            sectionTitle("Applied classification rules") + classificationEvidenceHtml(classEntries) +
+            sectionTitle("Applied classification rules") + classificationEvidenceHtml(classEntries, r) +
             sectionTitle("Object-level Control Plane reasoning") + principalControlPlaneReasoningHtml(controlPlaneEntries);
         const scopeAnchor = evidenceScopeId ? ` id="${escAttr(evidenceScopeId)}"` : "";
         if (asArray(r.scopeReasoning).length) {
@@ -2570,6 +2684,9 @@
                 ["Privileged type", dash(r.privilegedType)],
                 ["Outside of home tenant", esc(yesNo(r.outsideOfHomeTenant))],
                 ["Sync source", dash(r.syncSource)],
+                ["Origin", dash(r.originType)],
+                ["Origin tenant Id", r.originTenantId ? mono(r.originTenantId) : dash("")],
+                ["Origin Id", r.originId ? mono(r.originId) : dash("")],
             ]) +
             sectionTitle("Classification") +
             kvHtml([
@@ -2843,14 +2960,15 @@
     // JS context with this page, so it hands off its filters via URL query parameters instead:
     //   ?rs=<comma-list|*>          RBAC System multi-select
     //   &tier=<comma-list|*>        RBAC Tier Level (classification AdminTierLevelName)
-    //   &objectTier=<name|*>        Identity classification (ObjectAdminTierLevelName)
+    //   &objectTier=<name[,name]|*> Identity classification (ObjectAdminTierLevelName), one or several tiers
+    //   &q=<text>                   Search (display name, role name, scope name, role actions)
     //   #secOverview                (anchor scroll handled natively by the browser)
     // Values that don't exist as filter options are silently dropped, so a stale or
     // foreign link can never produce a filter selection the UI has no checkbox or
     // tile to clear again.
     function applyQueryDeepLink() {
         const params = new URLSearchParams(location.search);
-        if (!params.has("rs") && !params.has("tier") && !params.has("objectTier")) return;
+        if (!params.has("rs") && !params.has("tier") && !params.has("objectTier") && !params.has("q")) return;
         const rs = params.get("rs");
         const tier = params.get("tier");
         const objectTier = params.get("objectTier");
@@ -2867,12 +2985,18 @@
             if (host._refreshOptions) host._refreshOptions(allTiers);
         }
         if (objectTier !== null && objectTier !== "*" && objectTier !== "") {
-            // Single-value identity-classification filter - the same mechanism as
-            // clicking a "Classification of privileged identities" tile, clearable
-            // via its export chip. state.objectTier holds exactly one tier, so a
-            // multi-tier handoff is ignored (showing all is a safe superset).
+            // Identity-classification filter - the same mechanism as clicking a "Classification of privileged
+            // identities" tile, clearable via its export chip; several tiers (Privilege History hand-over) are kept.
             const known = objectTier.split(",").filter((t) => TIER_ORDER.includes(t));
-            if (known.length === 1) state.objectTier = known[0];
+            if (known.length) state.objectTier = known.join(",");
+        }
+        // &q=<text>: the search (display name, role name, scope name, role actions), e.g. the role search of the
+        // Privilege History.
+        const query = params.get("q");
+        if (query) {
+            state.displayName = query.trim().toLowerCase();
+            const searchInput = document.getElementById("fltDisplayName");
+            if (searchInput) searchInput.value = query.trim();
         }
         const svcHost = document.getElementById("fltService");
         if (svcHost && svcHost._refreshOptions) svcHost._refreshOptions(serviceOptions());

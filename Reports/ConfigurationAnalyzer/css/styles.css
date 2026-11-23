@@ -3595,12 +3595,6 @@ tr.cmp-row>td {
     overflow-wrap: anywhere;
 }
 
-.asr-filter-note {
-    align-self: flex-end;
-    font-size: 12px;
-    padding-bottom: 6px;
-}
-
 .asr-resource-link {
     appearance: none;
     background: transparent;
@@ -3870,31 +3864,38 @@ tr.cmp-row>td {
 /* =========================================================================
    Configuration Analyzer specific styles (appended to the shared app CSS)
    ========================================================================= */
-.ca-toggle-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+/* Filter bars (shared/filters.css): the item pushed to the end of the bar, a checkbox option and the color
+   dot of the change status pills. */
+.eo-searchbar .ca-bar-end {
+    margin-left: auto;
 }
 
-.ca-toggle {
+.ca-check {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    font-size: 12px;
-    padding: 3px 10px;
-    border-radius: 12px;
-    border: 1px solid var(--neutral-stroke-strong);
-    background: var(--neutral-surface);
+    gap: 6px;
+    font-size: 13px;
     color: var(--neutral-fg-secondary);
     cursor: pointer;
-    user-select: none;
 }
 
-.ca-toggle.on {
-    background: var(--brand-bg);
-    border-color: var(--brand);
-    color: var(--brand-pressed);
-    font-weight: 600;
+.ca-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.ca-status-dot.added {
+    background: #0e700e;
+}
+
+.ca-status-dot.modified {
+    background: #c07807;
+}
+
+.ca-status-dot.removed {
+    background: #a4262c;
 }
 
 .status-chip {

@@ -56,6 +56,35 @@
         try { return decodeURIComponent(match[1]); } catch (_) { return null; }
     }
 
+    // Short, non-blocking notice for a deep link whose target is not in the loaded data, for example
+    // "Assignment path <id> was not found in the loaded snapshots." It closes itself after a while.
+    var noticeTimer = null;
+    function deepLinkNotFound(kind, reference, where) {
+        var notice = document.getElementById("eoDeepLinkNotice");
+        if (!notice) {
+            notice = document.createElement("div");
+            notice.id = "eoDeepLinkNotice";
+            notice.className = "eo-deeplink-notice";
+            notice.setAttribute("role", "status");
+            notice.innerHTML = '<span class="eo-deeplink-notice-text"></span><button type="button" class="eo-deeplink-notice-close" aria-label="Close notice">&times;</button>';
+            notice.querySelector("button").addEventListener("click", function () { notice.hidden = true; });
+            document.body.appendChild(notice);
+            // The next deep link replaces the notice: the report shows it again if that target is missing too.
+            window.addEventListener("hashchange", function () { notice.hidden = true; }, true);
+        }
+        var text = notice.querySelector(".eo-deeplink-notice-text");
+        var code = document.createElement("code");
+        code.textContent = reference == null ? "" : String(reference);
+        text.textContent = "";
+        text.appendChild(document.createTextNode(kind + " "));
+        text.appendChild(code);
+        text.appendChild(document.createTextNode(" was not found in the " + (where || "loaded results") + "."));
+        notice.hidden = false;
+        clearTimeout(noticeTimer);
+        noticeTimer = setTimeout(function () { notice.hidden = true; }, 10000);
+        return notice;
+    }
+
     function reviewStoreKey(reportId) { return "entraops.review." + reportId; }
 
     // Parsed review-map cache: reviewControl runs once per rendered row (hundreds of rows per
@@ -92,10 +121,17 @@
         } catch (_) { /* Local storage can be unavailable in hardened browsers. */ }
     }
 
+    // Local review status of a row, kept in this browser only. It is no finding exception (Finding Exceptions
+    // File, "Risk accepted" / "Dismissed"): the labels say "Reviewed" so the two are not confused. The stored
+    // values stay "Open", "Accepted risk" and "Remediated" for the statuses saved by earlier versions.
+    var REVIEW_OPTIONS = [["Open", "Open"], ["Accepted risk", "Reviewed: accepted"], ["Remediated", "Reviewed: remediated"]];
     function reviewControl(reportId, findingId, defaultStatus, replaceOpenWithDefault) {
         var status = getReviewStatus(reportId, findingId, defaultStatus);
         if (replaceOpenWithDefault && status === "Open" && defaultStatus) status = defaultStatus;
-            return '<select class="review-status" data-review-report="' + encodeURIComponent(reportId) + '" data-review-finding="' + encodeURIComponent(findingId) + '" aria-label="Review status"><option' + (status === "Open" ? " selected" : "") + '>Open</option><option' + (status === "Accepted risk" ? " selected" : "") + '>Accepted risk</option><option' + (status === "Remediated" ? " selected" : "") + '>Remediated</option></select>';
+        return '<select class="review-status" data-review-report="' + encodeURIComponent(reportId) + '" data-review-finding="' + encodeURIComponent(findingId) + '" aria-label="Review status (this browser only)" title="Review status, saved in this browser only. To accept a finding for everyone, add a finding exception in the Privileged Assets Findings view.">' +
+            REVIEW_OPTIONS.map(function (option) {
+                return '<option value="' + option[0] + '"' + (status === option[0] ? " selected" : "") + ">" + option[1] + "</option>";
+            }).join("") + "</select>";
     }
 
     function bindReviewControls(container, onChange) {
@@ -112,6 +148,7 @@
         freshnessText: freshnessText,
         flowDeepLink: flowDeepLink,
         flowReferenceFromHash: flowReferenceFromHash,
+        deepLinkNotFound: deepLinkNotFound,
         getReviewStatus: getReviewStatus,
         setReviewStatus: setReviewStatus,
         reviewControl: reviewControl,

@@ -450,7 +450,8 @@ function Update-EntraOpsClassificationExplorerData {
             }
         }
 
-        foreach ($rid in $docsRoleObjects.Keys) {
+        # Hashtable key order is not stable across runs; sort so the generated data is reproducible.
+        foreach ($rid in ($docsRoleObjects.Keys | Sort-Object)) {
             $role = $docsRoleObjects[$rid]
             $graphActs = if ($graphActionsByRole.ContainsKey($rid)) { $graphActionsByRole[$rid] } else { $null }
             $roleClass = 'Unclassified'

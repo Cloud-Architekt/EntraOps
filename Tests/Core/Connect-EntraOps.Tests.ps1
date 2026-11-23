@@ -94,8 +94,11 @@ Describe 'Connect-EntraOps configuration file detection' {
         $Output = Invoke-TestConnect
 
         $Output | Should -Match "Working Folder\s+: $([regex]::Escape($script:BaseFolder)) \(set in this session\)"
-        $Global:DefaultFolderClassification | Should -Be "$script:BaseFolder/Classification/"
-        $Global:DefaultFolderClassifiedEam | Should -Be "$script:BaseFolder/PrivilegedEAM/"
+        $Global:DefaultFolderClassification | Should -Be "$script:BaseFolder/Classification"
+        $Global:DefaultFolderClassifiedEam | Should -Be "$script:BaseFolder/PrivilegedEAM"
+        # Consumers append "/<child>": a trailing separator would produce paths such as PrivilegedEAM//EntraID
+        "$Global:DefaultFolderClassifiedEam/EntraID" | Should -Not -Match '//'
+        "$Global:DefaultFolderClassification/$($Global:TenantNameContext)/Classification_Azure.json" | Should -Not -Match '//'
     }
 
     It 'does not use a configuration of another tenant' {
@@ -105,6 +108,8 @@ Describe 'Connect-EntraOps configuration file detection' {
 
         Get-Variable -Name EntraOpsConfig -Scope Global -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
         $Output | Should -Match "Config File\s+: Not used - TenantName 'fabrikam.onmicrosoft.com'"
+        # Invoke-EntraOpsPrivilegedEAM looks for the file itself and must not load the skipped one.
+        (& (Get-Module EntraOps) { $__EntraOpsSession['SkippedConfigFilePath'] }) | Should -Be (Join-Path $script:WorkFolder 'EntraOpsConfig.json')
         Should -Invoke Set-AzContext -ModuleName EntraOps -Times 0 -Exactly
     }
 

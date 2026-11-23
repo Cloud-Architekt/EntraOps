@@ -52,6 +52,17 @@
     emptyState.classList.add("hidden");
     content.classList.remove("hidden");
 
+    // Without git history the page shows the current export only: the trends need snapshots from git.
+    if (DATA_TM.historySource === "folder") {
+        const folderNote = document.getElementById("tmFolderNote");
+        if (folderNote) {
+            folderNote.hidden = false;
+            folderNote.textContent = "This report shows the current Privileged EAM export only: it was generated without git history " +
+                "(-HistorySource Folder, or Auto outside a git repository). Commit the exports to a repository and generate the report with " +
+                "-HistorySource Git or Auto to see trends and to compare points in time.";
+        }
+    }
+
     const TIER_ORDER = Array.isArray(DATA_TM.tierOrder) && DATA_TM.tierOrder.length
         ? DATA_TM.tierOrder
         : ["ControlPlane", "ManagementPlane", "WorkloadPlane", "UserAccess", "Unclassified"];
@@ -105,10 +116,20 @@
         return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
     }
 
+    // Without git (-HistorySource Folder, or Auto outside a repository) the current export is the only snapshot.
+    const FOLDER_MODE = DATA_TM.historySource === "folder";
+
+    // Short commit id; uncommitted exports and exports without git history have no commit.
+    function snapshotLabel(s) {
+        if (s.workingTree) return FOLDER_MODE ? "current export" : "working tree";
+        const sha = String(s.commitSha || "");
+        return sha.startsWith("(") ? sha.replace(/^\(|\)$/g, "") : sha.substring(0, 7);
+    }
+
     // ---- State -----------------------------------------------------------------------
     const state = {
-        roleSystems: null, // null = all, else Set
-        tierLevels: null,  // null = all, else Set
+        roleSystems: [], // multi-select facets of pills: [] = all, else the selected values
+        tierLevels: [],
         roleSearch: "",
         fromIdx: 0,
         toIdx: snapshots.length - 1,
@@ -118,8 +139,7 @@
     // ---- Filters (RBAC System / Tier Level / Role search) - apply to the snapshot
     //      detail & compare tables; the trend charts always show totals across every
     //      RBAC system and tier since that's what was aggregated at generation time. ----
-    buildMultiSelect("tmFltRoleSystem", "RBAC System", allRbacSystems, "roleSystems");
-    buildMultiSelect("tmFltTierLevel", "RBAC Tier Level", TIER_ORDER, "tierLevels");
+    EntraOpsFilters.bindPills(document.getElementById("tmFacets"), state, () => renderSnapshotDetail());
     document.getElementById("tmFltRole").addEventListener("input", debounce((e) => {
         state.roleSearch = e.target.value.trim().toLowerCase();
         renderSnapshotDetail();
@@ -133,64 +153,34 @@
         };
     }
 
-    function buildMultiSelect(hostId, label, options, stateKey) {
-        const host = document.getElementById(hostId);
-        host.innerHTML =
-            `<label>${esc(label)}</label>` +
-            `<div class="dd"><button class="dd-btn" type="button">` +
-            `<span class="dd-val">All</span><span class="dd-caret">&#9660;</span></button>` +
-            `<div class="dd-pop hidden"></div></div>`;
-        const btn = host.querySelector(".dd-btn");
-        const pop = host.querySelector(".dd-pop");
-        const val = host.querySelector(".dd-val");
-
-        function selectedSet() { return state[stateKey]; }
-
-        function renderPop() {
-            const sel = selectedSet();
-            const allChecked = sel === null;
-            pop.innerHTML =
-                `<label class="dd-all"><input type="checkbox" data-all ${allChecked ? "checked" : ""}/>All</label>` +
-                options.map((opt) =>
-                    `<label><input type="checkbox" data-v="${esc(opt)}" ${allChecked || sel.has(opt) ? "checked" : ""}/>${esc(TIER_TEXT[opt] || opt)}</label>`
-                ).join("");
-            pop.querySelector("[data-all]").addEventListener("change", (e) => {
-                state[stateKey] = e.target.checked ? null : new Set();
-                renderPop();
-                renderVal();
-                renderSnapshotDetail();
-            });
-            pop.querySelectorAll("input[data-v]").forEach((cb) =>
-                cb.addEventListener("change", () => {
-                    const chosen = new Set(
-                        Array.from(pop.querySelectorAll("input[data-v]")).filter((c) => c.checked).map((c) => c.dataset.v)
-                    );
-                    state[stateKey] = chosen.size === options.length ? null : chosen;
-                    renderPop();
-                    renderVal();
-                    renderSnapshotDetail();
-                })
-            );
+    // The snapshot the pills count: the selected one, else the latest one of the time range with
+    // object-level detail.
+    function facetSnapshotIdx() {
+        if (state.selectedIdx !== null) return state.selectedIdx;
+        for (let i = state.toIdx; i >= state.fromIdx; i--) {
+            if (Array.isArray(snapshots[i].objects) && snapshots[i].objects.length) return i;
         }
+        return state.toIdx;
+    }
 
-        function renderVal() {
-            const sel = selectedSet();
-            if (sel === null) val.textContent = "All";
-            else if (sel.size === 0) val.textContent = "None";
-            else if (sel.size <= 2) val.textContent = Array.from(sel).map((v) => TIER_TEXT[v] || v).join(", ");
-            else val.textContent = sel.size + " selected";
-        }
-
-        btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            document.querySelectorAll(".dd-pop").forEach((p) => { if (p !== pop) p.classList.add("hidden"); });
-            pop.classList.toggle("hidden");
-        });
-        pop.addEventListener("click", (e) => e.stopPropagation());
-        document.addEventListener("click", () => pop.classList.add("hidden"));
-
-        renderPop();
-        renderVal();
+    // Pills of the RBAC systems and tier levels, with the number of privileged objects of the counted
+    // snapshot that match the other filters. A snapshot lists an object once per RBAC system it holds
+    // roles in, so the pills count distinct object IDs.
+    function renderFacets() {
+        const idx = facetSnapshotIdx();
+        const objects = snapshots[idx].objects || [];
+        const objectKey = (o) => o.objectId;
+        const systems = EntraOpsFilters.facetCounts(objects, "roleSystems", objectMatches, (o) => o.roleSystem, objectKey);
+        const tiers = EntraOpsFilters.facetCounts(objects, "tierLevels", objectMatches, (o) => o.objectAdminTierLevelName || "Unclassified", objectKey);
+        const multi = { multi: true };
+        document.getElementById("tmFltRoleSystem").innerHTML = EntraOpsFilters.pill(state, "roleSystems", "", "All", systems.total, multi) +
+            allRbacSystems.map((system) => EntraOpsFilters.pill(state, "roleSystems", system, system, systems.counts[system] || 0, multi)).join("");
+        document.getElementById("tmFltTierLevel").innerHTML = EntraOpsFilters.pill(state, "tierLevels", "", "All", tiers.total, multi) +
+            TIER_ORDER.map((tier) => EntraOpsFilters.tierPill(state, "tierLevels", tier, tierLabel(tier), tiers.counts[tier] || 0, multi)).join("");
+        document.getElementById("tmFacetScope").textContent = `Number of privileged objects in the ${state.selectedIdx === null ? "latest " : ""}snapshot of ` +
+            `${fmtDate(snapshots[idx].commitDate)} (${snapshotLabel(snapshots[idx])})` +
+            (snapshots[idx].hasDetail === false ? " - trend only, without object-level detail" : "") +
+            ", each counted once across RBAC systems. Groups are included; the asset charts count users and service principals only.";
     }
 
     // ---- Time range selects ------------------------------------------------------------
@@ -200,7 +190,7 @@
     const compareCurrent = document.getElementById("tmCompareCurrent");
 
     function snapshotOptionsHtml(includeLive) {
-        return snapshots.map((s, i) => `<option value="${i}">${esc(fmtDate(s.commitDate))} (${esc(s.commitSha.substring(0, 7))})${s.hasDetail === false ? " - trend only" : ""}</option>`).join("") +
+        return snapshots.map((s, i) => `<option value="${i}">${esc(fmtDate(s.commitDate))} (${esc(snapshotLabel(s))})${s.hasDetail === false ? " - trend only" : ""}</option>`).join("") +
             (includeLive ? `<option value="live">Live (now)</option>` : "");
     }
 
@@ -217,11 +207,13 @@
         state.fromIdx = Math.min(Number(rangeFrom.value), state.toIdx);
         rangeFrom.value = String(state.fromIdx);
         renderCharts();
+        renderFacets();
     });
     rangeTo.addEventListener("change", () => {
         state.toIdx = Math.max(Number(rangeTo.value), state.fromIdx);
         rangeTo.value = String(state.toIdx);
         renderCharts();
+        renderFacets();
     });
     document.getElementById("tmResetRange").addEventListener("click", () => {
         state.fromIdx = 0;
@@ -229,6 +221,7 @@
         rangeFrom.value = "0";
         rangeTo.value = String(state.toIdx);
         renderCharts();
+        renderFacets();
     });
 
     // ---- Charts ------------------------------------------------------------------------
@@ -360,22 +353,26 @@
         renderSnapshotDetail();
     }
 
+    // skip leaves out one facet, for the counts of its pills.
+    function objectMatches(o, skip) {
+        if (skip !== "roleSystems" && !EntraOpsFilters.matchesFacet(state, "roleSystems", o.roleSystem)) return false;
+        if (skip !== "tierLevels" && !EntraOpsFilters.matchesFacet(state, "tierLevels", o.objectAdminTierLevelName || "Unclassified")) return false;
+        if (state.roleSearch) {
+            const hit = (o.roleAssignments || []).some((ra) => (ra.roleDefinitionName || "").toLowerCase().includes(state.roleSearch));
+            if (!hit) return false;
+        }
+        return true;
+    }
+
     function filteredSnapshotObjects(snapshot) {
-        return (snapshot.objects || []).filter((o) => {
-            if (state.roleSystems !== null && !state.roleSystems.has(o.roleSystem)) return false;
-            if (state.tierLevels !== null && !state.tierLevels.has(o.objectAdminTierLevelName || "Unclassified")) return false;
-            if (state.roleSearch) {
-                const hit = (o.roleAssignments || []).some((ra) => (ra.roleDefinitionName || "").toLowerCase().includes(state.roleSearch));
-                if (!hit) return false;
-            }
-            return true;
-        });
+        return (snapshot.objects || []).filter((o) => objectMatches(o));
     }
 
     function renderSnapshotDetail() {
         const chip = document.getElementById("tmSnapshotChip");
         const jumpBtn = document.getElementById("tmJumpToOverview");
         const body = document.getElementById("tmSnapshotBody");
+        renderFacets();
 
         if (state.selectedIdx === null) {
             chip.classList.add("hidden");
@@ -389,15 +386,17 @@
         const live = getLiveTotals();
 
         chip.classList.remove("hidden");
-        chip.textContent = `${fmtDate(snapshot.commitDate)} \u00b7 ${snapshot.commitSha.substring(0, 7)}`;
+        chip.textContent = `${fmtDate(snapshot.commitDate)} \u00b7 ${snapshotLabel(snapshot)}`;
         jumpBtn.classList.remove("hidden");
         jumpBtn.onclick = () => {
-            const rs = state.roleSystems === null ? "*" : Array.from(state.roleSystems).join(",");
+            const rs = state.roleSystems.length ? state.roleSystems.join(",") : "*";
             // This app's tier filter matches objectAdminTierLevelName (identity
             // classification), so it maps to EamDashboard's objectTier parameter -
             // not its `tier` parameter, which filters classification tiers.
-            const objectTier = state.tierLevels === null ? "*" : Array.from(state.tierLevels).join(",");
+            const objectTier = state.tierLevels.length ? state.tierLevels.join(",") : "*";
             const params = new URLSearchParams({ rs, objectTier });
+            // The role search is handed over as the EAM Dashboard search (it also matches role names).
+            if (state.roleSearch) params.set("q", state.roleSearch);
             location.href = `../EamDashboard/index.html?${params.toString()}#secOverview`;
         };
 
@@ -419,7 +418,7 @@
             `<td>${(o.roleAssignments || []).length}</td></tr>`
         ).join("");
         const assetNote = objs.length > 200
-            ? `<p class="hint">Showing first 200 of ${objs.length.toLocaleString()} privileged assets.</p>`
+            ? `<p class="hint">Showing first 200 of ${objs.length.toLocaleString()} rows (one per object and RBAC system).</p>`
             : "";
 
         const assignmentList = objs.flatMap((o) => (o.roleAssignments || []).map((ra) => ({ o, ra })))
@@ -477,26 +476,30 @@
     // ---- Compare two points in time -----------------------------------------------------
     // The tierBreaches computed here intentionally matches the generator's definition
     // (New-EntraOpsPrivilegedEamPrivilegeHistoryData: unique classification tiers per role
-    // assignment, counted when tierRank(tier) < tierRank(object tier)), so client-side
-    // aggregates and snapshot.totals.tierBreaches agree.
+    // assignment, counted when tierRank(tier) < tierRank(object tier), an unclassified object
+    // compared as User Access), so client-side aggregates and snapshot.totals.tierBreaches agree.
+    // Assets and role assignments are counted like the generator too: assets without groups, and an assignment
+    // once per roleAssignmentInstanceId (else roleAssignmentId), so the latest snapshot shows no delta vs. today.
     function aggregate(objects) {
         const assetMap = new Map();
         const assetsByTier = {}, usersByTier = {}, assignByTier = {};
         TIER_ORDER.forEach((t) => { assetsByTier[t] = 0; usersByTier[t] = 0; assignByTier[t] = 0; });
         const seenAssignment = new Set();
-        let totalAssignments = 0, totalUsers = 0, tierBreaches = 0;
+        let totalAssignments = 0, totalUsers = 0, tierBreaches = 0, totalAssets = 0;
 
         objects.forEach((o) => {
             const tier = o.objectAdminTierLevelName || "Unclassified";
             if (!assetMap.has(o.objectId)) {
                 assetMap.set(o.objectId, { tier, type: o.objectType, name: o.objectDisplayName });
-                if (o.objectType !== "group") assetsByTier[tier] = (assetsByTier[tier] || 0) + 1;
+                if (o.objectType !== "group") { assetsByTier[tier] = (assetsByTier[tier] || 0) + 1; totalAssets++; }
                 if (o.objectType === "user") { usersByTier[tier] = (usersByTier[tier] || 0) + 1; totalUsers++; }
             }
-            const objRank = tierRank(tier);
+            // An unclassified object is compared as User Access: only a role above User Access is a breach.
+            const objRank = tierRank(tier === "Unclassified" ? "UserAccess" : tier);
             (o.roleAssignments || []).forEach((ra) => {
-                if (!ra.roleAssignmentId || !seenAssignment.has(ra.roleAssignmentId)) {
-                    if (ra.roleAssignmentId) seenAssignment.add(ra.roleAssignmentId);
+                const assignmentKey = ra.roleAssignmentInstanceId || ra.roleAssignmentId;
+                if (!assignmentKey || !seenAssignment.has(assignmentKey)) {
+                    if (assignmentKey) seenAssignment.add(assignmentKey);
                     totalAssignments++;
                 }
                 const tiers = (ra.classification || []).map((c) => c.adminTierLevelName).filter(Boolean);
@@ -510,7 +513,7 @@
 
         return {
             assetMap, assetsByTier, usersByTier, assignByTier,
-            totals: { assets: assetMap.size, users: totalUsers, roleAssignments: totalAssignments, tierBreaches },
+            totals: { assets: totalAssets, users: totalUsers, roleAssignments: totalAssignments, tierBreaches },
         };
     }
 
@@ -522,7 +525,7 @@
     function labelForCompareValue(val) {
         if (val === "live") return "Live (now)";
         const s = snapshots[Number(val)];
-        return `${fmtDate(s.commitDate)} (${s.commitSha.substring(0, 7)})`;
+        return `${fmtDate(s.commitDate)} (${snapshotLabel(s)})`;
     }
 
     document.getElementById("tmCompareRun").addEventListener("click", () => {

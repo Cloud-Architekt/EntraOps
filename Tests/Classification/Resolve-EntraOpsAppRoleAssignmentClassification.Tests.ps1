@@ -82,4 +82,28 @@ Describe 'Resolve-EntraOpsAppRoleAssignmentClassification' {
     It 'returns an empty result for no assignments' {
         @(Resolve-EntraOpsAppRoleAssignmentClassification -AppRoleAssignments @() -ClassificationDefinitions @()).Count | Should -Be 0
     }
+
+    It 'applies the exclusions of a definition: <Case>' -ForEach @(
+        @{ Case = 'no exclusions'; Excluded = $null; Expected = 'ControlPlane' }
+        @{ Case = 'an empty list'; Excluded = @(); Expected = 'ControlPlane' }
+        @{ Case = 'the permission'; Excluded = @('Sites.FullControl.All'); Expected = 'Unclassified' }
+        @{ Case = 'the permission and another one'; Excluded = @('Files.Read.All', 'Sites.FullControl.All'); Expected = 'Unclassified' }
+        @{ Case = 'a wildcard pattern'; Excluded = @('Sites.*'); Expected = 'Unclassified' }
+        @{ Case = 'another permission only'; Excluded = @('Files.Read.All'); Expected = 'ControlPlane' }
+    ) {
+        $Definition = New-ClassificationDefinition -Action 'Sites.FullControl.All'
+        $Definition.ExcludedRoleDefinitionActions = $Excluded
+
+        $Result = Resolve-EntraOpsAppRoleAssignmentClassification -AppRoleAssignments @(New-PermissionAssignment -Name 'Sites.FullControl.All' -RoleType 'Application') -ClassificationDefinitions @($Definition)
+
+        @($Result.Classification.AdminTierLevelName) | Should -Be @($Expected)
+    }
+
+    It 'classifies a delegated permission of an entry that an earlier version split as "Delegated"' {
+        $Definitions = @(New-ClassificationDefinition -Action 'Sites.FullControl.All' -ResourceScope 'Delegated')
+
+        $Result = Resolve-EntraOpsAppRoleAssignmentClassification -AppRoleAssignments @(New-PermissionAssignment -Name 'Sites.FullControl.All') -ClassificationDefinitions $Definitions
+
+        @($Result.Classification.AdminTierLevelName) | Should -Be @('ControlPlane')
+    }
 }

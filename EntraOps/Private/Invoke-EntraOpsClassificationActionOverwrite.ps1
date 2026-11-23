@@ -173,7 +173,8 @@ function Invoke-EntraOpsClassificationActionOverwrite {
                     # permission type. Preserve it at the original tier by splitting the entry first.
                     if ($HasResourceProperties -and "$($Definition.ResourceScope)" -eq "All" -and
                         -not [string]::IsNullOrEmpty($OverwriteResourceScope) -and "$OverwriteResourceScope" -ne "All") {
-                        $ComplementaryScope = if ("$OverwriteResourceScope" -eq "Application") { "Delegated" } else { "Application" }
+                        # ResourceScope values of the classification: "Application" and "Delegation" (not the RoleType "Delegated").
+                        $ComplementaryScope = if ("$OverwriteResourceScope" -eq "Application") { "Delegation" } else { "Application" }
                         $ComplementaryDefinition = $null
                         foreach ($SiblingDefinition in @($Tier.TierLevelDefinition)) {
                             if ($SiblingDefinition.Service -ne $Definition.Service) { continue }

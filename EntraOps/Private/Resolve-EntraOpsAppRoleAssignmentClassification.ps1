@@ -42,12 +42,20 @@ function Resolve-EntraOpsAppRoleAssignmentClassification {
         $ClassifiedWithMatchedActions = @()
         foreach ($RoleDefinitionName in $AppRoleAssignment.RoleDefinitionName) {
             $ClassifiedWithMatchedActions += $ClassificationDefinitions | Where-Object {
-                ($_.RoleDefinitionActions -eq $RoleDefinitionName -or $RoleDefinitionName -like $_.RoleDefinitionActions) -and
-                $_.ExcludedRoleDefinitionActions -ne $RoleDefinitionName -and
-                (-not $_.ResourceAppId -or $_.ResourceAppId -eq $AppRoleAssignment.ResourceAppId) -and
-                ($_.ResourceScope -eq "All" -or
-                ($AppRoleAssignment.RoleType -eq "Application" -and $_.ResourceScope -eq "Application") -or
-                ($AppRoleAssignment.RoleType -eq "Delegated" -and $_.ResourceScope -eq "Delegation"))
+                $Definition = $_
+                # An exclusion matches like an action: exactly or as wildcard pattern. (A comparison with the
+                # whole collection - "-ne" - filtered it instead: an empty list excluded everything, a second entry
+                # or a wildcard nothing.)
+                $IsExcluded = @($Definition.ExcludedRoleDefinitionActions | Where-Object {
+                        -not [string]::IsNullOrEmpty("$_") -and ($RoleDefinitionName -eq "$_" -or $RoleDefinitionName -like "$_")
+                    }).Count -gt 0
+                ($Definition.RoleDefinitionActions -eq $RoleDefinitionName -or $RoleDefinitionName -like $Definition.RoleDefinitionActions) -and
+                -not $IsExcluded -and
+                (-not $Definition.ResourceAppId -or $Definition.ResourceAppId -eq $AppRoleAssignment.ResourceAppId) -and
+                ($Definition.ResourceScope -eq "All" -or
+                ($AppRoleAssignment.RoleType -eq "Application" -and $Definition.ResourceScope -eq "Application") -or
+                # "Delegated": entries split by an overwrite of EntraOps before 1.2.0
+                ($AppRoleAssignment.RoleType -eq "Delegated" -and $Definition.ResourceScope -in @("Delegation", "Delegated")))
             } | ForEach-Object {
                 [PSCustomObject]@{
                     EAMTierLevelName     = $_.EAMTierLevelName

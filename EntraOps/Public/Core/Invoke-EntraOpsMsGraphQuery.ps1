@@ -735,7 +735,8 @@ function Invoke-EntraOpsMsGraphQuery {
             # Optionally persist static data to disk for cross-session caching
             if ($IsStaticData -and (Test-Path $__EntraOpsSession.PersistentCachePath)) {
                 try {
-                    $CacheFileName = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($cacheKey)) + ".json"
+                    # Hash the key: Base64 of a URI can contain '/' and exceed the 255-character file name limit
+                    $CacheFileName = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($cacheKey))) + ".json"
                     $CacheFilePath = Join-Path $__EntraOpsSession.PersistentCachePath $CacheFileName
                     
                     $PersistentCacheObject = @{

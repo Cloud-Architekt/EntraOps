@@ -156,7 +156,8 @@ function Push-EntraOpsLogsIngestionAPI {
 
             $script:ChunkIndex++
             Write-Verbose "Sending chunk $($script:ChunkIndex) with $($RecordsSubset.Count) record(s) and body size $BodySize bytes to Logs Ingestion API"
-            Invoke-RestMethod -Uri $PostUri -Method "Post" -Body $Body -Headers $headers -Verbose
+            # No -Verbose: its request line prints the DCE endpoint and DCR immutable ID to pipeline logs
+            Invoke-RestMethod -Uri $PostUri -Method "Post" -Body $Body -Headers $headers
         }
 
         # Batch records up-front by an estimated per-record size to avoid serializing the whole

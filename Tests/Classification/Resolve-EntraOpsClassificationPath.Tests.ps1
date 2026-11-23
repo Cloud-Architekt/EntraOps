@@ -7,6 +7,7 @@ BeforeDiscovery {
 BeforeAll {
     $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
     . "$script:TestRepositoryRoot/EntraOps/Private/Resolve-EntraOpsClassificationPath.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Write-EntraOpsWarningOnce.ps1"
 }
 
 Describe "Resolve-EntraOpsClassificationPath" {
