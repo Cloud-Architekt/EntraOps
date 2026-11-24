@@ -24,6 +24,7 @@ Describe 'Get-EntraOpsFindingDetail' {
         @{ Message = "Management Plane workload identity 'aadops-pull-sp' has 2 owner(s)."; DisplayName = 'aadops-pull-sp'; ObjectType = 'serviceprincipal'; Tier = 'ControlPlane'; Expected = 'With Management Plane access, has 2 owner(s).' }
         @{ Message = "The policy 'Initial Policy' of the access package 'Pkg' has no access review."; DisplayName = 'Pkg / Initial Policy'; ObjectType = 'accessPackageAssignmentPolicy'; Tier = ''; Expected = 'Has no access review.' }
         @{ Message = "Custom role 'NetOps' (Azure) grants Control Plane permissions."; DisplayName = 'NetOps'; ObjectType = 'roleDefinition'; Tier = ''; Expected = 'Azure: grants Control Plane permissions.' }
+        @{ Message = "The administrative unit 'Privileged Users' has dynamic membership ((user.accountEnabled -eq true)) and 8 privileged member(s)."; DisplayName = 'Privileged Users'; ObjectType = 'administrativeUnit'; Tier = ''; Expected = 'Has dynamic membership ((user.accountEnabled -eq true)) and 8 privileged member(s).' }
     ) {
         InModuleScope EntraOps -Parameters @{ M = $Message; D = $DisplayName; O = $ObjectType; T = $Tier } { param($M, $D, $O, $T) Get-EntraOpsFindingDetail -Message $M -DisplayName $D -ObjectType $O -AdminTierLevelName $T } | Should -BeExactly $Expected
     }

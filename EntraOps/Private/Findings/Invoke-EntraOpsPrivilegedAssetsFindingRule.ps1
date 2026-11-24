@@ -215,6 +215,13 @@ function Invoke-EntraOpsPrivilegedAssetsFindingRule {
     $ParameterValues = if ($null -ne $Rule.PSObject.Properties['ParameterValues'] -and $null -ne $Rule.ParameterValues) { $Rule.ParameterValues } else { @{} }
     $ManagingTenantId = "$($ParameterValues['ManagingTenantId'])"
     $ManagingTenantName = "$($ParameterValues['ManagingTenantName'])"
+    # Emergency access accounts (Findings.EmergencyAccessAccounts, by object ID or user principal name) are shared
+    # accounts without a personal work account (EO.4009) or personal PAW (EO.4008): skipped and named in a note.
+    $EmergencyAccess = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if ($Rule.Key -cin 'pawMissing', 'workAccountMissing') {
+        foreach ($Entry in @(@($ParameterValues['EmergencyAccessAccounts']) | Where-Object { "$_" })) { $null = $EmergencyAccess.Add("$Entry".Trim()) }
+    }
+    $SkippedEmergencyAccess = [System.Collections.Generic.List[string]]::new()
     # The role assignments that are access of the object: delegated permissions act within the rights of the signed-in
     # user (EO.5005 reports the Control Plane ones), so they are not listed.
     function Get-ForeignAssignment($InventoryObject) { @($InventoryObject.assignments | Where-Object { $_.roleType -ne 'Delegated' }) }
@@ -230,6 +237,14 @@ function Invoke-EntraOpsPrivilegedAssetsFindingRule {
         $Check = $Context.ObjectFindings["$($Object.objectId)"][$Rule.Key]
         if ($null -eq $Check) { throw "No Privileged Assets evaluator for finding rule '$($Rule.Id)' ($($Rule.Key))." }
         if (-not $Check.Applies) { continue }
+        if ($EmergencyAccess.Count -gt 0 -and $Rule.Key -cin 'pawMissing', 'workAccountMissing') {
+            $Keys = @("$($Object.objectId)", "$($Object.userPrincipalName)") | Where-Object { $_ }
+            if (@($Keys | Where-Object { $EmergencyAccess.Contains($_) }).Count -gt 0) {
+                $Label = "'$($Object.displayName)' ($($Object.objectId))"
+                if (-not $SkippedEmergencyAccess.Contains($Label)) { $SkippedEmergencyAccess.Add($Label) }
+                continue
+            }
+        }
         if ($Rule.Key -ceq 'foreign') {
             $Assignments = Get-ForeignAssignment $Object
             if (-not $Check.Failed) {
@@ -356,6 +371,9 @@ function Invoke-EntraOpsPrivilegedAssetsFindingRule {
     }
     # Names compare case-insensitively, like the reports; Sort-Object -Stable keeps the inventory order of equal entries.
     $ForeignResults | Sort-Object -Stable -Property Rank, Name, Role, Scope | ForEach-Object { $_.Result }
+    if ($SkippedEmergencyAccess.Count -gt 0) {
+        [pscustomobject]@{ NoteOnly = $true; Note = "$($SkippedEmergencyAccess.Count) emergency access account(s) of Findings.EmergencyAccessAccounts are not reported: $(Join-EntraOpsFindingName $SkippedEmergencyAccess)." }
+    }
     if ($Rule.Key -ceq 'foreign') {
         # What the inventory cannot list (also data gaps of findings.json): groups whose origin is unknown (a group
         # synchronized from another tenant looks local), and the members of privileged groups of other tenants.

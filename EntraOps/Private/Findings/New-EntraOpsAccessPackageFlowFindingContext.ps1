@@ -476,6 +476,8 @@ function New-EntraOpsAccessPackageFlowFindingContext {
                 assignedPrincipals = @($AssignedPrincipals)
                 # The live access package data has the policy (with the IDs of its requestors and approvers).
                 livePolicy         = [bool]$LiveForPolicy
+                # Live expiration pattern (type, endDateTime, duration) from Microsoft Graph, when collected.
+                expiration         = $(if ($LiveForPolicy) { Get-Prop $LiveForPolicy 'expiration' } else { $null })
                 resourcePath       = $Item.resource.p
                 properties         = $Properties
                 checks             = $null

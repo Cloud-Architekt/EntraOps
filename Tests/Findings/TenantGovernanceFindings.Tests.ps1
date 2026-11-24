@@ -309,6 +309,16 @@ Describe 'Tenant Governance and Privilege History findings' {
             $Result.FailedCount | Should -Be 0
         }
 
+        It 'does not treat a policy that also excludes the identity as covering a block policy allow-list (EO.4003)' {
+            $Folder = New-TestConditionalAccessData 'ca-self-excl' @(
+                [ordered]@{ Id = 'ca1'; DisplayName = 'Block portals'; State = 'enabled'; BuiltInControls = @('block'); IncludeUsers = @('All'); ExcludeUsers = @('breakglass@contoso.com') }
+                [ordered]@{ Id = 'ca2'; DisplayName = 'Require MFA'; State = 'enabled'; BuiltInControls = @('mfa'); IncludeUsers = @('breakglass@contoso.com'); ExcludeUsers = @('breakglass@contoso.com') }
+            )
+            $Result = Get-TestConditionalAccessResult $Folder
+            $Result.Status | Should -Be 'Failed'
+            @($Result.Results | Where-Object { $_.Instance.Id -eq 'ca1' }).Count | Should -Be 1
+        }
+
         It 'skips the rules that need the privileged objects when the EAM Dashboard data is missing' {
             $Folder = New-TestConditionalAccessData 'ca-no-objects' @(
                 [ordered]@{ Id = 'ca1'; DisplayName = 'Require MFA'; State = 'enabled'; ExcludeUsers = @('breakglass@contoso.com') }

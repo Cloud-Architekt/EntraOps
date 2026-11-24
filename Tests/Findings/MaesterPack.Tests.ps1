@@ -663,11 +663,18 @@ Describe 'EntraOps Maester Pack' -Skip:(-not $script:MaesterPackSource) {
 
         It 'skips when no results are found, with how to create them' {
             $script:Settings = @{}
+            $script:EntraOpsPackHasModule = $true
             Test-EntraOpsPackFinding -RuleId 'EO.1001' | Should -BeNullOrEmpty
             $script:Detail.SkippedCustomReason | Should -Match 'No EntraOps finding results \(findings\.json\) were found in'
             $script:Detail.SkippedCustomReason | Should -Match ([regex]::Escape((Join-Path $script:Empty 'EntraOps/Reports/Findings/data')))
             $script:Detail.SkippedCustomReason | Should -Match 'Invoke-EntraOpsAssessment .* or New-EntraOpsReportingData'
             $script:Detail.SkippedCustomReason | Should -Not -Match 'Save-EntraOpsFindingJson'
+            $script:Detail.SkippedCustomReason | Should -Not -Match 'Install-PSResource'
+            # Without the module on the machine, the reason tells how to install it.
+            $script:EntraOpsPackHasModule = $false
+            Test-EntraOpsPackFinding -RuleId 'EO.1001' | Should -BeNullOrEmpty
+            $script:Detail.SkippedCustomReason | Should -Match 'Install-PSResource -Name EntraOps'
+            $script:EntraOpsPackHasModule = $null
             $script:Settings = @{ 'EntraOps.FindingsPath' = (Join-Path $TestDrive 'missing') }
             Test-EntraOpsPackFinding -RuleId 'EO.1001' | Should -BeNullOrEmpty
             $script:Detail.SkippedCustomReason | Should -Match 'No EntraOps finding results were found at .*missing'

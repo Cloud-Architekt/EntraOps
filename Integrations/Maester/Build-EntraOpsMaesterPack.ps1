@@ -140,6 +140,21 @@ $Manifest = [ordered]@{
         Modules      = @()
     }
     Categories       = @('Identity', 'Privileged access', 'Enterprise Access Model')
+    Settings         = [ordered]@{
+        'EntraOps.FindingsPath'       = [ordered]@{
+            Type        = 'string'
+            Description = 'Path to EntraOps findings.json or the folder containing it.'
+        }
+        'EntraOps.MaxFindingsAgeDays' = [ordered]@{
+            Type        = 'int'
+            Default     = 7
+            Description = 'Maximum age of findings.json in days before tests are skipped (0 disables the age check).'
+        }
+        'EntraOps.ReportsPath'        = [ordered]@{
+            Type        = 'string'
+            Description = 'URL or local folder of the EntraOps reports for result links, or None to disable report links.'
+        }
+    }
 }
 # Maintained in the pack repository: named in the manifest when they exist.
 if (Test-Path -LiteralPath (Join-Path $OutputPath 'maester-pack.guide.json') -PathType Leaf) { $Manifest.Guide = 'maester-pack.guide.json' }

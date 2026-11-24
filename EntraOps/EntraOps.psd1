@@ -210,7 +210,7 @@
     # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
     PrivateData          = @{
         PSData = @{
-            Prerelease   = 'rc1'
+            Prerelease   = 'rc2'
             Tags         = @(
                 'AzureAD',
                 'Entra',

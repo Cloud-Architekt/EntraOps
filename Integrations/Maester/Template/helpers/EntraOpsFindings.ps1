@@ -49,6 +49,22 @@ function Resolve-EntraOpsPackPath {
     [System.IO.Path]::GetFullPath($value, (Get-Location -PSProvider FileSystem).ProviderPath)
 }
 
+function Get-EntraOpsPackNotFoundAdvice {
+    <#
+    .SYNOPSIS
+    An install hint, appended to the guidance when no findings.json is found, if the EntraOps module is not installed on this machine; otherwise nothing.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    if ($null -eq $script:EntraOpsPackHasModule) {
+        $script:EntraOpsPackHasModule = [bool](Get-Module -ListAvailable -Name 'EntraOps' | Select-Object -First 1)
+    }
+    if ($script:EntraOpsPackHasModule) { return '' }
+    ' The EntraOps module is not installed on this machine: install it with Install-PSResource -Name EntraOps -Prerelease -Repository PSGallery -Scope CurrentUser, then run Invoke-EntraOpsAssessment (it saves findings.json to <home>/EntraOps/Reports/Findings/data, where the pack finds it without a setting).'
+}
+
 function Get-EntraOpsPackFindingSet {
     <#
     .SYNOPSIS
@@ -85,7 +101,7 @@ function Get-EntraOpsPackFindingSet {
         )
         $folder = @($defaultFolders | Where-Object { Test-Path -LiteralPath (Join-Path -Path $_ -ChildPath 'findings.json') -PathType Leaf }) | Select-Object -First 1
         if (-not $folder) {
-            Skip-EntraOpsPackTest "No EntraOps finding results (findings.json) were found in $($defaultFolders -join ', '). To create them, $howTo. For results in another folder, for example the Findings/data folder of the EntraOps-Reporting artifact, set EntraOps.FindingsPath in the GlobalSettings of maester-config.json to that folder."
+            Skip-EntraOpsPackTest "No EntraOps finding results (findings.json) were found in $($defaultFolders -join ', '). To create them, $howTo. For results in another folder, for example the Findings/data folder of the EntraOps-Reporting artifact, set EntraOps.FindingsPath in the GlobalSettings of maester-config.json to that folder.$(Get-EntraOpsPackNotFoundAdvice)"
             return
         }
         $path = Join-Path -Path $folder -ChildPath 'findings.json'
@@ -587,6 +603,7 @@ function Get-EntraOpsPackObjectInfo {
             'group' { $portalLink = "$($PortalUrl)#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Overview/groupId/$id"; $affectedType = 'Group'; $odataType = '#microsoft.graph.group' }
             'serviceprincipal' { $portalLink = "$($PortalUrl)#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/$id"; $affectedType = 'ServicePrincipal'; $odataType = '#microsoft.graph.servicePrincipal' }
             'conditionalaccesspolicy' { $portalLink = "$($PortalUrl)#view/Microsoft_AAD_ConditionalAccess/PolicyBlade/policyId/$id"; $affectedType = 'ConditionalAccessPolicy'; $odataType = '#microsoft.graph.conditionalAccessPolicy' }
+            'administrativeunit' { $portalLink = "$($PortalUrl)#view/Microsoft_AAD_IAM/AdministrativeUnitMenuBlade/~/Overview/objectId/$id" }
             # Maester has no Graph object type for applications; it identifies app registrations by appId.
             'application' {
                 if ("$($evidence.AppId)" -match $guid) {
@@ -737,7 +754,7 @@ function Get-EntraOpsPackEvidenceText {
     $items = [System.Collections.Generic.List[string]]::new()
     $pim = if ($Evidence.PimAssignmentType) { [string]$Evidence.PimAssignmentType } elseif ($Evidence.PIMAssignmentType) { [string]$Evidence.PIMAssignmentType }
     if ($pim -and -not $text.Contains($pim.ToLowerInvariant())) {
-        $items.Add($(switch ($pim) { 'Eligible' { '⏳ eligible' } 'Permanent' { '📌 permanent' } default { "PIM: $pim" } }))
+        $items.Add($(switch ($pim) { 'Eligible' { '⏳ eligible' } 'Permanent' { '📌 permanent' } default { "PIM: $(ConvertTo-EntraOpsPackMarkdownCell $pim)" } }))
     }
     $scopeId = if ($Evidence.RoleAssignmentScopeId) { [string]$Evidence.RoleAssignmentScopeId } else { [string]$Evidence.ScopeId }
     # The scope of an API permission (ResourceApps) is the ID of its API, which the message names.
@@ -1523,13 +1540,13 @@ function Test-EntraOpsPackFinding {
 
     # The tenant of the results: Maester compares it only while Microsoft Graph is connected (not with -SkipGraphConnect).
     $tenant = if ($findingSet.TenantName) { [string]$findingSet.TenantName } elseif ($findingSet.TenantId) { [string]$findingSet.TenantId } else { $null }
-    $source = "EntraOps $($findingSet.Generator.Version) results of $(if ($tenant) { "$(ConvertTo-EntraOpsPackMarkdownCell $tenant), " })$($findingSet.GeneratedText)"
-    # What the reason of the rule is (ReasonCode of EntraOps; results of older versions have none).
+    $source = "EntraOps $(ConvertTo-EntraOpsPackMarkdownCell ([string]$findingSet.Generator.Version)) results of $(if ($tenant) { "$(ConvertTo-EntraOpsPackMarkdownCell $tenant), " })$(ConvertTo-EntraOpsPackMarkdownCell ([string]$findingSet.GeneratedText))"
+    # Structured reason category emitted by EntraOps (ReasonCode).
     $reasonCode = if ($null -ne $rule.PSObject.Properties['ReasonCode'] -and $rule.ReasonCode) { [string]$rule.ReasonCode } else { $null }
     # The reason as the results show it: other rules it refers to are named by their Maester test.
     $ruleReason = ConvertTo-EntraOpsPackTestReference -Text ([string]$rule.Reason) -Rules @($findingSet.Rules) -RuleId $RuleId
     # The note of a Failed or Passed rule: data it could not evaluate, or a hint how to fix the results.
-    $note = if ($ruleReason -and $rule.Status -in 'Failed', 'Passed') { "Note: $ruleReason" } else { $null }
+    $note = if ($ruleReason -and $rule.Status -in 'Failed', 'Passed') { "Note: $(ConvertTo-EntraOpsPackMarkdownCell $ruleReason)" } else { $null }
     # The links of the results: to the EntraOps reports (when found) and to the Microsoft Entra admin center.
     $reportBase = [string]$findingSet.ReportBase
     $portalUrl = Get-EntraOpsPackPortalUrl
@@ -1537,10 +1554,10 @@ function Test-EntraOpsPackFinding {
     # A setting EntraOps.ReportsPath without the reports: the results say why they have no report links.
     $reportsNote = if ($null -ne $findingSet.PSObject.Properties['ReportsNote'] -and $findingSet.ReportsNote) { "📝 $(ConvertTo-EntraOpsPackMarkdownCell $findingSet.ReportsNote)" }
     # Principals of the Global Exclusion List of EntraOps (Classification/Global.json) are not in the Privileged EAM data,
-    # so the rules that evaluate it do not cover their privileged access (results of EntraOps 1.2.0 and later name them).
+    # so the rules that evaluate it do not cover their privileged access.
     $exclusionCount = if ($null -ne $findingSet.PSObject.Properties['GlobalExclusions'] -and $null -ne $findingSet.GlobalExclusions) { [int]$findingSet.GlobalExclusions.Count } else { 0 }
     $exclusionNote = if ($exclusionCount -gt 0 -and "$($rule.Area)" -in 'TierBreach', 'PrivilegedAssets', 'PrivilegedEAM', 'PrivilegeHistory') {
-        "ℹ️ $(Get-EntraOpsPackCountText -Count $exclusionCount -Noun 'principal') of the Global Exclusion List of EntraOps ($($findingSet.GlobalExclusions.FilePath)) $(if ($exclusionCount -eq 1) { 'is' } else { 'are' }) not in the Privileged EAM data, so this check does not cover $(if ($exclusionCount -eq 1) { 'its' } else { 'their' }) privileged access."
+        "ℹ️ $(Get-EntraOpsPackCountText -Count $exclusionCount -Noun 'principal') of the Global Exclusion List of EntraOps ($(ConvertTo-EntraOpsPackMarkdownCell ([string]$findingSet.GlobalExclusions.FilePath))) $(if ($exclusionCount -eq 1) { 'is' } else { 'are' }) not in the Privileged EAM data, so this check does not cover $(if ($exclusionCount -eq 1) { 'its' } else { 'their' }) privileged access."
     }
     # GroupOriginUnknown and RemoteGroupMembersMissing are reported by EO.4010 and EO.4011 themselves, scoped to what each evaluates.
     $gapNotes = @(if (("$($rule.Status)" -in 'Passed', 'Failed' -or $reasonCode -eq 'Unclassified') -and $null -ne $findingSet.PSObject.Properties['DataGaps']) {
@@ -1564,7 +1581,7 @@ function Test-EntraOpsPackFinding {
             # detail recorded first replaces the error record (with the line of this file) in the report.
             $why = if ($ruleReason) { $ruleReason } else { 'No reason was recorded.' }
             $message = "EntraOps could not evaluate rule $($RuleId): $why"
-            Add-MtTestResultDetail -Result "$message`n`nRun the EntraOps evaluation again (Invoke-EntraOpsAssessment or New-EntraOpsReportingData).`n`n$footer"
+            Add-MtTestResultDetail -Result "$(ConvertTo-EntraOpsPackMarkdownCell $message)`n`nRun the EntraOps evaluation again (Invoke-EntraOpsAssessment or New-EntraOpsReportingData).`n`n$footer"
             throw $message
         }
         'Skipped' {

@@ -201,11 +201,33 @@ function New-EntraOpsAccessPackageFlowData {
             if ($null -eq $Policy) { continue }
             $Requestors = @($Policy.requestorSettings.allowedRequestors)
             $Approvers = @($Policy.requestApprovalSettings.approvalStages | ForEach-Object { $_.primaryApprovers })
+            # The legacy beta policy has no expiration pattern: v1.0 has it (noExpiration, notSpecified, afterDateTime or
+            # afterDuration, also in hours), which tells EO.6005 a fixed date or hours from a policy that never expires.
+            $LiveExpiration = $null
+            try {
+                $V1Policy = Invoke-EntraOpsMsGraphQuery -Uri "/v1.0/identityGovernance/entitlementManagement/assignmentPolicies/${PolicyId}?`$select=id,expiration" -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
+                if ($null -ne $V1Policy -and $null -ne $V1Policy.expiration -and "$($V1Policy.expiration.type)") {
+                    $LiveExpiration = [ordered]@{
+                        type        = "$($V1Policy.expiration.type)"
+                        endDateTime = $(if ($null -ne $V1Policy.expiration.endDateTime) { "$($V1Policy.expiration.endDateTime)" } else { $null })
+                        duration    = $(if ($null -ne $V1Policy.expiration.duration) { "$($V1Policy.expiration.duration)" } else { $null })
+                    }
+                }
+            } catch {
+                Write-Verbose "Could not read the expiration of access package assignment policy $PolicyId from Microsoft Graph v1.0: $($_.Exception.Message)"
+            }
+            # Without it, a fixed date or a number of days of the legacy policy is still an expiration.
+            if ($null -eq $LiveExpiration -and "$($Policy.expirationDateTime)") {
+                $LiveExpiration = [ordered]@{ type = 'afterDateTime'; endDateTime = "$($Policy.expirationDateTime)"; duration = $null }
+            } elseif ($null -eq $LiveExpiration -and "$($Policy.durationInDays)" -match '^\d+$' -and [int]"$($Policy.durationInDays)" -gt 0) {
+                $LiveExpiration = [ordered]@{ type = 'afterDuration'; endDateTime = $null; duration = "P$([int]"$($Policy.durationInDays)")D" }
+            }
             $PolicyRequestorApprovers[$PolicyId] = [ordered]@{
                 accessPackageId = "$($Policy.accessPackageId)"
                 scopeType       = "$($Policy.requestorSettings.scopeType)"
                 requestors      = $Requestors
                 approvers       = $Approvers
+                expiration      = $LiveExpiration
             }
             if ($Policy.accessPackageId) { [void]$PackageIds.Add("$($Policy.accessPackageId)") }
             foreach ($UserSet in @($Requestors) + @($Approvers)) {

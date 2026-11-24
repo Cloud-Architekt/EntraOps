@@ -15,6 +15,7 @@ Describe 'New-EntraOpsAccessPackageFlowData' {
         $script:ScopesResponse = @()
         $script:DriftResponse = @{ group = @(); application = @() }
         $script:DriftError = $null
+        $script:ExpirationResponse = $null
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid())
         New-Item -ItemType Directory -Path "$script:Root/PrivilegedEAM/EntraID", "$script:Root/TenantGovernance/Snapshots", "$script:Root/App" -Force | Out-Null
 
@@ -56,6 +57,7 @@ Describe 'New-EntraOpsAccessPackageFlowData' {
                     $Exception.Data['StatusCode'] = 404
                     throw $Exception
                 }
+                '/v1.0/identityGovernance/entitlementManagement/assignmentPolicies/policy1?*' { return [pscustomobject]@{ id = 'policy1'; expiration = $script:ExpirationResponse } }
                 '*/accessPackages/package1' { return [pscustomobject]@{ displayName = 'Package 1'; catalogId = '' } }
                 '*/accessPackages/package1?*' { return [pscustomobject]@{ accessPackageResourceRoleScopes = $script:ScopesResponse } }
                 '*/accessPackageAssignments?*' { return $script:AssignmentsResponse }
@@ -93,6 +95,19 @@ Describe 'New-EntraOpsAccessPackageFlowData' {
         $MemberTiers[$script:ControlPlaneUserId] | Should -Be 'ControlPlane'
         $MemberTiers[$script:ManagementPlaneUserId] | Should -Be 'ManagementPlane'
         $MemberTiers[$script:UnprivilegedUserId] | Should -Be 'UserAccess'
+    }
+
+    It 'keeps the expiration of the policy: from Microsoft Graph v1.0, else from the legacy policy (EO.6005)' {
+        $script:ExpirationResponse = [pscustomobject]@{ type = 'afterDuration'; duration = 'PT12H'; endDateTime = $null }
+        $Result = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningAction SilentlyContinue
+        $Result.policyRequestorApprovers['policy1'].expiration.type | Should -Be 'afterDuration'
+        $Result.policyRequestorApprovers['policy1'].expiration.duration | Should -Be 'PT12H'
+
+        # Without the v1.0 expiration and without a date or days on the legacy policy, the expiration stays unknown:
+        # EO.6005 then falls back to the snapshot and says so.
+        $script:ExpirationResponse = $null
+        $Result = New-EntraOpsAccessPackageFlowData -RepoRoot $script:Root -AppRoot "$script:Root/App" -ResolveRequestorApproverTiers $false -PassThru -WarningAction SilentlyContinue
+        $Result.policyRequestorApprovers['policy1'].expiration | Should -BeNullOrEmpty
     }
 
     It 'writes the tiers the Object Classification File declares for the target groups' {

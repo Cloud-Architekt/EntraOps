@@ -191,11 +191,22 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
             }
         }
         'accessPackageExpiration' {
+            $FallbackFailed = 0
             foreach ($Flow in $PrivilegedPolicies) {
-                $Days = Get-EntraOpsReportProperty -Object $Flow.properties -Name 'DurationInDays'
-                $Expiration = Get-EntraOpsReportProperty -Object $Flow.properties -Name 'ExpirationDateTime'
-                $NoExpiration = [int]"$(if ("$Days" -match '^\d+$') { $Days } else { 0 })" -le 0 -and -not (Test-EntraOpsJsTruthy $Expiration)
+                $LiveExp = if ($null -ne $Flow.PSObject.Properties['expiration']) { $Flow.expiration } else { $null }
+                $ExpType = if ($null -ne $LiveExp) { "$(Get-EntraOpsReportProperty -Object $LiveExp -Name 'type')" } else { '' }
+                if ($ExpType) {
+                    $NoExpiration = $ExpType -in 'noExpiration', 'notSpecified'
+                } else {
+                    $Days = Get-EntraOpsReportProperty -Object $Flow.properties -Name 'DurationInDays'
+                    $Expiration = Get-EntraOpsReportProperty -Object $Flow.properties -Name 'ExpirationDateTime'
+                    $NoExpiration = [int]"$(if ("$Days" -match '^\d+$') { $Days } else { 0 })" -le 0 -and -not (Test-EntraOpsJsTruthy $Expiration)
+                    if ($NoExpiration) { $FallbackFailed++ }
+                }
                 New-PolicyInstance $Flow $NoExpiration "Assignments of the policy '$($Flow.name)' of the access package '$($Flow.accessPackageName)' do not expire."
+            }
+            if ($FallbackFailed -gt 0) {
+                [pscustomobject]@{ NoteOnly = $true; Note = "$FallbackFailed failed $(if ($FallbackFailed -eq 1) { 'policy has' } else { 'policies have' }) no live expiration pattern in the Access Package Flow data and $(if ($FallbackFailed -eq 1) { 'was' } else { 'were' }) evaluated from DurationInDays of the Tenant Governance snapshot, which cannot tell fixed-date or hour-based expirations from non-expiring policies. Generate the Access Package Flow data again with New-EntraOpsAccessPackageFlowData to verify the expiration type." }
             }
         }
         'accessPackageAccessReview' {
@@ -251,10 +262,12 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
                 if (-not $Hit) { $Hit = & $Resolve $Reference $true }
                 return ($EmergencyAccess -contains $Reference) -or ($Hit -and ($EmergencyAccess -contains "$($Hit.objectId)" -or ($Hit.displayName -and $EmergencyAccess -contains "$($Hit.displayName)") -or ($Hit.userPrincipalName -and $EmergencyAccess -contains "$($Hit.userPrincipalName)")))
             }
-            # Users and groups that enabled policies target (IncludeUsers, IncludeGroups), by reference and object ID.
-            # A block policy that excludes such an identity is an allow-list (for example "block access to admin portals
-            # for everyone except privileged accounts"), not a gap: the identity has its own policies.
+            # Users and groups that enabled policies target (IncludeUsers, IncludeGroups) and exclude (ExcludeUsers,
+            # ExcludeGroups), by reference and object ID. A block policy that excludes such an identity is an allow-list
+            # (for example "block access to admin portals for everyone except privileged accounts"), not a gap: the
+            # identity has its own enabled policy that targets it without excluding it.
             $IncludedBy = @{}
+            $ExcludedBy = @{}
             foreach ($Policy in $Context.ConditionalAccessPolicies) {
                 foreach ($Entry in @(@(@($Policy['IncludeUsers']) | ForEach-Object { @{ Reference = $_; IsGroup = $false } }) + @(@($Policy['IncludeGroups']) | ForEach-Object { @{ Reference = $_; IsGroup = $true } }))) {
                     if (-not "$($Entry.Reference)" -or "$($Entry.Reference)" -in 'All', 'None', 'GuestsOrExternalUsers') { continue }
@@ -265,11 +278,25 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
                         $null = $IncludedBy[$Key].Add("$($Policy['Id'])")
                     }
                 }
+                foreach ($Entry in @(@(@($Policy['ExcludeUsers']) | ForEach-Object { @{ Reference = $_; IsGroup = $false } }) + @(@($Policy['ExcludeGroups']) | ForEach-Object { @{ Reference = $_; IsGroup = $true } }))) {
+                    if (-not "$($Entry.Reference)" -or "$($Entry.Reference)" -in 'All', 'None', 'GuestsOrExternalUsers') { continue }
+                    $Hit = & $Resolve "$($Entry.Reference)" $Entry.IsGroup
+                    foreach ($Key in @("$($Entry.Reference)".ToUpperInvariant(), $(if ($Hit) { "$($Hit.objectId)".ToUpperInvariant() }))) {
+                        if (-not $Key) { continue }
+                        if (-not $ExcludedBy.ContainsKey($Key)) { $ExcludedBy[$Key] = [System.Collections.Generic.HashSet[string]]::new() }
+                        $null = $ExcludedBy[$Key].Add("$($Policy['Id'])")
+                    }
+                }
                 # Directory roles are referenced by display name; their keys have a prefix to keep them apart from groups.
                 foreach ($Role in @($Policy['IncludeRoles'] | Where-Object { $_ })) {
                     $Key = "ROLE:$("$Role".ToUpperInvariant())"
                     if (-not $IncludedBy.ContainsKey($Key)) { $IncludedBy[$Key] = [System.Collections.Generic.HashSet[string]]::new() }
                     $null = $IncludedBy[$Key].Add("$($Policy['Id'])")
+                }
+                foreach ($Role in @($Policy['ExcludeRoles'] | Where-Object { $_ })) {
+                    $Key = "ROLE:$("$Role".ToUpperInvariant())"
+                    if (-not $ExcludedBy.ContainsKey($Key)) { $ExcludedBy[$Key] = [System.Collections.Generic.HashSet[string]]::new() }
+                    $null = $ExcludedBy[$Key].Add("$($Policy['Id'])")
                 }
             }
             # The tier of the directory roles by display name (PIM role settings of the snapshot).
@@ -279,8 +306,14 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
             }
             $IsTargetedElsewhere = {
                 param($Policy, [string]$Reference, $Hit)
-                foreach ($Key in @($Reference.ToUpperInvariant(), $(if ($Hit) { "$($Hit.objectId)".ToUpperInvariant() }))) {
-                    if ($Key -and $IncludedBy.ContainsKey($Key) -and @($IncludedBy[$Key] | Where-Object { $_ -ne "$($Policy['Id'])" }).Count -gt 0) { return $true }
+                $Keys = @($Reference.ToUpperInvariant(), $(if ($Hit) { "$($Hit.objectId)".ToUpperInvariant() })) | Where-Object { $_ } | Select-Object -Unique
+                foreach ($Key in $Keys) {
+                    if (-not $IncludedBy.ContainsKey($Key)) { continue }
+                    foreach ($OtherId in $IncludedBy[$Key]) {
+                        if ($OtherId -eq "$($Policy['Id'])") { continue }
+                        $AlsoExcluded = @($Keys | Where-Object { $ExcludedBy.ContainsKey($_) -and $ExcludedBy[$_].Contains($OtherId) }).Count -gt 0
+                        if (-not $AlsoExcluded) { return $true }
+                    }
                 }
                 return $false
             }
@@ -512,7 +545,7 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
                     ObjectId    = $UnitId
                     ObjectType  = 'administrativeUnit'
                     DisplayName = "$($Unit['DisplayName'])"
-                    Message     = "The administrative unit '$($Unit['DisplayName'])' with $($PrivilegedMembers[$UnitId].Count) privileged member(s) has dynamic membership ($($Unit['MembershipRule']))."
+                    Message     = "The administrative unit '$($Unit['DisplayName'])' has dynamic membership ($($Unit['MembershipRule'])) and $($PrivilegedMembers[$UnitId].Count) privileged member(s)."
                     Evidence    = [ordered]@{ MembershipRule = "$($Unit['MembershipRule'])"; PrivilegedMemberIds = @($PrivilegedMembers[$UnitId]); SnapshotKey = $Context.SnapshotKey }
                 }
             }

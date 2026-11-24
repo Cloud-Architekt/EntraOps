@@ -417,7 +417,11 @@ function Invoke-EntraOpsPrivilegedEamFindingRule {
             foreach ($Item in $Assignments) {
                 if ("$($Item.Assignment.RoleAssignmentType)" -ne 'Transitive' -or $Item.Tier -ne 'ControlPlane') { continue }
                 $Chain = @(@($Item.Assignment.TransitiveByNestingObjectIds) | Where-Object { $_ })
-                New-AssignmentInstance $Item ($Chain.Count -ge 2) "'$($Item.DisplayName)' holds the Control Plane role $(Get-Role $Item) through $($Chain.Count) nested groups." ([ordered]@{ GroupIds = $Chain; GroupNames = @(@($Item.Assignment.TransitiveByNestingObjectDisplayNames) | Where-Object { $_ }) })
+                $GroupNames = @(@($Item.Assignment.TransitiveByNestingObjectDisplayNames) | Where-Object { $_ })
+                $Scope = if ("$($Item.Assignment.RoleAssignmentScopeName)") { "$($Item.Assignment.RoleAssignmentScopeName)" } else { "$($Item.Assignment.RoleAssignmentScopeId)" }
+                $ScopeText = if ($Scope) { " at '$Scope'" } else { '' }
+                $ChainText = if ($GroupNames.Count -gt 0) { ": $(Join-Limited $GroupNames 5)" } else { '' }
+                New-AssignmentInstance $Item ($Chain.Count -ge 2) "'$($Item.DisplayName)' holds the Control Plane role $(Get-Role $Item)$ScopeText through $($Chain.Count) nested groups$ChainText." ([ordered]@{ GroupIds = $Chain; GroupNames = $GroupNames })
             }
         }
         default { throw "No Privileged EAM evaluator for finding rule '$($Rule.Id)' ($($Rule.Key))." }
