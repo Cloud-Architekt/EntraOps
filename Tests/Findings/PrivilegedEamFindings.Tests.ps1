@@ -237,6 +237,17 @@ Describe 'Privileged EAM findings' {
         $Result.Results[0].Evidence.CausingRoles | Should -Be @("'Global Administrator' (EntraID)")
     }
 
+    It 'names the roles of each more privileged tier apart in a tier breach (EO.1002)' {
+        $Root = Join-Path $TestDrive 'tier-breach-mixed-tiers'
+        New-Item -ItemType Directory -Path "$Root/EntraID" -Force | Out-Null
+        ConvertTo-Json -Depth 10 -InputObject @(
+            New-TestObject 91 'user' 'Member' 'UserAccess' @((New-TestAssignment 'Groups Administrator' 'ManagementPlane'), (New-TestAssignment 'Global Administrator' 'ControlPlane'), (New-TestAssignment 'Directory Readers' 'UserAccess'))
+        ) | Set-Content -LiteralPath "$Root/EntraID/EntraID.json"
+        $Result = Invoke-EntraOpsFindingEvaluation -Area PrivilegedAssets -ImportPath $Root -ReportPath (Join-Path $TestDrive 'noreports') -WarningAction SilentlyContinue | Where-Object Key -eq 'tierBreach'
+        $Result.Results[0].Message | Should -Be "User Access object 'Object 91' (user) holds role assignments of the Control Plane: 'Global Administrator' (EntraID), and of the Management Plane: 'Groups Administrator' (EntraID)."
+        $Result.Results[0].Evidence.CausingRoles | Should -Be @("'Global Administrator' (EntraID)", "'Groups Administrator' (EntraID)")
+    }
+
     It 'names the related objects of a Privileged Assets finding, also those outside the export resolved by the report data' {
         $Root = Join-Path $TestDrive 'related'
         $Reports = Join-Path $TestDrive 'related-reports'

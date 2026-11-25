@@ -70,6 +70,6 @@ function New-EntraOpsFindingResult {
         Evidence   = $Evidence
         Message    = $Message
         # The message without its subject (object and tier), for views that show the object next to it.
-        Detail     = (Get-EntraOpsFindingDetail -Message $Message -DisplayName $DisplayName -ObjectId $ObjectId -ObjectType $ObjectType -AdminTierLevelName $AdminTierLevelName)
+        Detail     = (Get-EntraOpsFindingDetail -Message $Message -DisplayName $DisplayName -ObjectType $ObjectType -AdminTierLevelName $AdminTierLevelName)
     }
 }

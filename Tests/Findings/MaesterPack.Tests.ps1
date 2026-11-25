@@ -148,7 +148,7 @@ Describe 'EntraOps Maester Pack' -Skip:(-not $script:MaesterPackSource) {
     It 'rates the remediation of failing rules only' {
         $Failing = Get-Content -LiteralPath (Join-Path $script:PackRoot 'tests/Test.MP.EOPS.1001.ps1') -Raw
         $Failing | Should -Match "UserImpact\s+=\s+'Medium',"
-        $Failing | Should -Match "ImplementationCost\s+=\s+'Medium',"
+        $Failing | Should -Match "ImplementationCost\s+=\s+'High',"
         $Failing | Should -Not -Match 'Lifecycle'
         $Investigate = Get-Content -LiteralPath (Join-Path $script:PackRoot 'tests/Test.MP.EOPS.2004.ps1') -Raw
         $Investigate | Should -Not -Match 'UserImpact|ImplementationCost'
@@ -798,6 +798,19 @@ Describe 'EntraOps Maester Pack' -Skip:(-not $script:MaesterPackSource) {
             $script:Facts[0].Type | Should -Be 'AppRegistration'
             $script:Facts[0].Id | Should -Be $AppId
             $script:Facts[0].Fact[0].Value | Should -Be 'Management Plane'
+        }
+
+        It 'adds no tier fact for results that carry the tier of an access package resource' {
+            Save-TestFindings @(@{ RuleId = 'EO.6003'; Area = 'AccessPackageFlow'; Status = 'Failed'; EvaluatedCount = 1; FailedCount = 1; Results = @(
+                        @{ Instance = @{ ObjectId = 'dddddddd-9999-9999-9999-999999999999'; DisplayName = 'Admins'; ObjectType = 'group'; AdminTierLevelName = 'ControlPlane' }; Message = 'Has members outside its access package.' }
+                    ) })
+            function Test-EntraOpsPackMaesterCommand { param($Name) $Name -eq 'Add-MtAffectedObjectFact' }
+            $script:Facts = [System.Collections.Generic.List[object]]::new()
+            function Add-MtAffectedObjectFact { param([Parameter(ValueFromPipeline)] $InputObject, $Source, $AsOf) process { $script:Facts.Add($InputObject) } }
+
+            Test-EntraOpsPackFinding -RuleId 'EO.6003' | Should -BeFalse
+            $script:Detail.GraphObjects.Count | Should -Be 1
+            $script:Facts.Count | Should -Be 0
         }
 
         It 'uses the admin center of the cloud of the Microsoft Graph connection' {

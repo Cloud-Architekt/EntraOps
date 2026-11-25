@@ -44,6 +44,12 @@
 .PARAMETER ObjectClassificationFile
     Object Classification File settings (Enabled, FilePath). Default will be set by EntraOpsConfig.json section ObjectClassificationFile. When enabled, a User, Group, ServicePrincipal or Application object that neither Custom Security Attributes nor Alternate Tier Level Attributes classify takes its tier from its entry in the file (matched by ObjectId).
 
+.PARAMETER IsForeignPrincipal
+    The object is a principal of another tenant with access through Tenant Governance (the tenant of its role assignment is not this tenant), so a missing object in this tenant is expected.
+
+.PARAMETER ForeignTenantId
+    The tenant of a foreign principal (the governing tenant of its Tenant Governance role assignment). When the principal is not found in this tenant and is no remote tenant group, the placeholder keeps this tenant as ObjectTenantId and OriginTenantId with the OriginType TenantGovernance, so the principal stays an object of another tenant (EO.4010, EO.4011) until it is resolved in the managing tenant.
+
 .PARAMETER CustomSecurityAttributeClassification
     Defines if the tier of User, ServicePrincipal and Application objects is read from Custom Security Attributes. Default will be set by EntraOpsConfig.json CustomSecurityAttributes.Enabled. Custom Security Attributes win over Alternate Tier Level Attributes and the Object Classification File; an object without tier falls back to them. When absent, Custom Security Attributes are used unless the Object Classification File or, for users and service principals, the Alternate Tier Level Attributes of the object type are enabled (behavior of older config files). The PAW device and work account attributes are always read.
 
@@ -82,6 +88,9 @@ function Get-EntraOpsPrivilegedEntraObject {
         ,
         [Parameter(Mandatory = $false)]
         [switch]$IsForeignPrincipal
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$ForeignTenantId
         ,
         [Parameter(Mandatory = $false)]
         [System.String]$PrivilegedUserAdminTierLevelAttribute = $(if (-not [string]::IsNullOrEmpty($EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAdminTierLevelAttribute)) { $EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAdminTierLevelAttribute } else { 'adminTierLevel' })
@@ -199,9 +208,15 @@ function Get-EntraOpsPrivilegedEntraObject {
         } else {
             Write-Host "Object $AadObjectId not found in home tenant — expected for tenant governance (TG) objects, will be resolved in managing tenant context." -ForegroundColor Gray
             $StopwatchTotal.Stop()
+            # The principal belongs to the tenant of its Tenant Governance role assignment, not to this tenant: keep that
+            # tenant, so the placeholder stays an object of another tenant (EO.4010, EO.4011, and the Administrative Unit
+            # and Conditional Access group reconciliation skip it) when it is not resolved in the managing tenant (no
+            # ManagingTenantId, a principal of another governing tenant, or a failed cross-tenant step).
+            # Like a remote tenant group: ObjectTenantId as the assignment names it, OriginTenantId in lowercase.
+            $PrincipalTenantId = if (-not [string]::IsNullOrWhiteSpace($ForeignTenantId)) { $ForeignTenantId.Trim() } else { $null }
             return [PSCustomObject]@{
                 'ObjectId'                      = $AadObjectId
-                'ObjectTenantId'                = $TenantId
+                'ObjectTenantId'                = $(if ($PrincipalTenantId) { $PrincipalTenantId } else { $TenantId })
                 'ObjectType'                    = 'unknown'
                 'ObjectSubType'                 = 'unknown'
                 'ObjectDisplayName'             = 'Identity not found'
@@ -223,9 +238,10 @@ function Get-EntraOpsPrivilegedEntraObject {
                 'AssignedAdministrativeUnits'   = @()
                 'PasswordPolicyAssigned'        = @()
                 'OutsideOfHomeTenant'           = $true
-                'OriginType'                    = $null
-                'OriginTenantId'                = $null
-                'OriginId'                      = $null
+                # A principal of another tenant with access through Tenant Governance (Resolve-EntraOpsObjectOrigin).
+                'OriginType'                    = 'TenantGovernance'
+                'OriginTenantId'                = $(if ($PrincipalTenantId) { $PrincipalTenantId.ToLowerInvariant() } else { $null })
+                'OriginId'                      = $AadObjectId
             }
         }
     }

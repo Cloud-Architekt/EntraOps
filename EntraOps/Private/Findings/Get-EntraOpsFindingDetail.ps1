@@ -16,15 +16,10 @@ function Get-EntraOpsFindingDetail {
         '<name>'", "the policy '<policy>' of the access package '<package>'") becomes "the role" or "the policy". A following "(<object type>)" or "(<tier>)" is
         removed with it; other details in parentheses are kept as a label ("Azure: grants ...", "Block access: ...").
         Any other message, or a rest that would not read as a sentence, is returned unchanged.
-
-        A message names an object whose display name another object has as well with the start of its ID
-        ("'Test (047ce3f2)'"): with -ObjectId, this name is the name of the object.
     .PARAMETER Message
         The message of the result.
     .PARAMETER DisplayName
         The display name of the object of the result.
-    .PARAMETER ObjectId
-        The ID of the object of the result, for a message that names the object with the start of its ID.
     .PARAMETER ObjectType
         The object type of the result (user, group, serviceprincipal ...).
     .PARAMETER AdminTierLevelName
@@ -47,10 +42,6 @@ function Get-EntraOpsFindingDetail {
 
         [Parameter(Mandatory = $false)]
         [AllowEmptyString()]
-        [string]$ObjectId,
-
-        [Parameter(Mandatory = $false)]
-        [AllowEmptyString()]
         [string]$ObjectType,
 
         [Parameter(Mandatory = $false)]
@@ -59,12 +50,6 @@ function Get-EntraOpsFindingDetail {
     )
 
     if ([string]::IsNullOrWhiteSpace($Message) -or [string]::IsNullOrWhiteSpace($DisplayName)) { return $Message }
-
-    # An object whose name another object has as well is named with the start of its ID: "'Test (047ce3f2)'".
-    if ($ObjectId.Length -ge 8) {
-        $UniqueName = "$DisplayName ($($ObjectId.Substring(0, 8).ToLowerInvariant()))"
-        if ($Message.Contains("'$UniqueName'")) { $DisplayName = $UniqueName }
-    }
 
     $TierNames = @{ ControlPlane = 'Control Plane'; ManagementPlane = 'Management Plane'; WorkloadPlane = 'Workload Plane'; UserAccess = 'User Access' }
     $Tier = if ($TierNames.ContainsKey($AdminTierLevelName)) { $TierNames[$AdminTierLevelName] } else { $null }

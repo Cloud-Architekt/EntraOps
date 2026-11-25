@@ -715,7 +715,9 @@ function Get-EntraOpsPrivilegedEamEntraId {
                         # Optimized: Passes pre-fetched InputObject to avoid redundant API calls
                         # Flag foreign principals (from tenant governance) so expected 404s are treated as informational.
                         $IsForeign = (-not [string]::IsNullOrEmpty($obj.ObjectTenantId) -and $obj.ObjectTenantId -ne $LocalTenantId)
-                        $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $LocalTenantId -InputObject $PreFetchedObj -IsForeignPrincipal:$IsForeign
+                        # The tenant of the foreign principal, kept by its placeholder when it is not found here.
+                        $ForeignTenantId = if ($IsForeign) { "$($obj.ObjectTenantId)" } else { '' }
+                        $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $LocalTenantId -InputObject $PreFetchedObj -IsForeignPrincipal:$IsForeign -ForeignTenantId $ForeignTenantId
 
                         [PSCustomObject]@{
                             ObjectId = $ObjectId
@@ -817,7 +819,9 @@ function Get-EntraOpsPrivilegedEamEntraId {
                 # Flag foreign principals (from tenant governance) so expected 404s are treated as informational.
                 $ObjMeta = $UniqueObjects[$i]
                 $IsForeign = (-not [string]::IsNullOrEmpty($ObjMeta.ObjectTenantId) -and $ObjMeta.ObjectTenantId -ne $TenantId)
-                $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId -InputObject $PreFetchedObj -IsForeignPrincipal:$IsForeign
+                # The tenant of the foreign principal, kept by its placeholder when it is not found here.
+                $ForeignTenantId = if ($IsForeign) { "$($ObjMeta.ObjectTenantId)" } else { '' }
+                $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId -InputObject $PreFetchedObj -IsForeignPrincipal:$IsForeign -ForeignTenantId $ForeignTenantId
             } catch {
                 $WarningMessages.Add([PSCustomObject]@{Type = "Stage5-Sequential"; Message = "Failed to get details for object $($ObjectId): $_"; Target = $ObjectId })
                 $ObjectDetailsCache[$ObjectId] = $null

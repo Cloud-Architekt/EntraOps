@@ -142,7 +142,7 @@ function Save-EntraOpsFindingJson {
             GeneratedAt       = (Get-Date -AsUTC).ToString('o')
             Generator         = [ordered]@{
                 Name    = 'EntraOps'
-                Version = "$($MyInvocation.MyCommand.Module.Version)"
+                Version = "$(Get-EntraOpsModuleVersion)"
             }
             TenantId          = $TenantId
             TenantName        = $TenantName

@@ -116,6 +116,30 @@ Describe 'Finding evidence details' {
         $ById[(Get-TestId 102)].Message | Should -BeLike '*is an object of tenant tenant-4 with access through Tenant Governance, outside the home tenant, with *'
     }
 
+    It 'reports a Tenant Governance principal that is not found in this tenant as an object of its tenant (EO.4010, EO.4011)' {
+        $Root = Join-Path $TestDrive 'tgplaceholder'
+        New-Item -ItemType Directory -Path "$Root/EntraID" -Force | Out-Null
+        $GlobalAdmin = { New-TestAssignment 'Global Administrator' 'ControlPlane' @{ PIMAssignmentType = 'Permanent' } }
+        ConvertTo-Json -Depth 10 -InputObject @(
+            # Local objects of the home tenant (tenant-1).
+            New-TestObject 130 'user' 'Member' 'ControlPlane' @(& $GlobalAdmin) @{ ObjectUserPrincipalName = 'AdeleV@contoso.com'; OriginType = 'Cloud'; OriginTenantId = 'tenant-1'; OriginId = (Get-TestId 130) }
+            New-TestObject 131 'user' 'Member' 'ControlPlane' @(& $GlobalAdmin) @{ ObjectUserPrincipalName = 'AlexW@contoso.com'; OriginType = 'Cloud'; OriginTenantId = 'tenant-1'; OriginId = (Get-TestId 131) }
+            # The placeholder of Get-EntraOpsPrivilegedEntraObject for a principal of a governing tenant that is not found
+            # here and is no remote group (no ManagingTenantId, or a principal of another governing tenant).
+            New-TestObject 132 'unknown' 'unknown' 'Unclassified' @(& $GlobalAdmin) @{ ObjectDisplayName = 'Identity not found'; ObjectTenantId = 'tenant-9'; OutsideOfHomeTenant = $true; OriginType = 'TenantGovernance'; OriginTenantId = 'tenant-9'; OriginId = (Get-TestId 132) }
+        ) | Set-Content -LiteralPath "$Root/EntraID/EntraID.json"
+
+        $Results = Invoke-TestEvaluation $Root @('PrivilegedAssets', 'PrivilegedEAM')
+        $Foreign = @($Results['foreign'].Results)
+        @($Foreign.Instance.ObjectId | Select-Object -Unique) | Should -Be @((Get-TestId 132))
+        $Foreign[0].Message | Should -BeLike "*'Identity not found' (unknown) is an object of tenant tenant-9 with access through Tenant Governance, outside the home tenant, with the Control Plane role 'Global Administrator'*"
+        $ControlPlane = @($Results['foreignPrincipalControlPlane'].Results)
+        @($ControlPlane.Instance.ObjectId) | Should -Be @((Get-TestId 132))
+        $ControlPlane[0].Message | Should -Be "Object (unknown) 'Identity not found' is an object of tenant tenant-9 with access through Tenant Governance and has Control Plane access."
+        $ControlPlane[0].Evidence.OriginType | Should -Be 'TenantGovernance'
+        $ControlPlane[0].Evidence.OriginTenantId | Should -Be 'tenant-9'
+    }
+
     It 'lists every role assignment of an object of another tenant, most privileged first, and an object with delegated permissions only once (EO.4010)' {
         $Root = Join-Path $TestDrive 'foreignassignments'
         foreach ($System in 'EntraID', 'ResourceApps') { New-Item -ItemType Directory -Path "$Root/$System" -Force | Out-Null }
@@ -191,7 +215,7 @@ Describe 'Finding evidence details' {
         @($Rule.Results | Where-Object { $_.Instance.ObjectId -eq (Get-TestId 91) })[0].Message | Should -BeLike '*has no associated privileged access workstation (PAW).'
     }
 
-    It 'tells objects of the same name apart by the start of their ID' {
+    It 'names the object of a result by its display name, also when another object has the same name' {
         $Root = Join-Path $TestDrive 'names'
         New-Item -ItemType Directory -Path "$Root/EntraID" -Force | Out-Null
         ConvertTo-Json -Depth 10 -InputObject @(
@@ -199,10 +223,15 @@ Describe 'Finding evidence details' {
             New-TestObject 96 'serviceprincipal' 'Application' 'ManagementPlane' @(New-TestAssignment 'Role' 'ControlPlane') @{ ObjectDisplayName = 'Test'; OriginTenantId = 'tenant-1' }
         ) | Set-Content -LiteralPath "$Root/EntraID/EntraID.json"
 
-        $Results = Invoke-TestEvaluation $Root 'PrivilegedAssets'
-        $Messages = @($Results.Values | ForEach-Object { $_.Results.Message } | Where-Object { $_ -like "*object 'Test*" })
-        $Messages | Should -Not -BeNullOrEmpty
-        foreach ($Message in $Messages) { $Message | Should -Match "object 'Test \((00000095|00000096)\)'" }
+        # The reports show the ID with the result (Maester Pack: the start of the ID of objects of the same name), so
+        # the message names the object as the other rules do, and its detail removes it.
+        $Results = @((Invoke-TestEvaluation $Root 'PrivilegedAssets')['tierBreach'].Results)
+        $Results | Should -HaveCount 2
+        @($Results.Instance.ObjectId | Sort-Object) | Should -Be @((Get-TestId 95), (Get-TestId 96))
+        foreach ($Result in $Results) {
+            $Result.Message | Should -BeLike "Management Plane object 'Test' (serviceprincipal) holds role assignments *"
+            $Result.Detail | Should -BeLike 'Holds role assignments *'
+        }
     }
 
     It 'saves the principals of the Global Exclusion List in findings.json' {

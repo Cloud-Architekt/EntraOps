@@ -24,6 +24,7 @@ let exceptionFindingsAppUrl;
 let groupedFindingsAppUrl;
 let expiredFindingsAppUrl;
 let dataGapsFindingsAppUrl;
+let sameNameFindingsAppUrl;
 
 const userId = "11111111-1111-1111-1111-111111111111";
 const servicePrincipalId = "22222222-2222-2222-2222-222222222222";
@@ -143,6 +144,13 @@ test.beforeAll(async () => {
         { ...savedRule("EO.8099", "oldDrift", "PrivilegeHistory", "Drift", "Removed drift check", "Low", [], "Excluded"), Reason: "Deprecated: replaced by EO.8001.", CategoryTitle: "Drift", CategoryNumber: 8 }
     ]);
     noRulesAppUrl = await writeSavedFindingsFixture("norules", "t1", []);
+    // Two users of the same name, one of them outside the inventory, and a group of its own name.
+    const permanent = (id, name, type = "user") => ({ ...savedResult(id, `User '${name}' holds the Control Plane role 'Global Administrator' (EntraID) as a permanent assignment.`, type), Instance: { Id: id, ObjectId: id, ObjectType: type, DisplayName: name, AdminTierLevel: 0 } });
+    sameNameFindingsAppUrl = await writeSavedFindingsFixture("samename", "t1", [
+        savedRule("EO.3001", "permanentControlPlaneAssignment", "PrivilegedEAM", "JustInTimeAccess", "Permanent Control Plane role assignment", "High", [
+            permanent(userId, "Admin A"), permanent("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd", "Admin A"), permanent(groupId, "PRG-Tier0-Admins", "group")
+        ])
+    ]);
     // A finding of a group outside the Privileged EAM export (for example an access package resource group).
     outsideFindingsAppUrl = await writeSavedFindingsFixture("outside", "t1", [
         savedRule("EO.6003", "unauthorizedAccess", "AccessPackageFlow", "AccessGovernance", "Unauthorized access to privileged access package resource", "High", [
@@ -947,6 +955,21 @@ test("Findings view opens a check from a deep link and lists the affected object
     await expect(evidence.locator("summary")).toHaveText("Technical details (1)");
     await expect(evidence.locator("dt")).toHaveText(["Flow ID"]);
     await expect(evidence.locator("dd")).toHaveText(["99999999-9999-9999-9999-999999999999|activation"]);
+    expect(pageErrors).toEqual([]);
+});
+
+test("Findings view names objects of the same name with the start of their ID, and the message by the name", async ({ page }) => {
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto(`${sameNameFindingsAppUrl}?view=findings#rule=EO.3001`);
+    await expect(page.locator("#paiRuleBlade")).toHaveClass(/open/);
+    const objects = page.locator("#paiRuleResultsBody td.pai-rres-object");
+    await expect(objects).toHaveCount(3);
+    // In the inventory and outside of it, as the Maester Pack names them; an object of its own name keeps it.
+    await expect(objects.filter({ hasText: "Admin A (11111111)" }).locator("button.pai-link")).toHaveText("Admin A (11111111)");
+    await expect(objects.filter({ hasText: "Admin A (cdcdcdcd)" })).toHaveCount(1);
+    await expect(objects.filter({ hasText: "PRG-Tier0-Admins" }).locator("button.pai-link")).toHaveText("PRG-Tier0-Admins");
+    await expect(page.locator("#paiRuleResultsBody td.pai-rres-details").first()).toContainText("User 'Admin A' holds the Control Plane role");
     expect(pageErrors).toEqual([]);
 });
 

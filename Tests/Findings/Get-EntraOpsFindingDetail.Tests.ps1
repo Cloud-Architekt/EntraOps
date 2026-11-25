@@ -38,21 +38,6 @@ Describe 'Get-EntraOpsFindingDetail' {
         InModuleScope EntraOps -Parameters @{ M = $Message; D = $DisplayName; O = $ObjectType; T = $Tier } { param($M, $D, $O, $T) Get-EntraOpsFindingDetail -Message $M -DisplayName $D -ObjectType $O -AdminTierLevelName $T } | Should -BeExactly $Message
     }
 
-    It 'removes the subject of an object named with the start of its ID, as objects of the same name are' {
-        InModuleScope EntraOps {
-            $Id = '00000095-0000-0000-0000-000000000095'
-            Get-EntraOpsFindingDetail -Message "Management Plane object 'Test (00000095)' (serviceprincipal) holds role assignments of the Control Plane: 'Role' (EntraID)." -DisplayName 'Test' -ObjectId $Id -ObjectType 'serviceprincipal' -AdminTierLevelName 'ManagementPlane' |
-                Should -BeExactly "Holds role assignments of the Control Plane: 'Role' (EntraID)."
-            Get-EntraOpsFindingDetail -Message "Unclassified object 'Test (00000095)' (user) with Management Plane role assignments is not protected by restricted management." -DisplayName 'Test' -ObjectId $Id -ObjectType 'user' -AdminTierLevelName 'Unclassified' |
-                Should -BeExactly 'With Management Plane role assignments, is not protected by restricted management.'
-            # The object of the same name with another ID is another object: the message stays.
-            Get-EntraOpsFindingDetail -Message "Management Plane object 'Test (00000096)' (serviceprincipal) holds role assignments of the Control Plane." -DisplayName 'Test' -ObjectId $Id -ObjectType 'serviceprincipal' -AdminTierLevelName 'ManagementPlane' |
-                Should -BeLike "Management Plane object 'Test (00000096)'*"
-            # A message without the ID is read as before.
-            Get-EntraOpsFindingDetail -Message "User 'Test' has no sponsor." -DisplayName 'Test' -ObjectId $Id -ObjectType 'user' -AdminTierLevelName 'UserAccess' | Should -BeExactly 'Has no sponsor.'
-        }
-    }
-
     It 'returns the message when there is no object name' {
         InModuleScope EntraOps { Get-EntraOpsFindingDetail -Message 'Tenant-wide finding.' -DisplayName '' } | Should -BeExactly 'Tenant-wide finding.'
     }

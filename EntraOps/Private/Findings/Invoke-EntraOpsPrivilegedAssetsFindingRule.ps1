@@ -163,11 +163,11 @@ function Invoke-EntraOpsPrivilegedAssetsFindingRule {
         $Tier = Get-ObjectTier $InventoryObject
         $Access = Get-AccessTier $InventoryObject
         $AccessText = if ($Access -ne 'Unclassified' -and (Get-EntraOpsAdminTierLevel $Access) -lt (Get-EntraOpsAdminTierLevel $Tier)) { " with $(Get-EntraOpsTierDisplayName $Access) role assignments" } else { '' }
-        # Two objects of the same name (for example two service principals 'Test') are named with the start of their ID.
-        "$(Get-EntraOpsTierDisplayName $Tier) object '$(Get-UniqueName "$($InventoryObject.displayName)" "$($InventoryObject.objectId)")' ($($InventoryObject.objectType))$AccessText"
+        "$(Get-EntraOpsTierDisplayName $Tier) object '$($InventoryObject.displayName)' ($($InventoryObject.objectType))$AccessText"
     }
-    # Display names of more than one object (inventory and related objects): such an object is named with the start of
-    # its ID ('Jane Doe (0e1e6c34)'), so two owners of the same name are not taken for one.
+    # Display names of more than one object (inventory and related objects): a related object (owner, owned object,
+    # parent) is named with the start of its ID ('Jane Doe (0e1e6c34)'), so two owners of the same name are not taken
+    # for one. The object of a result is named by its display name: the reports show its ID with the result.
     $IdsByName = [System.Collections.Generic.Dictionary[string, System.Collections.Generic.HashSet[string]]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $KnownObjects = @($Context.ObjectsById.Values) + @(if ($null -ne $Context.PSObject.Properties['RelatedObjects'] -and $null -ne $Context.RelatedObjects) { $Context.RelatedObjects.Values })
     foreach ($Known in $KnownObjects) {
@@ -254,7 +254,7 @@ function Invoke-EntraOpsPrivilegedAssetsFindingRule {
             }
             $ObjectTier = Get-ObjectTier $Object
             # The object as the subject that Get-EntraOpsFindingDetail removes; the tier of each assignment follows.
-            $Subject = "$(Get-EntraOpsTierDisplayName $ObjectTier) object '$(Get-UniqueName "$($Object.displayName)" "$($Object.objectId)")' ($($Object.objectType)) is $(Get-EntraOpsFindingOriginText -Object $Object -HomeTenantId $Context.HomeTenantId -ManagingTenantId $ManagingTenantId -ManagingTenantName $ManagingTenantName), outside the home tenant"
+            $Subject = "$(Get-EntraOpsTierDisplayName $ObjectTier) object '$($Object.displayName)' ($($Object.objectType)) is $(Get-EntraOpsFindingOriginText -Object $Object -HomeTenantId $Context.HomeTenantId -ManagingTenantId $ManagingTenantId -ManagingTenantName $ManagingTenantName), outside the home tenant"
             $OriginEvidence = [ordered]@{}
             foreach ($Field in 'originType', 'originTenantId', 'originId') {
                 if ("$($Object[$Field])") { $OriginEvidence[$Field.Substring(0, 1).ToUpperInvariant() + $Field.Substring(1)] = "$($Object[$Field])" }
@@ -312,16 +312,21 @@ function Invoke-EntraOpsPrivilegedAssetsFindingRule {
         if ("$($Object.objectType)" -eq 'application' -and "$($Object.userPrincipalName)" -match '^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') { $Evidence['AppId'] = "$($Object.userPrincipalName)" }
         $Message = switch ($Rule.Key) {
             'tierBreach' {
-                # The role assignments (without delegated permissions) of a more privileged tier than the object.
+                # The role assignments (without delegated permissions) of a more privileged tier than the object, named
+                # by their tier (most privileged first): a User Access object can hold Control and Management Plane roles.
                 $ObjectLevel = Get-EntraOpsAdminTierLevel $ObjectTier
-                $Roles = @($Object.assignments | Where-Object { $_.roleType -ne 'Delegated' -and $TierRank.ContainsKey("$($_.tierName)") -and $_.tierName -ne 'Unclassified' -and (Get-EntraOpsAdminTierLevel $_.tierName) -lt $ObjectLevel } |
-                        ForEach-Object { "'$(if ($_.roleDefinitionName) { $_.roleDefinitionName } else { $_.roleDefinitionId })' ($($_.roleSystem))" } | Select-Object -Unique)
+                $RolesByTier = @($Object.assignments | Where-Object { $_.roleType -ne 'Delegated' -and $TierRank.ContainsKey("$($_.tierName)") -and $_.tierName -ne 'Unclassified' -and (Get-EntraOpsAdminTierLevel $_.tierName) -lt $ObjectLevel } |
+                        Group-Object { "$($_.tierName)" } | Sort-Object { $TierRank[$_.Name] } | ForEach-Object {
+                            [pscustomobject]@{ Tier = $_.Name; Roles = @($_.Group | ForEach-Object { "'$(if ($_.roleDefinitionName) { $_.roleDefinitionName } else { $_.roleDefinitionId })' ($($_.roleSystem))" } | Select-Object -Unique) }
+                        })
+                $Roles = @($RolesByTier | ForEach-Object { $_.Roles } | Select-Object -Unique)
                 $Evidence['CausingRoles'] = $Roles
-                "$(Get-EntraOpsTierDisplayName $ObjectTier) object '$(Get-UniqueName "$($Object.displayName)" "$($Object.objectId)")' ($($Object.objectType)) holds role assignments of the $(Get-EntraOpsTierDisplayName $AccessTier)$(if ($Roles.Count) { ": $(Join-Limited $Roles 3)" })."
+                $RoleText = if ($RolesByTier.Count) { @($RolesByTier | ForEach-Object { "of the $(Get-EntraOpsTierDisplayName $_.Tier): $(Join-Limited $_.Roles 3)" }) -join ', and ' } else { "of the $(Get-EntraOpsTierDisplayName $AccessTier)" }
+                "$(Get-EntraOpsTierDisplayName $ObjectTier) object '$($Object.displayName)' ($($Object.objectType)) holds role assignments $RoleText."
             }
             'unclassified' {
-                if ($AccessTier -ne 'Unclassified') { "Unclassified object '$(Get-UniqueName "$($Object.displayName)" "$($Object.objectId)")' ($($Object.objectType)) holds $(Get-EntraOpsTierDisplayName $AccessTier) role assignments." }
-                else { "Unclassified object '$(Get-UniqueName "$($Object.displayName)" "$($Object.objectId)")' ($($Object.objectType)) has no tier classification." }
+                if ($AccessTier -ne 'Unclassified') { "Unclassified object '$($Object.displayName)' ($($Object.objectType)) holds $(Get-EntraOpsTierDisplayName $AccessTier) role assignments." }
+                else { "Unclassified object '$($Object.displayName)' ($($Object.objectType)) has no tier classification." }
             }
             'ownerLowerTier' { "$Label has owners of a lower tier: $(Join-Limited @($RelatedIds | ForEach-Object { Get-RelatedText $_ }))." }
             'ownsHigherTier' { "$Label owns objects of a more privileged tier: $(Join-Limited @($RelatedIds | ForEach-Object { Get-RelatedText $_ }))." }

@@ -71,6 +71,48 @@ Describe 'Get-EntraOpsPrivilegedEntraObject resolution status' {
         $Result.ResolutionStatus | Should -Be 'Unresolved'
     }
 
+    It 'keeps the tenant of a Tenant Governance principal that is not found in this tenant' {
+        $ObjectId = '55555555-5555-5555-5555-555555555555'
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -eq '/beta/directory/remoteTenantGroups') {
+                return @([pscustomobject]@{ id = 'r1'; remoteGroupId = '66666666-6666-6666-6666-666666666666'; remoteTenantId = 'cccccccc-cccc-cccc-cccc-cccccccccccc'; remoteGroupDisplayName = 'Other remote group' })
+            }
+            $Exception = [System.InvalidOperationException]::new("Microsoft Graph query '$Uri' failed")
+            $Exception.Data['StatusCode'] = 404
+            throw $Exception
+        }
+
+        $Result = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $global:TenantIdContext `
+            -IsForeignPrincipal -ForeignTenantId 'BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB' 6>$null
+
+        $Result.ObjectId | Should -Be $ObjectId
+        $Result.ObjectType | Should -Be 'unknown'
+        $Result.ObjectDisplayName | Should -Be 'Identity not found'
+        # The tenant of its role assignment, not the home tenant, so the findings report it as an object of another tenant.
+        $Result.ObjectTenantId | Should -Be 'BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB'
+        $Result.OutsideOfHomeTenant | Should -BeTrue
+        $Result.OriginType | Should -Be 'TenantGovernance'
+        $Result.OriginTenantId | Should -Be 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        $Result.OriginId | Should -Be $ObjectId
+        # A foreign principal is not probed at /users.
+        Should -Invoke Invoke-EntraOpsMsGraphQuery -Times 0 -Exactly -ParameterFilter { $Uri -like '/beta/users/*' }
+    }
+
+    It 'marks a Tenant Governance principal that is not found as of Tenant Governance also without its tenant' {
+        Mock Invoke-EntraOpsMsGraphQuery {
+            if ($Uri -eq '/beta/directory/remoteTenantGroups') { return @() }
+            $Exception = [System.InvalidOperationException]::new("Microsoft Graph query '$Uri' failed")
+            $Exception.Data['StatusCode'] = 404
+            throw $Exception
+        }
+
+        $Result = Get-EntraOpsPrivilegedEntraObject -AadObjectId '77777777-7777-7777-7777-777777777777' -TenantId $global:TenantIdContext -IsForeignPrincipal 6>$null
+
+        $Result.ObjectTenantId | Should -Be $global:TenantIdContext
+        $Result.OriginType | Should -Be 'TenantGovernance'
+        $Result.OriginTenantId | Should -BeNullOrEmpty
+    }
+
     It 'classifies an unhandled directory object type as unknown and identifies it in a warning' {
         $ObjectId = '44444444-4444-4444-4444-444444444444'
         Mock Invoke-EntraOpsMsGraphQuery {

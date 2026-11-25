@@ -408,9 +408,24 @@
     // Without prototype: an ID of a deep link like "constructor" is not an object.
     var objectsById = Object.create(null);
     var related = {};
+    // The object IDs of each display name (lower case) of the objects, related objects and saved finding results: a name
+    // of more than one object is shown with the start of the ID of the object, as the Maester Pack does.
+    var idsByName = Object.create(null);
     var fileEntries = {};
 
     function $(id) { return document.getElementById(id); }
+
+    function indexName(name, id) {
+        if (!name || !id) return;
+        var key = String(name).toLowerCase();
+        (idsByName[key] = idsByName[key] || Object.create(null))[String(id).toLowerCase()] = true;
+    }
+
+    // "Jane Doe (0e1e6c34)" when another object has the display name, else the display name.
+    function uniqueName(name, id) {
+        var ids = name ? idsByName[String(name).toLowerCase()] : null;
+        return ids && id && Object.keys(ids).length > 1 ? name + " (" + String(id).slice(0, 8).toLowerCase() + ")" : name;
+    }
 
     function esc(value) {
         return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
@@ -660,6 +675,11 @@
             savedFindingsState.status = "otherTenant";
             return;
         }
+        // The objects of the results count for the names as well: some are outside the inventory (for example the
+        // resource group of an access package).
+        SAVED_RULES.forEach(function (rule) {
+            rule.results.concat(rule.unclassifiedResults, rule.acceptedResults).forEach(function (result) { indexName(result.displayName, result.objectId); });
+        });
         var outsideRules = {};
         var savedPa = SAVED_RULES.filter(function (rule) { return rule.area === "PrivilegedAssets" && rule.key; });
         if (savedPa.length) {
@@ -1901,7 +1921,7 @@
 
     function resultObjectCell(result) {
         var object = objectsById[result.objectId];
-        var name = object ? '<button type="button" class="pai-link" data-open="' + esc(object.objectId) + '">' + esc(object.displayName) + "</button>" : esc(result.displayName || result.objectId || "-");
+        var name = object ? '<button type="button" class="pai-link" data-open="' + esc(object.objectId) + '">' + esc(uniqueName(object.displayName, object.objectId)) + "</button>" : esc(uniqueName(result.displayName, result.objectId) || result.objectId || "-");
         var type = typeLabel(object ? object.objectType : result.objectType);
         // The tier sits under the name and type: a column of its own was too narrow for "Management Plane".
         return name + (type ? '<div class="muted pai-small">' + esc(type) + "</div>" : "") + (object || !result.objectId ? "" : '<div class="muted pai-small cell-mono">' + esc(result.objectId) + "</div>") +
@@ -2398,7 +2418,7 @@
             var info = EXCEPTION_STATUS[status];
             var rule = ruleById[entry.RuleId];
             var object = objectsById[String(entry.ObjectId).toLowerCase()];
-            var name = object ? '<button type="button" class="pai-link" data-open="' + esc(object.objectId) + '">' + esc(object.displayName) + "</button>" : esc(entry.DisplayName || entry.ObjectId || entry.InstanceId);
+            var name = object ? '<button type="button" class="pai-link" data-open="' + esc(object.objectId) + '">' + esc(uniqueName(object.displayName, object.objectId)) + "</button>" : esc(uniqueName(entry.DisplayName, entry.ObjectId) || entry.ObjectId || entry.InstanceId);
             var scope = entry.InstanceId ? "Finding " + entry.InstanceId : "All findings of the object";
             var check = rule ? '<button type="button" class="pai-link" data-rule-open="' + esc(rule.id) + '">' + esc(rule.id) + '</button><div class="muted pai-small">' + esc(rule.title) + "</div>" : esc(entry.RuleId);
             var expires = entry.ExpiresOn ? esc(entry.ExpiresOn) + (exceptionExpiring(entry) ? ' <span class="chip warn" title="Expires within ' + EXPIRING_DAYS + ' days">Soon</span>' : "") : '<span class="muted">-</span>';
@@ -3243,7 +3263,11 @@
             object.assignmentSummary = object.assignmentSummary || { total: 0, eligible: 0, active: 0, byTier: {}, bySystem: {}, highestTierName: "Unclassified" };
             return object;
         });
-        objects.forEach(function (object) { objectsById[object.objectId] = object; });
+        objects.forEach(function (object) { objectsById[object.objectId] = object; indexName(object.displayName, object.objectId); });
+        Object.keys(DATA.relatedObjects || {}).forEach(function (key) {
+            var entry = DATA.relatedObjects[key] || {};
+            indexName(entry.displayName, entry.objectId || key);
+        });
         attachSavedFindings();
         loadExceptions();
         related = DATA.relatedObjects || {};

@@ -1312,7 +1312,9 @@ function Add-EntraOpsPackAffectedObject {
     test when Maester collects the affected objects (Invoke-Maester -IncludeAffectedObjects): all of them, also
     those beyond the rows of the tables. App registrations have no Graph object type in Maester, which records them
     from their link (by appId). Adds the EntraOps tier of each of these objects to the Affected objects page
-    (Add-MtAffectedObjectFact, Maester 3.0 or later; it does nothing when Maester does not collect them).
+    (Add-MtAffectedObjectFact, Maester 3.0 or later; it does nothing when Maester does not collect them), unless
+    -SkipTierFact: the Affected objects page shows one tier per object for all tests, so only rules whose results
+    carry the classification of the object add it (not the tier of an access package resource or a PIM role).
     #>
     [CmdletBinding()]
     [OutputType([object[]])]
@@ -1324,7 +1326,9 @@ function Add-EntraOpsPackAffectedObject {
         [string] $PortalUrl,
 
         [AllowNull()]
-        [Nullable[datetime]] $AsOf
+        [Nullable[datetime]] $AsOf,
+
+        [switch] $SkipTierFact
     )
 
     $objects = @{}
@@ -1335,7 +1339,7 @@ function Add-EntraOpsPackAffectedObject {
     }
     $graphObjects = @($objects.Values | Where-Object { $_.ODataType } | Sort-Object Name | ForEach-Object { [pscustomobject]@{ id = $_.Id; displayName = $_.Name; '@odata.type' = $_.ODataType } })
 
-    $facts = @($objects.Values | Where-Object { $_.Tier } | ForEach-Object {
+    $facts = @($objects.Values | Where-Object { $_.Tier -and -not $SkipTierFact } | ForEach-Object {
             [pscustomobject]@{
                 Type = $_.AffectedType
                 Id   = $_.AffectedId
@@ -1512,7 +1516,8 @@ function Test-EntraOpsPackFinding {
     and adds the evidence that the message does not name (PIM assignment type, scope, groups). Every result links
     the rule in the Findings view of the Privileged Assets report. The users, groups, service principals, app
     registrations and Conditional Access policies of the results are the affected objects of the test in Maester
-    (Invoke-Maester -IncludeAffectedObjects), with their EntraOps tier. A rule skipped because only unclassified
+    (Invoke-Maester -IncludeAffectedObjects), with their EntraOps tier from the rules that judge the classification
+    of the object (Tier Breach, Privileged Assets, Privileged EAM and Privilege History). A rule skipped because only unclassified
     objects are affected lists these objects. The data gaps of the evaluation that affect the rule (DataGaps of
     findings.json) are named with its result.
     #>
@@ -1677,8 +1682,10 @@ function Test-EntraOpsPackFinding {
             }
             $lines.Add('')
             $lines.Add($footer)
-            # All affected objects (also those beyond the tables) for the affected objects of Maester, with their tier.
-            $graphObjects = @(Add-EntraOpsPackAffectedObject -Results $results -PortalUrl $portalUrl -AsOf $findingSet.GeneratedAtUtc)
+            # All affected objects (also those beyond the tables) for the affected objects of Maester, with their tier
+            # when the results carry the classification of the object (the Access Package Flow and PIM Request Flow
+            # rules carry the tier of the resource or role instead).
+            $graphObjects = @(Add-EntraOpsPackAffectedObject -Results $results -PortalUrl $portalUrl -AsOf $findingSet.GeneratedAtUtc -SkipTierFact:("$($rule.Area)" -notin 'TierBreach', 'PrivilegedAssets', 'PrivilegedEAM', 'PrivilegeHistory'))
             $detail = @{ Result = ($lines -join "`n") }
             if ($graphObjects.Count) { $detail.GraphObjects = $graphObjects }
             if ($investigate) {
