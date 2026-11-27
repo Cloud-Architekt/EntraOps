@@ -564,7 +564,14 @@ are available outside the reports, for example as Maester tests.
   `EO.1010`; the note of the rule counts them.
 - `EO.4003` evaluates the members of excluded groups, which `New-EntraOpsReportingData` resolves when
   it generates the Configuration Analyzer data. Excluded groups without member data are named in the
-  reason of the result instead of passing.
+  reason of the result instead of passing. Three or more policies whose only reported exclusion is the
+  same user or group (typically the emergency access accounts) are one result for that user or group,
+  with the policies in its evidence.
+- `EO.3006` and `EO.3009` count an authentication context that a role requires on activation only when
+  an enabled Conditional Access policy of the Tenant Governance snapshot targets it; report-only
+  policies don't count. Whether that policy applies to every holder of the role isn't evaluated.
+  Without Conditional Access policies in the snapshot the configured context counts, and the reason of
+  the rule says so.
 - `Save-EntraOpsFindingJson` writes the results to `Reports/Findings/data/findings.json` (and
   `findings.js`, from which Privileged Assets shows the findings of its objects).
   `New-EntraOpsReportingData` saves them after the report data (`-SkipFindings` turns it off), so the

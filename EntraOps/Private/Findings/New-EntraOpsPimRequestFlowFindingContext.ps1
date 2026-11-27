@@ -17,6 +17,11 @@ function New-EntraOpsPimRequestFlowFindingContext {
         replaces the catalog tier, so then the assignments decide alone. Roles without a tier fall back to
         the most privileged tier of their role actions.
 
+        An authentication context that a role setting requires on activation counts only when an enabled
+        Conditional Access policy of the snapshot targets it (authContextPolicy of the flow: Enforced,
+        ReportOnly, None, or Unknown when the snapshot has no Conditional Access policies). Whether that
+        policy applies to every holder of the role is not evaluated.
+
         The role setting rules evaluate a Control Plane role always (its setting applies to every future
         assignment) and a Management Plane role only when it has a current eligible or active assignment in
         the Privileged EAM data. Built-in roles that cannot be assigned (User, Guest User, Device Join, ...)
@@ -229,14 +234,27 @@ function New-EntraOpsPimRequestFlowFindingContext {
     if ($null -ne $Snapshot) {
         $RoleDefinitions = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
         $RoleSettings = [System.Collections.Generic.List[object]]::new()
+        # Authentication contexts by ID, and the Conditional Access policies that target a context (by its ID or name, upper case).
+        $AuthContextNameById = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::Ordinal)
+        $AuthContextPolicies = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
+        $ConditionalAccessPolicyCount = 0
         foreach ($Resource in $Snapshot.resources) {
             $Type = "$($Resource.type)".ToLowerInvariant()
-            if ($Type -ne 'microsoft.entra.rolesetting' -and $Type -ne 'microsoft.entra.roledefinition') { continue }
+            if ($Type -notin 'microsoft.entra.rolesetting', 'microsoft.entra.roledefinition', 'microsoft.entra.conditionalaccesspolicy', 'microsoft.entra.authenticationcontextclassreference') { continue }
+            if ($Type -eq 'microsoft.entra.conditionalaccesspolicy') { $ConditionalAccessPolicyCount++ }
             if (-not (Test-EntraOpsJsTruthy $Resource.h) -or $Blobs -isnot [System.Collections.IDictionary] -or -not $Blobs.Contains("$($Resource.h)")) { continue }
             $Blob = $Blobs["$($Resource.h)"]
             if ($null -eq $Blob) { continue }
             $Properties = if ($Blob -is [System.Collections.IDictionary] -and (Test-EntraOpsJsTruthy $Blob['properties'])) { $Blob['properties'] } else { @{} }
-            if ($Type -eq 'microsoft.entra.roledefinition') {
+            if ($Type -eq 'microsoft.entra.authenticationcontextclassreference') {
+                if ((Test-EntraOpsJsTruthy $Properties['Id']) -and (Test-EntraOpsJsTruthy $Properties['DisplayName'])) { $AuthContextNameById[(Get-Upper $Properties['Id'])] = "$($Properties['DisplayName'])" }
+            } elseif ($Type -eq 'microsoft.entra.conditionalaccesspolicy') {
+                foreach ($Reference in @($Properties['AuthenticationContexts'] | Where-Object { Test-EntraOpsJsTruthy $_ })) {
+                    $Key = Get-Upper $Reference
+                    if (-not $AuthContextPolicies.ContainsKey($Key)) { $AuthContextPolicies[$Key] = [System.Collections.Generic.List[object]]::new() }
+                    $AuthContextPolicies[$Key].Add([pscustomobject]@{ Name = "$(if (Test-EntraOpsJsTruthy $Properties['DisplayName']) { $Properties['DisplayName'] } else { $Resource.name })"; State = "$($Properties['State'])" })
+                }
+            } elseif ($Type -eq 'microsoft.entra.roledefinition') {
                 $Id = if (Test-EntraOpsJsTruthy $Properties['Id']) { $Properties['Id'] } else { $Properties['TemplateId'] }
                 if (Test-EntraOpsJsTruthy $Id) {
                     $RoleDefinitions["$Id"] = [pscustomobject]@{
@@ -250,9 +268,37 @@ function New-EntraOpsPimRequestFlowFindingContext {
             }
         }
 
+        # Whether a Conditional Access policy enforces the authentication context a role setting requires:
+        # Enforced (an enabled policy targets it), ReportOnly (only report-only policies), None (no policy, or only
+        # disabled ones) or Unknown (the snapshot has no Conditional Access policies). $null without a context.
+        function Get-AuthContextPolicy($Properties) {
+            $Id = "$($Properties['AuthenticationContextId'])"
+            $Name = "$($Properties['AuthenticationContextName'])"
+            if (-not (Test-EntraOpsJsTruthy $Properties['AuthenticationContextRequired']) -or (-not $Id -and -not $Name)) { return $null }
+            $Label = if ($Name -and $Id -and $Name -ne $Id) { "$Name ($Id)" } elseif ($Name) { $Name } else { $Id }
+            if ($ConditionalAccessPolicyCount -eq 0) { return [pscustomobject]@{ State = 'Unknown'; Context = $Label; Policies = @() } }
+            # Policies name the context by display name; the role setting has its ID, its name or both.
+            $Keys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            foreach ($Reference in @($Id, $Name)) {
+                if (-not $Reference) { continue }
+                $Upper = Get-Upper $Reference
+                $null = $Keys.Add($Upper)
+                $Mapped = $null
+                if ($AuthContextNameById.TryGetValue($Upper, [ref]$Mapped)) { $null = $Keys.Add((Get-Upper $Mapped)) }
+                foreach ($Pair in $AuthContextNameById.GetEnumerator()) { if ((Get-Upper $Pair.Value) -ceq $Upper) { $null = $Keys.Add($Pair.Key) } }
+            }
+            $Policies = @(foreach ($Key in $Keys) { if ($AuthContextPolicies.ContainsKey($Key)) { $AuthContextPolicies[$Key] } })
+            $Enabled = @($Policies | Where-Object { $_.State -eq 'enabled' } | ForEach-Object { $_.Name } | Select-Object -Unique)
+            $ReportOnly = @($Policies | Where-Object { $_.State -eq 'enabledForReportingButNotEnforced' } | ForEach-Object { $_.Name } | Select-Object -Unique)
+            if ($Enabled.Count -gt 0) { return [pscustomobject]@{ State = 'Enforced'; Context = $Label; Policies = $Enabled } }
+            if ($ReportOnly.Count -gt 0) { return [pscustomobject]@{ State = 'ReportOnly'; Context = $Label; Policies = $ReportOnly } }
+            return [pscustomobject]@{ State = 'None'; Context = $Label; Policies = @() }
+        }
+
         foreach ($Item in $RoleSettings) {
             $Properties = $Item.p
             $RoleId = $Properties['Id']
+            $AuthContextPolicy = Get-AuthContextPolicy $Properties
             $RoleDefinition = $null
             if (Test-EntraOpsJsTruthy $RoleId) { $null = $RoleDefinitions.TryGetValue("$RoleId", [ref]$RoleDefinition) }
             $RoleName = if (Test-EntraOpsJsTruthy $Properties['DisplayName']) { $Properties['DisplayName'] } elseif ($RoleDefinition) { $RoleDefinition.displayName } else { $Item.resource.name }
@@ -276,6 +322,7 @@ function New-EntraOpsPimRequestFlowFindingContext {
                     roleAssigned    = $(if ($null -eq $AssignedRoles -or -not (Test-EntraOpsJsTruthy $RoleId)) { $null } else { $AssignedRoles.Contains((Get-Upper $RoleId)) })
                     resourcePath    = $Item.resource.p
                     approvers       = $(if ($PathKey -eq 'activation') { , $Approvers } else { , @() })
+                    authContextPolicy = $AuthContextPolicy
                     p               = $Properties
                     checks          = $null
                 }

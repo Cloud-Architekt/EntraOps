@@ -32,6 +32,37 @@ function Test-EntraOpsPimRoleSettingInScope {
     return -not ($null -ne $Flow.PSObject.Properties['roleAssigned'] -and $Flow.roleAssigned -eq $false)
 }
 
+function Get-EntraOpsAuthContextPolicyText {
+    <#
+    .SYNOPSIS
+        Says why the authentication context of a role setting enforces nothing (authContextPolicy of a PIM flow).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param (
+        [Parameter(Mandatory = $true)]
+        [object]$Policy
+    )
+
+    if ($Policy.State -ceq 'ReportOnly') { return "only report-only Conditional Access policies target it ($(Join-EntraOpsFindingName @($Policy.Policies))), so it enforces nothing" }
+    'no enabled Conditional Access policy targets it, so it enforces nothing'
+}
+
+function Get-EntraOpsAuthContextUnknownNote {
+    <#
+    .SYNOPSIS
+        The note of a rule for roles whose authentication context could not be compared with Conditional Access.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param (
+        [Parameter(Mandatory = $true)]
+        [int]$Count
+    )
+
+    "$Count role(s) require an authentication context on activation, but the Tenant Governance snapshot has no Conditional Access policies, so it is not evaluated whether an enabled policy enforces the context. Add microsoft.entra.conditionalaccesspolicy to the snapshot."
+}
+
 function Get-EntraOpsPimRequestFlowFlag {
     <#
     .SYNOPSIS
@@ -68,8 +99,15 @@ function Get-EntraOpsPimRequestFlowFlag {
     }
 
     # PIM offers either Azure MFA or an authentication context on activation; a configured context is the stronger choice.
-    $AuthContextEnforced = (& $Truthy 'AuthenticationContextRequired') -and ((& $Truthy 'AuthenticationContextName') -or (& $Truthy 'AuthenticationContextId'))
-    Add-Check 'noMfaActivation' ($Activation -and $Privileged) { -not (& $Truthy 'ActivationReqMFA') -and -not $AuthContextEnforced } { "$RoleText can be activated without MFA or an authentication context." }
+    # The context enforces nothing unless an enabled Conditional Access policy targets it (authContextPolicy of the
+    # flow); without Conditional Access policies in the snapshot (Unknown) the configured context counts.
+    $ContextPolicy = if ($null -ne $Flow.PSObject.Properties['authContextPolicy']) { $Flow.authContextPolicy } else { $null }
+    $ContextNotEnforced = $null -ne $ContextPolicy -and $ContextPolicy.State -cin 'None', 'ReportOnly'
+    $AuthContextEnforced = (& $Truthy 'AuthenticationContextRequired') -and ((& $Truthy 'AuthenticationContextName') -or (& $Truthy 'AuthenticationContextId')) -and -not $ContextNotEnforced
+    Add-Check 'noMfaActivation' ($Activation -and $Privileged) { -not (& $Truthy 'ActivationReqMFA') -and -not $AuthContextEnforced } {
+        if ($ContextNotEnforced) { "$RoleText can be activated without MFA: it requires the authentication context '$($ContextPolicy.Context)', but $(Get-EntraOpsAuthContextPolicyText $ContextPolicy)." }
+        else { "$RoleText can be activated without MFA or an authentication context." }
+    }
     Add-Check 'noApprovalActivation' ($Activation -and $Privileged) { -not $ApprovalRequired } { "$RoleText can be activated without approval." }
     Add-Check 'approverNotEnforced' $Activation { -not $ApprovalRequired -and $Properties['ActivateApprover'] -is [array] -and $Properties['ActivateApprover'].Count -gt 0 } { "$RoleText has $($Properties['ActivateApprover'].Count) approver(s) configured, but 'Require approval to activate' is disabled - the approver list has no effect." }
     # The approver checks apply to privileged (Control and Management Plane) roles with approval.
@@ -139,6 +177,10 @@ function Invoke-EntraOpsPimRequestFlowFindingRule {
             [pscustomobject]@{ NoteOnly = $true; Note = "$(@($Incomplete | Select-Object -First 5) -join ' ')$(if ($Incomplete.Count -gt 5) { " $($Incomplete.Count - 5) more roles have approvers that could not be resolved or groups without members." })" }
         }
     }
+    if ($Rule.Key -ceq 'noMfaActivation') {
+        $Unknown = @($Context.Flows | Where-Object { $null -ne $_.checks[$Rule.Key] -and $_.checks[$Rule.Key].Applies -and $null -ne $_.PSObject.Properties['authContextPolicy'] -and $null -ne $_.authContextPolicy -and $_.authContextPolicy.State -ceq 'Unknown' })
+        if ($Unknown.Count -gt 0) { [pscustomobject]@{ NoteOnly = $true; Note = Get-EntraOpsAuthContextUnknownNote -Count $Unknown.Count } }
+    }
     foreach ($Flow in $Context.Flows) {
         $Check = $Flow.checks[$Rule.Key]
         if ($null -eq $Check) { throw "No PIM Request Flow evaluator for finding rule '$($Rule.Id)' ($($Rule.Key))." }
@@ -159,6 +201,7 @@ function Invoke-EntraOpsPimRequestFlowFindingRule {
                 Path        = $Flow.path
                 RoleTier    = $Flow.roleTier
                 SnapshotKey = $Context.SnapshotKey
+                AuthenticationContextPolicy = $(if ($null -ne $Flow.PSObject.Properties['authContextPolicy'] -and $null -ne $Flow.authContextPolicy) { [ordered]@{ Context = $Flow.authContextPolicy.Context; State = $Flow.authContextPolicy.State; Policies = @($Flow.authContextPolicy.Policies) } })
                 # Tier: the tier of the approver's access; ProtectionTier: the classification the approver checks compare.
                 Approvers   = @($Flow.approvers | ForEach-Object { [ordered]@{ Label = $_.label; Tier = $_.tier; ProtectionTier = $(if ($null -ne $_.PSObject.Properties['protectionTier']) { $_.protectionTier }); LeastProtectedMember = $(if ($null -ne $_.PSObject.Properties['protectionMember']) { $_.protectionMember }); Resolved = $_.resolved } })
             }

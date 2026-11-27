@@ -64,7 +64,11 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
         emergency access accounts, is targeted by another enabled policy that does not exclude them: by user, as
         (transitive) member of an included group with member data, or by an included directory role they hold actively
         on the directory. Otherwise the result names the Control Plane members that remain uncovered
-        (UncoveredControlPlaneMembers).
+        (UncoveredControlPlaneMembers). Three or more policies whose only reported exclusion is the same user or group
+        are one result for that user or group, with the policies in its evidence (Policies).
+
+        controlPlaneActivationAuthContext also fails when the required authentication context is not targeted by an
+        enabled Conditional Access policy of the snapshot (authContextPolicy of the PIM flow).
 
         Without the EAM Dashboard objects (an optional dataset), conditionalAccessControlPlaneExclusion (when a
         policy excludes users) and dynamicPrivilegedAdministrativeUnit return a SkipReason, and so do the rules
@@ -163,10 +167,19 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
             }
         }
         'controlPlaneActivationAuthContext' {
+            $Unknown = 0
             foreach ($Flow in $Context.Pim.Flows) {
                 if ($Flow.path -ne 'activation' -or -not (Test-EntraOpsPimRoleSettingInScope -Flow $Flow -ControlPlaneOnly)) { continue }
-                New-RoleInstance $Flow (-not (Test-EntraOpsJsTruthy (Get-Setting $Flow 'AuthenticationContextRequired'))) "The activation of the Control Plane role '$($Flow.roleName)' does not require an authentication context."
+                $Required = Test-EntraOpsJsTruthy (Get-Setting $Flow 'AuthenticationContextRequired')
+                $Policy = if ($Required -and $null -ne $Flow.PSObject.Properties['authContextPolicy']) { $Flow.authContextPolicy } else { $null }
+                if ($null -ne $Policy -and $Policy.State -ceq 'Unknown') { $Unknown++ }
+                $NotEnforced = $null -ne $Policy -and $Policy.State -cin 'None', 'ReportOnly'
+                $Message = if ($NotEnforced) { "The activation of the Control Plane role '$($Flow.roleName)' requires the authentication context '$($Policy.Context)', but $(Get-EntraOpsAuthContextPolicyText $Policy)." } else { "The activation of the Control Plane role '$($Flow.roleName)' does not require an authentication context." }
+                $Evidence = [ordered]@{}
+                if ($null -ne $Policy) { $Evidence['AuthenticationContextPolicy'] = [ordered]@{ Context = $Policy.Context; State = $Policy.State; Policies = @($Policy.Policies) } }
+                New-RoleInstance $Flow (-not $Required -or $NotEnforced) $Message $Evidence
             }
+            if ($Unknown -gt 0) { [pscustomobject]@{ NoteOnly = $true; Note = Get-EntraOpsAuthContextUnknownNote -Count $Unknown } }
         }
         'privilegedRoleAlert' {
             # Admin alerts of the PIM role setting. In the M365DSC naming of the snapshot, EligibleAssignment* are
@@ -430,7 +443,7 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
             $FailedExclusions = [System.Collections.Generic.List[object]]::new()
             # Reported users excluded from every enabled policy (candidates for EmergencyAccessAccounts), for the note below.
             $Candidates = [System.Collections.Generic.List[string]]::new()
-            foreach ($Policy in $Context.ConditionalAccessPolicies) {
+            $PolicyInstances = foreach ($Policy in $Context.ConditionalAccessPolicies) {
                 $Excluded = [System.Collections.Generic.List[string]]::new()
                 $Scoped = [System.Collections.Generic.List[string]]::new()
                 $ExcludedRoles = [System.Collections.Generic.List[string]]::new()
@@ -495,6 +508,42 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
                     }
                 }
             }
+            # Three or more policies whose only reported exclusion is the same user or group (typically the emergency
+            # access accounts) are one result for that identity, with the policies in its evidence.
+            $PolicyInstances = @($PolicyInstances)
+            $Collapsed = @{}
+            foreach ($Group in @($PolicyInstances | Where-Object { $_.Failed -and $_.Evidence.ExcludedControlPlane.Count -eq 1 -and $_.Evidence.ExcludedControlPlaneRoles.Count -eq 0 } | Group-Object { "$($_.Evidence.ExcludedControlPlane[0])".ToUpperInvariant() } | Where-Object { $_.Count -ge 3 })) {
+                $Reference = "$($Group.Group[0].Evidence.ExcludedControlPlane[0])"
+                # A group resolved by its member data has no object ID of its own: its key in the index is the ID.
+                $IsGroup = @($Context.ConditionalAccessPolicies | Where-Object { @($_['ExcludeGroups']) -contains $Reference }).Count -gt 0
+                $Hit = & $Resolve $Reference $IsGroup
+                $HitId = if ($Hit -is [System.Collections.IDictionary]) { "$($Hit['objectId'])" } elseif ($Hit) { "$($Hit.objectId)" } else { '' }
+                if (-not $HitId -and $IsGroup -and $Hit) {
+                    foreach ($Pair in $ReportData.ResolvedGroupTierIndex.GetEnumerator()) { if ([object]::ReferenceEquals($Pair.Value, $Hit)) { $HitId = "$($Pair.Key)".ToLowerInvariant(); break } }
+                }
+                $PolicyNames = @($Group.Group | ForEach-Object { $_.DisplayName })
+                $Uncovered = @($Group.Group | ForEach-Object { $_.Evidence.UncoveredControlPlaneMembers } | ForEach-Object { $_.Members } | Where-Object { $_ } | Select-Object -Unique)
+                foreach ($Instance in $Group.Group) { $Collapsed[$Instance.InstanceKey] = $true }
+                [pscustomobject]@{
+                    Failed             = $true
+                    InstanceKey        = "exclusion|$($Reference.ToUpperInvariant())"
+                    Note               = $UnresolvedNote
+                    ObjectId           = $(if ($HitId) { $HitId } else { $Reference })
+                    ObjectType         = $(if ($IsGroup) { 'group' } else { 'user' })
+                    DisplayName        = $(if ($Hit -and "$($Hit.displayName)") { "$($Hit.displayName)" } else { $Reference })
+                    AdminTierLevel     = Get-EntraOpsAdminTierLevel 'ControlPlane'
+                    AdminTierLevelName = 'ControlPlane'
+                    Message            = "$($Group.Count) enabled Conditional Access policies do not apply to the excluded Control Plane $(if ($IsGroup) { 'group' } else { 'user' }) '$Reference'$(if ($Uncovered.Count -gt 0) { " (Control Plane members no other enabled policy targets: $(Join-EntraOpsFindingName $Uncovered))" }), their only reported exclusion: $(Join-EntraOpsFindingName $PolicyNames)."
+                    Evidence           = [ordered]@{
+                        ExcludedControlPlane         = @($Reference)
+                        ExcludedControlPlaneRoles    = @()
+                        Policies                     = @($Group.Group | ForEach-Object { [ordered]@{ Id = $_.ObjectId; DisplayName = $_.DisplayName; GrantControls = @($_.Evidence.GrantControls) } })
+                        UncoveredControlPlaneMembers = @($(if ($Uncovered.Count -gt 0) { [ordered]@{ Group = $Reference; Members = $Uncovered } }))
+                        SnapshotKey                  = $Context.SnapshotKey
+                    }
+                }
+            }
+            $PolicyInstances | Where-Object { -not $Collapsed.ContainsKey($_.InstanceKey) }
             # Users excluded from every enabled policy are typically the emergency access accounts: they are reported,
             # and the reason names them so they can be added to EmergencyAccessAccounts if they are.
             if ($Candidates.Count -gt 0) {
@@ -515,7 +564,7 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
                     if (-not $Hit) { $Hit = & $Resolve $Name $false }
                     $Label = if ($Hit -and "$($Hit.displayName)" -and "$($Hit.displayName)" -ne $Name) { "'$($Hit.displayName)' ($Name)" } else { "'$Name'" }
                     $Hint = if ($EmergencyAccess.Count -gt 0) { "If it is an emergency access account or group, add it to Findings.EmergencyAccessAccounts." } else { "If it is your emergency access account or group, set Findings.EmergencyAccessAccounts." }
-                    [pscustomobject]@{ NoteOnly = $true; Note = "$($Single[0].Count) of $($FailedExclusions.Count) failed policies only exclude $Label. $Hint" }
+                    [pscustomobject]@{ NoteOnly = $true; Note = "$($Single[0].Count) of $($FailedExclusions.Count) policies with a reported exclusion only exclude $Label. $Hint" }
                 }
             }
         }

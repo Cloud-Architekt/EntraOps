@@ -38,7 +38,7 @@ Describe 'Tenant Governance and Privilege History findings' {
             & $Resource 'microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy' 'Forever' ([ordered]@{ Id = 'pol1'; DisplayName = 'Forever'; AccessPackageId = 'pk1'; DurationInDays = 0; AccessReviewSettings = @{ IsEnabled = $false }; RequestApprovalSettings = @{ IsApprovalRequired = $true } })
             & $Resource 'microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy' 'Reviewed' ([ordered]@{ Id = 'pol2'; DisplayName = 'Reviewed'; AccessPackageId = 'pk1'; DurationInDays = 30; AccessReviewSettings = @{ IsEnabled = $true }; RequestApprovalSettings = @{ IsApprovalRequired = $true } })
             & $Resource 'microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy' 'Users' ([ordered]@{ Id = 'pol3'; DisplayName = 'Users'; AccessPackageId = 'pk2'; DurationInDays = 0; AccessReviewSettings = @{ IsEnabled = $false } })
-            & $Resource 'microsoft.entra.conditionalaccesspolicy' 'Require MFA' ([ordered]@{ Id = 'ca1'; DisplayName = 'Require MFA'; State = 'enabled'; ExcludeUsers = @('breakglass@contoso.com'); ExcludeGroups = @('CP Admins') })
+            & $Resource 'microsoft.entra.conditionalaccesspolicy' 'Require MFA' ([ordered]@{ Id = 'ca1'; DisplayName = 'Require MFA'; State = 'enabled'; ExcludeUsers = @('breakglass@contoso.com'); ExcludeGroups = @('CP Admins'); AuthenticationContexts = @('c1') })
             & $Resource 'microsoft.entra.conditionalaccesspolicy' 'Block legacy' ([ordered]@{ Id = 'ca2'; DisplayName = 'Block legacy'; State = 'enabled'; ExcludeUsers = @('breakglass@contoso.com'); ExcludeGroups = @() })
             & $Resource 'microsoft.entra.conditionalaccesspolicy' 'Disabled' ([ordered]@{ Id = 'ca3'; DisplayName = 'Disabled'; State = 'disabled'; ExcludeGroups = @('CP Admins') })
             & $Resource 'microsoft.entra.administrativeunit' 'Dynamic' ([ordered]@{ Id = $script:Units.Dynamic; DisplayName = 'Dynamic'; MembershipType = 'Dynamic'; MembershipRule = '(user.department -eq "IT")' })
@@ -271,7 +271,7 @@ Describe 'Tenant Governance and Privilege History findings' {
     Context 'Conditional Access exclusions of Control Plane users and groups' {
         BeforeAll {
             # A Reports folder with the given Conditional Access policies and the objects of the shared fixture.
-            function New-TestConditionalAccessData([string]$Name, [object[]]$Policies) {
+            function New-TestConditionalAccessData([string]$Name, [object[]]$Policies, [scriptblock]$Edit) {
                 $Folder = Join-Path $TestDrive $Name
                 Copy-Item -LiteralPath $script:Root -Destination $Folder -Recurse
                 $Path = "$Folder/ConfigurationAnalyzer/data/configuration-analyzer-data.js"
@@ -284,9 +284,17 @@ Describe 'Tenant Governance and Privilege History findings' {
                     $Data.blobs["ca$Number"] = [ordered]@{ resourceType = 'microsoft.entra.conditionalaccesspolicy'; properties = $Policy }
                     $Data.snapshots[0].resources += [ordered]@{ p = "microsoft.entra.conditionalaccesspolicy/test/$Number.json"; h = "ca$Number" }
                 }
+                if ($Edit) { & $Edit $Data }
                 "window.ENTRAOPS_CONFIGANALYZER_DATA = $($Data | ConvertTo-Json -Depth 20 -Compress);" | Set-Content -LiteralPath $Path
                 $Folder
             }
+            function Get-TestAuthContextResult([string]$ReportPath) {
+                $ByKey = @{}
+                foreach ($Result in Invoke-EntraOpsFindingEvaluation -Area TenantGovernance, PimRequestFlow -ReportPath $ReportPath -ConfigFilePath (Join-Path $TestDrive 'none.json')) { $ByKey[$Result.Key] = $Result }
+                $ByKey
+            }
+            # The role setting 'CP short' requires an authentication context instead of MFA.
+            $script:ContextInsteadOfMfa = { param($Data) $Setting = ($Data.blobs.Values | Where-Object { $_.properties.DisplayName -eq 'CP short' }).properties; $Setting['ActivationReqMFA'] = $false }
             function Get-TestConditionalAccessResult([string]$ReportPath) {
                 Invoke-EntraOpsFindingEvaluation -Area TenantGovernance -ReportPath $ReportPath -ConfigFilePath (Join-Path $TestDrive 'none.json') | Where-Object Key -eq 'conditionalAccessControlPlaneExclusion'
             }
@@ -311,7 +319,76 @@ Describe 'Tenant Governance and Privilege History findings' {
             @($Result.Results.Evidence.ExcludedControlPlane | Select-Object -Unique) | Should -Be @('CP Admins')
             # The reason points to the setting.
             $Result.ReasonCode | Should -Be 'Note'
-            $Result.Reason | Should -BeLike "2 of 2 failed policies only exclude 'CP Admins'*set Findings.EmergencyAccessAccounts*"
+            $Result.Reason | Should -BeLike "2 of 2 policies with a reported exclusion only exclude 'CP Admins'*set Findings.EmergencyAccessAccounts*"
+        }
+
+        It 'reports three or more policies that only exclude the same Control Plane group as one result' {
+            $Folder = New-TestConditionalAccessData 'ca-collapsed' @(
+                [ordered]@{ Id = 'ca1'; DisplayName = 'Require MFA'; State = 'enabled'; ExcludeGroups = @('CP Admins') }
+                [ordered]@{ Id = 'ca2'; DisplayName = 'Block legacy'; State = 'enabled'; ExcludeGroups = @('CP Admins') }
+                [ordered]@{ Id = 'ca3'; DisplayName = 'Require device'; State = 'enabled'; ExcludeGroups = @('CP Admins') }
+                [ordered]@{ Id = 'ca4'; DisplayName = 'Require terms'; State = 'enabled'; ExcludeUsers = @('breakglass@contoso.com'); ExcludeGroups = @('CP Admins') }
+                [ordered]@{ Id = 'ca5'; DisplayName = 'No exclusion'; State = 'enabled' }
+            )
+            $Result = Get-TestConditionalAccessResult $Folder
+            # The three policies with the same single exclusion, the policy with another exclusion, and the passing policy.
+            $Result.EvaluatedCount | Should -Be 3
+            $Result.FailedCount | Should -Be 2
+            $Group = $Result.Results | Where-Object { $_.Instance.DisplayName -eq 'CP Admins' }
+            $Group.Instance.ObjectType | Should -Be 'group'
+            $Group.Instance.ObjectId | Should -Be (Get-TestId 2)
+            @($Group.Evidence.Policies.DisplayName) | Should -Be @('Require MFA', 'Block legacy', 'Require device')
+            $Group.Message | Should -BeLike "3 enabled Conditional Access policies do not apply to the excluded Control Plane group 'CP Admins'*Require MFA, Block legacy, Require device."
+            ($Result.Results | Where-Object { $_.Instance.DisplayName -eq 'Require terms' }).Evidence.ExcludedControlPlane | Should -Be @('breakglass@contoso.com', 'CP Admins')
+        }
+
+        It 'fails a required authentication context that no enabled Conditional Access policy targets (EO.3006, EO.3009)' {
+            $Folder = New-TestConditionalAccessData 'context-none' @(
+                [ordered]@{ Id = 'ca1'; DisplayName = 'Other context'; State = 'enabled'; AuthenticationContexts = @('c2') }
+                [ordered]@{ Id = 'ca2'; DisplayName = 'Disabled'; State = 'disabled'; AuthenticationContexts = @('c1') }
+            ) $script:ContextInsteadOfMfa
+            $Results = Get-TestAuthContextResult $Folder
+            $Role = $Results['controlPlaneActivationAuthContext'].Results | Where-Object { $_.Instance.DisplayName -eq 'CP short' }
+            $Role.Message | Should -Be "The activation of the Control Plane role 'CP short' requires the authentication context 'c1', but no enabled Conditional Access policy targets it, so it enforces nothing."
+            $Role.Evidence.AuthenticationContextPolicy.State | Should -Be 'None'
+            $Mfa = $Results['noMfaActivation'].Results | Where-Object { $_.Instance.DisplayName -eq 'CP short' }
+            $Mfa.Message | Should -Be "The Control Plane role 'CP short' can be activated without MFA: it requires the authentication context 'c1', but no enabled Conditional Access policy targets it, so it enforces nothing."
+        }
+
+        It 'does not count a report-only policy as enforcing the authentication context' {
+            $Folder = New-TestConditionalAccessData 'context-report-only' @(
+                [ordered]@{ Id = 'ca1'; DisplayName = 'Pilot'; State = 'enabledForReportingButNotEnforced'; AuthenticationContexts = @('c1') }
+            ) $script:ContextInsteadOfMfa
+            $Results = Get-TestAuthContextResult $Folder
+            $Role = $Results['controlPlaneActivationAuthContext'].Results | Where-Object { $_.Instance.DisplayName -eq 'CP short' }
+            $Role.Message | Should -BeLike "*requires the authentication context 'c1', but only report-only Conditional Access policies target it (Pilot), so it enforces nothing."
+            @($Results['noMfaActivation'].Results.Instance.DisplayName) | Should -Contain 'CP short'
+        }
+
+        It 'matches the authentication context of a role setting by ID with the display name the policy uses' {
+            $Folder = New-TestConditionalAccessData 'context-by-id' @(
+                [ordered]@{ Id = 'ca1'; DisplayName = 'Require reauthentication'; State = 'enabled'; AuthenticationContexts = @('Reauthentication') }
+            ) {
+                param($Data)
+                $Setting = ($Data.blobs.Values | Where-Object { $_.properties.DisplayName -eq 'CP short' }).properties
+                $Setting['ActivationReqMFA'] = $false
+                $Setting['AuthenticationContextId'] = 'c7'
+                $Setting.Remove('AuthenticationContextName')
+                $Data.blobs['context'] = [ordered]@{ resourceType = 'microsoft.entra.authenticationcontextclassreference'; properties = [ordered]@{ Id = 'c7'; DisplayName = 'Reauthentication'; IsAvailable = $true } }
+                $Data.snapshots[0].resources += [ordered]@{ p = 'microsoft.entra.authenticationcontextclassreference/test/c7.json'; h = 'context' }
+            }
+            $Results = Get-TestAuthContextResult $Folder
+            @($Results['controlPlaneActivationAuthContext'].Results.Instance.DisplayName) | Should -Not -Contain 'CP short'
+            @($Results['noMfaActivation'].Results.Instance.DisplayName) | Should -Not -Contain 'CP short'
+        }
+
+        It 'keeps the configured authentication context and notes it when the snapshot has no Conditional Access policies' {
+            $Folder = New-TestConditionalAccessData 'context-unknown' @() $script:ContextInsteadOfMfa
+            $Results = Get-TestAuthContextResult $Folder
+            @($Results['controlPlaneActivationAuthContext'].Results.Instance.DisplayName) | Should -Not -Contain 'CP short'
+            $Results['controlPlaneActivationAuthContext'].Reason | Should -BeLike '1 role(s) require an authentication context on activation, but the Tenant Governance snapshot has no Conditional Access policies*'
+            @($Results['noMfaActivation'].Results.Instance.DisplayName) | Should -Not -Contain 'CP short'
+            $Results['noMfaActivation'].Reason | Should -BeLike '*the Tenant Governance snapshot has no Conditional Access policies*'
         }
 
         It 'reports a Control Plane user excluded from every enabled policy without the setting and names it as candidate' {
