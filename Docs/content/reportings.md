@@ -99,10 +99,10 @@ export and of the Tenant Governance snapshots. `-HistorySource` of `New-EntraOps
 `New-EntraOpsPrivilegedEamPrivilegeHistoryData` and `New-EntraOpsTenantGovernanceConfigurationAnalyzerData`
 selects the source:
 
-| Value            | Behavior                                                                                                                                                                                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Value            | Behavior                                                                                                                                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Auto` (default) | The git history when the working folder is a git repository with git installed and the data has commits, otherwise the current folder (with a notice, not a warning).                     |
-| `Git`            | The git history; stops with an error without git or repository.                                                                                                                                |
+| `Git`            | The git history; stops with an error without git or repository.                                                                                                                           |
 | `Folder`         | Only the current files: one snapshot from the export (dated by its newest file) and from the snapshot folder (dated by `CapturedDateTime` of its manifest), also inside a git repository. |
 
 With git, an export or snapshot that differs from the newest commit (or was never committed) is added as the
@@ -190,16 +190,16 @@ its risk, and *Finding exceptions* exports the file to commit.
 
 Each affected object links to the report that shows it, opened at that object:
 
-| Affected object | Deep links |
-| --- | --- |
-| PIM role setting | PIM Request Flow (`#flow=` with the role and path), Configuration Analyzer (`#object=`) |
-| Access package assignment policy | Access Package Flow (`#flow=<policy ID>`), Configuration Analyzer (`#object=`) |
-| Conditional Access policy | Conditional Access Analysis (`#flow=<policy ID>`), Configuration Analyzer (`#object=`) |
-| Administrative unit | Configuration Analyzer (`#object=`) |
-| Tier breach path | Tier Breach Analyzer (`#sel=`), EAM Dashboard (`#assignment=`, `#asset=`), Access Path Map (`#node=`) |
-| Role assignment | EAM Dashboard (`#assignment=`, `#asset=`), Access Path Map (`#node=`) |
-| Privileged object | EAM Dashboard (`#asset=`), Access Path Map (`#node=`) |
-| Custom role | EAM Dashboard (`#assignment=` of its Control Plane assignments) |
+| Affected object                  | Deep links                                                                                            |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| PIM role setting                 | PIM Request Flow (`#flow=` with the role and path), Configuration Analyzer (`#object=`)               |
+| Access package assignment policy | Access Package Flow (`#flow=<policy ID>`), Configuration Analyzer (`#object=`)                        |
+| Conditional Access policy        | Conditional Access Analysis (`#flow=<policy ID>`), Configuration Analyzer (`#object=`)                |
+| Administrative unit              | Configuration Analyzer (`#object=`)                                                                   |
+| Tier breach path                 | Tier Breach Analyzer (`#sel=`), EAM Dashboard (`#assignment=`, `#asset=`), Access Path Map (`#node=`) |
+| Role assignment                  | EAM Dashboard (`#assignment=`, `#asset=`), Access Path Map (`#node=`)                                 |
+| Privileged object                | EAM Dashboard (`#asset=`), Access Path Map (`#node=`)                                                 |
+| Custom role                      | EAM Dashboard (`#assignment=` of its Control Plane assignments)                                       |
 
 **Overview** shows metrics and the inventory with the object details that the assignment-centric
 views don't show:
@@ -476,16 +476,16 @@ are available outside the reports, for example as Maester tests.
 - The rules are grouped in categories; the first digit of the rule ID is the category. IDs never
   change once released: a new rule gets the next number of its category.
 
-  | ID | Category | Checks |
-  | --- | --- | --- |
-  | `EO.1xxx` | Tier boundaries | Lower tiers that control objects, services or access of a more privileged tier |
-  | `EO.2xxx` | Classification | Objects, role assignments and approvers without a tier; custom roles to review |
-  | `EO.3xxx` | Just-in-time access | Standing access and the PIM settings of eligible assignments and activations |
-  | `EO.4xxx` | Account protection | Restricted management, cloud-only and member accounts, PAW, Conditional Access |
-  | `EO.5xxx` | Workload and agent identities | Service principals, applications and agents with privileged access |
-  | `EO.6xxx` | Access governance | Access packages: approval, requestor scope, expiration, access reviews and access drift |
-  | `EO.7xxx` | Ownership and delegation | Owners of privileged objects, role assignment delegation, nested groups, administrative units |
-  | `EO.8xxx` | Drift | Changes of privileged access between Privileged EAM snapshots |
+  | ID        | Category                      | Checks                                                                                        |
+  | --------- | ----------------------------- | --------------------------------------------------------------------------------------------- |
+  | `EO.1xxx` | Tier boundaries               | Lower tiers that control objects, services or access of a more privileged tier                |
+  | `EO.2xxx` | Classification                | Objects, role assignments and approvers without a tier; custom roles to review                |
+  | `EO.3xxx` | Just-in-time access           | Standing access and the PIM settings of eligible assignments and activations                  |
+  | `EO.4xxx` | Account protection            | Restricted management, cloud-only and member accounts, PAW, Conditional Access                |
+  | `EO.5xxx` | Workload and agent identities | Service principals, applications and agents with privileged access                            |
+  | `EO.6xxx` | Access governance             | Access packages: approval, requestor scope, expiration, access reviews and access drift       |
+  | `EO.7xxx` | Ownership and delegation      | Owners of privileged objects, role assignment delegation, nested groups, administrative units |
+  | `EO.8xxx` | Drift                         | Changes of privileged access between Privileged EAM snapshots                                 |
 
 - `Invoke-EntraOpsFindingEvaluation` evaluates the rules and returns one result per rule (`Failed`,
   `Passed`, `Skipped`, `Excluded` or `Error`, with the reason for the last three) with the affected
@@ -526,14 +526,14 @@ are available outside the reports, for example as Maester tests.
   Configuration Wizard) configures the evaluation. The reports, `findings.json` and the Maester Pack use
   the same settings:
 
-  | Setting | Default | Description |
-  | --- | --- | --- |
-  | `ExcludedRules` | none | Rules to exclude, by ID (`EO.4008`) or `<Area>.<Key>` (`PrivilegedAssets.pawMissing`). They are returned as `Excluded`. |
-  | `ControlPlaneActivationMaxHours` | `4` | `EO.3013`: maximum activation duration of Control Plane roles. |
-  | `EligibleAssignmentMaxDays` | `365` | `EO.3012`: maximum expiration of eligible assignments of Control and Management Plane roles. |
-  | `EmergencyAccessAccounts` | none | `EO.4003`: object IDs, user principal names or group display names that Conditional Access policies may exclude. `EO.3001`, `EO.4008`, `EO.4009`: the accounts (object ID or user principal name, not display names or groups) that keep permanent Control Plane role assignments, have no associated PAW, or have no linked personal work account without a finding. When empty, nothing counts as emergency access: excluded Control Plane users are reported, and `EO.4003` names the users excluded from every enabled policy (with at least two enabled policies) in a note as candidates for the setting. When the failed policies mostly exclude the same identity, the result of `EO.4003` names it in a note. |
-  | `ExceptionsFilePath` | `./Classification/FindingExceptions.json` | The [Finding Exceptions File](#finding-exceptions), relative to the EntraOps folder. |
-  | `ExceptionMaxDays` | `180` | Longest time a risk can be accepted, in days; `0` for no limit. |
+  | Setting                          | Default                                   | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+  | -------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `ExcludedRules`                  | none                                      | Rules to exclude, by ID (`EO.4008`) or `<Area>.<Key>` (`PrivilegedAssets.pawMissing`). They are returned as `Excluded`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+  | `ControlPlaneActivationMaxHours` | `4`                                       | `EO.3013`: maximum activation duration of Control Plane roles.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+  | `EligibleAssignmentMaxDays`      | `365`                                     | `EO.3012`: maximum expiration of eligible assignments of Control and Management Plane roles.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+  | `EmergencyAccessAccounts`        | none                                      | `EO.4003`: object IDs, user principal names or group display names that Conditional Access policies may exclude. `EO.3001`, `EO.4008`, `EO.4009`: the accounts (object ID or user principal name, not display names or groups) that keep permanent Control Plane role assignments, have no associated PAW, or have no linked personal work account without a finding. When empty, nothing counts as emergency access: excluded Control Plane users are reported, and `EO.4003` names the users excluded from every enabled policy (with at least two enabled policies) in a note as candidates for the setting. When the failed policies mostly exclude the same identity, the result of `EO.4003` names it in a note. |
+  | `ExceptionsFilePath`             | `./Classification/FindingExceptions.json` | The [Finding Exceptions File](#finding-exceptions), relative to the EntraOps folder.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+  | `ExceptionMaxDays`               | `180`                                     | Longest time a risk can be accepted, in days; `0` for no limit.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
   `ConfigurationAnalyzer.PimRequestFlowExcludedRiskFlags` and `AccessPackageFlowExcludedRiskFlags` are
   deprecated aliases of `ExcludedRules`.
@@ -567,6 +567,9 @@ are available outside the reports, for example as Maester tests.
   reason of the result instead of passing. Three or more policies whose only reported exclusion is the
   same user or group (typically the emergency access accounts) are one result for that user or group,
   with the policies in its evidence.
+- `EO.3004` (permanent eligible assignments allowed) and `EO.3007` (activation without approval) ask for
+  a review of their results instead of failing (severity Info). `EO.3007` evaluates Control Plane roles
+  only: approval is not expected for every privileged role.
 - `EO.3006` and `EO.3009` count an authentication context that a role requires on activation only when
   an enabled Conditional Access policy of the Tenant Governance snapshot targets it; report-only
   policies don't count. Whether that policy applies to every holder of the role isn't evaluated.

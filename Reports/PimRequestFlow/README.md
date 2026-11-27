@@ -65,17 +65,17 @@ the browser.
 
 ### Risk Flags
 
-| Risk flag ID | Detected condition |
-| --- | --- |
-| `noMfaActivation` | A Control Plane or Management Plane role can be activated without MFA and without an authentication context. |
-| `noApprovalActivation` | A Control Plane or Management Plane role can be activated without approval. |
-| `approverNotEnforced` | `ActivateApprover` has entries while `ApprovaltoActivate` is disabled, so the approver list has no effect. |
-| `approverLowerTier` | An activation approver has a lower access tier than the role being activated. |
+| Risk flag ID           | Detected condition                                                                                                         |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `noMfaActivation`      | A Control Plane or Management Plane role can be activated without MFA and without an authentication context.               |
+| `noApprovalActivation` | A Control Plane role can be activated without approval.                                                                    |
+| `approverNotEnforced`  | `ActivateApprover` has entries while `ApprovaltoActivate` is disabled, so the approver list has no effect.                 |
+| `approverLowerTier`    | An activation approver has a lower access tier than the role being activated.                                              |
 | `approverUnclassified` | An activation approver could not be resolved against the EAM Dashboard data, so its tier cannot be compared with the role. |
-| `authContextMissing` | An authentication context is required but no context is configured. |
-| `permanentEligible` | A permanent, non-expiring eligible assignment is allowed for a privileged role. |
-| `permanentActive` | A permanent, non-expiring active assignment is allowed for a privileged role. |
-| `noMfaActiveAssign` | A privileged role can be directly assigned as Active without MFA at assignment time. |
+| `authContextMissing`   | An authentication context is required but no context is configured.                                                        |
+| `permanentEligible`    | A permanent, non-expiring eligible assignment is allowed for a privileged role.                                            |
+| `permanentActive`      | A permanent, non-expiring active assignment is allowed for a privileged role.                                              |
+| `noMfaActiveAssign`    | A privileged role can be directly assigned as Active without MFA at assignment time.                                       |
 
 The risk flags are EntraOps finding rules with the IDs above as keys (`Get-EntraOpsFindingRule -Area
 PimRequestFlow`). `New-EntraOpsReportFindingData` evaluates them in PowerShell for every snapshot with

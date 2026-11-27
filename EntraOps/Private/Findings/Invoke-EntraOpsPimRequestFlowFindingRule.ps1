@@ -72,7 +72,8 @@ function Get-EntraOpsPimRequestFlowFlag {
         privileged roles for noMfaActivation), Failed whether it fails the rule, and Text the risk flag the
         PIM Request Flow report shows (New-EntraOpsReportFindingData keeps only the failed keys). A role is
         in scope when it is Control Plane, or Management Plane with a current assignment, and can be assigned
-        (Test-EntraOpsPimRoleSettingInScope). New-EntraOpsPimRequestFlowFindingContext
+        (Test-EntraOpsPimRoleSettingInScope); noApprovalActivation evaluates Control Plane roles only.
+        New-EntraOpsPimRequestFlowFindingContext
         evaluates every flow once (checks of the flow).
     #>
     [CmdletBinding()]
@@ -108,7 +109,8 @@ function Get-EntraOpsPimRequestFlowFlag {
         if ($ContextNotEnforced) { "$RoleText can be activated without MFA: it requires the authentication context '$($ContextPolicy.Context)', but $(Get-EntraOpsAuthContextPolicyText $ContextPolicy)." }
         else { "$RoleText can be activated without MFA or an authentication context." }
     }
-    Add-Check 'noApprovalActivation' ($Activation -and $Privileged) { -not $ApprovalRequired } { "$RoleText can be activated without approval." }
+    # Approval is reviewed for Control Plane roles only: it is not expected for every privileged role.
+    Add-Check 'noApprovalActivation' ($Activation -and (Test-EntraOpsPimRoleSettingInScope -Flow $Flow -ControlPlaneOnly)) { -not $ApprovalRequired } { "$RoleText can be activated without approval." }
     Add-Check 'approverNotEnforced' $Activation { -not $ApprovalRequired -and $Properties['ActivateApprover'] -is [array] -and $Properties['ActivateApprover'].Count -gt 0 } { "$RoleText has $($Properties['ActivateApprover'].Count) approver(s) configured, but 'Require approval to activate' is disabled - the approver list has no effect." }
     # The approver checks apply to privileged (Control and Management Plane) roles with approval.
     # The tier the approver is protected for (own classification, for a group its least protected member), not the
@@ -188,22 +190,22 @@ function Invoke-EntraOpsPimRequestFlowFindingRule {
         if (-not $Check.Failed) { [pscustomobject]@{ Failed = $false; InstanceKey = $Flow.id }; continue }
 
         [pscustomobject]@{
-            Failed         = $true
-            InstanceKey    = $Flow.id
-            ObjectId       = "$($Flow.roleId)"
-            ObjectType     = 'roleSetting'
-            DisplayName    = "$($Flow.roleName)"
-            AdminTierLevel = $(if ($Flow.roleTier) { Get-EntraOpsAdminTierLevel $Flow.roleTier } else { $null })
+            Failed             = $true
+            InstanceKey        = $Flow.id
+            ObjectId           = "$($Flow.roleId)"
+            ObjectType         = 'roleSetting'
+            DisplayName        = "$($Flow.roleName)"
+            AdminTierLevel     = $(if ($Flow.roleTier) { Get-EntraOpsAdminTierLevel $Flow.roleTier } else { $null })
             AdminTierLevelName = $(if ($Flow.roleTier) { "$($Flow.roleTier)" } else { $null })
-            Message        = $Check.Text
-            Evidence       = [ordered]@{
-                FlowId      = $Flow.id
-                Path        = $Flow.path
-                RoleTier    = $Flow.roleTier
-                SnapshotKey = $Context.SnapshotKey
+            Message            = $Check.Text
+            Evidence           = [ordered]@{
+                FlowId                      = $Flow.id
+                Path                        = $Flow.path
+                RoleTier                    = $Flow.roleTier
+                SnapshotKey                 = $Context.SnapshotKey
                 AuthenticationContextPolicy = $(if ($null -ne $Flow.PSObject.Properties['authContextPolicy'] -and $null -ne $Flow.authContextPolicy) { [ordered]@{ Context = $Flow.authContextPolicy.Context; State = $Flow.authContextPolicy.State; Policies = @($Flow.authContextPolicy.Policies) } })
                 # Tier: the tier of the approver's access; ProtectionTier: the classification the approver checks compare.
-                Approvers   = @($Flow.approvers | ForEach-Object { [ordered]@{ Label = $_.label; Tier = $_.tier; ProtectionTier = $(if ($null -ne $_.PSObject.Properties['protectionTier']) { $_.protectionTier }); LeastProtectedMember = $(if ($null -ne $_.PSObject.Properties['protectionMember']) { $_.protectionMember }); Resolved = $_.resolved } })
+                Approvers                   = @($Flow.approvers | ForEach-Object { [ordered]@{ Label = $_.label; Tier = $_.tier; ProtectionTier = $(if ($null -ne $_.PSObject.Properties['protectionTier']) { $_.protectionTier }); LeastProtectedMember = $(if ($null -ne $_.PSObject.Properties['protectionMember']) { $_.protectionMember }); Resolved = $_.resolved } })
             }
         }
     }

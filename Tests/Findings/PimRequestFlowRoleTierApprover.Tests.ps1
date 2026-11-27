@@ -34,7 +34,8 @@ Describe 'PIM Request Flow role tiers and approvers' {
                             Id = $Role.Id; DisplayName = $Role.Name; ActivationReqMFA = $true; ApprovaltoActivate = [bool]$Role.Approval
                             ActivateApprover = $(if ($Role.Approval) { @('Empty Approvers', 'Twin Approvers') } else { @() })
                             PermanentEligibleAssignmentisExpirationRequired = $false; PermanentActiveAssignmentisExpirationRequired = $true; AssignmentReqMFA = $true
-                        } }
+                        } 
+                    }
                     [ordered]@{ type = 'microsoft.entra.rolesetting'; name = $Role.Name; p = "microsoft.entra.rolesetting/test/$($Role.Name).json"; h = $Hash }
                 })
             Write-TestDataFile "$Root/ConfigurationAnalyzer/data/configuration-analyzer-data.js" 'ENTRAOPS_CONFIGANALYZER_DATA' ([ordered]@{
@@ -66,7 +67,8 @@ Describe 'PIM Request Flow role tiers and approvers' {
                                 & $Assignment $script:Roles.Raised 'ControlPlane' 'Privileged User Management'
                                 & $Assignment $script:Roles.Overwritten 'ManagementPlane' 'Custom Classification' 'RoleDefinitionOverwrites'
                                 & $Assignment $script:Roles.AssignedOnly 'ManagementPlane' 'Groups'
-                            ) }
+                            ) 
+                        }
                         [ordered]@{ objectId = $script:Ids.TwinAdmin; objectType = 'user'; objectUserPrincipalName = 'twin.admin@contoso.com'; objectDisplayName = 'Twin Name'; objectAdminTierLevelName = 'ControlPlane'; classification = @(); roleAssignments = @() }
                         # The empty group has User Access: before, its access tier stood in for its members.
                         [ordered]@{ objectId = $script:Ids.EmptyGroup; objectType = 'group'; objectDisplayName = 'Empty Approvers'; objectAdminTierLevelName = 'UserAccess'; classification = @(); roleAssignments = @() }
@@ -192,6 +194,26 @@ Describe 'PIM Request Flow role tiers and approvers' {
         $InScope.UserAccessAssigned | Should -BeFalse
         $InScope.ControlPlaneNotAssignable | Should -BeFalse
         $InScope.ManagementPlaneWithoutData | Should -BeTrue
+    }
+
+    It 'reviews the approval of Control Plane roles only (EO.3007), also for an assigned Management Plane role' {
+        $Flags = & (Get-Module EntraOps) {
+            foreach ($Tier in 'ControlPlane', 'ManagementPlane') {
+                $Flow = [pscustomobject]@{ path = 'activation'; roleId = '11111111-1111-1111-1111-111111111111'; roleTier = $Tier; roleName = 'Role'; roleAssignable = $true; roleAssigned = $true; approvers = @(); p = @{ ActivationReqMFA = $false; ApprovaltoActivate = $false } }
+                [pscustomobject]@{ Tier = $Tier; Flags = Get-EntraOpsPimRequestFlowFlag -Flow $Flow }
+            }
+        }
+        $ControlPlane = ($Flags | Where-Object Tier -EQ 'ControlPlane').Flags
+        $ManagementPlane = ($Flags | Where-Object Tier -EQ 'ManagementPlane').Flags
+        $ControlPlane.noApprovalActivation.Failed | Should -BeTrue
+        $ManagementPlane.noApprovalActivation.Applies | Should -BeFalse
+        $ManagementPlane.noApprovalActivation.Failed | Should -BeFalse
+        # The other role setting rules still evaluate the assigned Management Plane role.
+        $ManagementPlane.noMfaActivation.Failed | Should -BeTrue
+
+        $Rules = Get-EntraOpsFindingRule | Where-Object { $_.Id -in 'EO.3004', 'EO.3007' }
+        $Rules.Count | Should -Be 2
+        $Rules | ForEach-Object { $_.Investigate | Should -BeTrue; $_.Severity | Should -Be 'Info' }
     }
 
     It 'does not evaluate the PIM settings of built-in roles that cannot be assigned' {
