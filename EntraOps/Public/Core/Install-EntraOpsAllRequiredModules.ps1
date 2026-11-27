@@ -14,22 +14,7 @@ function Install-EntraOpsAllRequiredModules {
 
     $ErrorActionPreference = "Stop"
 
-    $RequiredModules = @(
-        @{
-            ModuleName    = 'Az.Accounts'
-            ModuleVersion = '5.1.1'
-        }
-        @{
-            ModuleName    = 'Az.Resources'
-            ModuleVersion = '10.2.0'
-        }
-        @{
-            ModuleName    = 'Microsoft.Graph.Authentication'
-            ModuleVersion = '2.18.0'
-        }
-    )
-
-    foreach ($RequiredModule in $RequiredModules) {
-        Install-EntraOpsRequiredModule -ModuleName $RequiredModule.ModuleName -MinimalVersion $RequiredModule.ModuleVersion
+    foreach ($RequiredModule in @(Get-EntraOpsModuleRequirement | Where-Object { -not $_.Optional })) {
+        Install-EntraOpsRequiredModule -ModuleName $RequiredModule.ModuleName
     }
 }

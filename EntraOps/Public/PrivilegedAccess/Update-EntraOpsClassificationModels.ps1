@@ -27,8 +27,10 @@ function Update-EntraOpsClassificationModels {
         mismatch, formatted so the lists can be copied straight into a classification JSON file or into an AI prompt.
 
     .PARAMETER RepoRoot
-        Repository root containing the 'Scripts', 'Classification', 'EntraOps_Classification' and 'ClassificationExplorer'
-        folders. Defaults to the parent of this script's folder, or the current location when run interactively.
+        Repository root containing the 'Classification', 'EntraOps_Classification' and 'ClassificationExplorer'
+        folders. Defaults to the root inferred from the imported module, or the unique sibling
+        AzurePrivilegedIAM checkout when invoked from EntraOps. This command maintains source
+        classification data; use New-EntraOpsClassificationExplorerData to refresh the EntraOps report.
 
     .PARAMETER IncludeCustomRoles
         Include custom role definitions for the role-based exports (Directory, Identity Governance, Device Management, Azure).
@@ -52,7 +54,7 @@ function Update-EntraOpsClassificationModels {
         Do not run Update-EntraOpsClassificationExplorerData at the end.
 
     .PARAMETER SkipEntraOpsRepoSync
-        Do not prompt to sync the Classification Explorer app source into the EntraOps repository
+        Do not prompt to sync classification templates and the Classification Explorer app source into the EntraOps repository
         (Sync-EntraOpsClassificationExplorerSource) at the end of the run.
 
     .PARAMETER SkipHistoryUpdate
@@ -108,30 +110,34 @@ function Update-EntraOpsClassificationModels {
     )
 
     #region Resolve paths
+    $module = $MyInvocation.MyCommand.Module
+    if (-not $module -or -not $module.ModuleBase -or -not $module.Path) {
+        throw 'Update-EntraOpsClassificationModels must be invoked from an imported module.'
+    }
     if ([string]::IsNullOrEmpty($RepoRoot)) {
-        if ($PSScriptRoot) {
-            $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-        } else {
-            $RepoRoot = (Get-Location).Path
+        $RepoRoot = Resolve-EntraOpsClassificationRepoRoot -ModuleBase $module.ModuleBase
+    }
+    $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+    $ClassificationPath = Join-Path $RepoRoot "Classification"
+    $ModulePath = $module.Path
+
+    foreach ($requiredFolder in 'Classification', 'EntraOps_Classification', 'ClassificationExplorer') {
+        if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $requiredFolder) -PathType Container)) {
+            throw "Classification source folder '$requiredFolder' not found under '$RepoRoot'. Pass -RepoRoot pointing at AzurePrivilegedIAM."
         }
     }
-    $RepoRoot = (Resolve-Path $RepoRoot).Path
-    $ScriptsPath = Join-Path $RepoRoot "Scripts"
-    $ClassificationPath = Join-Path $RepoRoot "Classification"
-    $ExplorerScript = Join-Path $RepoRoot "Scripts/Update-EntraOpsClassificationExplorerData.ps1"
-    $SyncScript = Join-Path $RepoRoot "Scripts/Sync-EntraOpsClassificationExplorerSource.ps1"
+    $OriginalLocation = Get-Location
 
-    if (-not (Test-Path $ScriptsPath)) { throw "Scripts folder not found at '$ScriptsPath'. Provide -RepoRoot." }
+    if (-not (Test-Path $ModulePath)) { throw "Loaded module path not found at '$ModulePath'." }
     #endregion
 
-    #region Pre-flight connection hints (do not fail, just warn)
+    # Keep the EntraOps connection hints when sharing the standalone maintenance implementation.
     if (-not (Get-Command Get-MgContext -ErrorAction SilentlyContinue) -or $null -eq (Get-MgContext -ErrorAction SilentlyContinue)) {
-        Write-Warning "No Microsoft Graph context detected. Run Connect-MgGraph before this command for the Graph based exports."
+        Write-Warning 'No Microsoft Graph context detected. Run Connect-MgGraph before this command for the Graph based exports.'
     }
     if (-not (Get-Command Get-AzContext -ErrorAction SilentlyContinue) -or $null -eq (Get-AzContext -ErrorAction SilentlyContinue)) {
-        Write-Warning "No Azure context detected. Run Connect-AzAccount before this command for the Azure roles export."
+        Write-Warning 'No Azure context detected. Run Connect-AzAccount before this command for the Azure roles export.'
     }
-    #endregion
 
     $MismatchTempFile = Join-Path ([System.IO.Path]::GetTempPath()) ("EntraOpsDirectoryRolesMismatch_{0}.json" -f ([guid]::NewGuid()))
 
@@ -144,307 +150,316 @@ function Update-EntraOpsClassificationModels {
         ResolveApiPermissionDisplayNames = [bool]$ResolveApiPermissionDisplayNames
         MismatchTempFile                 = $MismatchTempFile
     }
+    $Jobs = @()
 
     try {
-    #region Lane definitions
-    $LaneApiPermissions = {
-        param($RepoRoot, $ScriptsPath, $Options)
-        Set-Location $RepoRoot
-        . (Join-Path $ScriptsPath "Export-EntraOpsClassificationAppRoles.ps1")
-        . (Join-Path $ScriptsPath "Export-EntraOpsClassificationScopes.ps1")
-        . (Join-Path $ScriptsPath "Export-EntraOpsClassificationApiPermissions.ps1")
+        #region Lane definitions
+        $LaneApiPermissions = {
+            param($RepoRoot, $ModulePath, $Options)
+            $ErrorActionPreference = 'Stop'
+            Set-Location -LiteralPath $RepoRoot
+            Import-Module $ModulePath -ErrorAction Stop
 
-        try { Write-Output "Step 1/3 Export-EntraOpsClassificationAppRoles"; Export-EntraOpsClassificationAppRoles } catch { throw "AppRoles failed: $($_.Exception.Message)" }
-        try { Write-Output "Step 2/3 Export-EntraOpsClassificationScopes"; Export-EntraOpsClassificationScopes } catch { throw "Scopes failed: $($_.Exception.Message)" }
-        try {
-            Write-Output "Step 3/3 Export-EntraOpsClassificationApiPermissions"
-            if ($Options.ResolveApiPermissionDisplayNames) { Export-EntraOpsClassificationApiPermissions -ResolveDisplayNames }
-            else { Export-EntraOpsClassificationApiPermissions }
-        } catch { throw "ApiPermissions failed: $($_.Exception.Message)" }
-        Write-Output "Lane complete"
-    }
-
-    $LaneEntraIdRoles = {
-        param($RepoRoot, $ScriptsPath, $Options)
-        Set-Location $RepoRoot
-        . (Join-Path $ScriptsPath "Export-EntraOpsClassificationDirectoryRoles.ps1")
-        . (Join-Path $ScriptsPath "Export-EntraOpsClassificationDirectoryRolesFromMsftDocs.ps1")
-        . (Join-Path $ScriptsPath "Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs.ps1")
-
-        try { Write-Output "Step 1/3 Export-EntraOpsClassificationDirectoryRoles"; Export-EntraOpsClassificationDirectoryRoles -IncludeCustomRoles $Options.IncludeCustomRoles } catch { throw "DirectoryRoles failed: $($_.Exception.Message)" }
-        try { Write-Output "Step 2/3 Export-EntraOpsClassificationDirectoryRolesFromMsftDocs"; Export-EntraOpsClassificationDirectoryRolesFromMsftDocs } catch { throw "DirectoryRolesFromMsftDocs failed: $($_.Exception.Message)" }
-        try {
-            Write-Output "Step 3/3 Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs"
-            $mm = Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs -ShowSummaryOnly $true
-            $mm | ConvertTo-Json -Depth 8 | Out-File -FilePath $Options.MismatchTempFile -Force
-        } catch { throw "Mismatch comparison failed: $($_.Exception.Message)" }
-        Write-Output "Lane complete"
-    }
-
-    $LaneIdentityGovernance = {
-        param($RepoRoot, $ScriptsPath, $Options)
-        Set-Location $RepoRoot
-        . (Join-Path $ScriptsPath "Export-EntraOpsClassificationIdentityGovernanceRoles.ps1")
-        try { Write-Output "Export-EntraOpsClassificationIdentityGovernanceRoles"; Export-EntraOpsClassificationIdentityGovernanceRoles -IncludeCustomRoles $Options.IncludeCustomRoles } catch { throw "IdentityGovernanceRoles failed: $($_.Exception.Message)" }
-        Write-Output "Lane complete"
-    }
-
-    $LaneDeviceManagement = {
-        param($RepoRoot, $ScriptsPath, $Options)
-        Set-Location $RepoRoot
-        . (Join-Path $ScriptsPath "Export-EntraOpsClassificationDeviceManagementRoles.ps1")
-        try { Write-Output "Export-EntraOpsClassificationDeviceManagementRoles"; Export-EntraOpsClassificationDeviceManagementRoles -IncludeCustomRoles $Options.IncludeCustomRoles } catch { throw "DeviceManagementRoles failed: $($_.Exception.Message)" }
-        Write-Output "Lane complete"
-    }
-
-    $LaneAzureRoles = {
-        param($RepoRoot, $ScriptsPath, $Options)
-        Set-Location $RepoRoot
-        . (Join-Path $ScriptsPath "Export-EntraOpsClassificationAzureRoles.ps1")
-        $azParams = @{ IncludeCustomRoles = $Options.IncludeCustomRoles }
-        if ($Options.Tier0IncludedResourceScope.Count -gt 0) { $azParams.Tier0IncludedResourceScope = $Options.Tier0IncludedResourceScope }
-        if ($Options.Tier1IncludedResourceScope.Count -gt 0) { $azParams.Tier1IncludedResourceScope = $Options.Tier1IncludedResourceScope }
-        if ($Options.AzureClassificationFile) { $azParams.ClassificationFile = $Options.AzureClassificationFile }
-        if ($Options.AzureRoleDefinitionScope) { $azParams.RoleDefinitionScope = $Options.AzureRoleDefinitionScope }
-        try { Write-Output "Export-EntraOpsClassificationAzureRoles"; Export-EntraOpsClassificationAzureRoles @azParams } catch { throw "AzureRoles failed: $($_.Exception.Message)" }
-        Write-Output "Lane complete"
-    }
-
-    $Lanes = @(
-        [PSCustomObject]@{ Name = "ApiPermissions"; Script = $LaneApiPermissions }
-        [PSCustomObject]@{ Name = "EntraIdRoles"; Script = $LaneEntraIdRoles }
-        [PSCustomObject]@{ Name = "IdentityGovernance"; Script = $LaneIdentityGovernance }
-        [PSCustomObject]@{ Name = "DeviceManagement"; Script = $LaneDeviceManagement }
-        [PSCustomObject]@{ Name = "AzureRoles"; Script = $LaneAzureRoles }
-    )
-    #endregion
-
-    $StartTime = Get-Date
-    Write-Host ""
-    Write-Host "=== Updating EntraOps classification models ===" -ForegroundColor Cyan
-    Write-Host ("Repository root : {0}" -f $RepoRoot) -ForegroundColor DarkCyan
-    Write-Host ("Execution mode  : {0}" -f $(if ($Sequential) { "Sequential" } else { "Parallel (Start-ThreadJob)" })) -ForegroundColor DarkCyan
-    Write-Host ("Include custom  : {0}" -f $Options.IncludeCustomRoles) -ForegroundColor DarkCyan
-    Write-Host ""
-
-    #region Run lanes
-    $UseParallel = (-not $Sequential) -and (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue)
-    if ((-not $Sequential) -and (-not $UseParallel)) {
-        Write-Warning "Start-ThreadJob not available, falling back to sequential execution."
-    }
-
-    if ($UseParallel) {
-        $Jobs = foreach ($Lane in $Lanes) {
-            Start-ThreadJob -Name $Lane.Name -ScriptBlock $Lane.Script -ArgumentList $RepoRoot, $ScriptsPath, $Options
+            try { Write-Output "Step 1/3 Export-EntraOpsClassificationAppRoles"; Export-EntraOpsClassificationAppRoles } catch { throw "AppRoles failed: $($_.Exception.Message)" }
+            try { Write-Output "Step 2/3 Export-EntraOpsClassificationScopes"; Export-EntraOpsClassificationScopes } catch { throw "Scopes failed: $($_.Exception.Message)" }
+            try {
+                Write-Output "Step 3/3 Export-EntraOpsClassificationApiPermissions"
+                if ($Options.ResolveApiPermissionDisplayNames) { Export-EntraOpsClassificationApiPermissions -ResolveDisplayNames }
+                else { Export-EntraOpsClassificationApiPermissions }
+            } catch { throw "ApiPermissions failed: $($_.Exception.Message)" }
+            Write-Output "Lane complete"
         }
 
-        $TotalLanes = $Jobs.Count
-        do {
-            Start-Sleep -Milliseconds 750
+        $LaneEntraIdRoles = {
+            param($RepoRoot, $ModulePath, $Options)
+            $ErrorActionPreference = 'Stop'
+            Set-Location -LiteralPath $RepoRoot
+            Import-Module $ModulePath -ErrorAction Stop
+
+            try { Write-Output "Step 1/3 Export-EntraOpsClassificationDirectoryRoles"; Export-EntraOpsClassificationDirectoryRoles -IncludeCustomRoles $Options.IncludeCustomRoles } catch { throw "DirectoryRoles failed: $($_.Exception.Message)" }
+            try { Write-Output "Step 2/3 Export-EntraOpsClassificationDirectoryRolesFromMsftDocs"; Export-EntraOpsClassificationDirectoryRolesFromMsftDocs } catch { throw "DirectoryRolesFromMsftDocs failed: $($_.Exception.Message)" }
+            try {
+                Write-Output "Step 3/3 Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs"
+                $mm = Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs -ShowSummaryOnly $true
+                $mm | ConvertTo-Json -Depth 8 | Out-File -FilePath $Options.MismatchTempFile -Force
+            } catch { throw "Mismatch comparison failed: $($_.Exception.Message)" }
+            Write-Output "Lane complete"
+        }
+
+        $LaneIdentityGovernance = {
+            param($RepoRoot, $ModulePath, $Options)
+            $ErrorActionPreference = 'Stop'
+            Set-Location -LiteralPath $RepoRoot
+            Import-Module $ModulePath -ErrorAction Stop
+            try { Write-Output "Export-EntraOpsClassificationIdentityGovernanceRoles"; Export-EntraOpsClassificationIdentityGovernanceRoles -IncludeCustomRoles $Options.IncludeCustomRoles } catch { throw "IdentityGovernanceRoles failed: $($_.Exception.Message)" }
+            Write-Output "Lane complete"
+        }
+
+        $LaneDeviceManagement = {
+            param($RepoRoot, $ModulePath, $Options)
+            $ErrorActionPreference = 'Stop'
+            Set-Location -LiteralPath $RepoRoot
+            Import-Module $ModulePath -ErrorAction Stop
+            try { Write-Output "Export-EntraOpsClassificationDeviceManagementRoles"; Export-EntraOpsClassificationDeviceManagementRoles -IncludeCustomRoles $Options.IncludeCustomRoles } catch { throw "DeviceManagementRoles failed: $($_.Exception.Message)" }
+            Write-Output "Lane complete"
+        }
+
+        $LaneAzureRoles = {
+            param($RepoRoot, $ModulePath, $Options)
+            $ErrorActionPreference = 'Stop'
+            Set-Location -LiteralPath $RepoRoot
+            Import-Module $ModulePath -ErrorAction Stop
+            $azParams = @{ IncludeCustomRoles = $Options.IncludeCustomRoles }
+            if ($Options.Tier0IncludedResourceScope.Count -gt 0) { $azParams.Tier0IncludedResourceScope = $Options.Tier0IncludedResourceScope }
+            if ($Options.Tier1IncludedResourceScope.Count -gt 0) { $azParams.Tier1IncludedResourceScope = $Options.Tier1IncludedResourceScope }
+            if ($Options.AzureClassificationFile) { $azParams.ClassificationFile = $Options.AzureClassificationFile }
+            if ($Options.AzureRoleDefinitionScope) { $azParams.RoleDefinitionScope = $Options.AzureRoleDefinitionScope }
+            try { Write-Output "Export-EntraOpsClassificationAzureRoles"; Export-EntraOpsClassificationAzureRoles @azParams } catch { throw "AzureRoles failed: $($_.Exception.Message)" }
+            Write-Output "Lane complete"
+        }
+
+        $Lanes = @(
+            [PSCustomObject]@{ Name = "ApiPermissions"; Script = $LaneApiPermissions }
+            [PSCustomObject]@{ Name = "EntraIdRoles"; Script = $LaneEntraIdRoles }
+            [PSCustomObject]@{ Name = "IdentityGovernance"; Script = $LaneIdentityGovernance }
+            [PSCustomObject]@{ Name = "DeviceManagement"; Script = $LaneDeviceManagement }
+            [PSCustomObject]@{ Name = "AzureRoles"; Script = $LaneAzureRoles }
+        )
+        #endregion
+
+        $StartTime = Get-Date
+        Write-Host ""
+        Write-Host "=== Updating EntraOps classification models ===" -ForegroundColor Cyan
+        Write-Host ("Repository root : {0}" -f $RepoRoot) -ForegroundColor DarkCyan
+        Write-Host ("Execution mode  : {0}" -f $(if ($Sequential) { "Sequential" } else { "Parallel (Start-ThreadJob)" })) -ForegroundColor DarkCyan
+        Write-Host ("Include custom  : {0}" -f $Options.IncludeCustomRoles) -ForegroundColor DarkCyan
+        Write-Host ""
+
+        #region Run lanes
+        $UseParallel = (-not $Sequential) -and (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue)
+        if ((-not $Sequential) -and (-not $UseParallel)) {
+            Write-Warning "Start-ThreadJob not available, falling back to sequential execution."
+        }
+
+        if ($UseParallel) {
+            $Jobs = foreach ($Lane in $Lanes) {
+                Start-ThreadJob -Name $Lane.Name -ScriptBlock $Lane.Script -ArgumentList $RepoRoot, $ModulePath, $Options
+            }
+
+            $TotalLanes = $Jobs.Count
+            do {
+                Start-Sleep -Milliseconds 750
+                foreach ($Job in $Jobs) {
+                    # Report lane failures together below, including when the caller uses Stop.
+                    $NewOutput = Receive-Job -Job $Job -ErrorAction SilentlyContinue
+                    foreach ($Line in $NewOutput) {
+                        Write-Host ("[{0,-18}] {1}" -f $Job.Name, $Line) -ForegroundColor DarkGray
+                    }
+                }
+                $Completed = @($Jobs | Where-Object { $_.State -in 'Completed', 'Failed', 'Stopped' }).Count
+                $Running = (@($Jobs | Where-Object { $_.State -eq 'Running' }) | ForEach-Object { $_.Name }) -join ", "
+                Write-Progress -Activity "Updating EntraOps classification models" -Status "$Completed of $TotalLanes lanes complete | running: $Running" -PercentComplete (($Completed / $TotalLanes) * 100)
+            } while (@($Jobs | Where-Object { $_.State -notin 'Completed', 'Failed', 'Stopped' }).Count -gt 0)
+
+            # Drain remaining output and retain failures before removing the jobs.
+            $LaneFailures = [System.Collections.Generic.List[string]]::new()
             foreach ($Job in $Jobs) {
-                $NewOutput = Receive-Job -Job $Job
+                $NewOutput = Receive-Job -Job $Job -ErrorAction SilentlyContinue
                 foreach ($Line in $NewOutput) {
                     Write-Host ("[{0,-18}] {1}" -f $Job.Name, $Line) -ForegroundColor DarkGray
                 }
+                if ($Job.State -in 'Failed', 'Stopped') {
+                    # Start-ThreadJob exposes the failure on the job itself; it has no child jobs.
+                    $Reason = $Job.JobStateInfo.Reason
+                    $Message = if ($Reason) { $Reason.Message } else { "Job ended in state '$($Job.State)'" }
+                    $LaneFailures.Add(("{0}: {1}" -f $Job.Name, $Message))
+                }
             }
-            $Completed = @($Jobs | Where-Object { $_.State -in 'Completed', 'Failed', 'Stopped' }).Count
-            $Running = (@($Jobs | Where-Object { $_.State -eq 'Running' }) | ForEach-Object { $_.Name }) -join ", "
-            Write-Progress -Activity "Updating EntraOps classification models" -Status "$Completed of $TotalLanes lanes complete | running: $Running" -PercentComplete (($Completed / $TotalLanes) * 100)
-        } while (@($Jobs | Where-Object { $_.State -eq 'Running' }).Count -gt 0)
-
-        # Drain remaining output and retain failures before removing the jobs.
-        $LaneFailures = [System.Collections.Generic.List[string]]::new()
-        foreach ($Job in $Jobs) {
-            $NewOutput = Receive-Job -Job $Job
-            foreach ($Line in $NewOutput) {
-                Write-Host ("[{0,-18}] {1}" -f $Job.Name, $Line) -ForegroundColor DarkGray
-            }
-            if ($Job.State -in 'Failed', 'Stopped') {
-                $Reason = $Job.ChildJobs[0].JobStateInfo.Reason
-                $Message = if ($Reason) { $Reason.Message } else { "Job ended in state '$($Job.State)'" }
-                $LaneFailures.Add(("{0}: {1}" -f $Job.Name, $Message))
-            }
-        }
-        $Jobs | Remove-Job -Force
-        Write-Progress -Activity "Updating EntraOps classification models" -Completed
-        if ($LaneFailures.Count -gt 0) {
-            throw ("Classification update failed in {0} lane(s): {1}" -f $LaneFailures.Count, ($LaneFailures -join '; '))
-        }
-    } else {
-        $TotalLanes = $Lanes.Count
-        $Index = 0
-        foreach ($Lane in $Lanes) {
-            $Index++
-            Write-Progress -Activity "Updating EntraOps classification models (sequential)" -Status "Lane $Index of $TotalLanes : $($Lane.Name)" -PercentComplete ((($Index - 1) / $TotalLanes) * 100)
-            Write-Host ("--- Lane: {0} ---" -f $Lane.Name) -ForegroundColor Cyan
-            & $Lane.Script $RepoRoot $ScriptsPath $Options | ForEach-Object { Write-Host ("[{0,-18}] {1}" -f $Lane.Name, $_) -ForegroundColor DarkGray }
-        }
-        Write-Progress -Activity "Updating EntraOps classification models (sequential)" -Completed
-    }
-    #endregion
-
-    #region Update Classification Explorer
-    if (-not $SkipClassificationExplorerUpdate) {
-        if (Test-Path $ExplorerScript) {
-            Write-Host ""
-            Write-Host "=== Updating Classification Explorer (Update-EntraOpsClassificationExplorerData -Mode Standalone) ===" -ForegroundColor Cyan
-            Write-Progress -Activity "Updating EntraOps classification models" -Status "Refreshing Classification Explorer bundle" -PercentComplete 95
-            try {
-                . $ExplorerScript
-                $explorerParams = @{ RepoRoot = $RepoRoot; Mode = 'Standalone' }
-                if ($SkipHistoryUpdate) { $explorerParams.SkipHistory = $true }
-                Update-EntraOpsClassificationExplorerData @explorerParams
-            } catch { throw "Update-EntraOpsClassificationExplorerData failed: $($_.Exception.Message)" }
+            $Jobs | Remove-Job -Force
+            $Jobs = @()
             Write-Progress -Activity "Updating EntraOps classification models" -Completed
+            if ($LaneFailures.Count -gt 0) {
+                throw ("Classification update failed in {0} lane(s): {1}" -f $LaneFailures.Count, ($LaneFailures -join '; '))
+            }
         } else {
-            throw "Classification Explorer update script not found at '$ExplorerScript'."
+            $TotalLanes = $Lanes.Count
+            $Index = 0
+            foreach ($Lane in $Lanes) {
+                $Index++
+                Write-Progress -Activity "Updating EntraOps classification models (sequential)" -Status "Lane $Index of $TotalLanes : $($Lane.Name)" -PercentComplete ((($Index - 1) / $TotalLanes) * 100)
+                Write-Host ("--- Lane: {0} ---" -f $Lane.Name) -ForegroundColor Cyan
+                & $Lane.Script $RepoRoot $ModulePath $Options | ForEach-Object { Write-Host ("[{0,-18}] {1}" -f $Lane.Name, $_) -ForegroundColor DarkGray }
+            }
+            Write-Progress -Activity "Updating EntraOps classification models (sequential)" -Completed
         }
-    }
-    #endregion
+        #endregion
 
-    #region Sync Classification Explorer source to EntraOps repository
-    if (-not $SkipEntraOpsRepoSync) {
-        if (Test-Path $SyncScript) {
-            $DefaultEntraOpsRoot = "../entraops"
-            Write-Host ""
-            Write-Host "=== Sync Classification Explorer source to EntraOps repository ===" -ForegroundColor Cyan
-            $EntraOpsRootAnswer = Read-Host ("Update Classification Explorer in EntraOps repository as well? Default EntraOpsRoot: '{0}' (press Enter to accept, type a custom path, or 'n' to skip)" -f $DefaultEntraOpsRoot)
-            if ($EntraOpsRootAnswer -notin @('n', 'N', 'no', 'No')) {
-                $EntraOpsRootToUse = if ([string]::IsNullOrWhiteSpace($EntraOpsRootAnswer)) { $DefaultEntraOpsRoot } else { $EntraOpsRootAnswer }
+        #region Update Classification Explorer
+        if (-not $SkipClassificationExplorerUpdate) {
+            if (Get-Command Update-EntraOpsClassificationExplorerData -ErrorAction SilentlyContinue) {
+                Write-Host ""
+                Write-Host "=== Updating Classification Explorer (Update-EntraOpsClassificationExplorerData -Mode Standalone) ===" -ForegroundColor Cyan
+                Write-Progress -Activity "Updating EntraOps classification models" -Status "Refreshing Classification Explorer bundle" -PercentComplete 95
                 try {
-                    . $SyncScript
-                    Sync-EntraOpsClassificationExplorerSource -RepoRoot $RepoRoot -EntraOpsRoot $EntraOpsRootToUse
-                } catch { throw "Sync-EntraOpsClassificationExplorerSource failed: $($_.Exception.Message)" }
+                    $explorerParams = @{ RepoRoot = $RepoRoot; Mode = 'Standalone' }
+                    if ($SkipHistoryUpdate) { $explorerParams.SkipHistory = $true }
+                    Update-EntraOpsClassificationExplorerData @explorerParams
+                } catch { throw "Update-EntraOpsClassificationExplorerData failed: $($_.Exception.Message)" }
+                Write-Progress -Activity "Updating EntraOps classification models" -Completed
             } else {
-                Write-Host "Skipped syncing Classification Explorer source to EntraOps repository." -ForegroundColor DarkGray
+                throw 'Update-EntraOpsClassificationExplorerData is not exported by the loaded module.'
             }
-        } else {
-            throw "Sync-EntraOpsClassificationExplorerSource script not found at '$SyncScript'."
         }
-    }
-    #endregion
+        #endregion
 
-    #region Build summary
-    function Get-EntraOpsUnclassifiedFromFile {
-        param([string]$Path)
-        $items = New-Object System.Collections.Generic.List[string]
-        if (-not (Test-Path $Path)) { return $items }
-        try { $data = Get-Content -Path $Path -Raw | ConvertFrom-Json -Depth 20 } catch { return $items }
-        # ConvertFrom-Json collapses a JSON '[]' to $null and a single-element JSON array to a
-        # bare object rather than a one-item array - normalize both back to a real array so the
-        # foreach below always sees the same shape regardless of how many entries the file has.
-        $data = @(if ($null -ne $data) { $data })
-        foreach ($item in $data) {
-            $props = $item.PSObject.Properties.Name
-            if ($props -contains 'RolePermissions') {
-                foreach ($perm in $item.RolePermissions) {
-                    $permProps = $perm.PSObject.Properties.Name
-                    if (($permProps -contains 'EAMTierLevelName') -and $perm.EAMTierLevelName -eq 'Unclassified' -and ($permProps -contains 'AuthorizedResourceAction') -and $perm.AuthorizedResourceAction) {
-                        $items.Add([string]$perm.AuthorizedResourceAction) | Out-Null
+        #region Sync classification templates and Classification Explorer source to EntraOps repository
+        if (-not $SkipEntraOpsRepoSync) {
+            if (Get-Command Sync-EntraOpsClassificationExplorerSource -ErrorAction SilentlyContinue) {
+                Write-Host ""
+                Write-Host "=== Sync classification templates and Classification Explorer source to EntraOps repository ===" -ForegroundColor Cyan
+                $EntraOpsRootAnswer = Read-Host 'Update classification templates and Classification Explorer in the EntraOps repository as well? Press Enter to auto-detect, type a custom path, or n to skip'
+                if ($EntraOpsRootAnswer -notin @('n', 'N', 'no', 'No')) {
+                    try {
+                        $syncParameters = @{ RepoRoot = $RepoRoot }
+                        if (-not [string]::IsNullOrWhiteSpace($EntraOpsRootAnswer)) {
+                            $syncParameters.EntraOpsRoot = $EntraOpsRootAnswer
+                        }
+                        Sync-EntraOpsClassificationExplorerSource @syncParameters
+                    } catch { throw "Sync-EntraOpsClassificationExplorerSource failed: $($_.Exception.Message)" }
+                } else {
+                    Write-Host "Skipped syncing classification templates and Classification Explorer source to EntraOps repository." -ForegroundColor DarkGray
+                }
+            } else {
+                Write-Verbose 'Classification Explorer source sync is not available in the loaded module.'
+            }
+        }
+        #endregion
+
+        #region Build summary
+        function Get-EntraOpsUnclassifiedFromFile {
+            param([string]$Path)
+            $items = New-Object System.Collections.Generic.List[string]
+            if (-not (Test-Path $Path)) { return $items }
+            try { $data = Get-Content -Path $Path -Raw | ConvertFrom-Json -Depth 20 } catch { return $items }
+            # ConvertFrom-Json collapses a JSON '[]' to $null and a single-element JSON array to a
+            # bare object rather than a one-item array - normalize both back to a real array so the
+            # foreach below always sees the same shape regardless of how many entries the file has.
+            $data = @(if ($null -ne $data) { $data })
+            foreach ($item in $data) {
+                $props = $item.PSObject.Properties.Name
+                if ($props -contains 'RolePermissions') {
+                    foreach ($perm in $item.RolePermissions) {
+                        $permProps = $perm.PSObject.Properties.Name
+                        if (($permProps -contains 'EAMTierLevelName') -and $perm.EAMTierLevelName -eq 'Unclassified' -and ($permProps -contains 'AuthorizedResourceAction') -and $perm.AuthorizedResourceAction) {
+                            $items.Add([string]$perm.AuthorizedResourceAction) | Out-Null
+                        }
                     }
+                } elseif (($props -contains 'EAMTierLevelName') -and $item.EAMTierLevelName -eq 'Unclassified') {
+                    $id = $null
+                    foreach ($candidate in 'AuthorizedResourceAction', 'PermissionValue', 'AppRoleDisplayName', 'ScopeDisplayName') {
+                        if (($props -contains $candidate) -and $item.$candidate) { $id = [string]$item.$candidate; break }
+                    }
+                    if ($id) { $items.Add($id) | Out-Null }
                 }
-            } elseif (($props -contains 'EAMTierLevelName') -and $item.EAMTierLevelName -eq 'Unclassified') {
-                $id = $null
-                foreach ($candidate in 'AuthorizedResourceAction', 'PermissionValue', 'AppRoleDisplayName', 'ScopeDisplayName') {
-                    if (($props -contains $candidate) -and $item.$candidate) { $id = [string]$item.$candidate; break }
-                }
-                if ($id) { $items.Add($id) | Out-Null }
+            }
+            return ($items | Sort-Object -Unique)
+        }
+
+        $SummarySources = [ordered]@{
+            "Classification_AppRoles.json"                          = (Join-Path $ClassificationPath "Classification_AppRoles.json")
+            "Classification_Scopes.json"                            = (Join-Path $ClassificationPath "Classification_Scopes.json")
+            "Classification_ApiPermissions.json"                    = (Join-Path $ClassificationPath "Classification_ApiPermissions.json")
+            "Classification_EntraIdDirectoryRoles.json"             = (Join-Path $ClassificationPath "Classification_EntraIdDirectoryRoles.json")
+            "Classification_EntraIdDirectoryRolesFromMsftDocs.json" = (Join-Path $ClassificationPath "Classification_EntraIdDirectoryRolesFromMsftDocs.json")
+            "Classification_IdentityGovernance.json"                = (Join-Path $ClassificationPath "Classification_IdentityGovernance.json")
+            "Classification_DeviceManagementRoles.json"             = (Join-Path $ClassificationPath "Classification_DeviceManagementRoles.json")
+            "Classification_AzureResources.json"                    = (Join-Path $ClassificationPath "Classification_AzureResources.json")
+        }
+
+        $UnclassifiedBySource = [ordered]@{}
+        foreach ($Source in $SummarySources.Keys) {
+            $UnclassifiedBySource[$Source] = @(Get-EntraOpsUnclassifiedFromFile -Path $SummarySources[$Source])
+        }
+
+        # Microsoft Docs mismatch
+        $Mismatch = $null
+        if (Test-Path $MismatchTempFile) {
+            try { $Mismatch = Get-Content -Path $MismatchTempFile -Raw | ConvertFrom-Json -Depth 10 } catch { $Mismatch = $null }
+            Remove-Item -Path $MismatchTempFile -Force -ErrorAction SilentlyContinue
+        }
+
+        $OnlyInDocs = @()
+        $OnlyInGraph = @()
+        $DocsUnclassified = @()
+        if ($Mismatch) {
+            $OnlyInDocs = @($Mismatch.ActionDifferences | Where-Object { $_.Difference -eq 'OnlyInDocs' } | Select-Object -ExpandProperty Action -Unique | Sort-Object)
+            $OnlyInGraph = @($Mismatch.ActionDifferences | Where-Object { $_.Difference -eq 'OnlyInGraph' } | Select-Object -ExpandProperty Action -Unique | Sort-Object)
+            $DocsUnclassified = @($Mismatch.UnclassifiedActions | Select-Object -ExpandProperty Action -Unique | Sort-Object)
+        }
+        #endregion
+
+        #region Print summary
+        $Duration = (Get-Date) - $StartTime
+        Write-Host ""
+        Write-Host "================ CLASSIFICATION UPDATE SUMMARY ================" -ForegroundColor Cyan
+        Write-Host ("Completed in {0:hh\:mm\:ss}" -f $Duration) -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Unclassified items per source:" -ForegroundColor Yellow
+        foreach ($Source in $UnclassifiedBySource.Keys) {
+            $count = $UnclassifiedBySource[$Source].Count
+            $color = if ($count -gt 0) { "Yellow" } else { "Green" }
+            Write-Host ("  {0,-52} {1}" -f $Source, $count) -ForegroundColor $color
+        }
+        Write-Host ""
+        Write-Host "Microsoft Docs comparison (Entra ID directory roles):" -ForegroundColor Yellow
+        Write-Host ("  Actions only in Graph export : {0}" -f $OnlyInGraph.Count) -ForegroundColor Yellow
+        Write-Host ("  Actions only in Docs export  : {0}" -f $OnlyInDocs.Count) -ForegroundColor Magenta
+        Write-Host ("  Unclassified (Graph+Docs)    : {0}" -f $DocsUnclassified.Count) -ForegroundColor Red
+
+        # Copy-friendly blocks (plain text, no markdown, safe to paste into JSON or an AI prompt)
+        Write-Host ""
+        Write-Host "----- COPY/PASTE: UNCLASSIFIED ACTIONS PER SOURCE -----" -ForegroundColor Green
+        foreach ($Source in $UnclassifiedBySource.Keys) {
+            $list = $UnclassifiedBySource[$Source]
+            if ($list.Count -gt 0) {
+                Write-Host ""
+                Write-Host ("# {0} ({1} unclassified)" -f $Source, $list.Count) -ForegroundColor Green
+                $list | ForEach-Object { Write-Host $_ }
             }
         }
-        return ($items | Sort-Object -Unique)
-    }
 
-    $SummarySources = [ordered]@{
-        "Classification_AppRoles.json"                          = (Join-Path $ClassificationPath "Classification_AppRoles.json")
-        "Classification_Scopes.json"                            = (Join-Path $ClassificationPath "Classification_Scopes.json")
-        "Classification_ApiPermissions.json"                    = (Join-Path $ClassificationPath "Classification_ApiPermissions.json")
-        "Classification_EntraIdDirectoryRoles.json"             = (Join-Path $ClassificationPath "Classification_EntraIdDirectoryRoles.json")
-        "Classification_EntraIdDirectoryRolesFromMsftDocs.json" = (Join-Path $ClassificationPath "Classification_EntraIdDirectoryRolesFromMsftDocs.json")
-        "Classification_IdentityGovernance.json"                = (Join-Path $ClassificationPath "Classification_IdentityGovernance.json")
-        "Classification_DeviceManagementRoles.json"             = (Join-Path $ClassificationPath "Classification_DeviceManagementRoles.json")
-        "Classification_AzureResources.json"                    = (Join-Path $ClassificationPath "Classification_AzureResources.json")
-    }
-
-    $UnclassifiedBySource = [ordered]@{}
-    foreach ($Source in $SummarySources.Keys) {
-        $UnclassifiedBySource[$Source] = @(Get-EntraOpsUnclassifiedFromFile -Path $SummarySources[$Source])
-    }
-
-    # Microsoft Docs mismatch
-    $Mismatch = $null
-    if (Test-Path $MismatchTempFile) {
-        try { $Mismatch = Get-Content -Path $MismatchTempFile -Raw | ConvertFrom-Json -Depth 10 } catch { $Mismatch = $null }
-        Remove-Item -Path $MismatchTempFile -Force -ErrorAction SilentlyContinue
-    }
-
-    $OnlyInDocs = @()
-    $OnlyInGraph = @()
-    $DocsUnclassified = @()
-    if ($Mismatch) {
-        $OnlyInDocs = @($Mismatch.ActionDifferences | Where-Object { $_.Difference -eq 'OnlyInDocs' } | Select-Object -ExpandProperty Action -Unique | Sort-Object)
-        $OnlyInGraph = @($Mismatch.ActionDifferences | Where-Object { $_.Difference -eq 'OnlyInGraph' } | Select-Object -ExpandProperty Action -Unique | Sort-Object)
-        $DocsUnclassified = @($Mismatch.UnclassifiedActions | Select-Object -ExpandProperty Action -Unique | Sort-Object)
-    }
-    #endregion
-
-    #region Print summary
-    $Duration = (Get-Date) - $StartTime
-    Write-Host ""
-    Write-Host "================ CLASSIFICATION UPDATE SUMMARY ================" -ForegroundColor Cyan
-    Write-Host ("Completed in {0:hh\:mm\:ss}" -f $Duration) -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Unclassified items per source:" -ForegroundColor Yellow
-    foreach ($Source in $UnclassifiedBySource.Keys) {
-        $count = $UnclassifiedBySource[$Source].Count
-        $color = if ($count -gt 0) { "Yellow" } else { "Green" }
-        Write-Host ("  {0,-52} {1}" -f $Source, $count) -ForegroundColor $color
-    }
-    Write-Host ""
-    Write-Host "Microsoft Docs comparison (Entra ID directory roles):" -ForegroundColor Yellow
-    Write-Host ("  Actions only in Graph export : {0}" -f $OnlyInGraph.Count) -ForegroundColor Yellow
-    Write-Host ("  Actions only in Docs export  : {0}" -f $OnlyInDocs.Count) -ForegroundColor Magenta
-    Write-Host ("  Unclassified (Graph+Docs)    : {0}" -f $DocsUnclassified.Count) -ForegroundColor Red
-
-    # Copy-friendly blocks (plain text, no markdown, safe to paste into JSON or an AI prompt)
-    Write-Host ""
-    Write-Host "----- COPY/PASTE: UNCLASSIFIED ACTIONS PER SOURCE -----" -ForegroundColor Green
-    foreach ($Source in $UnclassifiedBySource.Keys) {
-        $list = $UnclassifiedBySource[$Source]
-        if ($list.Count -gt 0) {
+        if ($DocsUnclassified.Count -gt 0) {
             Write-Host ""
-            Write-Host ("# {0} ({1} unclassified)" -f $Source, $list.Count) -ForegroundColor Green
-            $list | ForEach-Object { Write-Host $_ }
+            Write-Host "----- COPY/PASTE: UNCLASSIFIED DIRECTORY ROLE ACTIONS (Graph + Docs) -----" -ForegroundColor Green
+            $DocsUnclassified | ForEach-Object { Write-Host $_ }
         }
-    }
 
-    if ($DocsUnclassified.Count -gt 0) {
+        if ($OnlyInDocs.Count -gt 0) {
+            Write-Host ""
+            Write-Host "----- COPY/PASTE: ACTIONS PRESENT ONLY IN MICROSOFT DOCS (missing from Graph export) -----" -ForegroundColor Green
+            $OnlyInDocs | ForEach-Object { Write-Host $_ }
+        }
         Write-Host ""
-        Write-Host "----- COPY/PASTE: UNCLASSIFIED DIRECTORY ROLE ACTIONS (Graph + Docs) -----" -ForegroundColor Green
-        $DocsUnclassified | ForEach-Object { Write-Host $_ }
-    }
-
-    if ($OnlyInDocs.Count -gt 0) {
+        Write-Host "==============================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "----- COPY/PASTE: ACTIONS PRESENT ONLY IN MICROSOFT DOCS (missing from Graph export) -----" -ForegroundColor Green
-        $OnlyInDocs | ForEach-Object { Write-Host $_ }
-    }
-    Write-Host ""
-    Write-Host "==============================================================" -ForegroundColor Cyan
-    Write-Host ""
-    #endregion
+        #endregion
 
-    # Return a structured object for further processing / AI prompting
-    return [PSCustomObject]@{
-        RepoRoot              = $RepoRoot
-        DurationSeconds       = [math]::Round($Duration.TotalSeconds, 1)
-        UnclassifiedBySource  = $UnclassifiedBySource
-        TotalUnclassified     = (($UnclassifiedBySource.Values | ForEach-Object { $_.Count }) | Measure-Object -Sum).Sum
-        DocsOnlyActions       = $OnlyInDocs
-        GraphOnlyActions      = $OnlyInGraph
-        DirectoryUnclassified = $DocsUnclassified
-        ActionDifferenceCount = if ($Mismatch) { @($Mismatch.ActionDifferences).Count } else { 0 }
-    }
+        return [PSCustomObject]@{
+            RepoRoot              = $RepoRoot
+            DurationSeconds       = [math]::Round($Duration.TotalSeconds, 1)
+            UnclassifiedBySource  = $UnclassifiedBySource
+            TotalUnclassified     = (($UnclassifiedBySource.Values | ForEach-Object { $_.Count }) | Measure-Object -Sum).Sum
+            DocsOnlyActions       = $OnlyInDocs
+            GraphOnlyActions      = $OnlyInGraph
+            DirectoryUnclassified = $DocsUnclassified
+            ActionDifferenceCount = if ($Mismatch) { @($Mismatch.ActionDifferences).Count } else { 0 }
+        }
     } finally {
+        if ($Jobs.Count -gt 0) {
+            $Jobs | Stop-Job -ErrorAction SilentlyContinue
+            $Jobs | Remove-Job -Force -ErrorAction SilentlyContinue
+        }
         Remove-Item -LiteralPath $MismatchTempFile -Force -ErrorAction SilentlyContinue
+        Set-Location -LiteralPath $OriginalLocation.Path
     }
 }

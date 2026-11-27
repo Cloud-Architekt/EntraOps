@@ -9,13 +9,13 @@ Describe 'Remove-EntraOpsData' {
     BeforeEach {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         $script:Tenant = Join-Path $script:Root 'Classification/contoso.onmicrosoft.com'
-        foreach ($Folder in 'PrivilegedEAM/EntraID', 'TenantGovernance/Snapshots', 'Classification/Templates', 'Classification/contoso.onmicrosoft.com', 'Classification/fabrikam.onmicrosoft.com', 'Reports/EamDashboard/data') {
+        foreach ($Folder in 'PrivilegedEAM/EntraID', 'TenantGovernance/Snapshots', 'Classification/Templates', 'Classification/contoso.onmicrosoft.com', 'Classification/fabrikam.onmicrosoft.com', 'Reports/EamDashboard/data', 'Reports/PimRequestFlow/data', 'Reports/Findings/data') {
             New-Item -ItemType Directory -Path (Join-Path $script:Root $Folder) -Force | Out-Null
         }
         foreach ($File in 'PrivilegedEAM/EntraID/EntraID.json', 'TenantGovernance/Snapshots/.SnapshotManifest.json', 'Classification/Templates/Classification_AadResources.json',
             'Classification/Global.json', 'Classification/ObjectClassification.json', 'Classification/contoso.onmicrosoft.com/Classification_AadResources.json',
             'Classification/contoso.onmicrosoft.com/Classification_RoleActionOverwrites.json', 'Classification/contoso.onmicrosoft.com/Classification_RoleDefinitionOverwrites_PAW.json', 'Classification/contoso.onmicrosoft.com/Classification_ApiPermissionOverwrites.json', 'Classification/fabrikam.onmicrosoft.com/Classification_AadResources.json',
-            'Reports/EamDashboard/data/eam-dashboard-data.js', 'EntraOpsConfig.json') {
+            'Reports/EamDashboard/data/eam-dashboard-data.js', 'Reports/PimRequestFlow/data/pim-request-flow-findings.js', 'Reports/Findings/data/findings.json', 'Reports/Findings/data/findings.js', 'EntraOpsConfig.json') {
             Set-Content -LiteralPath (Join-Path $script:Root $File) -Value '{}'
         }
         Mock Clear-EntraOpsCache -ModuleName EntraOps {}
@@ -27,6 +27,9 @@ Describe 'Remove-EntraOpsData' {
         Test-Path (Join-Path $script:Root 'PrivilegedEAM') | Should -BeFalse
         Test-Path (Join-Path $script:Root 'TenantGovernance/Snapshots') | Should -BeFalse
         Test-Path (Join-Path $script:Root 'Reports/EamDashboard/data/eam-dashboard-data.js') | Should -BeFalse
+        Test-Path (Join-Path $script:Root 'Reports/PimRequestFlow/data/pim-request-flow-findings.js') | Should -BeFalse
+        Test-Path (Join-Path $script:Root 'Reports/Findings/data/findings.json') | Should -BeFalse
+        Test-Path (Join-Path $script:Root 'Reports/Findings/data/findings.js') | Should -BeFalse
         Test-Path (Join-Path $script:Tenant 'Classification_AadResources.json') | Should -BeFalse
         Test-Path (Join-Path $script:Root 'Classification/fabrikam.onmicrosoft.com') | Should -BeFalse
         Test-Path (Join-Path $script:Tenant 'Classification_RoleActionOverwrites.json') | Should -BeTrue

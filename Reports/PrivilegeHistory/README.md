@@ -19,17 +19,32 @@ and the [Tier Breach Analyzer](../TierBreachAnalyzer/README.md).
   (an object whose own tier is less privileged than a role assignment it
   holds) over time. Charts show totals across every RBAC system and tier
   (that's what is aggregated at generation time).
-- **Filters** – RBAC System, RBAC Tier Level and a free-text Role search apply
-  to the snapshot detail and compare views below the charts.
-- **Time range** – pick a "from"/"to" snapshot to zoom the trend charts into a
-  specific window, or reset back to the full history.
+- **Filters** – RBAC System and RBAC Tier Level pills (any combination of values,
+  with the number of matching privileged assets of the selected snapshot, or of
+  the latest snapshot of the time range) and a free-text Role search apply to the
+  snapshot detail below the charts.
+- **Time range** – pick a "from"/"to" snapshot in the search bar to zoom the
+  trend charts into a specific window, or reset back to the full history.
 - **Snapshot detail** – click a point on any chart to inspect that snapshot:
   totals (with deltas vs. today's live data, when the EAM Dashboard dataset is
   present) plus filtered privileged asset and role assignment tables.
 - **Open in EAM Dashboard Overview** – jump from a snapshot straight into the
   [EAM Dashboard](../EamDashboard/README.md) with the same RBAC System / Tier
-  Level filters applied (handed off via URL query parameters, since the two
-  apps are separate static-web pages).
+  Level filters (one or several tiers) and the Role search applied (handed off via
+  URL query parameters `rs`, `objectTier` and `q`, since the two apps are separate
+  static-web pages). The EAM Dashboard lists privileged groups too, while the
+  Privilege History counts privileged assets without groups.
+- **Deltas vs. today** – the snapshot totals are compared with the EAM Dashboard
+  data counted like the generator (assets without groups, a role assignment once
+  per instance ID), so the snapshot of today's export shows *no change*.
+- **Tier breaches** – the chart counts every role assignment above the object tier,
+  including delegated permissions and Microsoft first-party apps. The finding
+  `EO.8002` (new tier breaches) follows the rules of `EO.1001`/`EO.1003` instead
+  (without delegated permissions and Microsoft apps, unclassified objects apart),
+  so its numbers can be lower; the chart says so.
+- **Without git history** (`-HistorySource Folder`, or `Auto` outside a repository)
+  the only snapshot is labelled *current export*, and a note says that trends and
+  comparisons need the exports in a git repository.
 - **Compare two points in time** – pick a baseline and a current point (any
   two snapshots, or a snapshot vs. today's live data) to see which privileged
   assets were added, removed or changed tier, and how the totals moved.

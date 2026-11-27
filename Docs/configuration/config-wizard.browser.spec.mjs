@@ -83,6 +83,7 @@ test("exports Service EM defaults and preserves imported Service EM settings", a
     expect(preview.ServiceEM.RoleAssignableWorkloadPlaneAdmins).toBe(false);
     expect(preview.ServiceEM.AdministrativeUnits).toEqual({ WorkloadPlane: "", UserAccess: "" });
     expect(preview.ServiceEM.UpdateObjectClassificationFile).toBe(false);
+    expect(preview.ServiceEM.WorkloadPlaneAdminRoles).toEqual({ PermanentRoleDefinitionIds: ["acdd72a7-3385-48ef-bd42-f606fba81ae7"], EligibleRoleDefinitionIds: [] });
     expect(preview.ServiceEM.PIMForGroups).toEqual({ MaximumActivationDuration: "PT10H", MaximumActiveAssignmentDuration: "P15D" });
     expect(preview.ServiceEM.AssignmentPolicies.BaselinePolicy).toEqual({ Expiration: "P365D", ApprovalTimeout: "P2D", AllowExtension: true });
     expect(preview.ServiceEM.AssignmentPolicies.WorkloadPlaneUsers.RequestorScope).toBe("AllMemberUsers");
@@ -106,6 +107,7 @@ test("exports Service EM defaults and preserves imported Service EM settings", a
                 RoleAssignableWorkloadPlaneAdmins: true,
                 AdministrativeUnits: { WorkloadPlane: "55555555-5555-5555-5555-555555555555" },
                 UpdateObjectClassificationFile: true,
+                WorkloadPlaneAdminRoles: { PermanentRoleDefinitionIds: [], EligibleRoleDefinitionIds: ["de139f84-1756-47ae-9be6-808fbbe84772"] },
                 CreateM365Group: true,
                 PIMForGroups: { MaximumActivationDuration: "PT8H" },
                 AssignmentPolicies: { WorkloadPlaneUsers: { RequestorScope: "CatalogPlaneMembers" } },
@@ -127,6 +129,7 @@ test("exports Service EM defaults and preserves imported Service EM settings", a
     await expect(page.locator('[data-key="SemRoleAssignableWorkloadPlaneAdmins"]')).toBeChecked();
     expect(preview.ServiceEM.AdministrativeUnits).toEqual({ WorkloadPlane: "55555555-5555-5555-5555-555555555555", UserAccess: "" });
     expect(preview.ServiceEM.UpdateObjectClassificationFile).toBe(true);
+    expect(preview.ServiceEM.WorkloadPlaneAdminRoles).toEqual({ PermanentRoleDefinitionIds: [], EligibleRoleDefinitionIds: ["de139f84-1756-47ae-9be6-808fbbe84772"] });
     expect(preview.ServiceEM.CreateM365Group).toBe(true);
     await expect(page.locator('[data-key="SemCreateM365Group"]')).toBeChecked();
     expect(preview.ServiceEM.PIMForGroups.MaximumActivationDuration).toBe("PT8H");
@@ -155,6 +158,59 @@ test("preserves EIDSCA finding exclusions through import and export", async ({ p
     await expect(page.locator('[data-key="EidscaExcludedFindings"]')).toHaveValue("EIDSCA.AP01, EIDSCA.AP02");
     await expect(page.locator("#wizPreview")).toContainText('"EidscaExcludedFindings": [');
     await expect(page.locator("#wizPreview")).toContainText('"EIDSCA.AP02"');
+});
+
+test("exports the Findings settings and preserves them through import and export", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await expect(page.locator("#wizPreview")).toContainText('"ControlPlaneActivationMaxHours": 4');
+    await expect(page.locator("#wizPreview")).toContainText('"EligibleAssignmentMaxDays": 365');
+    await expect(page.locator("#wizPreview")).toContainText('"ExceptionsFilePath": "./Classification/FindingExceptions.json"');
+    await expect(page.locator("#wizPreview")).toContainText('"ExceptionMaxDays": 180');
+
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            Findings: { ExcludedRules: ["EO.4008", "PrivilegedAssets.sponsorMissing"], ControlPlaneActivationMaxHours: 8, EligibleAssignmentMaxDays: 180, EmergencyAccessAccounts: ["breakglass@contoso.com"], ExceptionsFilePath: "./Findings/Exceptions.json", ExceptionMaxDays: 0 }
+        }))
+    });
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+
+    await expect(page.locator('[data-key="FindingsExcludedRules"]')).toHaveValue("EO.4008, PrivilegedAssets.sponsorMissing");
+    await expect(page.locator('[data-key="FindingsEmergencyAccessAccounts"]')).toHaveValue("breakglass@contoso.com");
+    await expect(page.locator("#wizPreview")).toContainText('"ControlPlaneActivationMaxHours": 8');
+    await expect(page.locator("#wizPreview")).toContainText('"EligibleAssignmentMaxDays": 180');
+    await expect(page.locator("#wizPreview")).toContainText('"PrivilegedAssets.sponsorMissing"');
+    // The Finding Exceptions File: its path and no limit for risk acceptances (0).
+    await expect(page.locator('[data-key="FindingsExceptionsFilePath"]')).toHaveValue("./Findings/Exceptions.json");
+    await expect(page.locator('[data-key="FindingsExceptionMaxDays"]')).toHaveValue("0");
+    await expect(page.locator("#wizPreview")).toContainText('"ExceptionsFilePath": "./Findings/Exceptions.json"');
+    await expect(page.locator("#wizPreview")).toContainText('"ExceptionMaxDays": 0');
+    await page.locator('[data-key="FindingsExceptionMaxDays"]').fill("90");
+    await expect(page.locator("#wizPreview")).toContainText('"ExceptionMaxDays": 90');
+});
+
+test("excludes risk flags as finding rules and imports the deprecated risk-flag settings", async ({ page }) => {
+    await page.goto(wizardUrl);
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+    // One place to exclude rules: the risk flags of the flow reports are finding rules.
+    await expect(page.locator('[data-key="PimRequestFlowExcludedRiskFlags"]')).toHaveCount(0);
+    await expect(page.locator('[data-key="AccessPackageFlowExcludedRiskFlags"]')).toHaveCount(0);
+    await expect(page.locator("#wizPreview")).not.toContainText("ExcludedRiskFlags");
+
+    await page.locator("#wizImportFile").setInputFiles({
+        name: "EntraOpsConfig.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+            ConfigurationAnalyzer: { PimRequestFlowExcludedRiskFlags: ["noMfaActivation"], AccessPackageFlowExcludedRiskFlags: ["broadRequestor"], EidscaExcludedFindings: [] },
+            Findings: { ExcludedRules: ["EO.4008", "PimRequestFlow.noMfaActivation"] }
+        }))
+    });
+    await page.getByRole("button", { name: /Reporting & Ingestion/ }).click();
+
+    await expect(page.locator('[data-key="FindingsExcludedRules"]')).toHaveValue("EO.4008, PimRequestFlow.noMfaActivation, AccessPackageFlow.broadRequestor");
+    await expect(page.locator("#wizPreview")).toContainText('"AccessPackageFlow.broadRequestor"');
+    await expect(page.locator("#wizPreview")).not.toContainText("ExcludedRiskFlags");
 });
 
 test("preserves updater, advanced CSA and unknown settings through import and export", async ({ page }) => {

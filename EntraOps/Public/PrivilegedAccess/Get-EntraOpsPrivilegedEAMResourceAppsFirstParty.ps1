@@ -141,6 +141,10 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                     'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
                     'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
                     'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                    'OutsideOfHomeTenant'           = $ObjectDetails.OutsideOfHomeTenant
+                    'OriginType'                    = $ObjectDetails.OriginType
+                    'OriginTenantId'                = $ObjectDetails.OriginTenantId
+                    'OriginId'                      = $ObjectDetails.OriginId
                     'RoleSystem'                    = "FirstPartyResourceApp"
                     'Classification'                = $Classification
                     'RoleAssignments'               = $AppRoleClassifiedAssignments
@@ -149,6 +153,7 @@ function Get-EntraOpsPrivilegedEamResourceAppsFirstParty {
                     'OwnedDevices'                  = $ObjectDetails.OwnedDevices
                     'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
                     'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                    'AssociatedPawDeviceObjectId'   = $ObjectDetails.AssociatedPawDeviceObjectId
                     'Audience'                      = $FirstPartyGraphActivity.AzureADMultipleOrgs
                 }
             }

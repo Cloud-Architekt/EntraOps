@@ -11,6 +11,9 @@ BeforeAll {
     . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsAlternateObjectTierLevelEnabled.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Resolve-EntraOpsAlternateObjectTierLevel.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/PrivilegedAccess/Get-EntraOpsPrivilegedEntraObject.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Resolve-EntraOpsObjectOrigin.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsObjectOriginTenantInfo.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Findings/Test-EntraOpsMicrosoftFirstParty.ps1"
 
     $script:GroupFilters = [pscustomobject]@{
         Enabled = $false

@@ -38,7 +38,10 @@ function Invoke-EntraOpsParallelObjectResolution {
         [int]$ParallelThrottleLimit = 10
     )
     
-    $UniqueObjectIds = @($UniqueObjects.ObjectId)
+    # Callers pass one entry per object ID and type, so an ID can repeat (e.g. an Azure principal listed with two
+    # principal types). Results are keyed by object ID, so each ID is fetched and resolved once.
+    $SeenObjectIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $UniqueObjectIds = @($UniqueObjects.ObjectId | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $SeenObjectIds.Add([string]$_) })
     
     #region Pre-fetch objects by type for massive performance improvement (Recommendation 2)
     # Standardized cache population using batch requests
@@ -138,7 +141,9 @@ function Invoke-EntraOpsParallelObjectResolution {
         $PreFetchStats.FailedCount += $UniqueObjectIds.Count
     }
     
-    Write-Host "Pre-fetch complete: $($PreFetchStats.PreFetchedCount) objects cached, $($PreFetchStats.FailedCount) failed."
+    # Objects that directoryObjects/getByIds doesn't return (other types, deleted or foreign objects) are resolved
+    # individually below, so the cached count can be lower than the number of requested IDs.
+    Write-Host "Pre-fetch complete: $($PreFetchStats.PreFetchedCount) of $($UniqueObjectIds.Count) object(s) cached, $($PreFetchStats.FailedCount) in failed batches."
     #endregion
     
     Write-Host "Resolving details for $($UniqueObjectIds.Count) unique objects..."
@@ -198,9 +203,8 @@ function Invoke-EntraOpsParallelObjectResolution {
             $LocalEntraOpsSession = $Script:__EntraOpsSession
 
             try {
-                $ParallelResults = $UniqueObjects | ForEach-Object -ThrottleLimit $ParallelThrottleLimit -Parallel {
-                    $obj = $_
-                    $ObjectId = $obj.ObjectId
+                $ParallelResults = $UniqueObjectIds | ForEach-Object -ThrottleLimit $ParallelThrottleLimit -Parallel {
+                    $ObjectId = $_
                     $LocalTenantId = $using:TenantId
                     $LocalEntraOpsPath = $using:EntraOpsModulePath
                     $LocalMgGraphPath = $using:MgGraphModulePath

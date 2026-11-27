@@ -62,6 +62,7 @@ jobs:
         with:
           inlineScript: |
             Import-Module ./EntraOps
+            Write-Host "EntraOps - Version $((Get-Module -Name EntraOps).Version) on PowerShell $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
             # Reserve time for export and commit within the 75-minute job timeout.
             $TimeoutInSeconds = [Math]::Min([int]${env:StepTimeoutInSeconds}, 4200)
             try {

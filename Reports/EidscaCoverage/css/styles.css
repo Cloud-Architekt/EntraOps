@@ -556,38 +556,6 @@ mark {
     margin-bottom: 16px;
 }
 
-.search {
-    position: relative;
-    flex: 1;
-    min-width: 240px;
-}
-
-.search input {
-    width: 100%;
-    height: 36px;
-    border: 1px solid var(--neutral-stroke-strong);
-    border-radius: var(--radius);
-    padding: 0 12px 0 36px;
-    font-family: inherit;
-    font-size: 14px;
-    background: var(--neutral-surface);
-    outline: none;
-}
-
-.search input:focus {
-    border-color: var(--brand);
-    box-shadow: 0 0 0 1px var(--brand);
-}
-
-.search .search-ico {
-    position: absolute;
-    left: 11px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--neutral-fg-secondary);
-    pointer-events: none;
-}
-
 select.filter,
 .seg {
     height: 36px;
@@ -2190,45 +2158,6 @@ a.nav-item:hover {
     }
 }
 
-/* Filter row (workbook parameter pills) */
-.eam-filter-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px 18px;
-    align-items: flex-end;
-}
-
-.eam-filter {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 150px;
-    /* All filters share the full row width evenly (same total width as the
-       full-width search row below) instead of leaving empty space behind
-       the last dropdown. */
-    flex: 1 1 0;
-}
-
-.eam-filter.grow {
-    flex: 1;
-    min-width: 220px;
-}
-
-/* Dropdown buttons stretch with their (flexed) filter column. */
-.eam-filter .dd,
-.eam-filter .dd-btn {
-    width: 100%;
-    max-width: none;
-}
-
-.eam-filter>label {
-    font-size: 11.5px;
-    font-weight: 600;
-    color: var(--neutral-fg-secondary);
-    text-transform: uppercase;
-    letter-spacing: .03em;
-}
-
 /* Multi-select dropdown */
 .dd {
     position: relative;
@@ -3243,33 +3172,6 @@ tr.cmp-row>td {
 /* =========================================================================
    Configuration Analyzer specific styles (appended to the shared app CSS)
    ========================================================================= */
-.ca-toggle-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.ca-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 12px;
-    padding: 3px 10px;
-    border-radius: 12px;
-    border: 1px solid var(--neutral-stroke-strong);
-    background: var(--neutral-surface);
-    color: var(--neutral-fg-secondary);
-    cursor: pointer;
-    user-select: none;
-}
-
-.ca-toggle.on {
-    background: var(--brand-bg);
-    border-color: var(--brand);
-    color: var(--brand-pressed);
-    font-weight: 600;
-}
-
 .status-chip {
     display: inline-flex;
     align-items: center;
@@ -3433,12 +3335,6 @@ table.ca-diff-table td.new {
     margin-bottom: 12px;
 }
 
-.eidsca-quicknav-actions {
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
-}
-
 .eidsca-quicknav-links {
     display: flex;
     flex-wrap: wrap;
@@ -3477,86 +3373,40 @@ table.ca-diff-table td.new {
 }
 
 .eidsca-navdot.warn {
-    background: #c07807;
+    background: #a4262c;
 }
 
 .eidsca-navdot.unknown {
     background: #a19f9d;
 }
 
+.eidsca-navdot.info {
+    background: #0078d4;
+}
+
 .eidsca-area {
-    margin-bottom: 10px;
-    border: 1px solid var(--neutral-stroke);
-    border-radius: var(--radius);
-    overflow: hidden;
-}
-
-.eidsca-area-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 10px 12px;
-    background: var(--neutral-surface-alt);
-    border: 0;
-    font: inherit;
-    font-weight: 600;
-    font-size: 13.5px;
-    color: var(--neutral-fg);
-    cursor: pointer;
-    text-align: left;
-}
-
-.eidsca-area-head:hover {
-    background: var(--neutral-stroke);
-}
-
-.eidsca-area-chevron {
-    flex-shrink: 0;
-    width: 12px;
-    color: var(--neutral-fg-secondary);
-}
-
-.eidsca-area-title {
-    flex-shrink: 0;
+    scroll-margin-top: 12px;
 }
 
 .eidsca-area-mitre {
-    display: flex;
+    display: inline-flex;
     gap: 4px;
     flex-wrap: wrap;
 }
 
 .eidsca-area-stats {
-    margin-left: auto;
-    display: flex;
+    display: inline-flex;
+    flex-wrap: wrap;
     gap: 6px;
-    flex-shrink: 0;
+}
+
+.eidsca-area .eo-group-body {
+    padding: 0 2px 0 22px;
 }
 
 @media (max-width: 720px) {
-    .eidsca-area-head {
-        display: grid;
-        grid-template-columns: 12px minmax(0, 1fr);
-    }
-
-    .eidsca-area-chevron {
-        grid-row: 1 / span 3;
-    }
-
-    .eidsca-area-title {
-        min-width: 0;
-        overflow-wrap: anywhere;
-    }
-
-    .eidsca-area-mitre,
-    .eidsca-area-stats {
-        grid-column: 2;
-    }
-
-    .eidsca-area-stats {
-        flex-wrap: wrap;
-        margin-left: 0;
+    .eidsca-area .eo-group-body {
+        padding-left: 0;
     }
 }
 
@@ -3576,7 +3426,12 @@ table.ca-diff-table td.new {
 }
 
 .eidsca-stat-pill.warn {
-    background: #c07807;
+    background: #a4262c;
+}
+
+/* A failing check: red like a failed check of the other reports (the amber .warn icon stays for notices). */
+.ca-gap-icon.warn.eidsca-failing {
+    background: #a4262c;
 }
 
 .eidsca-stat-pill.info {
@@ -3585,14 +3440,6 @@ table.ca-diff-table td.new {
 
 .eidsca-stat-pill.unknown {
     background: #a19f9d;
-}
-
-.eidsca-area-body {
-    padding: 4px 12px 4px;
-}
-
-.eidsca-area-body.collapsed {
-    display: none;
 }
 
 .eidsca-row-mitre {
@@ -3612,25 +3459,26 @@ table.ca-diff-table td.new {
     border-radius: 8px;
 }
 
+/* Severity colors of the shared severity ramp (shared/theme.css), separate from the tier colors. */
 .eidsca-severity-high {
-    background: #fde7e9;
-    color: #a4262c;
+    background: var(--sev-high-bg);
+    color: var(--sev-high-text);
 }
 
 .eidsca-severity-medium {
-    background: #fff4ce;
-    color: #8a6d00;
+    background: var(--sev-medium-bg);
+    color: var(--sev-medium-text);
 }
 
 .eidsca-severity-low {
-    background: var(--brand-bg);
-    color: var(--brand-pressed);
+    background: var(--sev-low-bg);
+    color: var(--sev-low-text);
 }
 
 .eidsca-severity-informational,
 .eidsca-severity-unspecified {
-    background: var(--neutral-surface-alt);
-    color: var(--neutral-fg-secondary);
+    background: var(--sev-info-bg);
+    color: var(--sev-info-text);
 }
 
 .eidsca-sev-breakdown {
@@ -3689,4 +3537,33 @@ table.ca-diff-table td.new {
 
 .eidsca-sev-bar span.unknown {
     background: #a19f9d;
+}
+
+/* ---------- EIDSCA Coverage: filters (shared/filters.css) ---------- */
+.eidsca-searchbar-spacer {
+    flex: 1 1 0;
+}
+
+.eo-searchbar > .tm-modes {
+    height: 38px;
+    border-radius: 8px;
+}
+
+.eidsca-freshness {
+    margin: -2px 0 12px;
+    font-size: 13px;
+}
+
+.eidsca-sev-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 1px solid currentColor;
+}
+
+@media (max-width: 760px) {
+    .eidsca-searchbar-spacer {
+        display: none;
+    }
 }

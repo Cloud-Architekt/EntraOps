@@ -243,6 +243,25 @@ directly instead of through the parser must exclude these records.
 `Pull-EntraOpsPrivilegedEAM` manually and check that `Push-EntraOpsPrivilegedEAM` and
 `Push-EntraOpsPrivilegedReporting` follow it, as in [6. Commit and verify the in-place upgrade](#6-commit-and-verify-the-in-place-upgrade).
 
+## Upgrade from EntraOps 1.1 to 1.2 {#upgrade-from-1-1}
+
+Upgrade in place as for 1.1. The Privileged EAM export of 1.2 names the origin of each object (`OriginType`,
+`OriginTenantId`, `OriginId`, see [Origin of privileged objects](../../privileged-eam/index.html#object-origin)),
+which needs these steps:
+
+**1. Grant `Group-XTenantIdentitySync.Read.All`** (Microsoft Graph, application permission, admin consent) to the
+workload identity, and consent to it for interactive sign-in. `New-EntraOpsWorkloadIdentity` adds it to new
+deployments; existing service principals need it granted explicitly. Without it, the collection warns once and
+leaves the origin of groups that are not synchronized from Active Directory empty.
+
+**2. Add the columns to the Log Analytics table** when you ingest into `PrivilegedEAM_CL` with a data collection
+rule. A custom table and the stream declaration of its data collection rule keep only the columns they declare:
+add `OriginType`, `OriginTenantId` and `OriginId` (type `string`) to both, otherwise these fields are not
+ingested.
+
+**3. Redeploy the WatchLists parser** (0.6) when you use WatchLists: it returns the origin columns, and empty
+values for WatchLists written by older versions.
+
 ## Do not use the new deployment path
 
 For an existing EntraOps 0.x GitHub deployment, skip **Get Started -> Create your repository from

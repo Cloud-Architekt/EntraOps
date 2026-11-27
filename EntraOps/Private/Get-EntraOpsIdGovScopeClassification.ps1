@@ -228,6 +228,16 @@ function Get-EntraOpsIdGovScopeClassification {
     #endregion
 
     #region Per-resource classification helpers
+    # Graph returns catalog resources, access packages and resource role scopes in no guaranteed order, so the
+    # collected detail lists (ClassifiedResources) and the "first 3" tier drivers picked for the Reason text
+    # changed between runs without any data change (e.g. two equally classified groups swapping places).
+    # Sorting by name/id/reason makes ScopeReasoning_IdentityGovernance.json deterministic; -Stable keeps
+    # exact duplicates in their original relative order.
+    function Sort-IdGovResourceDetail {
+        param([object[]]$Details)
+        @($Details | Where-Object { $null -ne $_ } | Sort-Object -Stable -Property ResourceName, ResourceId, Reason)
+    }
+
     # Returns detail entries: ResourceName, ResourceId, OriginSystem, Source, EAMTier, Reason
     function Get-ClassifiedGroupDetail {
         param([string]$GroupId, [string]$GroupDisplayName, [string]$Source)
@@ -571,6 +581,7 @@ function Get-EntraOpsIdGovScopeClassification {
                 }
             }
 
+            $AccessPackageResourceDetails = @(Sort-IdGovResourceDetail -Details $AccessPackageResourceDetails)
             $ApBestRank = 3   # UserAccess rank - scopes without any assigned resource are UserAccess (see .DESCRIPTION)
             $ApReason = "No resource role scopes are assigned to this access package"
             $ApSource = "AccessPackageResource"
@@ -594,6 +605,7 @@ function Get-EntraOpsIdGovScopeClassification {
                 }) | Out-Null
         }
 
+        $CatalogResourceDetails = @(Sort-IdGovResourceDetail -Details $CatalogResourceDetails)
         $CatalogBestRank = 3   # UserAccess rank - scopes without any assigned resource are UserAccess (see .DESCRIPTION)
         $CatalogReason = "No resources are assigned to this catalog or its access packages"
         if ($CatalogResolutionFailed) {

@@ -319,7 +319,7 @@ flowchart LR
     G_MP_Adm  -.->|"may assign roles to\n(e.g. Website Contributor)"| G_WP_Adm
 ```
 
-> WorkloadPlane-Admins don't get Contributor: Contributor on the resource group equals ManagementPlane control (e.g. managed identities, Key Vault access policies, run command) and would be a tier breach for the WorkloadPlane. Resource-level or other roles are assigned to WorkloadPlane-Admins by ManagementPlane-Admins through their constrained RBAC Administrator. ServiceEM assigns no Owner role: unrestricted access (role assignments including Owner) remains only with ControlPlane-Admins via the PIM-eligible User Access Administrator. All groups of the scope are assigned, including delegated ControlPlane-/ManagementPlane-Admins groups.
+> WorkloadPlane-Admins don't get Contributor by default (`ServiceEM.WorkloadPlaneAdminRoles` defines their permanent and eligible roles; default: permanent Reader, no eligible role): Contributor on the resource group equals ManagementPlane control (e.g. managed identities, Key Vault access policies, run command) and would be a tier breach for the WorkloadPlane. Resource-level or other roles are assigned to WorkloadPlane-Admins by ManagementPlane-Admins through their constrained RBAC Administrator. ServiceEM assigns no Owner role: unrestricted access (role assignments including Owner) remains only with ControlPlane-Admins via the PIM-eligible User Access Administrator. All groups of the scope are assigned, including delegated ControlPlane-/ManagementPlane-Admins groups.
 
 ---
 

@@ -230,6 +230,10 @@ function Invoke-EntraOpsEAMClassificationAggregation {
         'RestrictedManagementByRAG'     = $null
         'RestrictedManagementByAadRole' = $null
         'RestrictedManagementByRMAU'    = $null
+        'OutsideOfHomeTenant'           = $null
+        'OriginType'                    = $null
+        'OriginTenantId'                = $null
+        'OriginId'                      = $null
         'Sponsors'                      = $null
         'Owners'                        = $null
         'OwnedObjects'                  = $null
@@ -237,6 +241,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
         'IdentityParent'                = $null
         'AssociatedWorkAccount'         = $null
         'AssociatedPawDevice'           = $null
+        'AssociatedPawDeviceObjectId'   = $null
     }
     $UnresolvedMarkerClassification = [PSCustomObject]@{
         'AdminTierLevel'     = "0"
@@ -330,6 +335,10 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     'RestrictedManagementByRAG'     = $ObjectDetails.RestrictedManagementByRAG
                     'RestrictedManagementByAadRole' = $ObjectDetails.RestrictedManagementByAadRole
                     'RestrictedManagementByRMAU'    = $ObjectDetails.RestrictedManagementByRMAU
+                    'OutsideOfHomeTenant'           = $ObjectDetails.OutsideOfHomeTenant
+                    'OriginType'                    = $ObjectDetails.OriginType
+                    'OriginTenantId'                = $ObjectDetails.OriginTenantId
+                    'OriginId'                      = $ObjectDetails.OriginId
                     'RoleSystem'                    = $LocalRoleSystem
                     'Classification'                = $Classification
                     'RoleAssignments'               = @($RbacClassifiedAssignments | Sort-Object { ($_.Classification | Sort-Object AdminTierLevel -Top 1).AdminTierLevel }, RoleDefinitionName, RoleAssignmentScopeId, RoleAssignmentId)
@@ -340,6 +349,7 @@ function Invoke-EntraOpsEAMClassificationAggregation {
                     'IdentityParent'                = $ObjectDetails.IdentityParent
                     'AssociatedWorkAccount'         = $ObjectDetails.AssociatedWorkAccount
                     'AssociatedPawDevice'           = $ObjectDetails.AssociatedPawDevice
+                    'AssociatedPawDeviceObjectId'   = $ObjectDetails.AssociatedPawDeviceObjectId
                 }
             }
         }

@@ -27,6 +27,10 @@ and [Privilege History](../PrivilegeHistory/README.md).
   transitivity context; expand a row for the full assignment detail
   (assignment id, scope id, classification source, inherited-via, ...).
 - **CSV export** – download the current breach list for follow-up.
+- **Deep links** – `#sel=<objectId>||<role>||<service>||<scopeId>` opens a breach path
+  and clears the filters that hide it. `#path=<pathId>` (or a fifth `||<pathId>` segment
+  of `#sel=`) opens exactly one path, also when two role assignments share object, role,
+  service and scope.
 - **Review list / bookmarking** – star a breach row directly from the table to add it
   to the same cross-tool **Review list** used by the Classification Explorer, EAM
   Dashboard and Access Path Map (shared via `localStorage`). Every starred item

@@ -111,7 +111,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                     $_.Classification.AdminTierLevelName -contains $Tier.AdminTierLevelName -and `
                     ([string]::IsNullOrEmpty($_.ObjectTenantId) -or $_.ObjectTenantId -eq $TenantId)
             }
-            foreach ($OwnedDeviceId in @($TierDeviceOwners | ForEach-Object { @($_.OwnedDevices) + @($_.AssociatedPawDevice) } | Where-Object { $_ })) {
+            foreach ($OwnedDeviceId in @($TierDeviceOwners | ForEach-Object { @($_.OwnedDevices) + @(Get-EntraOpsPawDeviceObjectId -Object $_) } | Where-Object { $_ })) {
                 if (-not $DeviceTierAssignment.ContainsKey($OwnedDeviceId) -or [int]$Tier.AdminTierLevel -lt [int]$DeviceTierAssignment[$OwnedDeviceId]) {
                     $DeviceTierAssignment[$OwnedDeviceId] = $Tier.AdminTierLevel
                 }
@@ -240,7 +240,7 @@ function Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit {
                 })
             # Restricted to devices pinned to this tier by $DeviceTierAssignment - a device owned by a user
             # classified at several tiers belongs to the most privileged one only.
-            $DesiredDeviceIds = @($PrivilegedUsersAtTier | ForEach-Object { @($_.OwnedDevices) + @($_.AssociatedPawDevice) } | Where-Object { $_ } | Select-Object -Unique | Where-Object { $DeviceTierAssignment[$_] -eq $TierLevel.AdminTierLevel })
+            $DesiredDeviceIds = @($PrivilegedUsersAtTier | ForEach-Object { @($_.OwnedDevices) + @(Get-EntraOpsPawDeviceObjectId -Object $_) } | Where-Object { $_ } | Select-Object -Unique | Where-Object { $DeviceTierAssignment[$_] -eq $TierLevel.AdminTierLevel })
             $DeviceMembersUri = "/v1.0/directory/administrativeUnits/$AdminUnitId/members"
             $CurrentDeviceMemberIds = @((Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri "$DeviceMembersUri/microsoft.graph.device" -OutputType PSObject -DisableCache) | Where-Object { $null -ne $_.id } | Select-Object -ExpandProperty id)
 

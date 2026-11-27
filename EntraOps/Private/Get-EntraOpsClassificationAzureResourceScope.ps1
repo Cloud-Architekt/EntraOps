@@ -63,6 +63,10 @@ function Get-EntraOpsClassificationAzureResourceScope {
         ,
         [Parameter(Mandatory = $false)]
         [string]$ExposureManagementBaselineFile
+        ,
+        # Before the first export of a run, the missing export is expected (the caller refreshes the scope from it).
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipMissingEamDataWarning
     )
 
     $AzTenantId = (Get-AzContext).Tenant.Id
@@ -238,8 +242,12 @@ ExposureGraphNodes
     }
     if ($LoadedEamFileCount -eq 0) {
         $MissingEamMessage = "No EntraOps EAM files were available in '$EntraOpsEamFolder'. Managed-identity host resources cannot contribute to Azure Tier0/Tier1 scope reasoning until an EAM export exists."
-        Write-Warning $MissingEamMessage
-        if ($null -ne $WarningMessages) {
+        if ($SkipMissingEamDataWarning) {
+            Write-Verbose $MissingEamMessage
+        } else {
+            Write-Warning $MissingEamMessage
+        }
+        if ($null -ne $WarningMessages -and -not $SkipMissingEamDataWarning) {
             $WarningMessages.Add([PSCustomObject]@{ Type = 'AzureScopeReasoningEamUnavailable'; Message = $MissingEamMessage })
         }
     }

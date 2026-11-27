@@ -323,6 +323,24 @@ mark {
     font-size: 15px;
 }
 
+/* The graph heading stays on one line; a long name of the focused node ends in an ellipsis (full name in its title). */
+.apm-graph-title {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+#graphFocus {
+    display: inline-block;
+    min-width: 0;
+    max-width: min(360px, 100%);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#clearFocus {
+    flex-shrink: 0;
+}
+
 .card-head .hint {
     font-weight: 400;
     font-size: 12.5px;

@@ -10,7 +10,7 @@
     RootModule           = 'EntraOps.psm1'
 
     # Version number of this module.
-    ModuleVersion        = '1.1.0'
+    ModuleVersion        = '1.2.0'
 
     # Supported PSEditions
     CompatiblePSEditions = 'Core'
@@ -64,7 +64,7 @@
     # TypesToProcess = @()
 
     # Format files (.ps1xml) to be loaded when importing this module
-    # FormatsToProcess = @()
+    FormatsToProcess     = @('EntraOps.Format.ps1xml')
 
     # Modules to import as nested modules of the module specified in RootModule/ModuleToProcess
     # NestedModules = @()
@@ -89,6 +89,7 @@
         'Get-EntraOpsClassificationControlPlaneObjects'
         'Get-EntraOpsClassificationDirectoryRolesMismatchFromMsftDocs'
         'Get-EntraOpsEntraObject'
+        'Get-EntraOpsFindingRule'
         'Get-EntraOpsManagedIdentityAssignments'
         'Get-EntraOpsUpdateCandidate'
         'Get-EntraOpsUpdatePlan'
@@ -117,7 +118,9 @@
         'Install-EntraOpsAllRequiredModules'
         'Install-EntraOpsReportingFolder'
         'Install-EntraOpsRequiredModule'
+        'Invoke-EntraOpsAssessment'
         'Invoke-EntraOpsAzGraphQuery'
+        'Invoke-EntraOpsFindingEvaluation'
         'Invoke-EntraOpsAzQuery'
         'Invoke-EntraOpsGraphSecurityQuery'
         'Invoke-EntraOpsMsGraphQuery'
@@ -135,6 +138,7 @@
         'New-EntraOpsPrivilegedEamDashboardData'
         'New-EntraOpsPrivilegedEamPrivilegeHistoryData'
         'New-EntraOpsPrivilegedUnprotectedAdministrativeUnit'
+        'New-EntraOpsReportFindingData'
         'New-EntraOpsReportingData'
         'New-EntraOpsTenantGovernanceConfigurationAnalyzerData'
         'New-EntraOpsTierBreachAnalyzerData'
@@ -145,6 +149,7 @@
         'Resolve-EntraOpsUpdateSource'
         'Remove-EntraOpsData'
         'Remove-EntraOpsReportingData'
+        'Save-EntraOpsFindingJson'
         'Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists'
         'Save-EntraOpsPrivilegedEAMInsightsCustomTable'
         'Save-EntraOpsPrivilegedEAMJson'
@@ -205,7 +210,7 @@
     # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
     PrivateData          = @{
         PSData = @{
-            # Tags applied to this module. These help with module discovery in online galleries.
+            Prerelease   = 'rc2'
             Tags         = @(
                 'AzureAD',
                 'Entra',
@@ -233,7 +238,7 @@
             IconUri      = 'https://www.entraops.com/entraops_icon.png'
 
             # ReleaseNotes of this module
-            ReleaseNotes = 'Adds Service EM: service-scoped landing zones aligned with the Enterprise Access Model (Azure resource group, Entra groups, Identity Governance access packages, PIM and Azure RBAC with ABAC constrained delegation), Azure DevOps pipelines, module-only use from the PowerShell Gallery (Initialize-EntraOpsWorkspace, Remove-EntraOpsData), the Object Classification File, agent identity collection and the Privileged Assets report with Maester findings. Full changelog: https://github.com/Cloud-Architekt/EntraOps/blob/main/CHANGELOG.md'
+            ReleaseNotes = 'Adds EntraOps finding rules (Get-EntraOpsFindingRule, Invoke-EntraOpsFindingEvaluation, Save-EntraOpsFindingJson) with finding exceptions, the Privileged Assets Findings view and the EntraOps Maester Pack, a complete first assessment in one cmdlet (Invoke-EntraOpsAssessment), the origin of privileged objects (cross-tenant synchronization, B2B, first-party applications), report history without git and content that matches the module version. Upgrade: grant the Microsoft Graph permission Group-XTenantIdentitySync.Read.All. Full changelog: https://github.com/Cloud-Architekt/EntraOps/blob/main/CHANGELOG.md'
 
         } # End of PSData hashtable
 

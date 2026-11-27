@@ -72,11 +72,7 @@ function Save-EntraOpsPrivilegedEAMEnrichmentToWatchLists {
         throw "Security check failed: ImportPath '$ResolvedImportPath' is not under the expected base directory '$ResolvedBaseFolder'."
     }
 
-    try {
-        Import-Module "SentinelEnrichment" -ErrorAction Stop
-    } catch {
-        throw "Issue to import SentinelEnrichment modul!"
-    }
+    Install-EntraOpsRequiredModule -ModuleName 'SentinelEnrichment' -Import | Out-Null
 
     #region EntraOps Classification data
     $Privileges = foreach ($Rbac in $RbacSystems) {

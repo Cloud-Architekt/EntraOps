@@ -205,7 +205,8 @@ function Get-EntraOpsPrivilegedEamEntraId {
         try {
             $RoleDefCachedObject = Get-Content $RoleDefCacheFile -Raw | ConvertFrom-Json
             $CurrentTime = [DateTime]::UtcNow
-            $ExpiryTime = [DateTime]::Parse($RoleDefCachedObject.ExpiryTime)
+            # ConvertFrom-Json already returns a DateTime; [DateTime]::Parse would re-stringify it culture-specifically
+            $ExpiryTime = ([DateTimeOffset]$RoleDefCachedObject.ExpiryTime).UtcDateTime
 
             if ($CurrentTime -lt $ExpiryTime) {
                 $RoleDefCacheValid = $true
@@ -632,9 +633,12 @@ function Get-EntraOpsPrivilegedEamEntraId {
             $SharedEntraOpsSession = $__EntraOpsSession
             $SharedPreFetchedLookup = $SyncPreFetchedObjectLookup
 
-            # Create thread-safe progress counter for parallel processing
-            $ProgressCounter = [System.Collections.Concurrent.ConcurrentBag[int]]::new()
+            # Progress is written on this thread as the results arrive: the console keys progress records by
+            # their source, so a bar written in a parallel runspace ignores -Completed from here and stays
+            # visible (and is redrawn with every later bar) for the rest of the session.
             $TotalObjects = $UniqueObjects.Count
+            $CompletedObjects = 0
+            $ProgressInterval = [Math]::Max(10, [Math]::Floor($TotalObjects / 20))
 
             try {
                 # Execute parallel processing with shared cache
@@ -711,19 +715,9 @@ function Get-EntraOpsPrivilegedEamEntraId {
                         # Optimized: Passes pre-fetched InputObject to avoid redundant API calls
                         # Flag foreign principals (from tenant governance) so expected 404s are treated as informational.
                         $IsForeign = (-not [string]::IsNullOrEmpty($obj.ObjectTenantId) -and $obj.ObjectTenantId -ne $LocalTenantId)
-                        $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $LocalTenantId -InputObject $PreFetchedObj -IsForeignPrincipal:$IsForeign
-
-                        # Update progress (thread-safe)
-                        $LocalCounter = $using:ProgressCounter
-                        $LocalCounter.Add(1)
-                        $Completed = $LocalCounter.Count
-                        $LocalTotal = $using:TotalObjects
-
-                        # Progress reporting every 5% or every 10 items (whichever is more frequent)
-                        if (($Completed % [Math]::Max(10, [Math]::Floor($LocalTotal / 20))) -eq 0 -or $Completed -eq $LocalTotal) {
-                            $PercentComplete = [Math]::Round(($Completed / $LocalTotal) * 100, 1)
-                            Write-Progress -Id 1 -Activity "Parallel Object Resolution" -Status "Processed $Completed of $LocalTotal objects ($PercentComplete%)" -PercentComplete $PercentComplete
-                        }
+                        # The tenant of the foreign principal, kept by its placeholder when it is not found here.
+                        $ForeignTenantId = if ($IsForeign) { "$($obj.ObjectTenantId)" } else { '' }
+                        $ObjectDetails = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $LocalTenantId -InputObject $PreFetchedObj -IsForeignPrincipal:$IsForeign -ForeignTenantId $ForeignTenantId
 
                         [PSCustomObject]@{
                             ObjectId = $ObjectId
@@ -732,10 +726,6 @@ function Get-EntraOpsPrivilegedEamEntraId {
                             ThreadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
                         }
                     } catch {
-                        # Update progress even on failure
-                        $LocalCounter = $using:ProgressCounter
-                        $LocalCounter.Add(1)
-
                         [PSCustomObject]@{
                             ObjectId = $ObjectId
                             Details  = $null
@@ -744,6 +734,14 @@ function Get-EntraOpsPrivilegedEamEntraId {
                             ThreadId = [System.Threading.Thread]::CurrentThread.ManagedThreadId
                         }
                     }
+                } | ForEach-Object {
+                    # One result per object, failed or not: report every 5% or every 10 objects.
+                    $CompletedObjects++
+                    if (($CompletedObjects % $ProgressInterval) -eq 0 -or $CompletedObjects -eq $TotalObjects) {
+                        $PercentComplete = [Math]::Round(($CompletedObjects / $TotalObjects) * 100, 1)
+                        Write-Progress -Id 1 -Activity "Parallel Object Resolution" -Status "Processed $CompletedObjects of $TotalObjects objects ($PercentComplete%)" -PercentComplete $PercentComplete
+                    }
+                    $_
                 }
 
                 Write-Progress -Id 1 -Activity "Parallel Object Resolution" -Completed
@@ -821,7 +819,9 @@ function Get-EntraOpsPrivilegedEamEntraId {
                 # Flag foreign principals (from tenant governance) so expected 404s are treated as informational.
                 $ObjMeta = $UniqueObjects[$i]
                 $IsForeign = (-not [string]::IsNullOrEmpty($ObjMeta.ObjectTenantId) -and $ObjMeta.ObjectTenantId -ne $TenantId)
-                $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId -InputObject $PreFetchedObj -IsForeignPrincipal:$IsForeign
+                # The tenant of the foreign principal, kept by its placeholder when it is not found here.
+                $ForeignTenantId = if ($IsForeign) { "$($ObjMeta.ObjectTenantId)" } else { '' }
+                $ObjectDetailsCache[$ObjectId] = Get-EntraOpsPrivilegedEntraObject -AadObjectId $ObjectId -TenantId $TenantId -InputObject $PreFetchedObj -IsForeignPrincipal:$IsForeign -ForeignTenantId $ForeignTenantId
             } catch {
                 $WarningMessages.Add([PSCustomObject]@{Type = "Stage5-Sequential"; Message = "Failed to get details for object $($ObjectId): $_"; Target = $ObjectId })
                 $ObjectDetailsCache[$ObjectId] = $null
@@ -850,6 +850,11 @@ function Get-EntraOpsPrivilegedEamEntraId {
 
     $HasCrossTenantWork = ($CrossTenantGroupEntries.Count -gt 0 -or $CrossTenantNonGroupObjects.Count -gt 0) -and
     -not [string]::IsNullOrEmpty($Global:ManagingTenantIdContext)
+
+    # Whether the members of each group of another tenant were read (Phase 1). The export marks these groups with
+    # CrossTenantMembersExpanded, so the finding rules can name the groups whose members are missing.
+    $CrossTenantMembersExpanded = @{}
+    foreach ($GroupEntry in $CrossTenantGroupEntries) { $CrossTenantMembersExpanded["$($GroupEntry.ObjectId)"] = $false }
 
     if ($HasCrossTenantWork) {
         $Stage5bStart = Get-Date
@@ -881,6 +886,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
             "CustomSecAttributeAssignment.Read.All",
             "Directory.Read.All",
             "Group.Read.All",
+            "Group-XTenantIdentitySync.Read.All",
             "GroupMember.Read.All",
             "PrivilegedAccess.Read.AzureADGroup",
             "PrivilegedEligibilitySchedule.Read.AzureADGroup",
@@ -911,7 +917,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
                     $__EntraOpsSession['CurrentGraphTenantId'] = $Global:ManagingTenantIdContext
                 } elseif ($IsInteractiveAuth) {
                     Write-Host "Connecting to managing tenant '$Global:ManagingTenantIdContext' (interactive sign-in required)..." -ForegroundColor Cyan
-                    Connect-MgGraph -TenantId $Global:ManagingTenantIdContext -Scopes $ManagingTenantScopes -NoWelcome -ErrorAction Stop
+                    Connect-MgGraph -TenantId $Global:ManagingTenantIdContext -Scopes $ManagingTenantScopes -NoWelcome -ErrorAction Stop -ContextScope Process
                 } else {
                     $ManagingToken = (Get-AzAccessToken -ResourceTypeName "MSGraph" -TenantId $Global:ManagingTenantIdContext -AsSecureString -ErrorAction Stop).Token
                     Connect-MgGraph -AccessToken $ManagingToken -NoWelcome -ErrorAction Stop
@@ -948,7 +954,10 @@ function Get-EntraOpsPrivilegedEamEntraId {
                             $TransitiveMembers = Get-EntraOpsPrivilegedTransitiveGroupMember `
                                 -GroupObjectId $GroupId `
                                 -TenantId $GroupTenantId `
-                                -WarningMessages $WarningMessages
+                                -WarningMessages $WarningMessages `
+                                -ThrowOnQueryFailure
+                            # Only reached when every member query succeeded: a failed one throws to the catch below.
+                            $CrossTenantMembersExpanded["$GroupId"] = $true
 
                             # All classification entries for this group (one per role assignment)
                             $GroupClassEntries = @($AadRbacClassification | Where-Object { $_.ObjectId -eq $GroupId })
@@ -1084,7 +1093,7 @@ function Get-EntraOpsPrivilegedEamEntraId {
                     if ($IsRestOnlyMode) {
                         $__EntraOpsSession.Remove('CurrentGraphTenantId')
                     } elseif ($IsInteractiveAuth) {
-                        Connect-MgGraph -TenantId $Global:TenantIdContext -Scopes $HomeTenantScopes -NoWelcome -ErrorAction Stop
+                        Connect-MgGraph -TenantId $Global:TenantIdContext -Scopes $HomeTenantScopes -NoWelcome -ErrorAction Stop -ContextScope Process
                     } elseif ($null -ne $HomeToken) {
                         Connect-MgGraph -AccessToken $HomeToken -NoWelcome -ErrorAction Stop
                     }
@@ -1100,6 +1109,11 @@ function Get-EntraOpsPrivilegedEamEntraId {
     } else {
         Write-Verbose "Stage 5b: No cross-tenant groups or objects found — skipping."
     }
+
+    # Groups of other tenants with privileged (Control or Management Plane) roles whose members were not read: their
+    # members' access is missing in the export and the findings, so one warning names them.
+    $UnexpandedGroupWarning = Get-EntraOpsCrossTenantExpansionWarning -CrossTenantGroupEntries $CrossTenantGroupEntries -MembersExpanded $CrossTenantMembersExpanded -RbacClassification $AadRbacClassification -ObjectDetailsCache $ObjectDetailsCache -ManagingTenantId $Global:ManagingTenantIdContext
+    if ($UnexpandedGroupWarning) { Write-Warning $UnexpandedGroupWarning }
     #endregion
     #endregion
 
@@ -1121,6 +1135,13 @@ function Get-EntraOpsPrivilegedEamEntraId {
         -EnableParallelProcessing $EnableParallelProcessing `
         -ParallelThrottleLimit $ParallelThrottleLimit `
         -WarningMessages $WarningMessages
+
+    # Mark the groups of other tenants with whether their members were read (groups of this tenant have no mark).
+    foreach ($ClassifiedObject in @($AadRbacClassifiedObjects)) {
+        if ($null -ne $ClassifiedObject -and $CrossTenantMembersExpanded.ContainsKey("$($ClassifiedObject.ObjectId)")) {
+            $ClassifiedObject | Add-Member -NotePropertyName CrossTenantMembersExpanded -NotePropertyValue ([bool]$CrossTenantMembersExpanded["$($ClassifiedObject.ObjectId)"]) -Force
+        }
+    }
 
     Write-Progress -Activity "Stage 6/6: Finalizing Results" -Status "Applying global exclusions and sorting..." -PercentComplete 90
     $EamEntraId = $AadRbacClassifiedObjects | Where-Object { $GlobalExclusionList -notcontains $_.ObjectId }

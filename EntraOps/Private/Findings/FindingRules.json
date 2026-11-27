@@ -1,0 +1,2083 @@
+{
+  "schemaVersion": "1.0",
+  "maesterPackCode": "EOPS",
+  "categories": [
+    {
+      "Key": "TierBoundaries",
+      "Number": 1,
+      "Title": "Tier boundaries",
+      "Description": "Objects, owners, approvers and administrators of a lower tier that control objects, services or access of a more privileged tier."
+    },
+    {
+      "Key": "Classification",
+      "Number": 2,
+      "Title": "Classification",
+      "Description": "Privileged objects, role assignments and approvers without a tier of the Enterprise Access Model, and roles whose classification should be reviewed."
+    },
+    {
+      "Key": "JustInTimeAccess",
+      "Number": 3,
+      "Title": "Just-in-time access",
+      "Description": "Standing (permanent) privileged access and the PIM settings of eligible assignments and activations: duration, MFA, approval, authentication context and alerts."
+    },
+    {
+      "Key": "AccountProtection",
+      "Number": 4,
+      "Title": "Account protection",
+      "Description": "Protection of privileged user accounts and groups: restricted management, cloud-only and member accounts, privileged access workstations and Conditional Access."
+    },
+    {
+      "Key": "WorkloadIdentities",
+      "Number": 5,
+      "Title": "Workload and agent identities",
+      "Description": "Service principals, applications and agent identities with privileged access."
+    },
+    {
+      "Key": "AccessGovernance",
+      "Number": 6,
+      "Title": "Access governance",
+      "Description": "Access packages of privileged resources: approval, requestor scope, expiration, access reviews and access drift (Access Guardian)."
+    },
+    {
+      "Key": "OwnershipAndDelegation",
+      "Number": 7,
+      "Title": "Ownership and delegation",
+      "Description": "Owners of privileged workload identities and groups, conditions on role assignment delegation, nested groups and administrative units."
+    },
+    {
+      "Key": "Drift",
+      "Number": 8,
+      "Title": "Drift",
+      "Description": "Changes of privileged access between Privileged EAM snapshots."
+    }
+  ],
+  "rules": [
+    {
+      "Id": "EO.1001",
+      "Key": "tier0Breach",
+      "Area": "TierBreach",
+      "Title": "Role assignment of a lower-tier object reaches a Control Plane service",
+      "CheckTitle": "No object below Control Plane has access to a Control Plane service.",
+      "Description": "A user or service principal that is not Control Plane (unclassified objects count as Tier 2) reaches a Control Plane service through a role assignment, directly or through a group. The object is protected for its own, lower tier, so whoever compromises it gets Control Plane access. Each result is one role assignment of the object (at its scope, directly or through the group in TransitiveBy) with the Control Plane services of its classification (Services in the evidence). Delegated permissions are reported by EO.5005: the application acts within the rights of the signed-in user. Service principals of Microsoft first-party applications are not reported; the Tier Breach Analyzer still shows their paths. Eligible assignments count (PimAssignmentType in the evidence); a PIM activation is not reported apart from its eligible assignment.",
+      "Remediation": "1. Open the assignment in the Tier Breach Analyzer and check what causes it (direct, or the group in TransitiveBy).\n2. If the access is not needed, remove the role assignment or group membership, or use a role or scope without Control Plane actions.\n3. If it is needed, classify the object as Control Plane and protect it accordingly: cloud-only account, phishing-resistant authentication, PAW and restricted management.",
+      "Effort": "High",
+      "EffortDescription": "Each result is one assignment or membership, and untangling transitive access, reducing scopes, or reclassifying objects across teams requires coordination with access owners.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Administrators lose access they use today, or have to use a Control Plane account with stricter controls.",
+      "Severity": "Critical",
+      "Feature": "roles",
+      "ResourceType": "RoleAssignment",
+      "Category": "TierBoundaries",
+      "References": [
+        {
+          "Title": "Enterprise access model",
+          "Url": "https://learn.microsoft.com/security/privileged-access-workstations/privileged-access-access-model",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Secure access practices for administrators in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/security-planning",
+          "Type": "Learn"
+        },
+        {
+          "Title": "EntraOps classification and object tiers",
+          "Url": "https://www.entraops.com/docs/core/index.html",
+          "Type": "EntraOps"
+        }
+      ]
+    },
+    {
+      "Id": "EO.1002",
+      "Key": "tierBreach",
+      "Area": "PrivilegedAssets",
+      "Title": "Object tier below role assignments",
+      "CheckTitle": "Privileged objects are classified at the tier of their role assignments.",
+      "Description": "A classified object holds role assignments of a more privileged tier than its own object tier, for example a Management Plane account with a Control Plane role. The object is protected for its own tier only, so whoever compromises it gets the access of the higher tier. Unclassified objects are reported by EO.2001. Management and Workload Plane are both Tier 1, so they are no breach of each other. The role assignments are compared without delegated permissions: the application acts within the rights of the signed-in user (EO.5005). Service principals of Microsoft first-party applications are reported as well: their tier is the classification of the tenant.",
+      "Remediation": "1. Open the object in Privileged Assets and review its role assignments of the higher tier.\n2. Remove the assignments that exceed the object tier, or move them to an account of the matching tier.\n3. If the access is intended, raise the object tier (custom security attribute, Object Classification File or Alternate Tier Level Attribute) and apply the protection of that tier.",
+      "Effort": "Medium",
+      "EffortDescription": "Either the assignments move to another account, or the object is reclassified and protected for the higher tier.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Administrators may need a separate account of the higher tier for these tasks.",
+      "Severity": "High",
+      "Feature": "roles",
+      "ResourceType": "PrivilegedObject",
+      "Category": "TierBoundaries",
+      "References": [
+        {
+          "Title": "Enterprise access model",
+          "Url": "https://learn.microsoft.com/security/privileged-access-workstations/privileged-access-access-model",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Custom security attributes in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/fundamentals/custom-security-attributes-overview",
+          "Type": "Learn"
+        },
+        {
+          "Title": "EntraOps classification and object tiers",
+          "Url": "https://www.entraops.com/docs/core/index.html",
+          "Type": "EntraOps"
+        }
+      ]
+    },
+    {
+      "Id": "EO.1003",
+      "Key": "breach",
+      "Area": "TierBreach",
+      "Title": "Role assignment of a lower-tier object reaches a Management Plane service",
+      "CheckTitle": "No object below Management Plane has access to a Management Plane service.",
+      "Description": "A User Access object (Tier 2) reaches a Management Plane service through a role assignment, directly or through a group. The object is protected like a regular user, but can manage workloads and resources of the Management Plane. Unclassified objects are not reported: their tier is unknown, so the check counts them apart and is skipped when only unclassified objects are affected (classify them, see EO.2001). EO.1001 reports them: access to the Control Plane is a breach for every object that is not classified as Control Plane. Each result is one role assignment of the object with the Management Plane services of its classification (Services in the evidence); assignments that also reach a Control Plane service are reported by EO.1001. Delegated permissions and service principals of Microsoft first-party applications are not reported, as in EO.1001. Management and Workload Plane are both Tier 1 for this comparison. Eligible assignments count (PimAssignmentType in the evidence); a PIM activation is not reported apart from its eligible assignment.",
+      "Remediation": "1. Open the assignment in the Tier Breach Analyzer and check what causes it (direct, or the group in TransitiveBy).\n2. If the access is not needed, remove the role assignment or group membership, or use a role or scope without Management Plane actions.\n3. If it is needed, classify the object as Management Plane and protect it accordingly.",
+      "Effort": "High",
+      "EffortDescription": "Each result is one assignment or membership, and untangling transitive access, reducing scopes, or reclassifying objects across teams requires coordination with access owners.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Users lose access they use today, or have to use a Management Plane account with stricter controls.",
+      "Severity": "High",
+      "Feature": "roles",
+      "ResourceType": "RoleAssignment",
+      "Category": "TierBoundaries",
+      "References": [
+        {
+          "Title": "Enterprise access model",
+          "Url": "https://learn.microsoft.com/security/privileged-access-workstations/privileged-access-access-model",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Secure access practices for administrators in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/security-planning",
+          "Type": "Learn"
+        },
+        {
+          "Title": "EntraOps classification and object tiers",
+          "Url": "https://www.entraops.com/docs/core/index.html",
+          "Type": "EntraOps"
+        }
+      ]
+    },
+    {
+      "Id": "EO.1004",
+      "Key": "ownerLowerTier",
+      "Area": "PrivilegedAssets",
+      "Title": "Owner with lower tier",
+      "CheckTitle": "Privileged objects have no owners of a lower tier.",
+      "Description": "An owner of this privileged object is classified at a lower tier or is unclassified. Owners manage the object without a directory role: they can add credentials to an application or service principal, or change the members of a group, and so use its privileges. The owner becomes a path into the more privileged tier. Owners that are not privileged objects of the export (no role assignment of their own) count as Tier 2, so an owner without privileged access is reported even when it is classified in the tenant: check its classification before you remove it. EO.1005 reports the other side when the owner is a privileged object whose required tier, including its own role assignments, is lower than the owned object's. The required tier of the object counts its role assignments without delegated permissions. Service principals of Microsoft first-party applications are reported as well: their owners in this tenant can still manage the service principal.",
+      "Remediation": "1. Review the owners in the result and the evidence (RelatedObjectNames, RelatedObjectIds).\n2. Remove the owners that do not need to manage the object, and manage it with a role of its tier instead (for example Cloud Application Administrator scoped to the application, eligible in PIM).\n3. If an owner is needed, use an account classified at the tier of the object.",
+      "Effort": "Low",
+      "EffortDescription": "Removing an owner is a single change per object.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Former owners lose self-service management and use a scoped role instead.",
+      "Severity": "High",
+      "Feature": "roles",
+      "ResourceType": "PrivilegedObject",
+      "Category": "TierBoundaries",
+      "References": [
+        {
+          "Title": "Assign owners of an enterprise application",
+          "Url": "https://learn.microsoft.com/entra/identity/enterprise-apps/assign-app-owners",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Manage groups in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/fundamentals/how-to-manage-groups",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign Microsoft Entra roles at different scopes",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/assign-roles-different-scopes",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.1005",
+      "Key": "ownsHigherTier",
+      "Area": "PrivilegedAssets",
+      "Title": "Owns higher-tier object",
+      "CheckTitle": "Privileged objects do not own objects of a more privileged tier.",
+      "Description": "This object owns another object that needs a more privileged tier (by its own tier or its role assignments). Through the ownership it can take over the owned object and its privileges, so it effectively belongs to the more privileged tier. The owned object is reported by EO.1004. The required tiers count role assignments without delegated permissions.",
+      "Remediation": "1. Remove this object from the owners of the more privileged object (RelatedObjectIds).\n2. If the ownership is needed, classify this object at the tier of the owned object and protect it accordingly.",
+      "Effort": "Low",
+      "EffortDescription": "Removing an owner is a single change per object.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "The owner loses self-service management of the more privileged object.",
+      "Severity": "High",
+      "Feature": "roles",
+      "ResourceType": "PrivilegedObject",
+      "Category": "TierBoundaries",
+      "References": [
+        {
+          "Title": "Assign owners of an enterprise application",
+          "Url": "https://learn.microsoft.com/entra/identity/enterprise-apps/assign-app-owners",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Manage groups in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/fundamentals/how-to-manage-groups",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign Microsoft Entra roles at different scopes",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/assign-roles-different-scopes",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.1006",
+      "Key": "auScopeLowerTier",
+      "Area": "PrivilegedEAM",
+      "Title": "Administrative unit role of a lower tier",
+      "CheckTitle": "Administrative-unit-scoped roles do not manage objects of a more privileged tier.",
+      "Description": "A role assignment scoped to an administrative unit is held by an object of a lower tier than privileged members of the unit. Members without restricted management (restricted management administrative unit, role-assignable group or a privileged directory role) can be managed by the holder, for example by resetting a password or changing group members, which gives it control over a more privileged object. Only roles with Control or Management Plane actions are evaluated; the tier of the holder is the more privileged of its own classification and its access. Service principals of Microsoft first-party applications are not reported: Microsoft operates them. The export does not tell which administrative unit restricts a member, so a role scoped to the restricted management administrative unit itself, which can manage its members, is not reported.",
+      "Remediation": "1. Move the privileged members (MemberObjectIds) out of the administrative unit, or into a restricted management administrative unit (restricted management can only be turned on when the unit is created).\n2. Or assign the role on this administrative unit only to administrators of the members' tier.\n3. Use role-assignable groups for privileged groups.",
+      "Effort": "Medium",
+      "EffortDescription": "Needs a restricted management administrative unit or a new design of the unit's membership.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Administrators of the unit can no longer manage the privileged members; regular members are not affected.",
+      "Severity": "High",
+      "Feature": "roles",
+      "ResourceType": "RoleAssignment",
+      "Category": "TierBoundaries",
+      "References": [
+        {
+          "Title": "Restricted management administrative units",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/admin-units-restricted-management",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign Microsoft Entra roles with administrative unit scope",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/admin-units-assign-roles",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Privileged roles and permissions (who can reset passwords)",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/privileged-roles-permissions#who-can-reset-passwords",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.1007",
+      "Key": "parentLowerTier",
+      "Area": "PrivilegedAssets",
+      "Title": "Identity parent with lower tier",
+      "CheckTitle": "Agent identities have no identity parent of a lower tier.",
+      "Description": "The identity parent of this agent (its agent identity blueprint, or the agent identity of an agent user) is classified at a lower tier. Whoever controls the parent, for example through its owners or credentials, can act as this agent, so its privileges are only as protected as the parent. A parent that is not a privileged object of the export counts as Tier 2. The required tier of the agent counts its role assignments without delegated permissions.",
+      "Remediation": "1. Classify the identity parent at the tier of this agent, and restrict its owners and credentials accordingly.\n2. Or reduce the privileges of this agent to the tier of its parent.",
+      "Effort": "Low",
+      "EffortDescription": "Usually a classification change and a review of the parent's owners.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Owners of the parent may lose management access.",
+      "Severity": "Medium",
+      "Feature": "agent-identities",
+      "ResourceType": "Agent",
+      "Category": "TierBoundaries",
+      "References": [
+        {
+          "Title": "Microsoft Entra Agent ID",
+          "Url": "https://learn.microsoft.com/entra/agent-id/",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign custom security attributes to applications",
+          "Url": "https://learn.microsoft.com/entra/identity/enterprise-apps/custom-security-attributes-apps",
+          "Type": "Learn"
+        },
+        {
+          "Title": "EntraOps classification and object tiers",
+          "Url": "https://www.entraops.com/docs/core/index.html",
+          "Type": "EntraOps"
+        }
+      ]
+    },
+    {
+      "Id": "EO.1008",
+      "Key": "approverLowerTier",
+      "Area": "PimRequestFlow",
+      "Title": "Activation approver with lower tier",
+      "CheckTitle": "PIM activation approvers are classified at the tier of the role.",
+      "Description": "Activation of this Control or Management Plane role requires approval, but at least one approver is classified at a lower tier than the role. The approver's own classification counts, not the tier of its access: an approver with access above its classification is not protected for that access, so it does not count as adequately protected. A group approver counts as its least protected member; a group without member data or without members is not compared (never with the tier of its access) and is named like an unresolved approver (EO.2003). An approver named by a user principal name that is not in the Privileged EAM data is a user without privileged access (also a guest) and counts as User Access. A compromised lower-tier approver can approve activations of the more privileged role, which defeats approval as a control. Management and Workload Plane are both Tier 1, so they are no lower tier of each other.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Activation, replace the approvers with users or a role-assignable group classified at the tier of the role or above.",
+      "Effort": "Low",
+      "EffortDescription": "One change of the approvers in the PIM role setting.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Other people approve the activations; the activation itself does not change.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "TierBoundaries",
+      "References": [
+        {
+          "Title": "Approve or deny requests for Microsoft Entra roles in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-approval-workflow",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Overview of PIM rules (unifiedRoleManagementPolicy)",
+          "Url": "https://learn.microsoft.com/graph/identity-governance-pim-rules-overview",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.1009",
+      "Key": "approverLowerTier",
+      "Area": "AccessPackageFlow",
+      "Title": "Access package approver with lower tier",
+      "CheckTitle": "Access package approvers are classified at the tier of the granted resources.",
+      "Description": "The assignment policy requires approval, but the approval is protected for a lower tier than the most privileged resource of the access package. Any approver of a stage can approve, so a stage counts as its least privileged approver, and the approval of several stages as its strongest stage. Approvers count with their own classification, not the tier of their access, and a group approver as its least protected member (members without privileged access as User Access); a group without member data or without members (nobody can approve through it) is not compared, never with the tier of its access, like an unresolved approver. A compromised lower-tier approver can grant access to the more privileged resource. A single user approver that is not in the Privileged EAM data is a user without privileged access and counts as User Access. Approvers that cannot be resolved (the requestor's manager, sponsors, a group that EntraOps does not collect) and escalation approvers are not compared; fallback approvers can approve and are compared (marked '(fallback)'). Management and Workload Plane are both Tier 1, so they are no lower tier of each other. Policies with approval but without a resolved approver, and policies whose target tier is unknown (unclassified target groups, EO.2005), are not evaluated; the reason of the rule names them by cause: approver groups without members, policies missing from the live access package data (the snapshot has no approver IDs), and approvers that could not be resolved.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Entitlement management > Access packages > the package > Policies, select approvers classified at the tier of the resource (also as fallback approvers, which this check compares, and escalation approvers, which it does not); give approver groups members, or move the privileged resource to a separate access package with approvers of its tier.",
+      "Effort": "Low",
+      "EffortDescription": "One change of the approvers in the assignment policy.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Other people approve the requests; requestors are not affected.",
+      "Severity": "Medium",
+      "Feature": "identity-governance",
+      "ResourceType": "AccessPackage",
+      "Category": "TierBoundaries",
+      "References": [
+        {
+          "Title": "Change approval settings of an access package",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-access-package-approval-policy",
+          "Type": "Learn"
+        },
+        {
+          "Title": "accessPackageAssignmentPolicy resource",
+          "Url": "https://learn.microsoft.com/graph/api/resources/accesspackageassignmentpolicy",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.1010",
+      "Key": "assignedMorePrivileged",
+      "Area": "AccessPackageFlow",
+      "Title": "Assigned principal more privileged than approver",
+      "CheckTitle": "Access package approvers are classified at the tier of the assigned principals.",
+      "Description": "Principals assigned through this policy have a more privileged tier than the approval of the policy (any approver of a stage can approve, so a stage counts as its least privileged resolved approver, with the approver's own classification and a group as its least protected member), so the approval of their access is weaker than the tier they hold. The tier of a principal is the more privileged of its own classification and its access, as for the tier of an object in the other rules: a principal with Control Plane access is a Control Plane asset, whatever its classification. A single user approver that is not in the Privileged EAM data counts as User Access; approvers that cannot be resolved (the requestor's manager, sponsors, a group that EntraOps does not collect) are not compared. A group approver without members is not compared, never with the tier of its access; fallback approvers are compared and marked '(fallback)'. Management and Workload Plane are both Tier 1, so they are no lower tier of each other. Policies with approval but without a resolved approver are not evaluated; the reason of the rule names them by cause: approver groups without members, policies missing from the live access package data (the snapshot has no approver IDs), and approvers that could not be resolved.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Entitlement management > Access packages > the package > Policies, select approvers classified at the tier of the assigned principals, or assign privileged principals through a separate policy with approvers of their tier.",
+      "Effort": "Low",
+      "EffortDescription": "One change of the approvers, or one additional policy.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Other people approve the requests; requestors are not affected.",
+      "Severity": "Medium",
+      "Feature": "identity-governance",
+      "ResourceType": "AccessPackage",
+      "Category": "TierBoundaries",
+      "References": [
+        {
+          "Title": "Change approval settings of an access package",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-access-package-approval-policy",
+          "Type": "Learn"
+        },
+        {
+          "Title": "accessPackageAssignmentPolicy resource",
+          "Url": "https://learn.microsoft.com/graph/api/resources/accesspackageassignmentpolicy",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.2001",
+      "Key": "unclassified",
+      "Area": "PrivilegedAssets",
+      "Title": "Unclassified object",
+      "CheckTitle": "Privileged objects are classified in a tier of the Enterprise Access Model.",
+      "Description": "The privileged object has no object tier: no custom security attribute, no entry in the Object Classification File and no Alternate Tier Level Attribute. The finding rules treat it like Tier 2 (User Access), so tier-based protection such as Conditional Access by tier, restricted management or PAW is not applied, and its Control Plane access is a tier breach (EO.1001), while the other tier checks (EO.1003, EO.8002) set it apart until it is classified. Service principals of Microsoft first-party applications are not reported: Microsoft operates them.",
+      "Remediation": "1. Decide the tier from the role assignments of the object (AssignmentTierName in the evidence).\n2. Set it with the custom security attributes (by default adminTierLevel and adminTierLevelName, both consistently; users and service principals have their own attribute set names in EntraOpsConfig.json), the Object Classification File (also for groups, which have no custom security attributes) or an Alternate Tier Level Attribute. Applications take the tier of their service principal. An object of another tenant (a group or member with access through Tenant Governance, a remote group) has no custom security attributes of this tenant: use the Object Classification File with its object ID.\n3. Apply the protection of that tier.",
+      "Effort": "Low",
+      "EffortDescription": "Setting the tier is metadata only; applying the tier's protection can take more effort.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "No change for the user until tier-based policies apply to the object.",
+      "Severity": "Medium",
+      "Feature": "roles",
+      "ResourceType": "PrivilegedObject",
+      "Category": "Classification",
+      "References": [
+        {
+          "Title": "Add or deactivate custom security attribute definitions",
+          "Url": "https://learn.microsoft.com/entra/fundamentals/custom-security-attributes-add",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign custom security attributes to users",
+          "Url": "https://learn.microsoft.com/entra/identity/users/users-custom-security-attributes",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign custom security attributes to applications",
+          "Url": "https://learn.microsoft.com/entra/identity/enterprise-apps/custom-security-attributes-apps",
+          "Type": "Learn"
+        },
+        {
+          "Title": "EntraOps classification and object tiers",
+          "Url": "https://www.entraops.com/docs/core/index.html",
+          "Type": "EntraOps"
+        }
+      ]
+    },
+    {
+      "Id": "EO.2002",
+      "Key": "unclassifiedAssignment",
+      "Area": "PrivilegedEAM",
+      "Title": "Role assignment without tier classification",
+      "CheckTitle": "Privileged role assignments are classified in a tier of the Enterprise Access Model.",
+      "Description": "The role assignment has no tier classification, so its privileges are missing in the tier analysis (tier breaches and the required tier of the object). Usually the classification does not know the role, permission or its actions, for example a new built-in role, a custom role or an API permission of a third-party application. The OpenID Connect sign-in scopes openid, profile, email and offline_access and user_impersonation are not reported: they grant no privileges of their own.",
+      "Remediation": "1. Look up the role or permission in the Classification Explorer.\n2. Add it, or its actions, to the classification: a classification template, or an overwrite file such as Classification_RoleActionOverwrites.json or Classification_ApiPermissionOverwrites.json.\n3. Run the Privileged EAM collection again.",
+      "Effort": "Low",
+      "EffortDescription": "One classification entry covers every assignment of the role or permission.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "No change of access; only the analysis changes.",
+      "Severity": "Medium",
+      "Feature": "roles",
+      "ResourceType": "RoleAssignment",
+      "Category": "Classification",
+      "References": [
+        {
+          "Title": "Microsoft Entra built-in roles",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference",
+          "Type": "Learn"
+        },
+        {
+          "Title": "EntraOps classification and object tiers",
+          "Url": "https://www.entraops.com/docs/core/index.html",
+          "Type": "EntraOps"
+        }
+      ]
+    },
+    {
+      "Id": "EO.2003",
+      "Key": "approverUnclassified",
+      "Area": "PimRequestFlow",
+      "Title": "Activation approver not resolved",
+      "CheckTitle": "PIM activation approvers can be resolved against the Privileged EAM data.",
+      "Description": "Activation of this privileged role requires approval, but an approver could not be resolved against the Privileged EAM data: a group that EntraOps does not collect, a group without member data, a group without members or a display name of several objects. An approver named by a user principal name outside the Privileged EAM data is a user without privileged access and is compared as User Access (EO.1008). Its tier cannot be compared with the role, so a lower-tier approver can go unnoticed.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Activation, replace the approver with a classified user or group of the role's tier, or classify the approver (for example in the Object Classification File) so EntraOps can compare it.",
+      "Effort": "Low",
+      "EffortDescription": "One change of the approvers or one classification entry.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Other people may approve the activations.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "Classification",
+      "References": [
+        {
+          "Title": "Approve or deny requests for Microsoft Entra roles in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-approval-workflow",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "EntraOps classification and object tiers",
+          "Url": "https://www.entraops.com/docs/core/index.html",
+          "Type": "EntraOps"
+        }
+      ]
+    },
+    {
+      "Id": "EO.2004",
+      "Key": "customRoleControlPlane",
+      "Area": "PrivilegedEAM",
+      "Title": "Custom role with Control Plane permissions",
+      "CheckTitle": "Custom roles with Control Plane permissions should be investigated.",
+      "Description": "A custom role of Entra ID or Azure grants permissions classified as Control Plane. Microsoft does not maintain custom roles: whoever can change the role definition can add Control Plane permissions to every assignment of the role at once. Only custom roles with assignments in the export are evaluated; for Azure roles, the tier can come from the scope of the assignment.",
+      "Remediation": "1. Review the actions of the custom role and remove those that are not needed.\n2. Restrict who can change the role definition (Entra ID: Privileged Role Administrator; Azure: Microsoft.Authorization/roleDefinitions/write at its assignable scopes).\n3. Use a built-in role if one fits.",
+      "Effort": "Medium",
+      "EffortDescription": "Needs a review of the actions with the users of the role.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Only actions that are removed from the role stop working.",
+      "Severity": "Info",
+      "Investigate": true,
+      "Feature": "roles",
+      "ResourceType": "RoleDefinition",
+      "Category": "Classification",
+      "References": [
+        {
+          "Title": "Create a custom role in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/custom-create",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Azure custom roles",
+          "Url": "https://learn.microsoft.com/azure/role-based-access-control/custom-roles",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.2005",
+      "Key": "unclassifiedTarget",
+      "Area": "AccessPackageFlow",
+      "Title": "Access package target group without classification",
+      "CheckTitle": "Access package target groups without role assignments should be investigated.",
+      "Description": "A group that an access package grants membership of has no role assignment EntraOps can classify, and no tier from the Group filters of the Alternate Tier Level Attributes or the Object Classification File (checked in this order, as in Privileged EAM). Such groups often control access outside of role-based access control, for example as Conditional Access exclusion, app assignment or Intune target, so the tier of the access the membership grants is unknown. The access package checks that compare tiers (approval, requestor scope, approver tier, access drift) cannot judge these groups. The tier of the members is not used: their other access is not granted by the access package.",
+      "Remediation": "1. Decide which tier the access of the group belongs to (for example Management Plane for a Conditional Access exclusion group of administrators).\n2. Add the group to the Object Classification File (ObjectClassificationFile of EntraOpsConfig.json) with the tier and a justification, or classify it with a Group filter of the Alternate Tier Level Attributes (for example by naming convention or administrative unit).\n3. Generate the Access Package Flow data again (New-EntraOpsReportingData).",
+      "Effort": "Low",
+      "EffortDescription": "One entry per group in the Object Classification File, or one Group filter for a naming convention.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "None: only the classification in EntraOps changes.",
+      "Severity": "Info",
+      "Investigate": true,
+      "Feature": "identity-governance",
+      "ResourceType": "Group",
+      "Category": "Classification",
+      "References": [
+        {
+          "Title": "Entitlement management overview",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-overview",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3001",
+      "Key": "permanentControlPlaneAssignment",
+      "Area": "PrivilegedEAM",
+      "Title": "Permanent Control Plane role assignment",
+      "CheckTitle": "Control Plane roles of Entra ID and Azure are assigned to users only as eligible.",
+      "Description": "A user holds a Control Plane role of Entra ID or Azure through a permanent (active) direct assignment instead of an eligible assignment in Privileged Identity Management. Standing access is usable at any time without activation, MFA, approval or justification, and is the main target of credential and token theft. PIM activations and time-bound active assignments are not reported, nor is delegated access of Tenant Governance (granted by the managing tenant). Emergency access accounts of Findings.EmergencyAccessAccounts (object ID or user principal name of the account; display names and groups in the setting don't exclude anyone here) are expected here and not reported; the reason of the rule names them.",
+      "Remediation": "1. Create an eligible assignment for the user in PIM (Microsoft Entra roles or Azure resources).\n2. Remove the active assignment.\n3. Keep permanent assignments only for monitored emergency access accounts.",
+      "Effort": "Low",
+      "EffortDescription": "Converting an assignment to eligible is one change per assignment.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "The administrator has to activate the role before each use.",
+      "Severity": "High",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "User",
+      "Category": "JustInTimeAccess",
+      "Parameters": [
+        {
+          "Name": "EmergencyAccessAccounts",
+          "Setting": "EmergencyAccessAccounts",
+          "Default": []
+        }
+      ],
+      "References": [
+        {
+          "Title": "Assign Microsoft Entra roles in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-add-role-to-user",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign Azure resource roles in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-resource-roles-assign-roles",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Manage emergency access accounts",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/security-emergency-access",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3002",
+      "Key": "permanentControlPlaneMembership",
+      "Area": "PrivilegedEAM",
+      "Title": "Permanent membership in a Control Plane group",
+      "CheckTitle": "Memberships in groups with Control Plane access are eligible.",
+      "Description": "A user holds Control Plane access through a permanent (active) membership of a group whose role assignment is permanent as well, instead of an eligible membership in PIM for Groups or an eligible assignment of the group. The access is standing, and anyone who can manage the group's members can grant it. Permanent members of a group with an eligible role assignment are not reported: they have to activate the role. Neither are members of a group whose role assignment is delegated access of Tenant Governance: the managing tenant grants it, so it cannot be made eligible here. A permanent member of a group that is itself a permanent member of the group with the role assignment has standing access as well (Nested Permanent group member, Privileged EAM data of EntraOps 1.2.0 or later); time-bound and activated memberships are not standing.",
+      "Remediation": "1. Manage the group with PIM for Groups (Privileged Identity Management > Groups).\n2. Make the user an eligible member, or make the role assignment of the group eligible in PIM.\n3. Remove the active membership.",
+      "Effort": "Medium",
+      "EffortDescription": "The group needs PIM for Groups, and members move to eligible memberships.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Members have to activate the membership before each use.",
+      "Severity": "High",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "User",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "PIM for Groups",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/concept-pim-for-groups",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign eligibility for a group in PIM for Groups",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/groups-assign-member-owner",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3003",
+      "Key": "azureRootScopeAssignment",
+      "Area": "PrivilegedEAM",
+      "Title": "Permanent Azure role assignment at root scope",
+      "CheckTitle": "No Control or Management Plane Azure role is assigned permanently at the root scope.",
+      "Description": "A Control or Management Plane Azure role is assigned permanently at the root scope (/) or the tenant root management group, so it applies to every management group, subscription and resource. User Access roles such as Reader, the members of a group with the assignment, and Microsoft first-party service principals such as MS-PIM (which manages the PIM assignments of Azure resources) are not reported. PIM activations and time-bound assignments are not reported.",
+      "Remediation": "1. Assign the role at the lowest management group, subscription or resource group that is needed.\n2. For users and groups, make the assignment eligible in PIM for Azure resources.\n3. Service principals and managed identities cannot be eligible in PIM: scope their assignment down, and protect their credentials and owners.",
+      "Effort": "Medium",
+      "EffortDescription": "The required scopes need to be identified before the assignment moves.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Automation or administrators lose access at scopes that are no longer covered.",
+      "Severity": "High",
+      "Feature": "access-management",
+      "ResourceType": "RoleAssignment",
+      "Product": "azure",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "Elevate access to manage all Azure subscriptions and management groups",
+          "Url": "https://learn.microsoft.com/azure/role-based-access-control/elevate-access-global-admin",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Azure management groups",
+          "Url": "https://learn.microsoft.com/azure/governance/management-groups/overview",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Best practices for Azure RBAC",
+          "Url": "https://learn.microsoft.com/azure/role-based-access-control/best-practices",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign Azure resource roles in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-resource-roles-assign-roles",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3004",
+      "Key": "permanentEligible",
+      "Area": "PimRequestFlow",
+      "Title": "Permanent eligible assignment allowed for privileged role",
+      "CheckTitle": "No permanent eligible assignment is allowed for Control and Management Plane roles.",
+      "Description": "The PIM setting of a Control or Management Plane role allows eligible assignments without expiration (the default of Entra ID roles). Eligibility that never expires is never reconsidered and stays when people change jobs. The tier of a role is the most privileged of its classification and of its current assignments, as the setting applies to every assignment of the role at any scope; only a role definition overwrite of the tenant can lower it. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Assignment, clear 'Allow permanent eligible assignment' and set 'Expire eligible assignments after' (for example 1 year). Renew needed access with access reviews or access packages.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per role, which can be applied to all roles by script.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Eligibility needs to be renewed when it expires.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Overview of PIM rules (unifiedRoleManagementPolicy)",
+          "Url": "https://learn.microsoft.com/graph/identity-governance-pim-rules-overview",
+          "Type": "Graph"
+        },
+        {
+          "Title": "Use PIM APIs to update rules",
+          "Url": "https://learn.microsoft.com/graph/how-to-pim-update-rules",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3005",
+      "Key": "permanentActive",
+      "Area": "PimRequestFlow",
+      "Title": "Permanent active assignment allowed for privileged role",
+      "CheckTitle": "No permanent active assignment is allowed for Control and Management Plane roles.",
+      "Description": "The PIM setting of a Control or Management Plane role allows active assignments without expiration (the default of Entra ID roles). Administrators can then grant standing access to the role that bypasses activation, MFA and approval. The tier of a role is the most privileged of its classification and of its current assignments, as the setting applies to every assignment of the role at any scope; only a role definition overwrite of the tenant can lower it. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Assignment, clear 'Allow permanent active assignment' and set 'Expire active assignments after' to a short duration. Document emergency access accounts as exceptions.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per role, which can be applied to all roles by script.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Only administrators who create active assignments are affected.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Overview of PIM rules (unifiedRoleManagementPolicy)",
+          "Url": "https://learn.microsoft.com/graph/identity-governance-pim-rules-overview",
+          "Type": "Graph"
+        },
+        {
+          "Title": "Use PIM APIs to update rules",
+          "Url": "https://learn.microsoft.com/graph/how-to-pim-update-rules",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3006",
+      "Key": "noMfaActivation",
+      "Area": "PimRequestFlow",
+      "Title": "Privileged role can be activated without MFA",
+      "CheckTitle": "Activation of Control and Management Plane roles requires MFA or an authentication context.",
+      "Description": "A Control or Management Plane role can be activated without multifactor authentication ('Azure MFA' in the role setting, Graph rule Enablement_EndUser_Assignment) and without an authentication context. The activation then relies on the existing session: a stolen session or token can activate the role. The MFA option only requires an MFA claim in the existing token; only an authentication context with a Conditional Access policy can require a fresh, phishing-resistant sign-in. Roles that require an authentication context are not reported. The tier of a role is the most privileged of its classification and of its current assignments, as the setting applies to every assignment of the role at any scope; only a role definition overwrite of the tenant can lower it. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Activation, require a Conditional Access authentication context whose policy requires phishing-resistant authentication (preferred), or require multifactor authentication ('Azure MFA').",
+      "Effort": "Low",
+      "EffortDescription": "One setting per role.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Administrators authenticate again when they activate the role.",
+      "Severity": "High",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Conditional Access: authentication context",
+          "Url": "https://learn.microsoft.com/entra/identity/conditional-access/concept-conditional-access-cloud-apps#authentication-context",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Require phishing-resistant MFA for administrators",
+          "Url": "https://learn.microsoft.com/entra/identity/conditional-access/policy-admin-phish-resistant-mfa",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Overview of PIM rules (unifiedRoleManagementPolicy)",
+          "Url": "https://learn.microsoft.com/graph/identity-governance-pim-rules-overview",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3007",
+      "Key": "noApprovalActivation",
+      "Area": "PimRequestFlow",
+      "Title": "Privileged role can be activated without approval",
+      "CheckTitle": "Activation of Control and Management Plane roles requires approval.",
+      "Description": "A Control or Management Plane role can be activated without approval. Every eligible user, and an attacker in control of such an account, can activate the role alone. With approval turned on but no approvers selected, the Privileged Role Administrators approve. The tier of a role is the most privileged of its classification and of its current assignments, as the setting applies to every assignment of the role at any scope; only a role definition overwrite of the tenant can lower it. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Activation, turn on 'Require approval to activate' and select approvers of the role's tier. For frequently used roles, weigh approval against operations and compensate with an authentication context and activation alerts.",
+      "Effort": "Medium",
+      "EffortDescription": "One setting per role, plus defining and staffing approvers who are available when needed.",
+      "UserImpact": "High",
+      "UserImpactDescription": "Every activation waits for an approver, which delays administrative tasks.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "Approve or deny requests for Microsoft Entra roles in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-approval-workflow",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Overview of PIM rules (unifiedRoleManagementPolicy)",
+          "Url": "https://learn.microsoft.com/graph/identity-governance-pim-rules-overview",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3008",
+      "Key": "noMfaActiveAssign",
+      "Area": "PimRequestFlow",
+      "Title": "Privileged role can be assigned as active without MFA",
+      "CheckTitle": "Active assignments of Control and Management Plane roles require MFA.",
+      "Description": "Active assignments of a Control or Management Plane role can be created without multifactor authentication at assignment time ('Require Multi-Factor Authentication on active assignment' is off, Graph rule Enablement_Admin_Assignment). A hijacked administrator session can grant active access without authenticating again. The tier of a role is the most privileged of its classification and of its current assignments, as the setting applies to every assignment of the role at any scope; only a role definition overwrite of the tenant can lower it. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Assignment, turn on 'Require Multi-Factor Authentication on active assignment'.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per role.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Only administrators who create active assignments authenticate again.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Overview of PIM rules (unifiedRoleManagementPolicy)",
+          "Url": "https://learn.microsoft.com/graph/identity-governance-pim-rules-overview",
+          "Type": "Graph"
+        },
+        {
+          "Title": "Use PIM APIs to update rules",
+          "Url": "https://learn.microsoft.com/graph/how-to-pim-update-rules",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3009",
+      "Key": "controlPlaneActivationAuthContext",
+      "Area": "TenantGovernance",
+      "Title": "Control Plane role activation without authentication context",
+      "CheckTitle": "Activations of Control Plane roles require an authentication context.",
+      "Description": "Activation of a Control Plane role does not require a Conditional Access authentication context, so it cannot enforce controls beyond MFA: phishing-resistant authentication, a compliant privileged access workstation or a fresh sign-in. Whether the required context is selected is checked by EO.3011. The tier of a role is the most privileged of its classification and of its current assignments, as the setting applies to every assignment of the role at any scope; only a role definition overwrite of the tenant can lower it. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "1. Create an authentication context (Conditional Access > Authentication contexts).\n2. Target it with a Conditional Access policy that requires a phishing-resistant authentication strength, a compliant device and sign-in frequency 'Every time'.\n3. Select the context on activation in Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role.",
+      "Effort": "Medium",
+      "EffortDescription": "Needs an authentication context and a Conditional Access policy once, then one setting per role.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Activations need phishing-resistant authentication on a compliant device.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "Conditional Access: authentication context",
+          "Url": "https://learn.microsoft.com/entra/identity/conditional-access/concept-conditional-access-cloud-apps#authentication-context",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Require phishing-resistant MFA for administrators",
+          "Url": "https://learn.microsoft.com/entra/identity/conditional-access/policy-admin-phish-resistant-mfa",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3010",
+      "Key": "approverNotEnforced",
+      "Area": "PimRequestFlow",
+      "Title": "Approvers configured but approval not required",
+      "CheckTitle": "PIM role settings with approvers require approval to activate.",
+      "Description": "Approvers are configured in the PIM setting, but 'Require approval to activate' is off, so the approvers have no effect. Approval was probably intended but is not enforced. Microsoft Graph keeps the approvers of the disabled approval rule, so this is common after approval was turned off. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Activation, turn on 'Require approval to activate', or remove the approvers if approval is not intended.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per role.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "With approval turned on, every activation waits for an approver.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "Approve or deny requests for Microsoft Entra roles in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-approval-workflow",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Overview of PIM rules (unifiedRoleManagementPolicy)",
+          "Url": "https://learn.microsoft.com/graph/identity-governance-pim-rules-overview",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3011",
+      "Key": "authContextMissing",
+      "Area": "PimRequestFlow",
+      "Title": "Authentication context required but not configured",
+      "CheckTitle": "PIM role settings that require an authentication context have one configured.",
+      "Description": "The PIM setting requires an authentication context on activation, but no context is selected (neither its name nor its ID is in the snapshot), so the requirement has no effect. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Activation, select the authentication context, and make sure an enabled Conditional Access policy targets it.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per role.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Activations are checked by the Conditional Access policy of the context.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "Conditional Access: authentication context",
+          "Url": "https://learn.microsoft.com/entra/identity/conditional-access/concept-conditional-access-cloud-apps#authentication-context",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3012",
+      "Key": "eligibleAssignmentDuration",
+      "Area": "TenantGovernance",
+      "Title": "Long eligible assignment of a privileged role",
+      "CheckTitle": "Eligible assignments of Control and Management Plane roles expire within the configured maximum duration.",
+      "Description": "Eligible assignments of a Control or Management Plane role can last longer than the configured maximum (Findings.EligibleAssignmentMaxDays, default 365 days) before they expire. Long-lived eligibility is rarely reconsidered. Roles that allow permanent eligible assignments are reported by EO.3004. The tier of a role is the most privileged of its classification and of its current assignments, as the setting applies to every assignment of the role at any scope; only a role definition overwrite of the tenant can lower it. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Assignment, reduce 'Expire eligible assignments after' to the configured maximum or less, and renew needed access with access reviews or access packages.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per role.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Eligibility needs to be renewed more often.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "Parameters": [
+        {
+          "Name": "MaxDays",
+          "Setting": "EligibleAssignmentMaxDays",
+          "Default": 365
+        }
+      ],
+      "References": [
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Overview of PIM rules (unifiedRoleManagementPolicy)",
+          "Url": "https://learn.microsoft.com/graph/identity-governance-pim-rules-overview",
+          "Type": "Graph"
+        },
+        {
+          "Title": "Use PIM APIs to update rules",
+          "Url": "https://learn.microsoft.com/graph/how-to-pim-update-rules",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3013",
+      "Key": "controlPlaneActivationDuration",
+      "Area": "TenantGovernance",
+      "Title": "Long Control Plane role activation",
+      "CheckTitle": "Activations of Control Plane roles are limited to the configured maximum duration.",
+      "Description": "Activations of a Control Plane role can last longer than the configured maximum (Findings.ControlPlaneActivationMaxHours, default 4 hours; the PIM default is 8 hours). The longer an activation lasts, the longer a stolen session or token holds Control Plane access. The tier of a role is the most privileged of its classification and of its current assignments, as the setting applies to every assignment of the role at any scope; only a role definition overwrite of the tenant can lower it. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Activation, reduce 'Activation maximum duration (hours)' to the configured maximum or less.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per role.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Long tasks need a second activation.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "Parameters": [
+        {
+          "Name": "MaxHours",
+          "Setting": "ControlPlaneActivationMaxHours",
+          "Default": 4
+        }
+      ],
+      "References": [
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Overview of PIM rules (unifiedRoleManagementPolicy)",
+          "Url": "https://learn.microsoft.com/graph/identity-governance-pim-rules-overview",
+          "Type": "Graph"
+        },
+        {
+          "Title": "Use PIM APIs to update rules",
+          "Url": "https://learn.microsoft.com/graph/how-to-pim-update-rules",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.3014",
+      "Key": "privilegedRoleAlert",
+      "Area": "TenantGovernance",
+      "Title": "Privileged role without administrator alerts",
+      "CheckTitle": "Assignments and activations of Control and Management Plane roles alert administrators.",
+      "Description": "The PIM setting of a Control or Management Plane role does not notify administrators when the role is activated, or assigned as eligible or active: the default recipients are turned off and there are no additional recipients. Misuse of the role then goes unnoticed until someone reviews the audit log. Roles whose snapshot has no notification settings are not evaluated. The PIM settings of Microsoft Entra roles are evaluated; those of Azure roles and PIM for Groups are not.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Privileged Identity Management > Microsoft Entra roles > Settings > the role > Notification, turn on the default recipients of the 'Role activation alert' and 'Role assignment alert' notifications, or add the mailbox of the security operations team as additional recipient.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per role.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "No change for administrators; the recipients get notification emails.",
+      "Severity": "Medium",
+      "Feature": "privileged-identity-management",
+      "ResourceType": "DirectoryRole",
+      "Category": "JustInTimeAccess",
+      "References": [
+        {
+          "Title": "Email notifications in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-email-notifications",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Configure Microsoft Entra role settings in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-change-default-settings",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Overview of PIM rules (unifiedRoleManagementPolicy)",
+          "Url": "https://learn.microsoft.com/graph/identity-governance-pim-rules-overview",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4001",
+      "Key": "hybridPrivileged",
+      "Area": "PrivilegedAssets",
+      "Title": "Synchronized Control Plane identity",
+      "CheckTitle": "No Control Plane object is synchronized from Active Directory.",
+      "Description": "An object that is Control Plane, or holds Control Plane role assignments (unclassified objects included), is synchronized from Active Directory. Administrators of Active Directory and of the synchronization server can reset its password or change it, so the on-premises environment becomes part of the Control Plane.",
+      "Remediation": "Create a cloud-only account or group for the Control Plane privileges, move the role assignments to it, and remove the privileges from the synchronized object.",
+      "Effort": "High",
+      "EffortDescription": "Needs a new cloud-only object and the move of its role assignments.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Administrators use a separate cloud-only account for Control Plane tasks.",
+      "Severity": "High",
+      "Feature": "hybrid-identity",
+      "ResourceType": "PrivilegedObject",
+      "Category": "AccountProtection",
+      "References": [
+        {
+          "Title": "Protect Microsoft 365 from on-premises attacks",
+          "Url": "https://learn.microsoft.com/entra/architecture/protect-m365-from-on-premises-attacks",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Secure access practices for administrators in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/security-planning",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4002",
+      "Key": "guestPrivileged",
+      "Area": "PrivilegedEAM",
+      "Title": "Guest user with privileged access",
+      "CheckTitle": "No guest user has Control or Management Plane access, apart from the managing tenant.",
+      "Description": "A guest user holds Control or Management Plane access. The guest's home organization controls the authentication, credentials and lifecycle of the account, and controls of this tenant such as device compliance apply only when the cross-tenant access settings trust the home tenant. External users with a member account (userType Member) are not reported (EO.4011 reports those with Control Plane access). Principals of the managing tenant (ManagingTenantId of EntraOpsConfig.json, the governing tenant of Tenant Governance) are informational only: they pass, a note names them, and EO.4010 lists their role assignments.",
+      "Remediation": "Remove the access, or give the person a member account of this tenant that is classified and protected for its tier.",
+      "Effort": "Medium",
+      "EffortDescription": "Needs a member account and the move of the role assignments.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "The person signs in with a separate account of this tenant.",
+      "Severity": "High",
+      "Feature": "external-identities",
+      "ResourceType": "User",
+      "Category": "AccountProtection",
+      "Parameters": [
+        {
+          "Name": "ManagingTenantId",
+          "Setting": "ManagingTenantId",
+          "Default": "",
+          "Scope": "Root",
+          "Format": "Guid"
+        },
+        {
+          "Name": "ManagingTenantName",
+          "Setting": "ManagingTenantName",
+          "Default": "",
+          "Scope": "Root"
+        }
+      ],
+      "References": [
+        {
+          "Title": "Properties of a B2B guest user",
+          "Url": "https://learn.microsoft.com/entra/external-id/user-properties",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Cross-tenant access settings for B2B collaboration",
+          "Url": "https://learn.microsoft.com/entra/external-id/cross-tenant-access-settings-b2b-collaboration",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Secure access practices for administrators in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/security-planning",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4003",
+      "Key": "conditionalAccessControlPlaneExclusion",
+      "Area": "TenantGovernance",
+      "Title": "Control Plane user, group or role excluded from Conditional Access",
+      "CheckTitle": "Conditional Access policies do not exclude Control Plane users, groups or roles.",
+      "Description": "An enabled Conditional Access policy excludes a Control Plane user, a group with Control Plane members or a Control Plane directory role, so its controls do not apply to them. Excluded groups are evaluated with their members; groups that could not be resolved to their members are named in the reason of the result instead of passing silently. Not reported: emergency access accounts and groups of Findings.EmergencyAccessAccounts (nothing is taken for emergency access without the setting: users excluded from every enabled policy are reported, and the reason of the rule names them to add to the setting if they are emergency access accounts), and exclusions from a block policy of identities or roles that another enabled policy targets without excluding them (the allow-list of the block policy, for example privileged accounts and admin roles excluded from blocking admin portals for everyone else; target applications and conditions are not matched between the policies). An excluded group of a block policy also belongs to the allow-list when each of its Control Plane users (without the emergency access accounts) is targeted by another enabled policy that does not exclude them: by user, as a (transitive) member of an included group, or by an included directory role they hold actively on the directory; otherwise the result names the members that remain uncovered. When failed policies only exclude the same user or group, the reason of the rule names it: if it is your emergency access account or group, set Findings.EmergencyAccessAccounts.",
+      "Remediation": "1. Remove the exclusion, or remove the Control Plane users from the excluded group.\n2. If the exclusion is intended (persona-based policies), target the excluded users, groups or roles with a dedicated enabled policy with the same or stronger controls.\n3. Set Findings.EmergencyAccessAccounts to the emergency access accounts and groups.",
+      "Effort": "Medium",
+      "EffortDescription": "Exclusions often exist for a reason that needs an alternative policy first.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "The policy's controls start to apply to the excluded users.",
+      "Severity": "High",
+      "Feature": "conditional-access",
+      "ResourceType": "ConditionalAccessPolicy",
+      "Category": "AccountProtection",
+      "Parameters": [
+        {
+          "Name": "EmergencyAccessAccounts",
+          "Setting": "EmergencyAccessAccounts",
+          "Default": []
+        }
+      ],
+      "References": [
+        {
+          "Title": "Conditional Access: users, groups and workload identities",
+          "Url": "https://learn.microsoft.com/entra/identity/conditional-access/concept-conditional-access-users-groups",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Manage emergency access accounts",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/security-emergency-access",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Require phishing-resistant MFA for administrators",
+          "Url": "https://learn.microsoft.com/entra/identity/conditional-access/policy-admin-phish-resistant-mfa",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4004",
+      "Key": "unprotectedPrivilegedGroup",
+      "Area": "PrivilegedEAM",
+      "Title": "Privileged group without restricted management",
+      "CheckTitle": "Groups with Control or Management Plane access are role-assignable or protected by a restricted management administrative unit.",
+      "Description": "A group with Control or Management Plane access is neither role-assignable nor a member of a restricted management administrative unit. Group owners and administrators who can manage groups (for example Groups Administrator or User Administrator) can then change its members and take over its access. Groups of another tenant (a remote group of Tenant Governance) are managed in their tenant and pass: the reason of the rule names them, and EO.4011 and EO.4010 report their access.",
+      "Remediation": "Use a role-assignable group (role-assignable can only be set when the group is created) and move the role assignments to it, or add the group to a restricted management administrative unit.",
+      "Effort": "Medium",
+      "EffortDescription": "A role-assignable group has to be created and the assignments moved to it.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Only administrators who manage the group's members are affected.",
+      "Severity": "High",
+      "Feature": "groups",
+      "ResourceType": "Group",
+      "Category": "AccountProtection",
+      "References": [
+        {
+          "Title": "Use Microsoft Entra groups to manage role assignments",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/groups-concept",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Create a role-assignable group",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/groups-create-eligible",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Restricted management administrative units",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/admin-units-restricted-management",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4005",
+      "Key": "restrictedManagementGap",
+      "Area": "PrivilegedAssets",
+      "Title": "Restricted management not applied",
+      "CheckTitle": "Control, Management and Workload Plane users and groups are protected by restricted management.",
+      "Description": "A user or group that is, or holds role assignments of, Tier 0 or 1 (Control, Management or Workload Plane) is not protected by restricted management (a directory role, a role-assignable group or a restricted management administrative unit). Helpdesk, user and group administrators can then reset its credentials or change its members. A directory role protects its holder, also when it is eligible only or scoped to an administrative unit, except the roles whose holders Helpdesk, Password, Authentication or User Administrators can still manage: Directory Readers, Guest Inviter, Password Administrator, Helpdesk Administrator, Message Center Reader, Reports Reader, User Experience Success Manager, Usage Summary Reports Reader, Authentication Administrator, Groups Administrator and User Administrator. A role-assignable group in a restricted management administrative unit ('Conflict' in the Privileged Assets report) is protected by the group and not reported. A group with Control or Management Plane access is reported by EO.4004 instead; this rule reports such groups only when they are privileged by their classification. Objects of another tenant with access through Tenant Governance are managed in their tenant and not reported.",
+      "Remediation": "Add the object to a restricted management administrative unit, or grant its privileges through a role-assignable group.",
+      "Effort": "Medium",
+      "EffortDescription": "Needs a restricted management administrative unit or a role-assignable group.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Helpdesk can no longer manage the object; its tier's administrators do.",
+      "Severity": "Medium",
+      "Feature": "roles",
+      "ResourceType": "PrivilegedObject",
+      "Category": "AccountProtection",
+      "References": [
+        {
+          "Title": "Restricted management administrative units",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/admin-units-restricted-management",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Use Microsoft Entra groups to manage role assignments",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/groups-concept",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Privileged roles and permissions (who can reset passwords)",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/privileged-roles-permissions#who-can-reset-passwords",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4006",
+      "Key": "hybridManagementPlane",
+      "Area": "PrivilegedEAM",
+      "Title": "Synchronized Management Plane identity",
+      "CheckTitle": "No Management Plane object is synchronized from Active Directory.",
+      "Description": "A Management Plane object is synchronized from Active Directory. Administrators of Active Directory and of the synchronization server can reset its password or change it, and so take over its Management Plane access.",
+      "Remediation": "Create a cloud-only account or group for the Management Plane privileges, move the role assignments to it, and remove the privileges from the synchronized object.",
+      "Effort": "Medium",
+      "EffortDescription": "Needs a new cloud-only object and the move of its role assignments.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Administrators use a separate cloud-only account for Management Plane tasks.",
+      "Severity": "Medium",
+      "Feature": "hybrid-identity",
+      "ResourceType": "PrivilegedObject",
+      "Category": "AccountProtection",
+      "References": [
+        {
+          "Title": "Protect Microsoft 365 from on-premises attacks",
+          "Url": "https://learn.microsoft.com/entra/architecture/protect-m365-from-on-premises-attacks",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Secure access practices for administrators in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/security-planning",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4007",
+      "Key": "deviceNotPaw",
+      "Area": "PrivilegedAssets",
+      "Title": "Owns non-PAW devices",
+      "CheckTitle": "Control, Management and Workload Plane users own no devices other than their privileged access workstation.",
+      "Description": "A user that is, or holds role assignments of, Tier 0 or 1 (Control, Management or Workload Plane) is the registered owner of devices that are not its associated privileged access workstation (by default the custom security attribute associatedSecureAdminWorkstation, with the device ID or the object ID of the device). Without an associated PAW, every owned device is reported (and EO.4008 for Control Plane users). The privileged account registered regular devices; device ownership does not prove sign-ins from them, but a privileged account on a regular device exposes its tokens to threats of daily work.",
+      "Remediation": "1. Remove the privileged account as owner of the device.\n2. If the device is a PAW, add its device ID or object ID to the associatedSecureAdminWorkstation attribute of the user.\n3. Allow the privileged account only on its PAW, for example with a Conditional Access device filter.",
+      "Effort": "Medium",
+      "EffortDescription": "Removing device ownership or re-enrolling devices across users, or setting the PAW attribute when the device is a PAW.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "The privileged account is used only on its PAW.",
+      "Severity": "Medium",
+      "Feature": "devices",
+      "ResourceType": "User",
+      "Category": "AccountProtection",
+      "References": [
+        {
+          "Title": "Securing devices as part of the privileged access story",
+          "Url": "https://learn.microsoft.com/security/privileged-access-workstations/privileged-access-devices",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Conditional Access: filter for devices",
+          "Url": "https://learn.microsoft.com/entra/identity/conditional-access/concept-condition-filters-for-devices",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign custom security attributes to users",
+          "Url": "https://learn.microsoft.com/entra/identity/users/users-custom-security-attributes",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4008",
+      "Key": "pawMissing",
+      "Area": "PrivilegedAssets",
+      "Title": "No associated PAW",
+      "CheckTitle": "Control Plane users have an associated privileged access workstation.",
+      "Description": "A user that is Control Plane, or holds Control Plane role assignments, has no associated privileged access workstation (by default the custom security attribute associatedSecureAdminWorkstation, with the device ID or the object ID of the device; a reference that matches no device counts as none). EntraOps cannot tie the account to a PAW, and Conditional Access device filters cannot restrict the account to its own PAW (a generic device filter, for example on a PAW extension attribute, does not need the association). Emergency access accounts of Findings.EmergencyAccessAccounts (object ID or user principal name of the account; display names and groups in the setting don't exclude anyone here) are not reported; the reason of the rule names them.",
+      "Remediation": "Provide a PAW to the administrator and set its device ID or object ID in the associatedSecureAdminWorkstation attribute of the user.",
+      "Effort": "High",
+      "EffortDescription": "Needs a managed and hardened PAW device per administrator.",
+      "Parameters": [
+        {
+          "Name": "EmergencyAccessAccounts",
+          "Setting": "EmergencyAccessAccounts",
+          "Default": []
+        }
+      ],
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Control Plane tasks are done on a dedicated device.",
+      "Severity": "Medium",
+      "Feature": "devices",
+      "ResourceType": "User",
+      "Category": "AccountProtection",
+      "References": [
+        {
+          "Title": "Privileged access deployment",
+          "Url": "https://learn.microsoft.com/security/privileged-access-workstations/privileged-access-deployment",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Securing devices as part of the privileged access story",
+          "Url": "https://learn.microsoft.com/security/privileged-access-workstations/privileged-access-devices",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign custom security attributes to users",
+          "Url": "https://learn.microsoft.com/entra/identity/users/users-custom-security-attributes",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4009",
+      "Key": "workAccountMissing",
+      "Area": "PrivilegedAssets",
+      "Title": "No associated work account",
+      "CheckTitle": "Control, Management and Workload Plane users are linked to a work account.",
+      "Description": "A member user that is, or holds role assignments of, Tier 0 or 1 (Control, Management or Workload Plane) is not linked to the regular work account of its owner (by default the custom security attribute associatedWorkAccount; without it, the Privileged EAM collection also uses the identity info of Microsoft Defender XDR when XDR hunting is enabled). Without the link, leaver processes and investigations cannot connect the privileged account to a person. Emergency access accounts of Findings.EmergencyAccessAccounts (object ID or user principal name of the account; display names and groups in the setting don't exclude anyone here) are shared accounts without a personal work account and are not reported; the reason of the rule names them.",
+      "Remediation": "Set the associatedWorkAccount attribute of the privileged account to the owner's regular work account, preferably by the provisioning process of privileged accounts.",
+      "Effort": "Low",
+      "EffortDescription": "One attribute value per privileged account.",
+      "Parameters": [
+        {
+          "Name": "EmergencyAccessAccounts",
+          "Setting": "EmergencyAccessAccounts",
+          "Default": []
+        }
+      ],
+      "UserImpact": "Low",
+      "UserImpactDescription": "No change for the user.",
+      "Severity": "Low",
+      "Feature": "roles",
+      "ResourceType": "User",
+      "Category": "AccountProtection",
+      "References": [
+        {
+          "Title": "Assign custom security attributes to users",
+          "Url": "https://learn.microsoft.com/entra/identity/users/users-custom-security-attributes",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Lifecycle workflows (joiner, mover, leaver)",
+          "Url": "https://learn.microsoft.com/entra/id-governance/what-are-lifecycle-workflows",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4010",
+      "Key": "foreign",
+      "Area": "PrivilegedAssets",
+      "Title": "Role assignment of a principal managed by another tenant",
+      "CheckTitle": "Role assignments of principals managed by other tenants should be investigated.",
+      "Description": "The privileged object belongs to another tenant, as its origin (OriginType and OriginTenantId of the Privileged EAM export, EntraOps 1.2.0 or later) names it: a guest or an external member invited from another tenant (also a B2B member user with an #EXT# user principal name), a user or group synchronized from another tenant (cross-tenant synchronization, also without #EXT#), the service principal of an application of another organization (Microsoft applications are not reported), or an object of another tenant with access through Tenant Governance (a group or member of the governing tenant, a remote group). Its credentials and lifecycle are controlled outside this tenant. Each result is one role assignment of such an object, with its role, scope, tier, PIM assignment type and the group it comes through, sorted by the tier of the assignment (Control Plane first). Delegated permissions are not listed: they act within the rights of the signed-in user (EO.5005 reports the Control Plane ones); an object with delegated permissions only is one result. Principals of the managing tenant (ManagingTenantId of EntraOpsConfig.json, the governing tenant of Tenant Governance) are listed as well, named as the managing tenant and marked (evidence ManagingTenant), as their access is the most privileged access from another tenant. A finding exception accepts one assignment, so a new assignment of an accepted object is reported again. Guests with privileged access are also reported by EO.4002, applications of other organizations with Control Plane access by EO.5001.",
+      "Remediation": "Check whether the privileges are still needed and who controls the object in its home tenant. Remove the privileges if they are not needed, or use an object of this tenant.",
+      "Effort": "Low",
+      "EffortDescription": "A review per object, and removal if not needed.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Only the external object loses access.",
+      "Severity": "Info",
+      "Investigate": true,
+      "Feature": "external-identities",
+      "ResourceType": "PrivilegedObject",
+      "Category": "AccountProtection",
+      "Parameters": [
+        {
+          "Name": "ManagingTenantId",
+          "Setting": "ManagingTenantId",
+          "Default": "",
+          "Scope": "Root",
+          "Format": "Guid"
+        },
+        {
+          "Name": "ManagingTenantName",
+          "Setting": "ManagingTenantName",
+          "Default": "",
+          "Scope": "Root"
+        }
+      ],
+      "References": [
+        {
+          "Title": "Properties of a B2B guest user",
+          "Url": "https://learn.microsoft.com/entra/external-id/user-properties",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Cross-tenant access settings for B2B collaboration",
+          "Url": "https://learn.microsoft.com/entra/external-id/cross-tenant-access-settings-b2b-collaboration",
+          "Type": "Learn"
+        },
+        {
+          "Title": "EntraOps Tenant Governance",
+          "Url": "https://www.entraops.com/docs/tenant-governance/index.html",
+          "Type": "EntraOps"
+        }
+      ]
+    },
+    {
+      "Id": "EO.4011",
+      "Key": "foreignPrincipalControlPlane",
+      "Area": "PrivilegedEAM",
+      "Title": "Privileged principal managed by another tenant",
+      "CheckTitle": "No principal managed by another tenant has Control Plane access, apart from the managing tenant.",
+      "Description": "A user or group that another tenant manages holds Control Plane access: a user or group of cross-tenant synchronization, an external member (#EXT# with userType Member), or a group or member of another tenant with access through Tenant Governance (for example a remote group). The other tenant controls its credentials, authentication, membership and lifecycle, so a compromise of that tenant gives Control Plane access to this tenant, and controls of this tenant such as restricted management or Conditional Access may not apply. Principals of the managing tenant (ManagingTenantId of EntraOpsConfig.json, the governing tenant of Tenant Governance) are informational only: they pass, and a note names them. Guests are reported by EO.4002, service principals of applications of other organizations by EO.5001, and every role assignment of a principal of another tenant is listed by EO.4010. The origin of synchronized and governed objects is exported since EntraOps 1.2.0; older exports recognize only external users and objects of another tenant.",
+      "Remediation": "1. Check who manages the principal in its tenant and why it needs Control Plane access in this tenant.\n2. Move the access to a cloud-only account of this tenant that is classified and protected for the Control Plane, or to a role-assignable group of this tenant, and remove it from the principal of the other tenant.\n3. If the other tenant governs this tenant by design (Tenant Governance), set ManagingTenantId and ManagingTenantName in EntraOpsConfig.json to the governing tenant, so its principals are accepted; protect the governing tenant like this tenant's Control Plane.",
+      "Effort": "High",
+      "EffortDescription": "Needs an account or group of this tenant and the move of the role assignments; or one setting for the governing tenant.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "The administrators sign in with an account of this tenant instead of their account of the other tenant.",
+      "Severity": "High",
+      "Feature": "external-identities",
+      "ResourceType": "PrivilegedObject",
+      "Category": "AccountProtection",
+      "Parameters": [
+        {
+          "Name": "ManagingTenantId",
+          "Setting": "ManagingTenantId",
+          "Default": "",
+          "Scope": "Root",
+          "Format": "Guid"
+        },
+        {
+          "Name": "ManagingTenantName",
+          "Setting": "ManagingTenantName",
+          "Default": "",
+          "Scope": "Root"
+        }
+      ],
+      "References": [
+        {
+          "Title": "Cross-tenant synchronization",
+          "Url": "https://learn.microsoft.com/entra/identity/multi-tenant-organizations/cross-tenant-synchronization-overview",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Properties of a B2B guest user",
+          "Url": "https://learn.microsoft.com/entra/external-id/user-properties",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Secure access practices for administrators in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/security-planning",
+          "Type": "Learn"
+        },
+        {
+          "Title": "EntraOps Tenant Governance",
+          "Url": "https://www.entraops.com/docs/tenant-governance/index.html",
+          "Type": "EntraOps"
+        }
+      ]
+    },
+    {
+      "Id": "EO.5001",
+      "Key": "foreignWorkloadControlPlane",
+      "Area": "PrivilegedEAM",
+      "Title": "Workload identity of another tenant with Control Plane access",
+      "CheckTitle": "No service principal of another tenant has Control Plane access, apart from the managing tenant.",
+      "Description": "A service principal of a multi-tenant application of another organization (the tenant of the application, exported since EntraOps 1.2.0; Microsoft applications are not reported) holds Control Plane access. The other organization controls the credentials and code of the application, so a compromise of that vendor gives Control Plane access to this tenant. Delegated permissions do not count as access of the object: the application acts within the rights of the signed-in user (EO.5005 reports delegated Control Plane permissions). Without the tenant of the applications in the export (EntraOps before 1.2.0), the rule is skipped. Principals of the managing tenant (ManagingTenantId of EntraOpsConfig.json, the governing tenant of Tenant Governance) are informational only: they pass, a note names them, and EO.4010 lists their role assignments.",
+      "Remediation": "1. Remove the Control Plane permissions, or reduce them to the scope the application needs.\n2. If the vendor requires them, document the risk, monitor the service principal's sign-ins, ask the vendor to enable app instance property lock on its application (only the home tenant of the application can set it) and review its consent. Conditional Access for workload identities cannot target it: it supports only single-tenant applications of this tenant.",
+      "Effort": "Medium",
+      "EffortDescription": "Needs the vendor's requirements and possibly a change of the integration.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Features of the application that need the permissions stop working.",
+      "Severity": "High",
+      "Feature": "applications",
+      "ResourceType": "ServicePrincipal",
+      "Category": "WorkloadIdentities",
+      "Parameters": [
+        {
+          "Name": "ManagingTenantId",
+          "Setting": "ManagingTenantId",
+          "Default": "",
+          "Scope": "Root",
+          "Format": "Guid"
+        },
+        {
+          "Name": "ManagingTenantName",
+          "Setting": "ManagingTenantName",
+          "Default": "",
+          "Scope": "Root"
+        }
+      ],
+      "References": [
+        {
+          "Title": "Workload identities",
+          "Url": "https://learn.microsoft.com/entra/workload-id/workload-identities-overview",
+          "Type": "Learn"
+        },
+        {
+          "Title": "App instance property lock",
+          "Url": "https://learn.microsoft.com/entra/identity-platform/howto-configure-app-instance-property-locks",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Conditional Access for workload identities (single-tenant only)",
+          "Url": "https://learn.microsoft.com/entra/identity/conditional-access/workload-identity",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Review and revoke permissions granted to applications",
+          "Url": "https://learn.microsoft.com/entra/identity/enterprise-apps/manage-application-permissions",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.5002",
+      "Key": "agentPrivileged",
+      "Area": "PrivilegedEAM",
+      "Title": "Agent identity with privileged access",
+      "CheckTitle": "Agent identities have no Control or Management Plane access.",
+      "Description": "An agent identity, agent identity blueprint principal or agent user holds Control or Management Plane access. AI agents act autonomously on the content they process, so privileged access exposes the tenant to prompt injection and misuse of the agent. Delegated permissions do not count as access of the object: the application acts within the rights of the signed-in user (EO.5005 reports delegated Control Plane permissions).",
+      "Remediation": "Remove the privileged access, or replace it with the narrowest permissions the agent needs, scoped to the resources it works on. Assign a sponsor and owners of the agent's tier.",
+      "Effort": "Medium",
+      "EffortDescription": "Needs the agent's actual permission requirements.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Agent tasks that need the removed permissions stop working.",
+      "Severity": "High",
+      "Feature": "agent-identities",
+      "ResourceType": "Agent",
+      "Category": "WorkloadIdentities",
+      "References": [
+        {
+          "Title": "Microsoft Entra Agent ID",
+          "Url": "https://learn.microsoft.com/entra/agent-id/",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Workload identities",
+          "Url": "https://learn.microsoft.com/entra/workload-id/workload-identities-overview",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.5003",
+      "Key": "sponsorMissing",
+      "Area": "PrivilegedAssets",
+      "Title": "No sponsor",
+      "CheckTitle": "Agent identities and agent users have a sponsor.",
+      "Description": "An agent identity or agent user has no sponsor. Agent identity blueprints and their principals in the tenant are not reported: the sponsors of a blueprint are kept on the blueprint application. The sponsor is the person accountable for the agent's purpose and lifecycle; without one, nobody reviews or ends its access.",
+      "Remediation": "Assign a sponsor in the Microsoft Entra admin center (Agent ID) or with Microsoft Graph (sponsors), preferably when the agent is created.",
+      "Effort": "Low",
+      "EffortDescription": "One sponsor per agent.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "No change for the agent or its users.",
+      "Severity": "Medium",
+      "Feature": "agent-identities",
+      "ResourceType": "Agent",
+      "Category": "WorkloadIdentities",
+      "References": [
+        {
+          "Title": "Microsoft Entra Agent ID",
+          "Url": "https://learn.microsoft.com/entra/agent-id/",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign sponsors of a user (user: sponsors)",
+          "Url": "https://learn.microsoft.com/graph/api/user-post-sponsors",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.5004",
+      "Key": "workloadControlPlane",
+      "Area": "PrivilegedEAM",
+      "Title": "Workload identity with Control Plane access",
+      "CheckTitle": "Workload identities with Control Plane access should be investigated.",
+      "Description": "A service principal (application, managed identity or agent identity) holds Control Plane access. Service principals cannot hold eligible assignments in PIM, so the access is standing (permanent or time-bound active), and whoever controls its credentials, owners or the resource behind a managed identity has the same access. Service principals of Microsoft first-party applications are not reported. Delegated permissions do not count as access of the object: the application acts within the rights of the signed-in user (EO.5005 reports delegated Control Plane permissions).",
+      "Remediation": "1. Confirm that the workload needs Control Plane access, and reduce it to the permissions and scopes it needs.\n2. Prefer managed identities or federated credentials over secrets.\n3. Remove its owners, manage it with roles of its tier, and monitor its sign-ins.",
+      "Effort": "Medium",
+      "EffortDescription": "Needs the workload's actual permission requirements.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Automation that needs the removed permissions stops working.",
+      "Severity": "Info",
+      "Investigate": true,
+      "Feature": "applications",
+      "ResourceType": "ServicePrincipal",
+      "Category": "WorkloadIdentities",
+      "References": [
+        {
+          "Title": "Workload identities",
+          "Url": "https://learn.microsoft.com/entra/workload-id/workload-identities-overview",
+          "Type": "Learn"
+        },
+        {
+          "Title": "App management policies (credential restrictions)",
+          "Url": "https://learn.microsoft.com/graph/api/resources/applicationauthenticationmethodpolicy",
+          "Type": "Graph"
+        },
+        {
+          "Title": "Secure access practices for administrators in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/security-planning",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.5005",
+      "Key": "delegatedControlPlanePermission",
+      "Area": "PrivilegedEAM",
+      "Title": "Delegated Control Plane permission",
+      "CheckTitle": "Delegated permissions classified as Control Plane should be investigated.",
+      "Description": "An application has a delegated permission classified as Control Plane (for example Directory.ReadWrite.All). When a privileged user signs in, the application acts with this permission within the user's privileges, so the application, its credentials and its owners become a path to the user's Control Plane access. Microsoft first-party applications (for example Azure CLI and Azure PowerShell) are not reported, except Microsoft Graph Command Line Tools, Graph Explorer, Microsoft Intune PowerShell, SharePoint Online Web Client Extensibility, Microsoft Developer Sample Data Packs, Azure AD Assessment and M365 Lighthouse API: their delegated permissions exist only by consent of this tenant, which can revoke them. Each grant is one result, named with its consent: a grant for all users (admin consent) and the grant of one user for the same permission are two results.",
+      "Remediation": "Review the consent of the application: revoke delegated permissions that are not needed (admin consent grants them for every user who signs in), grant consent only for the users who need the application (oAuth2PermissionGrant with consentType Principal) instead of all users (AllPrincipals), and restrict who can manage the application.",
+      "Effort": "Low",
+      "EffortDescription": "Revoking a consent grant is one change per permission.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Features of the application that use the permission stop working.",
+      "Severity": "Info",
+      "Investigate": true,
+      "Feature": "app-consent",
+      "ResourceType": "ServicePrincipal",
+      "Category": "WorkloadIdentities",
+      "References": [
+        {
+          "Title": "Permissions and consent in the Microsoft identity platform",
+          "Url": "https://learn.microsoft.com/entra/identity-platform/permissions-consent-overview",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Review and revoke permissions granted to applications",
+          "Url": "https://learn.microsoft.com/entra/identity/enterprise-apps/manage-application-permissions",
+          "Type": "Learn"
+        },
+        {
+          "Title": "oAuth2PermissionGrant resource (consentType)",
+          "Url": "https://learn.microsoft.com/graph/api/resources/oauth2permissiongrant",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.6001",
+      "Key": "noApproval",
+      "Area": "AccessPackageFlow",
+      "Title": "No approval for privileged access package resource",
+      "CheckTitle": "Access package assignment policies for Control and Management Plane resources require approval.",
+      "Description": "An assignment policy that accepts requests grants a Control or Management Plane resource without approval, so every allowed requestor gets the privileged access on request. Policies that only administrators can assign are not reported. Target groups without a tier (no role assignment, Alternate Tier Level Attribute or Object Classification File entry) are not evaluated: EO.2005 reports them.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Entitlement management > Access packages > the package > Policies > Requests, turn on 'Require approval' with approvers of the resource's tier, and require a justification.",
+      "Effort": "Medium",
+      "EffortDescription": "One setting per policy, plus defining and staffing tier-appropriate approvers who are available when needed.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Requests wait for approval.",
+      "Severity": "High",
+      "Feature": "identity-governance",
+      "ResourceType": "AccessPackage",
+      "Category": "AccessGovernance",
+      "References": [
+        {
+          "Title": "Change approval settings of an access package",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-access-package-approval-policy",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Change request settings of an access package",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-access-package-request-policy",
+          "Type": "Learn"
+        },
+        {
+          "Title": "accessPackageAssignmentPolicy resource",
+          "Url": "https://learn.microsoft.com/graph/api/resources/accesspackageassignmentpolicy",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.6002",
+      "Key": "broadRequestor",
+      "Area": "AccessPackageFlow",
+      "Title": "Broad requestor scope for privileged access package resource",
+      "CheckTitle": "Access package assignment policies for Control and Management Plane resources cannot be requested by all users.",
+      "Description": "An assignment policy grants a Control or Management Plane resource and accepts requests from all directory members, all users including guests, all external users, or the users of all (configured or existing) connected organizations. Every account in that scope can request privileged access, so approval is the only barrier. Policies that do not accept requests are not reported. Target groups without a tier (no role assignment, Alternate Tier Level Attribute or Object Classification File entry) are not evaluated: EO.2005 reports them.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Entitlement management > Access packages > the package > Policies > Requests, limit who can request access to specific users or groups of the resource's tier.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per policy.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Users outside the selected groups can no longer request the access package.",
+      "Severity": "High",
+      "Feature": "identity-governance",
+      "ResourceType": "AccessPackage",
+      "Category": "AccessGovernance",
+      "References": [
+        {
+          "Title": "Change request settings of an access package",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-access-package-request-policy",
+          "Type": "Learn"
+        },
+        {
+          "Title": "accessPackageAssignmentPolicy resource",
+          "Url": "https://learn.microsoft.com/graph/api/resources/accesspackageassignmentpolicy",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.6003",
+      "Key": "unauthorizedAccess",
+      "Area": "AccessPackageFlow",
+      "Title": "Unauthorized access to privileged access package resource",
+      "CheckTitle": "Control and Management Plane access package resources have no members outside their access packages.",
+      "Description": "The access drift report of Microsoft Entra ID Governance (Access Guardian, preview) shows members or application role assignments of a Control or Management Plane group or application of an access package without a corresponding access package assignment: privileged access granted outside of governance, without approval, expiration or review. Target groups without a tier (no role assignment, Alternate Tier Level Attribute or Object Classification File entry) are not evaluated: EO.2005 reports them. The message names the date of the access drift report, which Microsoft Graph generates on its own schedule and can be days older than the evaluation.",
+      "Remediation": "Review the unauthorized access in the access drift report of Microsoft Entra ID Governance (Access Guardian, preview; examples in the evidence): remove it, or have it requested through the access package.",
+      "Effort": "Medium",
+      "EffortDescription": "Each unauthorized member needs a decision with the resource owner.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Members without an access package assignment lose access until they request it.",
+      "Severity": "High",
+      "Feature": "identity-governance",
+      "ResourceType": "AccessPackage",
+      "Category": "AccessGovernance",
+      "References": [
+        {
+          "Title": "Entitlement management overview",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-overview",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.6004",
+      "Key": "missingAccess",
+      "Area": "AccessPackageFlow",
+      "Title": "Missing access on privileged access package resource",
+      "CheckTitle": "Access package assignments of Control and Management Plane resources are applied to their resources.",
+      "Description": "The access drift report of Microsoft Entra ID Governance (Access Guardian, preview) shows active access package assignments whose membership or application role assignment of a Control or Management Plane group or application is missing. The access was removed outside of the access package, or provisioning failed. Target groups without a tier (no role assignment, Alternate Tier Level Attribute or Object Classification File entry) are not evaluated: EO.2005 reports them. The message names the date of the access drift report, which Microsoft Graph generates on its own schedule and can be days older than the evaluation.",
+      "Remediation": "Reprocess the assignments in the access drift report of Microsoft Entra ID Governance (Access Guardian, preview), and find out why the access was removed outside of the access package.",
+      "Effort": "Low",
+      "EffortDescription": "Reprocessing the assignment is one action.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Assigned users get the access they requested back.",
+      "Severity": "Low",
+      "Feature": "identity-governance",
+      "ResourceType": "AccessPackage",
+      "Category": "AccessGovernance",
+      "References": [
+        {
+          "Title": "Entitlement management overview",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-overview",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.6005",
+      "Key": "accessPackageExpiration",
+      "Area": "TenantGovernance",
+      "Title": "Privileged access package without expiration",
+      "CheckTitle": "Access package assignment policies for Control and Management Plane resources let assignments expire.",
+      "Description": "An assignment policy of an access package that grants a Control or Management Plane resource has no expiration, so its assignments last until someone removes them, even when the person no longer needs the access. When the Access Package Flow data includes the live expiration pattern from Microsoft Graph, policies with type noExpiration or notSpecified fail while afterDateTime and afterDuration pass. Without live expiration data, the rule falls back to DurationInDays and ExpirationDateTime from the Tenant Governance snapshot (which cannot distinguish fixed-date or hour-based expirations from non-expiring policies) and notes this in the reason. Target groups without a tier (no role assignment, Alternate Tier Level Attribute or Object Classification File entry) are not evaluated: EO.2005 reports them.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Entitlement management > Access packages > the package > Policies > Lifecycle, set an expiration and allow users to request an extension with approval if they need the access longer.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per policy.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Users extend or request the access again when it expires.",
+      "Severity": "Medium",
+      "Feature": "identity-governance",
+      "ResourceType": "AccessPackage",
+      "Category": "AccessGovernance",
+      "References": [
+        {
+          "Title": "Change lifecycle settings of an access package",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-access-package-lifecycle-policy",
+          "Type": "Learn"
+        },
+        {
+          "Title": "accessPackageAssignmentPolicy resource",
+          "Url": "https://learn.microsoft.com/graph/api/resources/accesspackageassignmentpolicy",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.6006",
+      "Key": "accessPackageAccessReview",
+      "Area": "TenantGovernance",
+      "Title": "Privileged access package without access review",
+      "CheckTitle": "Access package assignment policies for Control and Management Plane resources have access reviews.",
+      "Description": "An assignment policy of an access package that grants a Control or Management Plane resource has no recurring access review, so nobody confirms that the assigned users still need the privileged access. Target groups without a tier (no role assignment, Alternate Tier Level Attribute or Object Classification File entry) are not evaluated: EO.2005 reports them.",
+      "Remediation": "In Microsoft Entra admin center > ID Governance > Entitlement management > Access packages > the package > Policies > Lifecycle, turn on recurring access reviews with reviewers of the resource's tier (not a self-review), and remove access when reviewers do not respond.",
+      "Effort": "Low",
+      "EffortDescription": "One setting per policy, plus reviewers.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Reviewers confirm access regularly; users without a confirmation lose it.",
+      "Severity": "Medium",
+      "Feature": "identity-governance",
+      "ResourceType": "AccessPackage",
+      "Category": "AccessGovernance",
+      "References": [
+        {
+          "Title": "Create an access review of an access package",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-access-reviews-create",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Change lifecycle settings of an access package",
+          "Url": "https://learn.microsoft.com/entra/id-governance/entitlement-management-access-package-lifecycle-policy",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.7001",
+      "Key": "privilegedWorkloadOwner",
+      "Area": "PrivilegedEAM",
+      "Title": "Owner of a privileged workload identity",
+      "CheckTitle": "Service principals and applications with Control or Management Plane access have no owners.",
+      "Description": "A service principal or application with Control or Management Plane access has owners. Owners can add credentials and act as the workload identity at any time, without a directory role, PIM activation or approval: standing access to its privileges. Service principals of Microsoft first-party applications are not reported. Delegated permissions do not count as access of the object: the application acts within the rights of the signed-in user (EO.5005 reports delegated Control Plane permissions).",
+      "Remediation": "Remove the owners. Manage the application with roles of its tier, for example Cloud Application Administrator scoped to the application and eligible in PIM, and restrict credentials with an app management policy.",
+      "Effort": "Low",
+      "EffortDescription": "Removing an owner is a single change.",
+      "UserImpact": "Medium",
+      "UserImpactDescription": "Former owners lose self-service credential and configuration management and use a scoped, eligible role or CI/CD workflow instead.",
+      "Severity": "High",
+      "Feature": "applications",
+      "ResourceType": "ServicePrincipal",
+      "Category": "OwnershipAndDelegation",
+      "References": [
+        {
+          "Title": "Assign owners of an enterprise application",
+          "Url": "https://learn.microsoft.com/entra/identity/enterprise-apps/assign-app-owners",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Assign Microsoft Entra roles at different scopes",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/assign-roles-different-scopes",
+          "Type": "Learn"
+        },
+        {
+          "Title": "App management policies (credential restrictions)",
+          "Url": "https://learn.microsoft.com/graph/api/resources/applicationauthenticationmethodpolicy",
+          "Type": "Graph"
+        }
+      ]
+    },
+    {
+      "Id": "EO.7002",
+      "Key": "privilegedGroupOwner",
+      "Area": "PrivilegedEAM",
+      "Title": "Owner of a privileged group",
+      "CheckTitle": "Groups with Control or Management Plane access have no owners.",
+      "Description": "A group with Control or Management Plane access has owners. Owners can add members, including themselves, at any time without approval or PIM, and so grant the group's privileges.",
+      "Remediation": "Remove the owners, or make the ownership eligible in PIM for Groups with approval on activation.",
+      "Effort": "Low",
+      "EffortDescription": "Removing an owner is a single change.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Former owners use an eligible, approved ownership instead.",
+      "Severity": "High",
+      "Feature": "groups",
+      "ResourceType": "Group",
+      "Category": "OwnershipAndDelegation",
+      "References": [
+        {
+          "Title": "Assign eligibility for a group in PIM for Groups",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/groups-assign-member-owner",
+          "Type": "Learn"
+        },
+        {
+          "Title": "PIM for Groups",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/concept-pim-for-groups",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Manage groups in Microsoft Entra ID",
+          "Url": "https://learn.microsoft.com/entra/fundamentals/how-to-manage-groups",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.7003",
+      "Key": "unconstrainedRoleAssignmentDelegation",
+      "Area": "PrivilegedEAM",
+      "Title": "Unconstrained Azure role assignment delegation",
+      "CheckTitle": "User Access Administrator and Role Based Access Control Administrator assignments are constrained by conditions.",
+      "Description": "An Azure assignment of User Access Administrator or Role Based Access Control Administrator has no condition. Its holder can assign any role, including Owner, to any principal at the scope, including itself, so it is effectively Owner of the scope. Members of a group with the assignment are not reported separately, nor are the service principals of Microsoft first-party applications (for example MS-PIM, which manages PIM for Azure resources). Tenant-owned system-assigned managed identities created by Microsoft services (for example DefenderCSPMSecurityOperator for Microsoft Defender for Cloud) are not Microsoft first-party applications and are reported when their assignment has no condition.",
+      "Remediation": "Add a condition that constrains the delegation to the roles and principal types the holder needs to assign (under Conditions of the role assignment: 'Allow user to assign all roles except privileged administrator roles Owner, UAA, RBAC (Recommended)', 'Constrain roles', 'Constrain roles and principal types', 'Constrain roles and principals' or 'Allow all except specific roles'), or remove the assignment. Review Microsoft-managed system-assigned managed identities (such as DefenderCSPMSecurityOperator) and accept them as finding exceptions rather than modifying Microsoft-managed assignments without checking service impact.",
+      "Effort": "Medium",
+      "EffortDescription": "Needs the roles and principals that the holder delegates.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "The holder can only assign the roles and principals of the condition.",
+      "Severity": "High",
+      "Feature": "access-management",
+      "ResourceType": "RoleAssignment",
+      "Product": "azure",
+      "Category": "OwnershipAndDelegation",
+      "References": [
+        {
+          "Title": "Delegate Azure role assignment management with conditions",
+          "Url": "https://learn.microsoft.com/azure/role-based-access-control/delegate-role-assignments-overview",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Delegate role assignment management with conditions (portal)",
+          "Url": "https://learn.microsoft.com/azure/role-based-access-control/delegate-role-assignments-portal",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.7004",
+      "Key": "nestedControlPlaneGroup",
+      "Area": "PrivilegedEAM",
+      "Title": "Control Plane access through nested groups",
+      "CheckTitle": "Control Plane access is not granted through nested groups.",
+      "Description": "Control Plane access is granted through a group that is a member of another group. Nesting hides who holds the access, and the owners and administrators of every group in the chain can change it. The export records the chain of groups of PIM for Groups memberships (eligible nested groups); the members of other groups are read transitively, so their nesting is not reported.",
+      "Remediation": "Grant the access through one role-assignable group with direct eligible members, or remove the nesting.",
+      "Effort": "Medium",
+      "EffortDescription": "The members of the nested groups move to one group.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Members keep their access through the direct group.",
+      "Severity": "Medium",
+      "Feature": "groups",
+      "ResourceType": "RoleAssignment",
+      "Category": "OwnershipAndDelegation",
+      "References": [
+        {
+          "Title": "Use Microsoft Entra groups to manage role assignments",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/groups-concept",
+          "Type": "Learn"
+        },
+        {
+          "Title": "PIM for Groups",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/concept-pim-for-groups",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Best practices for Azure RBAC",
+          "Url": "https://learn.microsoft.com/azure/role-based-access-control/best-practices",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.7005",
+      "Key": "dynamicPrivilegedAdministrativeUnit",
+      "Area": "TenantGovernance",
+      "Title": "Dynamic administrative unit with privileged members",
+      "CheckTitle": "Administrative units with privileged members have no dynamic membership.",
+      "Description": "An administrative unit with dynamic membership contains Control or Management Plane objects. Whoever can change the attributes of its membership rule (for example the user principal name) can add privileged objects to it or remove them, and so change which administrators manage them. Only users, groups and service principals of the Privileged EAM data count as privileged members: devices (for example the privileged access workstations of administrators in a dynamic device administrative unit) are not evaluated, because the data has neither the members of dynamic administrative units nor the administrative unit memberships of devices.",
+      "Remediation": "Use assigned membership for administrative units with privileged members, or make sure that only administrators of the members' tier can change the attributes of the membership rule.",
+      "Effort": "Medium",
+      "EffortDescription": "Membership has to be maintained by assignment or a provisioning process.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "No change for the members.",
+      "Severity": "Medium",
+      "Feature": "roles",
+      "ResourceType": "AdministrativeUnit",
+      "Category": "OwnershipAndDelegation",
+      "References": [
+        {
+          "Title": "Manage dynamic membership rules of administrative units",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/admin-units-members-dynamic",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Restricted management administrative units",
+          "Url": "https://learn.microsoft.com/entra/identity/role-based-access-control/admin-units-restricted-management",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.8001",
+      "Key": "newControlPlaneAccess",
+      "Area": "PrivilegeHistory",
+      "Title": "New Control Plane access",
+      "CheckTitle": "New Control Plane access since the previous snapshot should be investigated.",
+      "Description": "A role assignment classified as Control Plane exists in the newest Privileged EAM snapshot of the Privilege History, but not in the previous snapshot. PIM activations are not counted: they are temporary instances of eligible assignments. A role that was reclassified to Control Plane shows as new access. Both snapshots need objects with the role type of their assignments (Privilege History data of EntraOps 1.2.0 or later): the Privilege History keeps the objects of a limited number of snapshots. Delegated permissions are not counted here: EO.8003 reports new delegated Control and Management Plane permissions.",
+      "Remediation": "Check in the Privilege History and EAM Dashboard reports that the new Control Plane access was requested and approved, and remove it if not.",
+      "Effort": "Low",
+      "EffortDescription": "A review of each new assignment.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Only unexpected access is removed.",
+      "Severity": "Info",
+      "Investigate": true,
+      "Feature": "roles",
+      "ResourceType": "RoleAssignment",
+      "Category": "Drift",
+      "References": [
+        {
+          "Title": "View audit history for Microsoft Entra roles in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-use-audit-log",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Microsoft Entra audit logs",
+          "Url": "https://learn.microsoft.com/entra/identity/monitoring-health/concept-audit-logs",
+          "Type": "Learn"
+        }
+      ]
+    },
+    {
+      "Id": "EO.8002",
+      "Key": "tierBreachIncrease",
+      "Area": "PrivilegeHistory",
+      "Title": "New tier breach since the previous snapshot",
+      "CheckTitle": "No new tier breach since the previous snapshot.",
+      "Description": "The newest Privileged EAM snapshot of the Privilege History has a tier breach that the previous snapshot does not have: a user or service principal holds a role assignment classified at a more privileged tier than the object. Tier breaches follow EO.1001 and EO.1003: Management and Workload Plane are both Tier 1, delegated permissions (EO.8003) and service principals of Microsoft first-party applications are not counted, and new breaches of unclassified objects (counted as User Access) are counted apart instead of being reported, as their tier is unknown (classify them, EO.2001). PIM activations are not counted: they are temporary instances of eligible assignments (as in EO.8001). Every new breach fails, also when others were removed and the number did not increase. The Privilege History chart counts every tier breach, including delegated permissions and Microsoft applications, so its number can be higher. A new breach can also come from a reclassified object or role. Both snapshots need objects with the role type of their assignments (Privilege History data of EntraOps 1.2.0 or later).",
+      "Remediation": "1. Review the new tier breaches in the affected results, and in the Privilege History and Tier Breach Analyzer reports (EO.1001, EO.1003).\n2. Remove the role assignments that are not needed, or move them to an account of the matching tier.\n3. If the access is intended, reclassify the object to the tier of the role and protect it accordingly.",
+      "Effort": "Low",
+      "EffortDescription": "A review of the change between two snapshots.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Depends on the tier breaches that are removed.",
+      "Severity": "High",
+      "Feature": "roles",
+      "ResourceType": "RoleAssignment",
+      "Category": "Drift",
+      "References": [
+        {
+          "Title": "Enterprise access model",
+          "Url": "https://learn.microsoft.com/security/privileged-access-workstations/privileged-access-access-model",
+          "Type": "Learn"
+        },
+        {
+          "Title": "View audit history for Microsoft Entra roles in PIM",
+          "Url": "https://learn.microsoft.com/entra/id-governance/privileged-identity-management/pim-how-to-use-audit-log",
+          "Type": "Learn"
+        },
+        {
+          "Title": "EntraOps classification and object tiers",
+          "Url": "https://www.entraops.com/docs/core/index.html",
+          "Type": "EntraOps"
+        }
+      ]
+    },
+    {
+      "Id": "EO.8003",
+      "Key": "newDelegatedPrivilegedPermission",
+      "Area": "PrivilegeHistory",
+      "Title": "New delegated privileged permission",
+      "CheckTitle": "New delegated Control or Management Plane permissions since the previous snapshot should be investigated.",
+      "Description": "A delegated permission classified as Control or Management Plane exists in the newest Privileged EAM snapshot of the Privilege History, but not in the previous snapshot, typically because an administrator or a user consented to it (the snapshots don't tell who; the audit log does), for example Directory.ReadWrite.All or Mail.Read for a new application. The application acts within the rights of the signed-in user, so it is no tier breach (EO.1001 to EO.1003, EO.8002), but whoever controls the application (its owners, credentials or redirect URIs) can obtain tokens of the users who sign in to it, and illicit consent grants are a common phishing technique. A new scope of an existing grant counts as new. Service principals of Microsoft first-party applications are not reported, except the Microsoft clients whose delegated permissions the tenant grants by consent (Microsoft Graph Command Line Tools, Graph Explorer, Microsoft Intune PowerShell, SharePoint Online Web Client Extensibility, Microsoft Developer Sample Data Packs, Azure AD Assessment and M365 Lighthouse API, as in EO.5005). Both snapshots need objects with the role type of their assignments (Privilege History data of EntraOps 1.2.0 or later).",
+      "Remediation": "1. Find who consented and when in the Microsoft Entra audit logs (activity 'Consent to application').\n2. If the permission is not needed, revoke it in Microsoft Entra admin center > Enterprise applications > the application > Permissions, or remove the delegated permission grant with Microsoft Graph PowerShell (Remove-MgOauth2PermissionGrant).\n3. Restrict user consent to permissions classified as low impact from verified publishers, and use the admin consent workflow, so privileged permissions need an administrator's review.",
+      "Effort": "Low",
+      "EffortDescription": "A review of each new consent.",
+      "UserImpact": "Low",
+      "UserImpactDescription": "Users of the application consent again, or request admin consent, if a needed grant is revoked.",
+      "Severity": "Info",
+      "Investigate": true,
+      "Feature": "app-consent",
+      "ResourceType": "ServicePrincipal",
+      "Category": "Drift",
+      "References": [
+        {
+          "Title": "Detect and remediate illicit consent grants",
+          "Url": "https://learn.microsoft.com/defender-office-365/detect-and-remediate-illicit-consent-grants",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Configure how users consent to applications",
+          "Url": "https://learn.microsoft.com/entra/identity/enterprise-apps/configure-user-consent",
+          "Type": "Learn"
+        },
+        {
+          "Title": "Configure the admin consent workflow",
+          "Url": "https://learn.microsoft.com/entra/identity/enterprise-apps/configure-admin-consent-workflow",
+          "Type": "Learn"
+        }
+      ]
+    }
+  ]
+}

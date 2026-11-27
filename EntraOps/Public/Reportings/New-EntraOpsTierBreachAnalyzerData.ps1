@@ -31,7 +31,7 @@
     Reports/TierBreachAnalyzer folder.
 
 .PARAMETER RepoRoot
-    Path to the EntraOps repository root that contains the PrivilegedEAM export folder.
+    Path to the EntraOps repository root that contains the PrivilegedEAM export folder (alias: -Path).
     Defaults to the repository this module lives in.
 
 .PARAMETER ImportPath
@@ -63,6 +63,7 @@ function New-EntraOpsTierBreachAnalyzerData {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param (
         [Parameter(Mandatory = $false)]
+        [Alias('Path')]
         [System.String]$RepoRoot,
 
         [Parameter(Mandatory = $false)]
@@ -101,7 +102,7 @@ function New-EntraOpsTierBreachAnalyzerData {
     if ([string]::IsNullOrWhiteSpace($OutFile)) { $OutFile = Join-Path $AppRoot 'data/tier-breach-data.js' }
 
     if (-not (Test-Path -LiteralPath $ImportPath)) {
-        throw "Privileged EAM import path not found: $ImportPath. Run Save-EntraOpsPrivilegedEAMJson first or pass -ImportPath."
+        throw "Privileged EAM import path not found: $ImportPath. Run Invoke-EntraOpsPrivilegedEAM (or Save-EntraOpsPrivilegedEAMJson) first, or pass -ImportPath."
     }
 
     Write-Verbose "Reading Privileged EAM JSON from $ImportPath."
@@ -123,176 +124,52 @@ function New-EntraOpsTierBreachAnalyzerData {
         return $null
     }
 
-    function ConvertTo-TierNumber {
-        <#
-            Normalize a raw tier value to a numeric tier (0/1/2).
-            Empty string, $null and "Unclassified" map to the default (Tier 2 -
-            lowest privilege), matching the handling of unclassified objects.
-        #>
-        param(
-            $Value,
-            [int] $Default = 2
-        )
-        if ($null -eq $Value) { return $Default }
-        $s = "$Value".Trim()
-        if ($s -eq '' -or $s -eq 'Unclassified') { return $Default }
-        $n = 0
-        if (-not [int]::TryParse($s, [ref] $n)) { return $Default }
-        if ($n -in 0, 1, 2) { return $n }
-        return $Default
-    }
+    # Objects and assignment paths are shared with the Findings rules (Invoke-EntraOpsFindingEvaluation).
+    $context = New-EntraOpsTierBreachFindingContext -ImportPath $ImportPath
+    $files = $context.Files
+    $objects = $context.Objects
+    $paths = $context.Paths
 
-    # Match PrivilegedEAM/<System>/<System>.json only (one level deep), not the
-    # per-object subfolders (user/, group/, serviceprincipal/ ...).
-    $files = Get-ChildItem -Path $ImportPath -Directory |
-    ForEach-Object { Get-ChildItem -Path $_.FullName -Filter '*.json' -File } |
-    Sort-Object FullName
+    # Breach flags use the test of the Tier Breach finding rules (Test-EntraOpsTierBreachPath) for every path,
+    # including the paths the rules leave out (delegated permissions, Microsoft first-party service principals)
+    # and the paths of unclassified objects that the breach rule counts apart.
 
-    if (-not $files) {
-        Write-Warning "No Privileged EAM JSON files found under $ImportPath (expected <RbacSystem>/<RbacSystem>.json). Generating an empty dataset."
-    } else {
-        Write-Verbose "Found $($files.Count) Privileged EAM JSON file(s) to process."
-    }
-
-    $objects = [System.Collections.Generic.List[object]]::new()
-    $paths = [System.Collections.Generic.List[object]]::new()
     # Maps assignment scope IDs to reusable scope-reasoning entries.
     $scopeReasoningByScope = [ordered]@{}
     $scopeReasoningDetails = Import-EntraOpsAzureScopeReasoning -RepoRoot $RepoRoot
 
     Write-Verbose "Loaded $($scopeReasoningDetails.Count) Azure scope-reasoning detail record(s)."
 
-    $fileNumber = 0
-    foreach ($file in @($files)) {
-        $fileNumber++
-        $roleSystem = Split-Path -Leaf (Split-Path -Parent $file.FullName)
-        Write-Verbose "[$fileNumber/$($files.Count)] Reading $roleSystem data from $($file.FullName)."
+    foreach ($path in $paths) {
+        # Breach: object less privileged than the service it reaches. The breach rule leaves out Control Plane
+        # services (tier0Breach reports them), the analyzer's breach flag covers both.
+        $path['tier0Breach'] = Test-EntraOpsTierBreachPath -Key 'tier0Breach' -Path $path
+        $path['breach'] = $path['tier0Breach'] -or (Test-EntraOpsTierBreachPath -Key 'breach' -Path $path)
 
-        try {
-            $data = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 |
-            ConvertFrom-Json
-        } catch {
-            # Stop generation when an enumerated export cannot be read or parsed.
-            throw "Failed to read or parse Privileged EAM export file '$($file.FullName)' (RBAC system '$roleSystem'): $($_.Exception.Message)"
-        }
-
-        $sourceObjectCount = @($data).Count
-        $processedObjectCount = 0
-        $pathsBeforeFile = $paths.Count
-        foreach ($o in @($data)) {
-            $processedObjectCount++
-            if ($processedObjectCount % 250 -eq 0) {
-                Write-Verbose "[$fileNumber/$($files.Count)] Processed $processedObjectCount of $sourceObjectCount $roleSystem source object(s)."
+        # Cache Azure scope reasoning once for each assignment scope.
+        $scopeId = $path.scopeId
+        if ($path.system -eq 'Azure' -and $scopeReasoningDetails.Count -gt 0 -and -not [string]::IsNullOrEmpty("$scopeId") -and -not $scopeReasoningByScope.Contains("$scopeId")) {
+            $scopeReasoning = [System.Collections.Generic.List[object]]::new()
+            foreach ($sr in (Find-EntraOpsAzureScopeReasoning -ScopeReasoningDetails $scopeReasoningDetails -ScopeId "$scopeId")) {
+                $scopeReasoning.Add([ordered]@{
+                        resourceName            = "$(Get-PropValue $sr 'ScopeName')"
+                        resourceId              = "$(Get-PropValue $sr 'ScopeId')"
+                        eamTier                 = "$(Get-PropValue $sr 'EAMTier')"
+                        resultingScope          = "$(Get-PropValue $sr 'ResultingScope')"
+                        reason                  = "$(Get-PropValue $sr 'Reason')"
+                        managedIdentityObjectId = "$(Get-PropValue $sr 'ManagedIdentityObjectId')"
+                        # ScopeRelation identifies the scope reason relative to the assignment scope.
+                        source                  = "$(Get-PropValue $sr 'Source')"
+                        scopeRelation           = $(if ("$(Get-PropValue $sr 'ScopeId')".TrimEnd('/') -ieq "$scopeId".TrimEnd('/')) { 'Exact' } else { 'Descendant resource' })
+                    })
             }
-
-            $objType = Get-PropValue $o 'ObjectType'
-            # Only users and service principals.
-            if ($objType -notin 'user', 'serviceprincipal') { continue }
-
-            $objectId = Get-PropValue $o 'ObjectId'
-            $display = Get-PropValue $o 'ObjectDisplayName'
-            if (-not $display) { $display = $objectId }
-            $objTier = ConvertTo-TierNumber -Value (Get-PropValue $o 'ObjectAdminTierLevel')
-
-            $objects.Add([ordered]@{
-                    id     = $objectId
-                    name   = $display
-                    type   = $objType
-                    system = $roleSystem
-                    tier   = $objTier
-                })
-
-            foreach ($ra in @(Get-PropValue $o 'RoleAssignments')) {
-                if ($null -eq $ra) { continue }
-                $roleName = Get-PropValue $ra 'RoleDefinitionName'
-                if (-not $roleName) { $roleName = '(unnamed role)' }
-                $isPriv = [bool] (Get-PropValue $ra 'RoleIsPrivileged')
-                $classifications = @(Get-PropValue $ra 'Classification')
-                if ($classifications.Count -eq 0) { continue }
-
-                # Assignment-level context (explains which assignment causes the breach).
-                $scopeId = Get-PropValue $ra 'RoleAssignmentScopeId'
-                $scopeName = Get-PropValue $ra 'RoleAssignmentScopeName'
-                if (-not $scopeName) { $scopeName = $scopeId }
-                $assignType = "$(Get-PropValue $ra 'RoleAssignmentType')"
-                $assignSub = "$(Get-PropValue $ra 'RoleAssignmentSubType')"
-                $pimManaged = [bool] (Get-PropValue $ra 'PIMManagedRole')
-                $pimType = "$(Get-PropValue $ra 'PIMAssignmentType')"
-                $roleType = "$(Get-PropValue $ra 'RoleType')"
-                $assignId = Get-PropValue $ra 'RoleAssignmentId'
-                $assignInstanceId = if (Get-PropValue $ra 'RoleAssignmentInstanceId') { Get-PropValue $ra 'RoleAssignmentInstanceId' } else { Get-EntraOpsRoleAssignmentInstanceId -RoleSystem $roleSystem -RoleAssignment $ra }
-                $transitiveBy = "$(Get-PropValue $ra 'TransitiveByObjectDisplayName')"
-
-                # De-duplicate services within a single assignment.
-                $seen = [System.Collections.Generic.HashSet[string]]::new()
-                foreach ($c in $classifications) {
-                    if ($null -eq $c) { continue }
-                    $service = Get-PropValue $c 'Service'
-                    if (-not $service) { $service = '(unclassified)' }
-                    $svcTier = ConvertTo-TierNumber -Value (Get-PropValue $c 'AdminTierLevel')
-                    $key = "$service|$svcTier"
-                    if (-not $seen.Add($key)) { continue }
-
-                    $taggedBy = "$(Get-PropValue $c 'TaggedBy')"
-                    $taggedBySystem = "$(Get-PropValue $c 'TaggedByRoleSystem')"
-
-                    # Cache Azure scope reasoning once for each assignment scope.
-                    if ($roleSystem -eq 'Azure' -and $scopeReasoningDetails.Count -gt 0 -and -not [string]::IsNullOrEmpty("$scopeId") -and -not $scopeReasoningByScope.Contains("$scopeId")) {
-                        $scopeReasoning = [System.Collections.Generic.List[object]]::new()
-                        foreach ($sr in (Find-EntraOpsAzureScopeReasoning -ScopeReasoningDetails $scopeReasoningDetails -ScopeId "$scopeId")) {
-                            $scopeReasoning.Add([ordered]@{
-                                    resourceName            = "$(Get-PropValue $sr 'ScopeName')"
-                                    resourceId              = "$(Get-PropValue $sr 'ScopeId')"
-                                    eamTier                 = "$(Get-PropValue $sr 'EAMTier')"
-                                    resultingScope          = "$(Get-PropValue $sr 'ResultingScope')"
-                                    reason                  = "$(Get-PropValue $sr 'Reason')"
-                                    managedIdentityObjectId = "$(Get-PropValue $sr 'ManagedIdentityObjectId')"
-                                    # ScopeRelation identifies the scope reason relative to the assignment scope.
-                                    source                  = "$(Get-PropValue $sr 'Source')"
-                                    scopeRelation           = $(if ("$(Get-PropValue $sr 'ScopeId')".TrimEnd('/') -ieq "$scopeId".TrimEnd('/')) { 'Exact' } else { 'Descendant resource' })
-                                })
-                        }
-                        if ($scopeReasoning.Count -gt 0) {
-                            $scopeReasoningByScope["$scopeId"] = $scopeReasoning
-                        } else {
-                            # Cache scope IDs without matching reasoning entries.
-                            $scopeReasoningByScope["$scopeId"] = @()
-                        }
-                    }
-
-                    $paths.Add([ordered]@{
-                            objectId           = $objectId
-                            objectName         = $display
-                            objectType         = $objType
-                            objectTier         = $objTier
-                            system             = $roleSystem
-                            role               = $roleName
-                            roleType           = $roleType
-                            roleIsPrivileged   = $isPriv
-                            service            = $service
-                            serviceTier        = $svcTier
-                            # Assignment detail.
-                            assignmentInstanceId = $assignInstanceId
-                            assignmentId       = $assignId
-                            scopeName          = $scopeName
-                            scopeId            = $scopeId
-                            assignmentType     = $assignType
-                            assignmentSubType  = $assignSub
-                            pimManaged         = $pimManaged
-                            pimAssignmentType  = $pimType
-                            transitiveBy       = $transitiveBy
-                            taggedBy           = $taggedBy
-                            taggedByRoleSystem = $taggedBySystem
-                            # Breach: object less privileged than the service it reaches.
-                            breach             = ($objTier -gt $svcTier)
-                            tier0Breach        = ($objTier -gt 0 -and $svcTier -eq 0)
-                            # Scope reasoning is resolved through scopeReasoningByScope.
-                        })
-                }
+            if ($scopeReasoning.Count -gt 0) {
+                $scopeReasoningByScope["$scopeId"] = $scopeReasoning
+            } else {
+                # Cache scope IDs without matching reasoning entries.
+                $scopeReasoningByScope["$scopeId"] = @()
             }
         }
-
-        Write-Verbose "[$fileNumber/$($files.Count)] Finished ${roleSystem}: processed $sourceObjectCount source object(s), added $($paths.Count - $pathsBeforeFile) assignment path(s)."
     }
 
     $repoRootFull = (Resolve-Path -LiteralPath $RepoRoot).Path

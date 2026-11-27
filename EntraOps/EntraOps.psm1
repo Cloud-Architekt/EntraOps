@@ -58,6 +58,8 @@ $__EntraOpsSession = [hashtable]::Synchronized(@{
     # nesting/catalog path within the same session skips the repeat (and, for structurally PIM-incapable
     # groups, always-failing) Graph probe instead of re-querying and re-warning every time.
     NonPimGroupIds      = [hashtable]::Synchronized(@{})
+    # Keys of Write-EntraOpsWarningOnce
+    WarningsOnce        = [System.Collections.Concurrent.ConcurrentDictionary[string, byte]]::new([System.StringComparer]::OrdinalIgnoreCase)
     RetryStatistics     = [hashtable]::Synchronized(@{
         TotalRetries               = 0
         ThrottledRequests          = 0

@@ -3,8 +3,11 @@
     Classifies the WorkloadPlane groups of a ServiceEM landing zone by administrative unit and Object Classification File.
 
 .DESCRIPTION
-    Only WorkloadPlane-Admins (tier WorkloadPlane) and WorkloadPlane-Users (tier UserAccess) created by the landing
+    Only WorkloadPlane-Admins (tier ManagementPlane) and WorkloadPlane-Users (tier UserAccess) created by the landing
     zone are handled; ControlPlane, ManagementPlane and administrator groups are classified in another way.
+    WorkloadPlane-Admins are classified ManagementPlane because the role assignments of the landing zone (e.g. the
+    constrained Role Based Access Control Administrator and the resource roles assigned by ManagementPlane-Admins)
+    are classified ManagementPlane: the object tier matches the tier of its access.
     Groups are identified by their mailNickname (<ServiceName>.WorkloadPlane.Admins/Users), not by display name.
 
     - ServiceEM.AdministrativeUnits.WorkloadPlane / .UserAccess: object ID of an administrative unit the group is
@@ -43,36 +46,38 @@ function Set-EntraOpsServiceEMWorkloadClassification {
         [string]$logPrefix = "[$($MyInvocation.MyCommand)]"
     )
 
-    $tierByNickname = @{
-        "$ServiceName.WorkloadPlane.Admins" = 'WorkloadPlane'
-        "$ServiceName.WorkloadPlane.Users"  = 'UserAccess'
+    # AuKey names the group in ServiceEM.AdministrativeUnits (WorkloadPlane = WorkloadPlane-Admins), Tier is its classification
+    $classificationByNickname = @{
+        "$ServiceName.WorkloadPlane.Admins" = @{ AuKey = 'WorkloadPlane'; Tier = 'ManagementPlane' }
+        "$ServiceName.WorkloadPlane.Users"  = @{ AuKey = 'UserAccess'; Tier = 'UserAccess' }
     }
     $targets = @(foreach ($group in $ServiceGroups) {
-            if ($group.IsDelegated -eq $true -or -not $tierByNickname.ContainsKey("$($group.MailNickname)")) { continue }
-            [pscustomobject]@{ Group = $group; Tier = $tierByNickname["$($group.MailNickname)"]; AdministrativeUnitId = $null }
+            if ($group.IsDelegated -eq $true -or -not $classificationByNickname.ContainsKey("$($group.MailNickname)")) { continue }
+            $classification = $classificationByNickname["$($group.MailNickname)"]
+            [pscustomobject]@{ Group = $group; AuKey = $classification.AuKey; Tier = $classification.Tier; AdministrativeUnitId = $null }
         })
     if ($targets.Count -eq 0) { return @() }
 
-    foreach ($tier in 'WorkloadPlane', 'UserAccess') {
-        $auId = [string](Get-EntraOpsServiceEMConfigValue -Path "AdministrativeUnits.$tier")
-        $tierTargets = @($targets | Where-Object Tier -EQ $tier)
-        if ([string]::IsNullOrWhiteSpace($auId) -or $tierTargets.Count -eq 0) { continue }
+    foreach ($auKey in 'WorkloadPlane', 'UserAccess') {
+        $auId = [string](Get-EntraOpsServiceEMConfigValue -Path "AdministrativeUnits.$auKey")
+        $auTargets = @($targets | Where-Object AuKey -EQ $auKey)
+        if ([string]::IsNullOrWhiteSpace($auId) -or $auTargets.Count -eq 0) { continue }
         if ($auId -notmatch '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') {
-            Write-Warning "$logPrefix ServiceEM.AdministrativeUnits.$tier '$auId' is not an object ID; no group is added to it."
+            Write-Warning "$logPrefix ServiceEM.AdministrativeUnits.$auKey '$auId' is not an object ID; no group is added to it."
             continue
         }
         try {
             $au = Invoke-EntraOpsMsGraphQuery -Method GET -Uri "/beta/administrativeUnits/$($auId)?`$select=id,displayName,isMemberManagementRestricted" -OutputType PSObject -DisableCache -ThrowOnFailure
         } catch {
-            Write-Warning "$logPrefix Administrative unit $auId (ServiceEM.AdministrativeUnits.$tier) can't be read; no group is added to it: $($_.Exception.Message)"
+            Write-Warning "$logPrefix Administrative unit $auId (ServiceEM.AdministrativeUnits.$auKey) can't be read; no group is added to it: $($_.Exception.Message)"
             continue
         }
 
-        foreach ($target in $tierTargets) {
+        foreach ($target in $auTargets) {
             $group = $target.Group
-            $isPimManaged = $tier -eq 'WorkloadPlane' -and $PimManagedWorkloadPlaneAdmins
+            $isPimManaged = $auKey -eq 'WorkloadPlane' -and $PimManagedWorkloadPlaneAdmins
             if ($au.isMemberManagementRestricted -eq $true -and ($group.IsAssignableToRole -eq $true -or $isPimManaged)) {
-                Write-Warning "$logPrefix $($group.DisplayName) ($($group.Id)) isn't added to the restricted management administrative unit '$($au.displayName)': $(if ($group.IsAssignableToRole -eq $true) { 'role-assignable' } else { 'PIM-managed' }) groups can't be members of a restricted management administrative unit. Use an administrative unit without restricted management for ServiceEM.AdministrativeUnits.$tier."
+                Write-Warning "$logPrefix $($group.DisplayName) ($($group.Id)) isn't added to the restricted management administrative unit '$($au.displayName)': $(if ($group.IsAssignableToRole -eq $true) { 'role-assignable' } else { 'PIM-managed' }) groups can't be members of a restricted management administrative unit. Use an administrative unit without restricted management for ServiceEM.AdministrativeUnits.$auKey."
                 continue
             }
             $body = @{ '@odata.id' = "https://graph.microsoft.com/beta/directoryObjects/$($group.Id)" } | ConvertTo-Json

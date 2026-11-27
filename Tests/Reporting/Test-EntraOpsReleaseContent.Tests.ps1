@@ -102,6 +102,26 @@ Get-EntraOpsAgentObject -ObjectId "11111111-1111-1111-1111-111111111111"
         & $ValidatorPath -RepositoryRoot $TestRoot | Should -Match 'Release content validation passed'
     }
 
+    It 'accepts the public tenants of Microsoft first-party applications as tenant ids' {
+        New-TestContent -Root $TestRoot -RelativePath 'Tests/sample.Tests.ps1' -Content @'
+@{ OriginTenantId = 'f8cdef31-a31e-4b4a-93e4-5f571e91255a' }
+@{ OriginTenantId = 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2' }
+'@
+
+        & $ValidatorPath -RepositoryRoot $TestRoot | Should -Match 'Release content validation passed'
+    }
+
+    It 'knows the same Microsoft tenants as the first-party detection' {
+        $Pattern = '\$MicrosoftTenantIds = @\((?<Ids>[^)]*)\)'
+        $Ids = { param($Path) @([regex]::Matches(([regex]::Match((Get-Content -LiteralPath $Path -Raw), $Pattern).Groups['Ids'].Value), '[0-9a-f-]{36}').Value | Sort-Object) }
+        $Detection = & $Ids (Join-Path $RepositoryRoot 'EntraOps/Private/Findings/Test-EntraOpsMicrosoftFirstParty.ps1')
+        $Detection | Should -Not -BeNullOrEmpty
+        # The release check also accepts the tenant of Graph Command Line Tools and Graph Explorer, which the detection
+        # maps by application ID.
+        $Validator = & $Ids $ValidatorPath
+        @($Detection | Where-Object { $_ -notin $Validator }) | Should -BeNullOrEmpty
+    }
+
     It 'rejects a non-empty shipped global principal exclusion list' {
         New-TestContent -Root $TestRoot -RelativePath 'Classification/Global.json' -Content '[ { "ExcludedPrincipalId": [ "11111111-1111-1111-1111-111111111111" ] } ]'
 

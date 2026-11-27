@@ -22,7 +22,7 @@
     are tracked through the repository's Git commit history instead, the same approach used for
     PrivilegedEAM data and Privilege History (see Reports/PrivilegeHistory/README.md).
 
-    Snapshot metadata (SnapshotId, DisplayName, CapturedDateTime, ResourcesToInclude, ResourceCount,
+    Snapshot metadata (TenantId, TenantName, SnapshotId, DisplayName, CapturedDateTime, ResourcesToInclude, ResourceCount,
     resource-type counts, and completion status) is persisted in <ExportFolder>/.SnapshotManifest.json
     and also shown as a summary in the command output. The latest attempt is recorded separately in
     <ExportFolder>/.LastAttemptManifest.json. When Graph reports a partiallySuccessful job, resource
@@ -31,9 +31,18 @@
     returns every resource that did export: those are published, and the previously published file
     of each resource the attempt did not return is retained so a failed export never shows up as a
     deleted resource in Git history. Such types are marked PublishedWithErrors with their
-    RetainedResourceCount. Types whose backing workload could not be reached (ConnectionError) or that
+    RetainedResourceCount. The export error alone never removes a file: Request_ResourceNotFound is also
+    reported for a resource that exists but references a deleted object (for example an excluded group of a
+    Conditional Access policy). Instead, each resource that would be retained is requested by its own Id
+    (properties.Id) with a direct Microsoft Graph GET; only an HTTP 404 for that resource removes its file.
+    The file is kept when Graph returns the resource, on throttling, service, network or permission errors,
+    when a control request for a resource the job did return fails, and for resource types without a known
+    direct endpoint (see Get-EntraOpsTenantGovernanceResourceGraphState for the covered types). Removed files
+    are listed in the manifest's RemovedResources (ResourceType, ResourceId, DisplayName, File, Reason, Detail)
+    and counted per type in RemovedResourceCount. Types whose backing workload could not be reached (ConnectionError) or that
     returned no resource at all retain their prior files and are marked PreservedStale with their
-    published and attempted snapshot Ids. If Graph provides no parseable per-type errors, no
+    published and attempted snapshot Ids and StaleSince, the time since which the type has been stale in
+    consecutive snapshots (the partial snapshot warning names it with its age). If Graph provides no parseable per-type errors, no
     downloaded types are published; all existing files are preserved as stale and the operation
     completes with a warning instead of failing the workflow.
 
@@ -73,8 +82,18 @@
     - Start: create a new job, persist its Id, and return without checking or downloading it.
     - Collect: check the persisted job once; download it only when complete. Never creates a job.
     - RunAndWait: create a new job and poll until complete. Intended for manual use.
-    Start and RunAndWait refuse to proceed while a pending job exists. Collect is a successful no-op when
-    no job is pending, which makes scheduled collection retries safe after an earlier retry succeeds.
+    Start and RunAndWait refuse to proceed while a pending job exists, unless the job is older than
+    PendingJobMaxAgeInHours. Collect is a successful no-op when no job is pending, which makes scheduled
+    collection retries safe after an earlier retry succeeds.
+
+.PARAMETER PendingJobMaxAgeInHours
+    Maximum age (in hours, since the job was created) of a pending snapshot job that is still notStarted or
+    running. An older job is released: it is deleted on the Microsoft Graph side (best effort), recorded as
+    the last attempt with the diagnostic SnapshotJobTimedOut and removed as pending job. Collect then fails,
+    so the stuck job is visible; Start and RunAndWait start a new job instead of refusing to proceed. Without
+    it, a job that Microsoft Graph never starts blocks every later snapshot. Defaults to
+    TenantGovernanceSnapshot.PendingJobMaxAgeInHours of the loaded EntraOpsConfig, otherwise 24. 0 never
+    releases a pending job by its age.
 
 .PARAMETER SkipWaitForCompletion
     Deprecated compatibility alias for -Operation Start. Do not combine it with -Operation.
@@ -142,6 +161,10 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
         [Parameter(Mandatory = $false)]
         [ValidateSet('DisplayName', 'ResourceId')]
         [System.String]$SnapshotResourceFileNaming = 'DisplayName'
+        ,
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(0, 8760)]
+        [System.Int32]$PendingJobMaxAgeInHours = 24
     )
 
     $ErrorActionPreference = "Stop"
@@ -163,6 +186,14 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
             }
             $SnapshotResourceFileNaming = [string]$TenantGovernanceConfig.SnapshotResourceFileNaming
             Write-Verbose "Using SnapshotResourceFileNaming '$SnapshotResourceFileNaming' from EntraOpsConfig"
+        }
+        if (-not $PSBoundParameters.ContainsKey('PendingJobMaxAgeInHours') -and $null -ne $TenantGovernanceConfig.PendingJobMaxAgeInHours -and "$($TenantGovernanceConfig.PendingJobMaxAgeInHours)" -ne '') {
+            $ConfiguredMaxAge = 0
+            if (-not [int]::TryParse("$($TenantGovernanceConfig.PendingJobMaxAgeInHours)", [ref]$ConfiguredMaxAge) -or $ConfiguredMaxAge -lt 0 -or $ConfiguredMaxAge -gt 8760) {
+                throw "Invalid TenantGovernanceSnapshot.PendingJobMaxAgeInHours '$($TenantGovernanceConfig.PendingJobMaxAgeInHours)' in EntraOpsConfig. Use a whole number of hours between 0 (never release a pending job by its age) and 8760."
+            }
+            $PendingJobMaxAgeInHours = $ConfiguredMaxAge
+            Write-Verbose "Using PendingJobMaxAgeInHours $PendingJobMaxAgeInHours from EntraOpsConfig"
         }
     }
     # --- Path safety: ensure ExportFolder is under the expected base directory ---
@@ -199,56 +230,135 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
     }
     #endregion
 
+    # The tenant of the snapshot, saved with the pending job and the manifest: a shared working folder is then never
+    # collected, reused or reported with a connection to another tenant. A pending job keeps the tenant it was started in.
+    $SnapshotTenantId = [string]$Global:TenantIdContext
+    $SnapshotTenantName = [string]$Global:TenantNameContext
+    if ([string]::IsNullOrWhiteSpace($SnapshotTenantId) -and (Get-Command -Name Get-MgContext -ErrorAction SilentlyContinue)) {
+        $SnapshotTenantId = [string](Get-MgContext -ErrorAction SilentlyContinue).TenantId
+    }
+    if ($null -ne $PendingJob -and -not [string]::IsNullOrWhiteSpace([string]$PendingJob.TenantId)) {
+        $SnapshotTenantId = [string]$PendingJob.TenantId
+        $SnapshotTenantName = [string]$PendingJob.TenantName
+    }
+
     #region Execute the requested state-machine operation
     $HasPendingJob = $PendingJob -and -not [string]::IsNullOrWhiteSpace($PendingJob.SnapshotJobId)
+
+    # A job of another tenant can't be read with this connection: it must not be taken for a failed job and released.
+    $ConnectedTenantId = [string]$Global:TenantIdContext
+    if ([string]::IsNullOrWhiteSpace($ConnectedTenantId) -and (Get-Command -Name Get-MgContext -ErrorAction SilentlyContinue)) {
+        $ConnectedTenantId = [string](Get-MgContext -ErrorAction SilentlyContinue).TenantId
+    }
+    $PendingJobOfOtherTenant = $HasPendingJob -and -not [string]::IsNullOrWhiteSpace([string]$PendingJob.TenantId) -and -not [string]::IsNullOrWhiteSpace($ConnectedTenantId) -and [string]$PendingJob.TenantId -ne $ConnectedTenantId
+
+    # Age of the pending job since its creation; $null when its creation time is unknown (it is then never released by age).
+    $PendingJobAgeInHours = $null
+    if ($HasPendingJob) {
+        # ConvertFrom-Json turns ISO 8601 dates into DateTime values.
+        $PendingCreatedValue = $PendingJob.CreatedDateTime
+        $PendingCreatedAt = [datetimeoffset]::MinValue
+        $HasPendingCreatedAt = if ($PendingCreatedValue -is [datetime]) {
+            $PendingCreatedAt = [datetimeoffset]$PendingCreatedValue.ToUniversalTime(); $true
+        } else {
+            [datetimeoffset]::TryParse([string]$PendingCreatedValue, [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$PendingCreatedAt)
+        }
+        if ($HasPendingCreatedAt) { $PendingJobAgeInHours = ([datetimeoffset]::UtcNow - $PendingCreatedAt).TotalHours }
+    }
+    $PendingJobExpired = $HasPendingJob -and -not $PendingJobOfOtherTenant -and $PendingJobMaxAgeInHours -gt 0 -and $null -ne $PendingJobAgeInHours -and $PendingJobAgeInHours -gt $PendingJobMaxAgeInHours
+
+    # Records the pending job as failed last attempt and removes it, so it no longer blocks later Start and Collect runs.
+    # The published snapshot is unchanged.
+    $ReleasePendingJob = {
+        param([string]$JobStatus, [string]$ErrorCode, [string]$Message, [string]$RemediationHint)
+        [ordered]@{
+            SnapshotId                  = $PendingJob.SnapshotJobId
+            SnapshotDisplayName         = $PendingJob.SnapshotDisplayName
+            SnapshotJobStatus           = $JobStatus
+            CapturedDateTime            = $PendingJob.CreatedDateTime
+            ResourcesToInclude          = @($PendingJob.ResourcesToInclude)
+            CapturedResourceCount       = 0
+            AttemptResourceTypeCounts   = [ordered]@{}
+            PublishedResourceTypeCounts = [ordered]@{}
+            ResourceTypeFileCounts      = [ordered]@{}
+            PublishedResourceTypes      = @()
+            StaleResourceTypes          = @($PendingJob.ResourcesToInclude | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
+            ResourceTypeStates          = @()
+            Diagnostics                 = @(
+                [PSCustomObject][ordered]@{
+                    ResourceType    = $null
+                    ErrorCategory   = 'SnapshotJobFailed'
+                    ErrorCode       = $ErrorCode
+                    Occurrences     = 1
+                    Message         = $Message
+                    RemediationHint = $RemediationHint
+                }
+            )
+            ErrorDetailsUnavailable     = $false
+            IsComplete                  = $false
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $LastAttemptManifestFilePath -Encoding utf8
+        Remove-Item -LiteralPath $PendingJobFilePath -Force
+    }
+
+    # Releases a pending job that Microsoft Graph has not completed within PendingJobMaxAgeInHours. The job is deleted on
+    # the Microsoft Graph side first (best effort), so it doesn't keep running or count against the snapshot jobs of the tenant.
+    $ReleaseExpiredPendingJob = {
+        param([string]$JobStatus)
+        $AgeText = "$([math]::Floor($PendingJobAgeInHours)) hour(s)"
+        try {
+            Invoke-EntraOpsMsGraphQuery -Method DELETE -Uri "/beta/admin/configurationManagement/configurationSnapshotJobs/$($PendingJob.SnapshotJobId)" -OutputType PSObject -DisableCache -ThrowOnFailure | Out-Null
+            Write-Verbose "Deleted snapshot job $($PendingJob.SnapshotJobId) in Microsoft Graph."
+        } catch {
+            Write-Warning "Snapshot job $($PendingJob.SnapshotJobId) could not be deleted in Microsoft Graph (it is released anyway): $($_.Exception.Message)"
+        }
+        $Message = "Snapshot job $($PendingJob.SnapshotJobId) is still '$JobStatus' $AgeText after it was created, longer than PendingJobMaxAgeInHours ($PendingJobMaxAgeInHours)."
+        & $ReleasePendingJob -JobStatus $JobStatus -ErrorCode 'SnapshotJobTimedOut' -Message $Message `
+            -RemediationHint 'Microsoft Graph did not complete the snapshot job in time. The job was released; the next run starts a new snapshot job. If this repeats, check the snapshot jobs of the tenant (Get-EntraOpsTenantGovernanceSnapshotReport) and the service health of Microsoft Graph.'
+        Write-Warning "$Message It was released; the published snapshot is unchanged."
+        $Message
+    }
+
     if ($Operation -eq 'Collect') {
         if (-not $HasPendingJob) {
             Write-Output "No pending Tenant Governance snapshot job exists. Nothing to collect."
             return [PSCustomObject]@{ Operation = 'Collect'; Status = 'NoPendingJob' }
         }
 
+        if ($PendingJobOfOtherTenant) {
+            throw "The pending snapshot job $($PendingJob.SnapshotJobId) in $ExportFolder belongs to tenant $(if ($PendingJob.TenantName) { "$($PendingJob.TenantName) ($($PendingJob.TenantId))" } else { $PendingJob.TenantId }), but the connection is to tenant $ConnectedTenantId. Connect to its tenant to collect it, or use a folder per tenant. The pending job is kept."
+        }
+
         Write-Output "Checking pending snapshot job $($PendingJob.SnapshotJobId) started at $($PendingJob.CreatedDateTime)..."
         try {
-            $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId $PendingJob.SnapshotJobId -ResourcesToInclude @($PendingJob.ResourcesToInclude) -SkipWaitForCompletion -SkipPrerequisiteCheck:$SkipPrerequisiteCheck
+            $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -SnapshotJobId $PendingJob.SnapshotJobId -ResourcesToInclude @($PendingJob.ResourcesToInclude) -SkipWaitForCompletion -SkipPrerequisiteCheck:$SkipPrerequisiteCheck -SkipPartialSuccessWarning
         } catch {
             # A job that can never be collected would block every later Start and Collect: record it as last attempt,
             # release the pending job and fail. Transient polling errors keep the pending job.
             if ($_.FullyQualifiedErrorId -like 'EntraOpsTenantGovernanceSnapshotJobTerminal*') {
-                $TerminalMessage = $_.Exception.Message
-                [ordered]@{
-                    SnapshotId                  = $PendingJob.SnapshotJobId
-                    SnapshotDisplayName         = $PendingJob.SnapshotDisplayName
-                    SnapshotJobStatus           = 'failed'
-                    CapturedDateTime            = $PendingJob.CreatedDateTime
-                    ResourcesToInclude          = @($PendingJob.ResourcesToInclude)
-                    CapturedResourceCount       = 0
-                    AttemptResourceTypeCounts   = [ordered]@{}
-                    PublishedResourceTypeCounts = [ordered]@{}
-                    ResourceTypeFileCounts      = [ordered]@{}
-                    PublishedResourceTypes      = @()
-                    StaleResourceTypes          = @($PendingJob.ResourcesToInclude | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
-                    ResourceTypeStates          = @()
-                    Diagnostics                 = @(
-                        [PSCustomObject][ordered]@{
-                            ResourceType    = $null
-                            ErrorCategory   = 'SnapshotJobFailed'
-                            ErrorCode       = 'SnapshotJobNotCollectable'
-                            Occurrences     = 1
-                            Message         = $TerminalMessage
-                            RemediationHint = 'The snapshot job failed or returned no resources and is not retried. The next run starts a new snapshot job.'
-                        }
-                    )
-                    ErrorDetailsUnavailable     = $false
-                    IsComplete                  = $false
-                } | ConvertTo-Json -Depth 10 | Set-Content -Path $LastAttemptManifestFilePath -Encoding utf8
-                Remove-Item -LiteralPath $PendingJobFilePath -Force
+                & $ReleasePendingJob -JobStatus 'failed' -ErrorCode 'SnapshotJobNotCollectable' -Message $_.Exception.Message `
+                    -RemediationHint 'The snapshot job failed or returned no resources and is not retried. The next run starts a new snapshot job.'
                 Write-Warning "Snapshot job $($PendingJob.SnapshotJobId) can't be collected and was released. The next run starts a new snapshot job; the published snapshot is unchanged."
             }
             throw
         }
+
+        # Still not complete after PendingJobMaxAgeInHours: release it and fail, so the stuck job is visible
+        # instead of being checked again on every run while the published snapshot ages.
+        if ($Snapshot.Status -ne 'Completed' -and $PendingJobExpired) {
+            $JobStatus = if ([string]::IsNullOrWhiteSpace([string]$Snapshot.Status)) { 'unknown' } else { [string]$Snapshot.Status }
+            $Message = & $ReleaseExpiredPendingJob -JobStatus $JobStatus
+            throw "$Message It was released; the next run starts a new snapshot job."
+        }
     } else {
+        if ($HasPendingJob -and $PendingJobExpired) {
+            $JobStatus = if ([string]::IsNullOrWhiteSpace([string]$PendingJob.LastKnownStatus)) { 'unknown' } else { [string]$PendingJob.LastKnownStatus }
+            $null = & $ReleaseExpiredPendingJob -JobStatus $JobStatus
+            Write-Output "Released the expired snapshot job $($PendingJob.SnapshotJobId). Starting a new snapshot job."
+            $HasPendingJob = $false
+            $PendingJob = $null
+        }
         if ($HasPendingJob) {
-            throw "Pending snapshot job $($PendingJob.SnapshotJobId) already exists. Run -Operation Collect before starting another job."
+            throw "Pending snapshot job $($PendingJob.SnapshotJobId) already exists. Run -Operation Collect before starting another job$(if ($PendingJobMaxAgeInHours -gt 0 -and -not $PendingJobOfOtherTenant) { ", or wait until it is older than PendingJobMaxAgeInHours ($PendingJobMaxAgeInHours), when a new job replaces it" })."
         }
 
         $Timestamp = (Get-Date).ToUniversalTime()
@@ -262,7 +372,7 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
             $SnapshotDisplayName = $SnapshotDisplayName.PadRight(8, '0')
         }
 
-        $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -ResourcesToInclude $ResourcesToInclude -SnapshotDisplayName $SnapshotDisplayName -TimeoutInSeconds $TimeoutInSeconds -SkipWaitForCompletion:($Operation -eq 'Start') -SkipPrerequisiteCheck:$SkipPrerequisiteCheck
+        $Snapshot = Get-EntraOpsTenantGovernanceSnapshot -ResourcesToInclude $ResourcesToInclude -SnapshotDisplayName $SnapshotDisplayName -TimeoutInSeconds $TimeoutInSeconds -SkipWaitForCompletion:($Operation -eq 'Start') -SkipPrerequisiteCheck:$SkipPrerequisiteCheck -SkipPartialSuccessWarning
     }
     #endregion
 
@@ -276,6 +386,9 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
             LastCheckedDateTime = (Get-Date).ToUniversalTime().ToString('o')
             LastKnownStatus     = $Snapshot.Status
             LastPollingError    = $Snapshot.PollingError
+            # The tenant of the job, so a shared working folder never collects it with a connection to another tenant
+            TenantId            = $SnapshotTenantId
+            TenantName          = $SnapshotTenantName
         }
         $PendingJobOutputObject | ConvertTo-Json -Depth 10 | Out-File -Path $PendingJobFilePath -Encoding utf8
         Write-Output "Snapshot job $($Snapshot.SnapshotId) is $($Snapshot.Status). State saved to $PendingJobFilePath. Collect it later with Save-EntraOpsTenantGovernanceSnapshotJson -Operation Collect."
@@ -375,12 +488,15 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
                     PublishedSnapshotId    = $PublishedSnapshotId
                     PublishedSource        = if ($PublishedSnapshotId) { 'Snapshot' } else { 'UnknownLegacySnapshot' }
                     AttemptSnapshotId      = $Snapshot.SnapshotId
+                    StaleSince             = Get-EntraOpsTenantGovernanceStaleSince -PreviousState $PreviousState -AttemptDateTime $Snapshot.CreatedDateTime
                 }
             }
         )
         # Nothing published: keep the previous capture time, so the snapshot age isn't reset
         $PublishedCapturedDateTime = if ($null -ne $PreviousManifest -and -not [string]::IsNullOrWhiteSpace("$($PreviousManifest.CapturedDateTime)")) { $PreviousManifest.CapturedDateTime } else { $Snapshot.CreatedDateTime }
         $AmbiguousPartialManifest = [ordered]@{
+            TenantId                    = $SnapshotTenantId
+            TenantName                  = $SnapshotTenantName
             SnapshotId                  = $Snapshot.SnapshotId
             SnapshotDisplayName         = $Snapshot.DisplayName
             SnapshotJobStatus           = $SnapshotJobStatus
@@ -650,9 +766,67 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
 
     #endregion
 
+    #region Confirm deletions of resources that a PublishedWithErrors type did not return
+    # Without this check a deleted resource is retained forever: its type keeps failing with export errors, so its
+    # earlier file is never dropped. The export error can't decide it - Request_ResourceNotFound is also reported for
+    # a resource that exists but references a deleted object, and a GUID in the message may be that referenced object.
+    # Only a 404 for a direct GET of the resource's own Id removes its file. Done before promotion, so the Graph calls
+    # don't extend the time in which published folders are moved.
+    $ConfirmedDeletedIdentities = @{}
+    foreach ($ResourceType in $ResourceTypesWithRetainedResources) {
+        $PublishedResourceFolder = Join-Path -Path $ExportFolder -ChildPath (ConvertTo-EntraOpsSafeFilePathSegment -Segment $ResourceType -FallbackName 'unknown')
+        if (-not (Test-Path -LiteralPath $PublishedResourceFolder -PathType Container)) { continue }
+        $CandidateIds = [System.Collections.Generic.SortedSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($PreviousFile in @(Get-ChildItem -LiteralPath $PublishedResourceFolder -Filter '*.json' -File -Recurse)) {
+            $PreviousResourceId = $null
+            try { $PreviousResourceId = [string](Get-Content -LiteralPath $PreviousFile.FullName -Raw | ConvertFrom-Json -AsHashtable -Depth 100).properties.Id } catch { $PreviousResourceId = $null }
+            if ([string]::IsNullOrWhiteSpace($PreviousResourceId)) { continue }
+            if ($CapturedResourceIdentities.ContainsKey("$ResourceType|$($PreviousResourceId.Trim().ToLowerInvariant())")) { continue }
+            [void]$CandidateIds.Add($PreviousResourceId.Trim())
+        }
+        if ($CandidateIds.Count -eq 0) { continue }
+
+        # Control check with a resource this job did return: when it isn't found either, the endpoint or the Id
+        # doesn't fit this tenant or type, and no 404 of this type can be trusted.
+        $ControlResourceId = @(
+            $CapturedResourceIdentities.Keys | Where-Object { $_.StartsWith("$ResourceType|", [System.StringComparison]::Ordinal) } |
+            ForEach-Object { $_.Substring($ResourceType.Length + 1) } | Sort-Object
+        ) | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($ControlResourceId)) { continue }
+        $ControlState = Get-EntraOpsTenantGovernanceResourceGraphState -ResourceType $ResourceType -ResourceId $ControlResourceId
+        if ($ControlState.State -eq 'Unsupported') {
+            Write-Verbose "No direct Microsoft Graph endpoint is known for '$ResourceType'; $($CandidateIds.Count) resource file(s) the job did not return are retained unchecked."
+            continue
+        }
+        if ($ControlState.State -ne 'Exists') {
+            Write-Warning "Could not check whether the $($CandidateIds.Count) resource(s) of '$ResourceType' that the snapshot job did not return still exist: the control request for a returned resource answered '$($ControlState.State)'$(if ($ControlState.StatusCode) { " (HTTP $($ControlState.StatusCode))" }). Their files are retained and checked again by the next snapshot."
+            continue
+        }
+
+        $UnverifiedCount = 0
+        foreach ($CandidateId in $CandidateIds) {
+            $CandidateState = Get-EntraOpsTenantGovernanceResourceGraphState -ResourceType $ResourceType -ResourceId $CandidateId
+            switch ($CandidateState.State) {
+                'NotFound' {
+                    $ConfirmedDeletedIdentities["$ResourceType|$($CandidateId.ToLowerInvariant())"] = "Microsoft Graph returned HTTP 404 for GET $($CandidateState.Uri)"
+                }
+                'Exists' { Write-Verbose "Resource '$CandidateId' ($ResourceType) still exists; its file is retained." }
+                default {
+                    $UnverifiedCount++
+                    Write-Verbose "Resource '$CandidateId' ($ResourceType) could not be checked ($($CandidateState.State)$(if ($CandidateState.StatusCode) { ", HTTP $($CandidateState.StatusCode)" })); its file is retained. $($CandidateState.Message)"
+                }
+            }
+        }
+        if ($UnverifiedCount -gt 0) {
+            Write-Warning "$UnverifiedCount resource(s) of '$ResourceType' that the snapshot job did not return could not be checked in Microsoft Graph (throttling, service or permission error). Their files are retained and checked again by the next snapshot."
+        }
+    }
+    #endregion
+
     #region Promote the staged resource types and roll back all promoted directories if publication fails
     $PromotionRecords = [System.Collections.Generic.List[object]]::new()
     $RetainedResourceCounts = @{}
+    $RemovedResources = [System.Collections.Generic.List[object]]::new()
     try {
         New-Item -Path $BackupFolder -ItemType Directory -Force | Out-Null
         foreach ($ResourceType in $PublishableResourceTypes) {
@@ -680,16 +854,18 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
             $RetainedResourceIdentities = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
             $PreviousResourceFiles = @(
                 foreach ($PreviousFile in @(Get-ChildItem -LiteralPath $ResourceBackupFolder -Filter '*.json' -File -Recurse)) {
-                    $PreviousResourceId = $null
+                    $PreviousResource = $null
                     # -AsHashtable: Graph emits empty property names in some payloads, which ConvertFrom-Json
                     # otherwise rejects, leaving the resource without an identity and retaining it twice.
-                    try { $PreviousResourceId = [string](Get-Content -LiteralPath $PreviousFile.FullName -Raw | ConvertFrom-Json -AsHashtable -Depth 100).properties.Id } catch { $PreviousResourceId = $null }
+                    try { $PreviousResource = Get-Content -LiteralPath $PreviousFile.FullName -Raw | ConvertFrom-Json -AsHashtable -Depth 100 } catch { $PreviousResource = $null }
+                    $PreviousResourceId = if ($null -ne $PreviousResource) { [string]$PreviousResource.properties.Id } else { $null }
                     $HasPreviousResourceId = -not [string]::IsNullOrWhiteSpace($PreviousResourceId)
                     $ExpectedIdFileName = if ($HasPreviousResourceId) {
                         ConvertTo-EntraOpsSafeFilePathSegment -Segment $PreviousResourceId -FallbackName 'Unnamed'
                     } else { $null }
                     [PSCustomObject]@{
                         File          = $PreviousFile
+                        DisplayName   = if ($null -ne $PreviousResource) { [string]$PreviousResource.displayName } else { $null }
                         ResourceId    = $PreviousResourceId
                         HasResourceId = $HasPreviousResourceId
                         IsIdNamed     = $HasPreviousResourceId -and [System.IO.Path]::GetFileNameWithoutExtension($PreviousFile.Name).Equals($ExpectedIdFileName, [System.StringComparison]::OrdinalIgnoreCase)
@@ -700,11 +876,24 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
                 $PreviousFile = $PreviousResourceFile.File
                 $PreviousResourceId = $PreviousResourceFile.ResourceId
                 $HasPreviousResourceId = $PreviousResourceFile.HasResourceId
+                $RelativePath = $PreviousFile.FullName.Substring($ResourceBackupFolder.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
                 if ($HasPreviousResourceId) {
                     $PreviousIdentity = "$ResourceType|$($PreviousResourceId.Trim().ToLowerInvariant())"
-                    if ($CapturedResourceIdentities.ContainsKey($PreviousIdentity) -or -not $RetainedResourceIdentities.Add($PreviousIdentity)) { continue }
+                    if ($CapturedResourceIdentities.ContainsKey($PreviousIdentity)) { continue }
+                    # Deleted in the tenant (404 for its own Id, see above): every file of it is dropped, legacy aliases included.
+                    if ($ConfirmedDeletedIdentities.ContainsKey($PreviousIdentity)) {
+                        $RemovedResources.Add([PSCustomObject][ordered]@{
+                                ResourceType = $ResourceType
+                                ResourceId   = $PreviousResourceId.Trim()
+                                DisplayName  = $PreviousResourceFile.DisplayName
+                                File         = "$SafeResourceType/$($RelativePath -replace '\\', '/')"
+                                Reason       = 'NotFound'
+                                Detail       = $ConfirmedDeletedIdentities[$PreviousIdentity]
+                            })
+                        continue
+                    }
+                    if (-not $RetainedResourceIdentities.Add($PreviousIdentity)) { continue }
                 }
-                $RelativePath = $PreviousFile.FullName.Substring($ResourceBackupFolder.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
                 $RetainedFilePath = Join-Path -Path $PublishedResourceFolder -ChildPath $RelativePath
                 if (Test-Path -LiteralPath $RetainedFilePath) {
                     # Without an identity the same path is the only evidence of the same resource.
@@ -725,6 +914,10 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
             }
             if ($RetainedResourceCounts[$ResourceType] -gt 0) {
                 Write-Warning "Resource type '$ResourceType' was published with export errors. $($RetainedResourceCounts[$ResourceType]) resource file(s) the snapshot job did not return were retained from the previously published snapshot."
+            }
+            $RemovedIds = @($RemovedResources | Where-Object { $_.ResourceType -eq $ResourceType } | ForEach-Object { $_.ResourceId } | Select-Object -Unique)
+            if ($RemovedIds.Count -gt 0) {
+                Write-Output "Removed $($RemovedIds.Count) resource(s) of '$ResourceType' that were deleted in the tenant (Microsoft Graph returned 404 for their Id): $($RemovedIds -join ', ')."
             }
         }
 
@@ -800,9 +993,11 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
                 AttemptResourceCount   = if ($AttemptResourceTypeCounts.Contains($ResourceType)) { $AttemptResourceTypeCounts[$ResourceType] } else { 0 }
                 PublishedResourceCount = $PublishedResourceTypeCounts[$ResourceType]
                 RetainedResourceCount  = if ($RetainedResourceCounts.ContainsKey($ResourceType)) { [int]$RetainedResourceCounts[$ResourceType] } else { 0 }
+                RemovedResourceCount   = @($RemovedResources | Where-Object { $_.ResourceType -eq $ResourceType } | ForEach-Object { $_.ResourceId } | Select-Object -Unique).Count
                 PublishedSnapshotId    = $PublishedSnapshotId
                 PublishedSource        = if ($PublishedSnapshotId) { 'Snapshot' } else { 'UnknownLegacySnapshot' }
                 AttemptSnapshotId      = $Snapshot.SnapshotId
+                StaleSince             = if ($IsStale) { Get-EntraOpsTenantGovernanceStaleSince -PreviousState $PreviousState -AttemptDateTime $Snapshot.CreatedDateTime } else { $null }
                 Diagnostics            = @($SnapshotDiagnostics | Where-Object { $_.ResourceType -eq $ResourceType })
             }
         }
@@ -822,6 +1017,8 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
     }
 
     $SnapshotManifest = [ordered]@{
+        TenantId                         = $SnapshotTenantId
+        TenantName                       = $SnapshotTenantName
         SnapshotId                       = $Snapshot.SnapshotId
         SnapshotDisplayName              = $Snapshot.DisplayName
         SnapshotJobStatus                = $SnapshotJobStatus
@@ -835,6 +1032,9 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
         PublishedWithErrorsResourceTypes = @($ResourceTypesWithRetainedResources)
         StaleResourceTypes               = @($StaleResourceTypes)
         ResourceTypeStates               = @($ResourceTypeStates)
+        # Files of retained resources dropped because Microsoft Graph returned 404 for their own Id. The deletion
+        # itself shows in Git history; this list keeps the reason next to the snapshot that removed them.
+        RemovedResources                 = @($RemovedResources | Sort-Object -Property ResourceType, ResourceId, File)
         Diagnostics                      = @($SnapshotDiagnostics)
         ErrorDetailsUnavailable          = $ParsedErrorDetails.Count -eq 0 -and $SnapshotJobStatus -eq 'partiallySuccessful'
         IsComplete                       = $SnapshotJobStatus -in @('completed', 'succeeded') -and $ResourceTypesWithErrors.Count -eq 0
@@ -854,7 +1054,10 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
     if ($SnapshotManifest.IsComplete) {
         Write-Output "Tenant Governance snapshot completed. $($Snapshot.ResourceCount) resource(s) captured and saved under $ExportFolder. Commit and push these files to track this point-in-time in Git history."
     } else {
-        Write-Warning "Tenant Governance snapshot job $($Snapshot.SnapshotId) completed as '$SnapshotJobStatus'. $($PublishableResourceTypes.Count) resource type(s) were published ($($ResourceTypesWithRetainedResources.Count) of them with per-resource export errors) and $($StaleResourceTypes.Count) type(s) with Graph errors were preserved as stale."
+        $StaleAge = Format-EntraOpsTenantGovernanceStaleAge -ResourceTypeStates $ResourceTypeStates
+        $RetainedText = if ($ResourceTypesWithRetainedResources.Count -gt 0) { ", $($ResourceTypesWithRetainedResources.Count) of them with per-resource export errors (resources that could not be exported are kept from the previous snapshot): $($ResourceTypesWithRetainedResources -join ', ')" }
+        $StaleText = if ($StaleResourceTypes.Count -gt 0) { " $($StaleResourceTypes.Count) type(s) with Graph errors were preserved as stale: $(if ($StaleAge) { $StaleAge } else { $StaleResourceTypes -join ', ' })." }
+        Write-Warning "Tenant Governance snapshot job $($Snapshot.SnapshotId) completed as '$SnapshotJobStatus'. $($PublishableResourceTypes.Count) resource type(s) were published$RetainedText.$StaleText"
     }
     Write-Output ($SnapshotSummary | Format-List | Out-String)
     #endregion

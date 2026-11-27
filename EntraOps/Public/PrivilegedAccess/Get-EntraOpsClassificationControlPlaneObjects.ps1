@@ -176,7 +176,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
             Write-Warning "No privileged objects found in EntraOps!"
         } else {
             $EntraOpsObjectClassification = $EntraOpsAllPrivilegedObjects | Where-Object { $_.ObjectAdminTierLevelName -eq "ControlPlane" } `
-            | Select-Object -Unique ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice `
+            | Select-Object -Unique ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice, @{Name = 'AssociatedPawDeviceObjectId'; Expression = { , @(Get-EntraOpsPawDeviceObjectId -Object $_) } } `
             | ForEach-Object {
                 $PrivilegedObject = $_ 
                 $ClassificationReason = @("ObjectAdminTierLevelName")
@@ -190,7 +190,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
 
             $EntraOpsRoleClassification = $EntraOpsAllPrivilegedObjects | Where-Object { $_.Classification.AdminTierLevelName -contains "ControlPlane" } `
             | ForEach-Object {
-                $PrivilegedObject = $_ | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice, RoleSystem
+                $PrivilegedObject = $_ | Select-Object ObjectId, ObjectType, ObjectSubType, ObjectDisplayName, ObjectUserPrincipalName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice, @{Name = 'AssociatedPawDeviceObjectId'; Expression = { , @(Get-EntraOpsPawDeviceObjectId -Object $_) } }, RoleSystem
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ObjectSignInName -Value ($PrivilegedObject.ObjectUserPrincipalName) -Force | Out-Null
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value ($PrivilegedObject | Select-Object -Unique RoleSystem) -Force | Out-Null
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "EntraOps" -Force | Out-Null
@@ -244,7 +244,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                 # come back in a different order on every run - sort deterministically to avoid a spurious diff
                 # in ScopeReasoning_ControlPlane.json each time the classification is regenerated with unchanged data.
                 $HighPrivilegedRoles = $HighPrivilegedObjectIdsFromAzGraph | Where-Object { $_.PrincipalId -eq $HighPrivilegedObjectId.ObjectId -and $_.PrincipalType -eq $HighPrivilegedObjectId.ObjectType } | Sort-Object RoleScope, RoleName | Select-Object -Unique RoleScope, RoleName
-                $PrivilegedObject = $ResolvedObject | Select-Object ObjectId, @{Name = 'ObjectType'; Expression = { $_.'ObjectType'.tolower() } }, ObjectSubType, ObjectDisplayName, ObjectSignInName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice
+                $PrivilegedObject = $ResolvedObject | Select-Object ObjectId, @{Name = 'ObjectType'; Expression = { $_.'ObjectType'.tolower() } }, ObjectSubType, ObjectDisplayName, ObjectSignInName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice, @{Name = 'AssociatedPawDeviceObjectId'; Expression = { , @(Get-EntraOpsPawDeviceObjectId -Object $_) } }
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationReason -Value $HighPrivilegedRoles -Force | Out-Null
                 $PrivilegedObject | Add-Member -MemberType NoteProperty -Name ClassificationSource -Value "Azure Resource Graph" -Force | Out-Null
                 $PrivilegedObject
@@ -327,6 +327,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                 $XspmResolutionObjects = @($UniqueGraphEdgeObjects | ForEach-Object { [PSCustomObject]@{ ObjectId = $_.ObjectId; ObjectType = $_.ObjectType } })
                 $XspmObjectDetailsCache = Invoke-EntraOpsParallelObjectResolution -UniqueObjects $XspmResolutionObjects -TenantId $TenantId -EnableParallelProcessing $EnableParallelProcessing -ParallelThrottleLimit $ParallelThrottleLimit
             }
+            $XspmNotClassifiedCount = 0
             $PrivilegedObjects += $UniqueGraphEdgeObjects | ForEach-Object {
                 $GraphEdge = $_
                 # Normalize ObjectType casing (Get-EntraOpsPrivilegedEntraObject can return mixed-case values,
@@ -334,7 +335,7 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                 # entries by the ObjectId+ObjectType uniqueness check below.
                 $ResolvedObject = $XspmObjectDetailsCache[$GraphEdge.ObjectId]
                 if ($null -ne $ResolvedObject -and $ResolvedObject.ObjectType -ne "unknown") {
-                    $PrivilegedObject = $ResolvedObject | Select-Object ObjectId, @{Name = 'ObjectType'; Expression = { $_.'ObjectType'.tolower() } }, ObjectSubType, ObjectDisplayName, ObjectSignInName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice
+                    $PrivilegedObject = $ResolvedObject | Select-Object ObjectId, @{Name = 'ObjectType'; Expression = { $_.'ObjectType'.tolower() } }, ObjectSubType, ObjectDisplayName, ObjectSignInName, ObjectTenantId, AssignedAdministrativeUnits, RestrictedManagementByRAG, RestrictedManagementByAadRole, RestrictedManagementByRMAU, OwnedDevices, AssociatedPawDevice, @{Name = 'AssociatedPawDeviceObjectId'; Expression = { , @(Get-EntraOpsPawDeviceObjectId -Object $_) } }
                     $ClassificationReason = @()
                     $ClassificationReason += ($PrivilegedObjectsGraphEdges | Where-Object { $_.ObjectId -eq $GraphEdge.ObjectId -and $_.ObjectType -eq $GraphEdge.ObjectType }).ClassificationReason | ConvertFrom-Json
                     # Kusto's "summarize by" gives no ordering guarantee, so EdgeLabel/TargetNodeName pairs can come
@@ -355,7 +356,12 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                     $UnresolvedPrivilegedObjectIds.Add($GraphEdge.ObjectId)
                 } elseif ($ExposureManagementQuery.Status -eq 'CarriedForward') {
                     $ExposureManagementWarnings.Add([pscustomobject]@{ Type = 'ExposureManagementObjectRemoved'; Message = "Exposure Management object $($GraphEdge.ObjectId) of the last successful query no longer exists and is no longer classified." })
+                } else {
+                    $XspmNotClassifiedCount++
                 }
+            }
+            if ($XspmNotClassifiedCount -gt 0) {
+                Write-Host "Exposure Management: $XspmNotClassifiedCount edge object(s) not found in Microsoft Entra ID are not classified." -ForegroundColor Gray
             }
         }
 
@@ -421,8 +427,11 @@ function Get-EntraOpsClassificationControlPlaneObjects {
                 Write-Host "    High privileged roles analyzed: $($AzureHighPrivilegedRoles -join ', ')" -ForegroundColor Gray
                 if ($AzureHighPrivilegedScopes -eq "*") {
                     Write-Host "    Azure scopes: All scopes (including management groups)" -ForegroundColor Gray
-                } else {
+                } elseif ($Global:EntraOpsIncludeObjectDetails) {
                     Write-Host "    Azure scopes: $($AzureHighPrivilegedScopes -join ', ')" -ForegroundColor Gray
+                } else {
+                    # Management group and subscription IDs stay out of pipeline logs unless object details are enabled
+                    Write-Host "    Azure scopes: $(@($AzureHighPrivilegedScopes).Count) configured scope(s)$(if (@($AzureHighPrivilegedScopes) -contains '/') { ' (including the root scope /)' })" -ForegroundColor Gray
                 }
                 $AssignedRoles = $SourceGroup.Group | ForEach-Object { $_.ClassificationReason } `
                 | Where-Object { $null -ne $_.RoleName } | Select-Object -ExpandProperty RoleName -Unique | Sort-Object
@@ -518,6 +527,8 @@ function Get-EntraOpsClassificationControlPlaneObjects {
             RestrictedManagementByRMAU    = $RestrictedManagementFlags['RestrictedManagementByRMAU']
             OwnedDevices                  = & $UnionValues 'OwnedDevices'
             AssociatedPawDevice           = & $UnionValues 'AssociatedPawDevice'
+            # The object IDs of the PAW devices (Get-EntraOpsPawDeviceObjectId), for the device lookups.
+            AssociatedPawDeviceObjectId   = & $UnionValues 'AssociatedPawDeviceObjectId'
             AssignedAdministrativeUnits   = if ($AdministrativeUnits.Count -gt 0) { , $AdministrativeUnits } else { $null }
             Classification                = $Classifications
         }

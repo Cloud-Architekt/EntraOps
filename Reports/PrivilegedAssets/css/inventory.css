@@ -182,12 +182,12 @@ table.pai-table thead th {
 }
 
 [data-theme="dark"] .tier-badge.tier-workloadplane {
-    background: rgba(0, 120, 212, .18);
-    color: #82c7ff;
+    background: var(--tier-workload-bg);
+    color: var(--tier-workload);
 }
 
 [data-theme="dark"] .tier-badge.tier-workloadplane .tier-dot {
-    background: #82c7ff;
+    background: var(--tier-workload);
 }
 
 .pai-link {
@@ -220,25 +220,26 @@ table.pai-table thead th {
     white-space: nowrap;
 }
 
-.pai-finding.sev-high {
-    background: rgba(164, 38, 44, .10);
-    border-color: rgba(164, 38, 44, .35);
-    color: var(--tier-control);
-}
+/* ---------- Severity: one modifier family (sev-*) sets the colors that badges, chips, dots and blades use -- */
+.sev-critical { --sev: var(--sev-critical); --sev-on: var(--sev-critical-fg); --sev-ink: var(--sev-critical-text); --sev-tint: var(--sev-critical-bg); }
+.sev-high { --sev: var(--sev-high); --sev-on: var(--sev-high-fg); --sev-ink: var(--sev-high-text); --sev-tint: var(--sev-high-bg); }
+.sev-medium { --sev: var(--sev-medium); --sev-on: var(--sev-medium-fg); --sev-ink: var(--sev-medium-text); --sev-tint: var(--sev-medium-bg); }
+.sev-low { --sev: var(--sev-low); --sev-on: var(--sev-low-fg); --sev-ink: var(--sev-low-text); --sev-tint: var(--sev-low-bg); }
+.sev-info { --sev: var(--sev-info); --sev-on: var(--sev-info-fg); --sev-ink: var(--sev-info-text); --sev-tint: var(--sev-info-bg); }
 
-.pai-finding.sev-medium {
-    background: rgba(192, 120, 7, .10);
-    border-color: rgba(192, 120, 7, .35);
-    color: var(--tier-management);
-}
-
-.pai-finding.sev-info {
-    cursor: help;
-}
-
+/* Tinted chip with the name of a finding (relationship warnings, Maester tests). */
 .pai-finding {
-    cursor: help;
     white-space: normal;
+}
+
+.pai-finding[class*="sev-"] {
+    background: var(--sev-tint);
+    border-color: var(--sev);
+    color: var(--sev-ink);
+}
+
+.pai-finding.sev-critical {
+    font-weight: 600;
 }
 
 .pai-removed td {
@@ -247,20 +248,20 @@ table.pai-table thead th {
 }
 
 [data-theme="dark"] .status-chip.added {
-    background: rgba(115, 196, 123, .16);
-    border-color: rgba(115, 196, 123, .45);
+    background: var(--tier-user-bg);
+    border-color: var(--tier-user);
     color: var(--tier-user);
 }
 
 [data-theme="dark"] .status-chip.modified {
-    background: rgba(241, 189, 84, .16);
-    border-color: rgba(241, 189, 84, .45);
+    background: var(--tier-management-bg);
+    border-color: var(--tier-management);
     color: var(--tier-management);
 }
 
 [data-theme="dark"] .status-chip.removed {
-    background: rgba(241, 112, 122, .16);
-    border-color: rgba(241, 112, 122, .45);
+    background: var(--tier-control-bg);
+    border-color: var(--tier-control);
     color: var(--tier-control);
 }
 
@@ -327,7 +328,8 @@ table.pai-table thead th {
     font-size: 12.5px;
 }
 
-.pai-drawer-table thead th {
+/* Tables in the side panels scroll with the panel: the shared sticky header (top: header height) would cover rows. */
+.drawer table.grid-table thead th {
     position: static;
 }
 
@@ -387,12 +389,6 @@ button.pai-finding:focus-visible {
     outline-offset: 1px;
 }
 
-.pai-finding.sev-info.pai-maester {
-    background: rgba(96, 94, 92, .10);
-    border-color: rgba(96, 94, 92, .30);
-    color: var(--neutral-fg-secondary);
-}
-
 .pai-maester {
     display: inline-flex;
     align-items: center;
@@ -419,13 +415,12 @@ button.pai-finding:focus-visible {
     border-left: 4px solid var(--neutral-stroke-strong);
 }
 
-.drawer.pai-blade.sev-high {
-    border-left-color: var(--tier-control);
+.drawer.pai-blade[class*="sev-"] {
+    border-left-color: var(--sev);
 }
 
-.drawer.pai-blade.sev-medium {
-    border-left-color: var(--tier-management);
-}
+.drawer.pai-blade.pai-blade-passed { border-left-color: var(--status-passed); }
+.drawer.pai-blade.pai-blade-error { border-left-color: var(--status-error); }
 
 .pai-blade-head {
     background: var(--neutral-surface-alt);
@@ -467,8 +462,13 @@ button.pai-finding:focus-visible {
     margin-bottom: 14px;
 }
 
+.pai-blade-stats.pai-blade-stats-2 {
+    grid-template-columns: repeat(2, minmax(0, 200px));
+}
+
 @media (max-width: 720px) {
-    .pai-blade-stats {
+    .pai-blade-stats,
+    .pai-blade-stats.pai-blade-stats-2 {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
@@ -540,4 +540,942 @@ button.pai-finding:focus-visible {
 
 .pai-md-table table.grid-table thead th {
     position: static;
+}
+/* ---------- Inventory filters: search, facet pills, more filters ------------- */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.pai-finding-filter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 1 360px;
+    min-width: 220px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--neutral-fg-secondary);
+}
+
+.pai-finding-filter .pai-input {
+    flex: 1;
+    height: 38px;
+    border-radius: 8px;
+}
+
+.pai-more-toggle {
+    height: 38px;
+    border-radius: 8px;
+    gap: 6px;
+}
+
+.pai-count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: 6px;
+    border-radius: 999px;
+    background: var(--brand);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.pai-more-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    border: 1px dashed var(--neutral-stroke-strong);
+    border-radius: 10px;
+}
+
+.pai-more-filters .eam-filter {
+    font-size: 12.5px;
+    color: var(--neutral-fg-secondary);
+}
+
+.pai-whatif-note {
+    font-size: 12px;
+}
+
+.pai-findings-note {
+    margin: 0 0 12px;
+    padding: 8px 12px;
+    border-left: 3px solid var(--brand);
+    border-radius: 6px;
+    background: var(--neutral-surface-alt);
+    color: var(--neutral-fg-secondary);
+    font-size: 12.5px;
+}
+
+.pai-findings-note p {
+    margin: 2px 0;
+}
+
+/* Data gaps of the saved evaluation, above the check results. */
+.pai-data-gaps {
+    margin: 0 0 16px;
+}
+
+.pai-data-gaps p {
+    margin: 4px 0;
+}
+
+.pai-data-gap-list {
+    margin: 6px 0 0;
+    padding-left: 18px;
+}
+
+.pai-data-gap-list li + li {
+    margin-top: 6px;
+}
+
+.pai-data-gap-message {
+    overflow-wrap: anywhere;
+}
+
+/* Stat tiles: one row on wide screens (pai-stat-n<count>), no orphan tile below. */
+.grid.pai-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grid.pai-stat-grid.pai-stat-n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid.pai-stat-grid.pai-stat-n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid.pai-stat-grid.pai-stat-n5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.grid.pai-stat-grid.pai-stat-n6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.grid.pai-stat-grid.pai-stat-n7 { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+
+@media (max-width: 1100px) {
+    .grid.pai-stat-grid.pai-stat-n4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.pai-stat-grid.pai-stat-n5,
+    .grid.pai-stat-grid.pai-stat-n6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.pai-stat-grid.pai-stat-n7 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+.stat.pai-stat-neutral .stat-accent { background: var(--neutral-stroke-strong); }
+.stat.pai-stat-error .stat-accent { background: var(--status-error); }
+.stat.pai-stat-findings .stat-accent { background: var(--sev-high); }
+
+/* ---------- Findings: severity badges, chips, drawer cards -------------------- */
+.pai-sev {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 999px;
+    background: var(--neutral-surface-alt);
+    color: var(--neutral-fg-secondary);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+/* Tinted severity badge with an outline in the severity color, like the status badges (and Maester);
+   Critical is solid so it stands out from High. */
+.pai-sev[class*="sev-"] {
+    background: var(--sev-tint);
+    border-color: color-mix(in srgb, var(--sev) 55%, transparent);
+    color: var(--sev-ink);
+}
+
+.pai-sev.sev-critical {
+    background: var(--sev);
+    border-color: var(--sev);
+    color: var(--sev-on);
+}
+
+.pai-sev.sev-info {
+    border-color: var(--neutral-stroke-strong);
+}
+
+/* The findings get the widest share of the inventory table, the object name the second. */
+table.pai-table th.pai-col-findings {
+    width: 26%;
+}
+
+table.pai-table th.pai-col-object {
+    width: 18%;
+}
+
+/* Long display names without spaces must not widen the object column. */
+table.pai-table td .pai-link {
+    overflow-wrap: anywhere;
+}
+
+.pai-findings-cell {
+    min-width: 190px;
+}
+
+/* Findings of an object: severity, count and the most severe finding on one line; the side panel has all. */
+.pai-fsum {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    max-width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.pai-fsum-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pai-fcount {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--neutral-fg-secondary);
+}
+
+/* At most two lines: a nowrap title set the width of the (auto layout) table and pushed it past the card. */
+.pai-ftop {
+    display: -webkit-box;
+    max-width: 100%;
+    overflow: hidden;
+    color: var(--neutral-fg);
+    font-size: 12.5px;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+}
+
+.pai-fsum:hover .pai-fcount,
+.pai-fsum:hover .pai-ftop {
+    color: var(--brand);
+    text-decoration: underline;
+}
+
+.pai-fsum:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* The compact summary under the object name replaces the Findings column on narrow screens. */
+.pai-fsum.pai-fmini {
+    display: none;
+    margin-top: 4px;
+}
+
+.pai-pre {
+    white-space: pre-line;
+}
+
+.pai-fgroup + .pai-fgroup {
+    margin-top: 14px;
+}
+
+.pai-fgroup-title {
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--neutral-fg-secondary);
+}
+
+.pai-flist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.pai-flist .pai-fitem {
+    margin: 0 0 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 8px;
+    background: var(--neutral-surface);
+}
+
+.pai-fitem-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.pai-rule-id {
+    margin-left: auto;
+    padding: 0 6px;
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 4px;
+    color: var(--neutral-fg-secondary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+}
+
+.pai-fmessages {
+    margin: 6px 0;
+    padding-left: 18px;
+    font-size: 12.5px;
+}
+
+.pai-fmessages li {
+    margin: 2px 0;
+}
+
+.pai-finding-filter .eo-facet-label {
+    white-space: nowrap;
+}
+
+/* Phones: one scrolling line of pills per facet, compact two-column tiles, findings under the object name. */
+@media (max-width: 760px) {
+    .pai-finding-filter {
+        flex-basis: 100%;
+        min-width: 0;
+    }
+
+    .grid.pai-stat-grid[class*="pai-stat-n"] {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .grid.pai-stat-grid.pai-stat-n3 > :first-child,
+    .grid.pai-stat-grid.pai-stat-n5 > :first-child,
+    .grid.pai-stat-grid.pai-stat-n7 > :first-child {
+        grid-column: span 2;
+    }
+
+    .pai-stat-grid .stat {
+        padding: 10px 12px;
+    }
+
+    .pai-stat-grid .stat .stat-value {
+        font-size: 22px;
+    }
+
+    .pai-stat-grid .stat .stat-sub {
+        font-size: 11.5px;
+    }
+
+    .pai-fsum.pai-fmini {
+        display: flex;
+    }
+
+    table.pai-table th.pai-col-findings,
+    table.pai-table td.pai-findings-cell {
+        display: none;
+    }
+}
+
+/* ---------- Findings view: findings of the checks by category -------- */
+.pai-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px 2px 8px;
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 999px;
+    background: var(--neutral-surface-alt);
+    color: var(--neutral-fg-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.pai-status-failed { background: var(--status-failed-bg); border-color: var(--status-failed); color: var(--status-failed); }
+.pai-status-passed { background: var(--status-passed-bg); border-color: var(--status-passed); color: var(--status-passed); }
+.pai-status-error { background: var(--status-error-bg); border-color: var(--status-error); color: var(--status-error); }
+.pai-status-excluded { border-style: dashed; }
+
+.pai-status-dot,
+.pai-sev-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--neutral-stroke-strong);
+    flex-shrink: 0;
+}
+
+.pai-status-dot.pai-status-failed { background: var(--status-failed); }
+.pai-status-dot.pai-status-passed { background: var(--status-passed); }
+.pai-status-dot.pai-status-skipped { background: var(--neutral-fg-disabled); }
+.pai-status-dot.pai-status-excluded { background: transparent; border: 1px dashed var(--neutral-fg-disabled); }
+.pai-status-dot.pai-status-error { background: var(--status-error); }
+
+.pai-sev-dot[class*="sev-"] { background: var(--sev); box-shadow: inset 0 0 0 1px var(--sev-ink); }
+
+.stat.pai-stat-failed .stat-accent { background: var(--status-failed); }
+.stat.pai-stat-passed .stat-accent { background: var(--status-passed); }
+
+.pai-status-bar {
+    display: flex;
+    height: 8px;
+    margin-bottom: 14px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--neutral-surface-alt);
+}
+
+.pai-status-bar span + span {
+    border-left: 2px solid var(--neutral-surface);
+}
+
+.pai-bar-failed { background: var(--status-failed); }
+.pai-bar-passed { background: var(--status-passed); }
+.pai-bar-error { background: var(--status-error); }
+.pai-bar-skipped { background: var(--neutral-fg-disabled); }
+.pai-bar-excluded { background: var(--neutral-stroke-strong); }
+
+.pai-rule-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+table.pai-rule-table {
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 8px;
+    table-layout: fixed;
+}
+
+/* Top-aligned (the shared grid-table centers cells): status and severity line up with the first line of the title. */
+table.grid-table.pai-rule-table tbody td {
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+table.pai-rule-table th.pai-rcol-status { width: 118px; }
+table.pai-rule-table th.pai-rcol-sev { width: 104px; }
+table.pai-rule-table th.pai-rcol-affected { width: 160px; }
+table.pai-rule-table th.pai-rcol-source { width: 170px; }
+
+table.pai-rule-table td.pai-rc-affected {
+    white-space: nowrap;
+}
+
+tr.pai-rule-row {
+    cursor: pointer;
+}
+
+tr.pai-rule-row:hover td {
+    background: var(--neutral-surface-alt);
+}
+
+.pai-rule-why {
+    margin-top: 2px;
+    font-style: italic;
+}
+
+.pai-rc-label {
+    display: none;
+}
+
+/* The rule ID is a label, not a link. */
+.pai-blade-chips .pai-rule-id {
+    margin-left: 0;
+    align-self: center;
+    font-size: 12px;
+    line-height: 20px;
+}
+
+.pai-rule-not-found {
+    margin-bottom: 12px;
+}
+
+.pai-blade-chips .pai-status,
+.pai-blade-chips .pai-sev {
+    align-self: center;
+}
+
+.pai-rule-reason {
+    margin-bottom: 12px;
+}
+
+.pai-rule-unclassified {
+    margin-bottom: 12px;
+}
+
+.pai-rule-unclassified .pai-rule-unclassified-toggle {
+    display: flex;
+    margin-top: 8px;
+}
+
+.pai-rule-unclassified-hint {
+    white-space: nowrap;
+}
+
+tr.pai-rule-unclassified-row td,
+tr.pai-rule-accepted-row td {
+    background: var(--neutral-surface-alt);
+}
+
+/* Finding exceptions: accepted results in the panel of a check and the form to accept one. */
+.pai-rule-accepted {
+    margin-bottom: 12px;
+}
+
+.pai-rule-accepted-hint {
+    white-space: nowrap;
+}
+
+table.pai-rule-results th.pai-rres-exception {
+    width: 104px;
+}
+
+.chip.pai-exception-state {
+    white-space: nowrap;
+}
+
+.chip.pai-exception-riskaccepted {
+    background: var(--sev-medium-bg);
+    color: var(--sev-medium-text);
+}
+
+.chip.pai-exception-dismissed {
+    background: var(--neutral-surface-alt);
+}
+
+.pai-exception-undo {
+    margin-top: 4px;
+}
+
+/* An exception that expired since the last evaluation: its finding is open again, the saved status is outdated. */
+.pai-rule-expired {
+    margin-bottom: 12px;
+}
+
+.pai-rule-expired-hint,
+.pai-rule-stale {
+    color: var(--status-error);
+    font-weight: 600;
+}
+
+.pai-rule-expired-hint {
+    white-space: nowrap;
+}
+
+.pai-rule-stale {
+    margin-top: 2px;
+}
+
+tr.pai-accept-row td {
+    background: var(--neutral-surface-alt);
+}
+
+.pai-accept-form {
+    display: grid;
+    gap: 10px;
+}
+
+.pai-accept-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 8px 12px;
+}
+
+.pai-accept-form label:not(.pai-check) {
+    display: grid;
+    gap: 4px;
+    font-size: 12.5px;
+    font-weight: 600;
+}
+
+.pai-accept-form .pai-input {
+    width: 100%;
+    font-weight: 400;
+}
+
+.pai-accept-scope {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+}
+
+.pai-accept-form textarea.pai-input {
+    resize: vertical;
+    font: inherit;
+}
+
+.pai-rule-result-search {
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.pai-rule-more {
+    margin-top: 8px;
+}
+
+/* The source is in the panel of a check: below 1280px the column goes, so the title keeps a readable width. */
+@media (max-width: 1280px) {
+    table.pai-rule-table th.pai-rcol-source,
+    table.pai-rule-table td.pai-rc-source {
+        display: none;
+    }
+}
+
+@media (max-width: 900px) {
+    table.pai-rule-table th.pai-rcol-affected { width: 110px; }
+}
+
+/* Phones: each check is a card - status and severity, then the title, then the affected objects. */
+@media (max-width: 600px) {
+    table.pai-rule-table,
+    table.pai-rule-table tbody {
+        display: block;
+    }
+
+    table.pai-rule-table thead {
+        display: none;
+    }
+
+    table.pai-rule-table tr.pai-rule-row {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        grid-template-areas: "status sev" "check check" "affected affected";
+        gap: 6px 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--neutral-stroke);
+    }
+
+    table.pai-rule-table tr.pai-rule-row:last-child {
+        border-bottom: none;
+    }
+
+    table.pai-rule-table tbody td:not(.pai-rc-source),
+    table.pai-rule-table tbody tr:last-child td:not(.pai-rc-source) {
+        display: block;
+        padding: 0;
+        border: none;
+    }
+
+    table.pai-rule-table td.pai-rc-status { grid-area: status; }
+    table.pai-rule-table td.pai-rc-sev { grid-area: sev; align-self: center; }
+    table.pai-rule-table td.pai-rc-check { grid-area: check; }
+    table.pai-rule-table td.pai-rc-affected { grid-area: affected; font-size: 12.5px; }
+
+    .pai-rc-label {
+        display: inline;
+        color: var(--neutral-fg-secondary);
+    }
+}
+
+/* Affected objects of a check (type under the name): the details (result messages) get the remaining width. */
+table.pai-rule-results {
+    width: 100%;
+    table-layout: fixed;
+}
+
+table.grid-table.pai-rule-results tbody td {
+    overflow-wrap: anywhere;
+    vertical-align: top;
+    padding: 10px 12px;
+}
+
+/* Object column: name, type and tier stacked; the details (message, links, evidence) take the remaining width. */
+table.pai-rule-results th.pai-rres-object { width: 30%; }
+
+.pai-rres-tier {
+    margin-top: 6px;
+}
+
+table.pai-rule-results .tier-badge {
+    max-width: 100%;
+    white-space: nowrap;
+}
+
+/* Evidence of a result: collapsed under its message, one definition per field. */
+.pai-evidence {
+    margin-top: 6px;
+}
+
+/* Reset the padding and weight of the drawer-section summary it is nested in. */
+.drawer-section .pai-evidence > summary {
+    padding: 0;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--neutral-fg-secondary);
+}
+
+.pai-evidence-list {
+    display: grid;
+    /* Long labels (RoleIsPrivileged, AssignmentInstanceId) wrap at 40% so the values keep most of the width. */
+    grid-template-columns: fit-content(40%) minmax(0, 1fr);
+    gap: 2px 10px;
+    margin: 4px 0 0;
+    font-size: 12px;
+}
+
+.pai-evidence-list dt {
+    color: var(--neutral-fg-secondary);
+    overflow-wrap: anywhere;
+}
+
+.pai-evidence-list dd {
+    margin: 0;
+    font-family: Consolas, "Cascadia Code", Menlo, monospace;
+    overflow-wrap: anywhere;
+}
+
+.pai-evidence-item {
+    display: block;
+}
+
+/* Resources of a check: one link per line with its source. */
+.pai-references li {
+    margin-bottom: 4px;
+}
+
+/* Phones: object and tier on one line, the details below. */
+@media (max-width: 600px) {
+    table.pai-rule-results,
+    table.pai-rule-results tbody {
+        display: block;
+        table-layout: auto;
+    }
+
+    table.pai-rule-results thead {
+        display: none;
+    }
+
+    table.pai-rule-results tbody tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 8px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--neutral-stroke);
+    }
+
+    table.pai-rule-results tbody td,
+    table.pai-rule-results tbody tr:last-child td {
+        display: block;
+        padding: 0;
+        border: none;
+    }
+
+    table.pai-rule-results tbody td.pai-rres-details,
+    table.pai-rule-results tbody td[colspan] {
+        grid-column: 1 / -1;
+    }
+}
+
+/* ---------- Findings: deep links of a result and the effort / user impact of a check ------------------ */
+.pai-result-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    margin-top: 6px;
+    font-size: 11.5px;
+}
+
+.pai-ratings {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+}
+
+.pai-rating {
+    padding: 8px 10px;
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 6px;
+    background: var(--neutral-surface-alt);
+}
+
+.pai-rating-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.pai-rating-label {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Low / Medium / High effort or impact: neutral outline badges, so they don't read as a finding severity. */
+.pai-level {
+    padding: 0 8px;
+    border: 1px solid var(--neutral-stroke-strong);
+    border-radius: 999px;
+    background: var(--neutral-surface);
+    color: var(--neutral-fg);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.pai-level-low { color: var(--neutral-fg-secondary); }
+.pai-level-high { border-color: var(--neutral-fg-secondary); }
+
+/* ---------- Check panel: objects, results and evaluated; results grouped by object -------------------------- */
+.pai-blade-stats.pai-blade-stats-3 {
+    grid-template-columns: repeat(3, minmax(0, 180px));
+}
+
+@media (max-width: 720px) {
+    .pai-blade-stats.pai-blade-stats-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+.pai-rc-results {
+    white-space: normal;
+}
+
+.pai-rule-note {
+    margin-bottom: 12px;
+}
+
+/* An object with several results: a toggle with their number, the first message as a preview. */
+.pai-rgroup-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--brand);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.pai-rgroup-toggle:hover {
+    text-decoration: underline;
+}
+
+.pai-rgroup-toggle:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.pai-rgroup-chevron {
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 6px solid currentColor;
+    transition: transform .12s ease;
+}
+
+.pai-rgroup-toggle[aria-expanded="true"] .pai-rgroup-chevron {
+    transform: rotate(90deg);
+}
+
+.pai-rgroup-preview {
+    display: -webkit-box;
+    margin-top: 4px;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+}
+
+/* The results of an expanded object: indented under the object row. */
+table.grid-table.pai-rule-results tbody tr.pai-rres-child td {
+    border-top: 0;
+}
+
+table.grid-table.pai-rule-results tbody tr.pai-rres-child td.pai-rres-details {
+    border-left: 2px solid var(--neutral-stroke-strong);
+    padding-left: 12px;
+}
+
+.pai-rres-select {
+    display: flex;
+    margin-top: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+/* Bulk exceptions: selection bar and form above the list. */
+.pai-rule-bulk-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.pai-rule-bulk-bar[hidden] {
+    display: none;
+}
+
+.pai-accept-bulk {
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 6px;
+    background: var(--neutral-surface);
+}
+
+/* Evidence: lists of objects as a small table; internal IDs under "Technical details". */
+.pai-evidence-table {
+    border-collapse: collapse;
+    font-family: inherit;
+    font-size: 11.5px;
+}
+
+.pai-evidence-table th,
+.pai-evidence-table td {
+    padding: 2px 8px 2px 0;
+    border-bottom: 1px solid var(--neutral-stroke);
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.pai-evidence-table th {
+    color: var(--neutral-fg-secondary);
+    font-weight: 600;
+}
+
+/* A table spans the evidence list (label above it) and uses the text font, not the monospace of the values. */
+.pai-evidence-list .pai-evidence-wide {
+    grid-column: 1 / -1;
+}
+
+.pai-evidence-list dd .pai-evidence-table {
+    width: 100%;
+    font-family: var(--font);
+}
+
+.pai-evidence-technical {
+    margin-top: 6px;
+}
+
+/* The evidence table sits in the results table of the panel: its cells don't take the padding and header style of it. */
+table.grid-table.pai-rule-results tbody .pai-evidence-table th,
+table.grid-table.pai-rule-results tbody .pai-evidence-table td,
+.pai-flist .pai-evidence-table th,
+.pai-flist .pai-evidence-table td {
+    padding: 3px 10px 3px 0;
+    background: transparent;
+    border-top: 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--neutral-stroke);
+    font-size: 11.5px;
+    text-transform: none;
+    letter-spacing: normal;
+    position: static;
+    box-shadow: none;
 }

@@ -1,6 +1,63 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
+## [1.2.0] - 2026-11-20
+
+### Added
+- **Findings**: The security checks of the reports are now EntraOps finding rules, evaluated in PowerShell, so the reports, `findings.json` and Maester show the same results. See [Findings and Maester Pack](https://www.entraops.com/docs/reportings/index.html#findings).
+  - 59 rules in eight categories with a stable ID (`EO.<n>`), severity, remediation steps, effort, user impact, references and Maester test ID (`MP.EOPS.<n>`).
+  - `Get-EntraOpsFindingRule` lists the rules, `Invoke-EntraOpsFindingEvaluation` evaluates them and `Save-EntraOpsFindingJson` saves `Reports/Findings/data/findings.json`, which `New-EntraOpsReportingData` writes and the reporting pipelines publish.
+  - The `Findings` section of `EntraOpsConfig.json` excludes rules (`ExcludedRules`) and sets thresholds (`ControlPlaneActivationMaxHours`, `EligibleAssignmentMaxDays`, `EmergencyAccessAccounts`); `New-EntraOpsConfigFile -Findings*` and the Configuration Wizard write it.
+  - `findings.json` lists missing data that limits the evaluation (`DataGaps`).
+- **Finding exceptions**: dismiss a finding (false positive) or accept its risk until a date in the Finding Exceptions File (`Findings.ExceptionsFilePath`, default `./Classification/FindingExceptions.json`; `Findings.ExceptionMaxDays`, default 180 days). Accepted results are counted apart (`AcceptedCount`) and not reported as failures; expired and invalid exceptions are warned about.
+- **Privileged Assets Findings view** (`?view=findings`): the results of all checks by category with filters, a panel per check (description, remediation, effort, user impact, evidence) and links from each affected object to the report that opens at it. Exceptions are added and exported from the panel.
+- **EntraOps Maester Pack** ([Cloud-Architekt/EntraOps-MaesterPack](https://github.com/Cloud-Architekt/EntraOps-MaesterPack), code `EOPS`): one Maester test per finding rule that reports the results of `findings.json`, without connection, permission or module. Install it with `Install-MtPack Cloud-Architekt/EntraOps-MaesterPack`.
+- **`Invoke-EntraOpsAssessment`**: a complete first assessment in one cmdlet, without a repository or configuration: installs the reporting apps of the module version, signs in, captures a Tenant Governance snapshot while the Privileged EAM classification runs, generates the reports and finding results and ends with the failed rules by severity and the next steps. A tenant that isn't prepared for the snapshot is only changed with `-SetupTenantGovernance`. See [Complete assessment with one cmdlet](https://www.entraops.com/docs/get-started/index.html#complete-assessment).
+- **PIM Request Flow and Access Package Flow**: each risk flag names its finding rule (linked to the Findings view), and flags accepted by an exception are not counted. Access Package Flow shows the tier of the target resources and the approval tier.
+- **Privileged EAM export**: the origin of each privileged object (`OriginType`, `OriginTenantId`, `OriginId`), for example cloud, on-premises, cross-tenant synchronization, B2B invitation, Tenant Governance or application type. The finding rules and the EAM Dashboard use it. Reading the origin of groups needs the Microsoft Graph permission `Group-XTenantIdentitySync.Read.All` (see *Changed*).
+- **EAM Dashboard / Classification Explorer**: star matched role actions to reuse them in Customize Overwrites. A bookmark keeps the RBAC system, scope and observed tier; the editor requires an explicit overwrite scope, tier and justification.
+- **Report history without git**: `-HistorySource Auto|Git|Folder` of `New-EntraOpsReportingData`, `New-EntraOpsPrivilegedEamPrivilegeHistoryData` and `New-EntraOpsTenantGovernanceConfigurationAnalyzerData`. Without git, Privilege History and Configuration Analyzer show the current export and snapshot. See [History source](https://www.entraops.com/docs/reportings/index.html#history-source).
+- **`Invoke-EntraOpsPrivilegedEAM`**: `-ControlPlaneScopeAction Refresh|Reuse|Prompt` reuses the Control Plane scope of an earlier run for a faster, comparable run (`Refresh` is the default); `-KeepConnection` keeps the connections for the report generation in the same session.
+- **ServiceEM**: `ServiceEM.WorkloadPlaneAdminRoles` in `EntraOpsConfig.json` defines the permanent (default: Reader) and PIM eligible (default: none) Azure roles of WorkloadPlane-Admins. Owner, User Access Administrator and Role Based Access Control Administrator are rejected. See [Roles of WorkloadPlane-Admins](https://www.entraops.com/docs/service-em/index.html#roles-of-workloadplane-admins).
+
+### Changed
+- **Upgrade: new Microsoft Graph permission `Group-XTenantIdentitySync.Read.All`** (application permission, admin consent). Grant it to the workload identity of an existing deployment (`New-EntraOpsWorkloadIdentity` adds it to new ones); `Connect-EntraOps` requests it for interactive sign-in. Without it, the collection completes with a warning and leaves the origin of groups empty, so `EO.4010` doesn't report groups of cross-tenant synchronization. When you ingest into `PrivilegedEAM_CL`, add the columns `OriginType`, `OriginTenantId` and `OriginId` (string) to the table and the data collection rule. See [Upgrade from EntraOps 1.1 to 1.2](https://www.entraops.com/docs/get-started/migration-guide/index.html#upgrade-from-1-1).
+- **Content of the module version**: `Initialize-EntraOpsWorkspace`, `Install-EntraOpsReportingFolder` and `New-EntraOpsReportingData -InstallMissingReportingFolder` install the classification templates, samples and reporting apps that match the module instead of the head of `main`; `-Ref` and `-Repository EntraOps-Insiders` select other content. Without `-Repository`, the repository comes from `AutomatedEntraOpsUpdate.Repository` of `EntraOpsConfig.json`, otherwise it is the public `EntraOps` repository.
+- **Sign-in**: `Connect-EntraOps` and the setup cmdlets sign in to Azure and Microsoft Graph for the current PowerShell process only, so parallel EntraOps runs (for example for several tenants) don't overwrite each other's context. Sign in again in every new PowerShell session.
+- **ServiceEM**: WorkloadPlane-Admins are classified `ManagementPlane` instead of `WorkloadPlane` in the Object Classification File, as the classification templates know no Workload Plane tier for role assignments. Existing `WorkloadPlane` entries are kept with a warning; change them to `ManagementPlane`. See [Classification of workload groups](https://www.entraops.com/docs/service-em/index.html#classification-of-workload-groups).
+- **Required module versions**: `Connect-EntraOps` and `Install-EntraOpsAllRequiredModules` require Az.Accounts 5.4.0, Az.Resources 9.1.0 and Microsoft.Graph.Authentication 2.41.2; `New-EntraOpsWorkloadIdentity` requires Microsoft.Graph.Applications 2.41.2. A missing or older module is installed; update the modules before `Connect-EntraOps` (`Install-EntraOpsAllRequiredModules` in a new PowerShell session).
+- **Reports**: PIM Request Flow, Access Package Flow and Tier Breach Analyzer show the findings evaluated in PowerShell instead of their own browser rules. The reports share one filter look. `Remove-EntraOpsReportingData` also removes the finding results.
+
+### Deprecated
+- `ConfigurationAnalyzer.PimRequestFlowExcludedRiskFlags` and `ConfigurationAnalyzer.AccessPackageFlowExcludedRiskFlags` (and the `New-EntraOpsConfigFile` parameters of the same name): exclude the rules in `Findings.ExcludedRules` (`PimRequestFlow.<key>`, `AccessPackageFlow.<key>`). The old settings are still read, with a warning.
+
+### Fixed
+- **Classification**:
+  - An overwrite of the application or delegated permission of an entry that classifies both types left the other type unclassified.
+  - `ExcludedRoleDefinitionActions` of API permissions are matched per exclusion, exactly or as wildcard pattern, instead of against the whole list.
+  - Classification Explorer resolves a starred role in the RBAC system of the star, and Customize Overwrites supports Azure RBAC.
+- **Privileged EAM**: collect the data again to correct existing exports.
+  - Remote groups with access through Tenant Governance take their tier from the Object Classification File.
+  - Tier names of custom security attributes in another spelling (`controlPlane`) are normalized.
+  - The owners of an app registration are included in the owners of its service principal.
+  - The PAW attribute accepts the device ID and the object ID of the device (`AssociatedPawDeviceObjectId`); before, a device ID matched no device.
+  - `Invoke-EntraOpsPrivilegedEAM` no longer builds the Control Plane scope from the export of another tenant in a shared working folder.
+- **Findings and flows**:
+  - Access package targets are classified by their own classification, not by the tiers of their members, and delegated permissions of an application no longer raise the tier of the access.
+  - Single user approvers outside the Privileged EAM data count as User Access
+  - Roles with an authentication context were flagged as activatable without MFA (`EO.3006`), and assignment policies that don't accept requests were flagged for no approval and a broad requestor scope (`EO.6001`, `EO.6002`).
+- **Tenant Governance snapshot**:
+  - A job that Microsoft Graph never completed blocked every later snapshot. A job older than `TenantGovernanceSnapshot.PendingJobMaxAgeInHours` (default 24 hours; `0` keeps the previous behavior) is deleted and replaced. See [Tenant Governance](https://www.entraops.com/docs/tenant-governance/index.html).
+  - Resources of a type whose export failed were kept even after they were deleted in the tenant; resources that Microsoft Graph reports as not found are removed (`RemovedResources` in the manifest).
+  - The manifest records its tenant, so a working folder shared by several tenants no longer mixes snapshots, pending jobs and connections.
+  - The warning about a partial snapshot names the affected resource types.
+- **GitHub rate limit**: `Update-EntraOpsClassificationFiles` and the source downloads of the setup cmdlets and the EntraOps update authenticate with `GITHUB_TOKEN` or `GH_TOKEN` when set and retry rate limit, server and network errors. When the template list can't be read, existing local templates are used with a warning (`-FailOnUnavailableRepository` restores the failure).
+- **Sentinel WatchLists**: `Save-EntraOpsPrivilegedEAMWatchLists` uses SentinelEnrichment 0.2.2 and installs it only when missing. Every WatchList is checked for existence and rows after its upload, missing or empty WatchLists are reported as an error, and a warning names both deployments when another one wrote the WatchList last.
+- **Pipeline logs**: the push steps no longer print the subscription ID, workspace, WatchList URIs and data collection endpoint, and the Control Plane scope update writes counts instead of object ID lists without `ConsoleOutput.IncludeObjectDetails`. Paths no longer print a double slash, missing classification files are warned about once per session, progress bars no longer stay on screen, and the pipelines print the EntraOps version.
+- **Reports**: the Privilege History *vs. today* deltas, case-insensitive deep links (`#flow=`, `#asset=`, `#assignment=`) and several filters of Configuration Analyzer, EAM Dashboard and EIDSCA Findings.
+- **Classification maintenance**: `Update-EntraOpsClassificationModels` runs through the imported module, and `Export-EntraOpsClassificationDirectoryRolesFromMsftDocs` excludes owner-only permissions like the Microsoft Graph exporter.
+- **Microsoft Graph caching**: the batch lookup of the principals of Entra ID role assignments failed and fell back to slower lookups, the role data cache was never reused on systems with a non-US date format, and cache files of long requests could not be written.
+
 ## [1.1.0] - 2026-10-27
 
 ### Added

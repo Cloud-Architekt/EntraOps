@@ -59,7 +59,7 @@ function Get-EntraOpsIntuneDeviceScopeSelectionGap {
         # Original casing for display; first non-null device value per normalized ID.
         $DeviceIdsByKey = [ordered]@{}
         foreach ($Entry in $UserGroup.Group) {
-            foreach ($DeviceId in @(& $GetOptionalValue $Entry 'OwnedDevices') + @(& $GetOptionalValue $Entry 'AssociatedPawDevice')) {
+            foreach ($DeviceId in @(& $GetOptionalValue $Entry 'OwnedDevices') + @(Get-EntraOpsPawDeviceObjectId -Object $Entry)) {
                 if ([string]::IsNullOrWhiteSpace("$DeviceId")) { continue }
                 $Key = "$DeviceId".Trim().ToLowerInvariant()
                 if (-not $DeviceIdsByKey.Contains($Key)) { $DeviceIdsByKey[$Key] = "$DeviceId".Trim() }

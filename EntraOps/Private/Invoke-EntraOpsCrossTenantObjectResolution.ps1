@@ -115,6 +115,7 @@ function Invoke-EntraOpsCrossTenantObjectResolution {
         "CustomSecAttributeAssignment.Read.All",
         "Directory.Read.All",
         "Group.Read.All",
+        "Group-XTenantIdentitySync.Read.All",
         "GroupMember.Read.All",
         "PrivilegedAccess.Read.AzureADGroup",
         "PrivilegedEligibilitySchedule.Read.AzureADGroup",
@@ -175,7 +176,7 @@ function Invoke-EntraOpsCrossTenantObjectResolution {
             if ($IsRestOnlyMode) {
                 $__EntraOpsSession.Remove('CurrentGraphTenantId')
             } elseif ($IsInteractiveAuth) {
-                Connect-MgGraph -TenantId $Global:TenantIdContext -Scopes $HomeTenantScopes -NoWelcome -ErrorAction Stop
+                Connect-MgGraph -TenantId $Global:TenantIdContext -Scopes $HomeTenantScopes -NoWelcome -ErrorAction Stop -ContextScope Process
             } else {
                 Connect-MgGraph -AccessToken $HomeToken -NoWelcome -ErrorAction Stop
             }

@@ -44,6 +44,12 @@
 .PARAMETER ObjectClassificationFile
     Object Classification File settings (Enabled, FilePath). Default will be set by EntraOpsConfig.json section ObjectClassificationFile. When enabled, a User, Group, ServicePrincipal or Application object that neither Custom Security Attributes nor Alternate Tier Level Attributes classify takes its tier from its entry in the file (matched by ObjectId).
 
+.PARAMETER IsForeignPrincipal
+    The object is a principal of another tenant with access through Tenant Governance (the tenant of its role assignment is not this tenant), so a missing object in this tenant is expected.
+
+.PARAMETER ForeignTenantId
+    The tenant of a foreign principal (the governing tenant of its Tenant Governance role assignment). When the principal is not found in this tenant and is no remote tenant group, the placeholder keeps this tenant as ObjectTenantId and OriginTenantId with the OriginType TenantGovernance, so the principal stays an object of another tenant (EO.4010, EO.4011) until it is resolved in the managing tenant.
+
 .PARAMETER CustomSecurityAttributeClassification
     Defines if the tier of User, ServicePrincipal and Application objects is read from Custom Security Attributes. Default will be set by EntraOpsConfig.json CustomSecurityAttributes.Enabled. Custom Security Attributes win over Alternate Tier Level Attributes and the Object Classification File; an object without tier falls back to them. When absent, Custom Security Attributes are used unless the Object Classification File or, for users and service principals, the Alternate Tier Level Attributes of the object type are enabled (behavior of older config files). The PAW device and work account attributes are always read.
 
@@ -82,6 +88,9 @@ function Get-EntraOpsPrivilegedEntraObject {
         ,
         [Parameter(Mandatory = $false)]
         [switch]$IsForeignPrincipal
+        ,
+        [Parameter(Mandatory = $false)]
+        [System.String]$ForeignTenantId
         ,
         [Parameter(Mandatory = $false)]
         [System.String]$PrivilegedUserAdminTierLevelAttribute = $(if (-not [string]::IsNullOrEmpty($EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAdminTierLevelAttribute)) { $EntraOpsConfig.CustomSecurityAttributes.PrivilegedUserAdminTierLevelAttribute } else { 'adminTierLevel' })
@@ -199,9 +208,15 @@ function Get-EntraOpsPrivilegedEntraObject {
         } else {
             Write-Host "Object $AadObjectId not found in home tenant — expected for tenant governance (TG) objects, will be resolved in managing tenant context." -ForegroundColor Gray
             $StopwatchTotal.Stop()
+            # The principal belongs to the tenant of its Tenant Governance role assignment, not to this tenant: keep that
+            # tenant, so the placeholder stays an object of another tenant (EO.4010, EO.4011, and the Administrative Unit
+            # and Conditional Access group reconciliation skip it) when it is not resolved in the managing tenant (no
+            # ManagingTenantId, a principal of another governing tenant, or a failed cross-tenant step).
+            # Like a remote tenant group: ObjectTenantId as the assignment names it, OriginTenantId in lowercase.
+            $PrincipalTenantId = if (-not [string]::IsNullOrWhiteSpace($ForeignTenantId)) { $ForeignTenantId.Trim() } else { $null }
             return [PSCustomObject]@{
                 'ObjectId'                      = $AadObjectId
-                'ObjectTenantId'                = $TenantId
+                'ObjectTenantId'                = $(if ($PrincipalTenantId) { $PrincipalTenantId } else { $TenantId })
                 'ObjectType'                    = 'unknown'
                 'ObjectSubType'                 = 'unknown'
                 'ObjectDisplayName'             = 'Identity not found'
@@ -215,6 +230,7 @@ function Get-EntraOpsPrivilegedEntraObject {
                 'AdminTierLevelName'            = 'Unclassified'
                 'AssociatedWorkAccount'         = @()
                 'AssociatedPawDevice'           = @()
+                'AssociatedPawDeviceObjectId'   = @()
                 'OnPremSynchronized'            = $false
                 'RestrictedManagementByRAG'     = $false
                 'RestrictedManagementByAadRole' = $false
@@ -222,6 +238,10 @@ function Get-EntraOpsPrivilegedEntraObject {
                 'AssignedAdministrativeUnits'   = @()
                 'PasswordPolicyAssigned'        = @()
                 'OutsideOfHomeTenant'           = $true
+                # A principal of another tenant with access through Tenant Governance (Resolve-EntraOpsObjectOrigin).
+                'OriginType'                    = 'TenantGovernance'
+                'OriginTenantId'                = $(if ($PrincipalTenantId) { $PrincipalTenantId.ToLowerInvariant() } else { $null })
+                'OriginId'                      = $AadObjectId
             }
         }
     }
@@ -229,10 +249,20 @@ function Get-EntraOpsPrivilegedEntraObject {
     # Variables for ownership or other object relationships
     [System.Collections.ArrayList]$Owners = @()
     [System.Collections.ArrayList]$Sponsors = @()
+    # The tenant of the application of a service principal (Microsoft first-party apps: the Microsoft tenants).
+    $AppOwnerOrganizationId = $null
+    # Origin of the object (Resolve-EntraOpsObjectOrigin): originTenantInfo of users and groups, the SID of objects
+    # synchronized from Active Directory and the application tenant of service principals (of the blueprint for an
+    # agent identity).
+    $OriginTenantInfo = $null
+    $OriginTenantInfoAvailable = $false
+    $OnPremisesSecurityIdentifier = ''
+    $OriginAppOwnerOrganizationId = $null
     [System.Collections.ArrayList]$ObjectOwner = @()
     [System.Collections.ArrayList]$DeviceOwner = @()
     [System.Collections.ArrayList]$WorkAccount = @()
     [System.Collections.ArrayList]$PawDevice = @()
+    [System.Collections.ArrayList]$PawDeviceObjectId = @()
     [System.Collections.ArrayList]$AssignedAdministrativeUnits = @()
 
     #region Calculate object details common for all object types and protection by RMAU membership
@@ -295,11 +325,16 @@ function Get-EntraOpsPrivilegedEntraObject {
         $AadRolesActive = @($AadRolesActiveResult | Where-Object { $null -ne $_.id })
         $AadRolesEligible = @($AadRolesEligibleResult | Where-Object { $null -ne $_.id })
 
-        # Set protection flag based on count of active or eligible roles
-        $RestrictedManagementByAadRole = ($AadRolesActive.Count -gt 0 -or $AadRolesEligible.Count -gt 0)
+        # Set protection flag based on the active or eligible roles (at any scope) that protect their holder:
+        # Helpdesk, Password, Authentication or User Administrators can still manage holders of a few roles, for
+        # example Directory Readers (Test-EntraOpsDirectoryRoleRestrictsManagement).
+        $AadRolesRestricting = @(@($AadRolesActive) + @($AadRolesEligible) | Where-Object { Test-EntraOpsDirectoryRoleRestrictsManagement -RoleDefinitionId $_.roleDefinitionId })
+        $RestrictedManagementByAadRole = $AadRolesRestricting.Count -gt 0
 
         if ($RestrictedManagementByAadRole) {
-            Write-Verbose "Object protected by AAD Role: Active=$($AadRolesActive.Count), Eligible=$($AadRolesEligible.Count)"
+            Write-Verbose "Object protected by AAD Role: Active=$($AadRolesActive.Count), Eligible=$($AadRolesEligible.Count), protecting=$($AadRolesRestricting.Count)"
+        } elseif ($AadRolesActive.Count -gt 0 -or $AadRolesEligible.Count -gt 0) {
+            Write-Verbose "Object not protected by AAD Role: its $($AadRolesActive.Count + $AadRolesEligible.Count) role(s) can be managed by Helpdesk, Password, Authentication or User Administrators"
         }
     } else {
         $RestrictedManagementByAadRole = $false
@@ -325,8 +360,16 @@ function Get-EntraOpsPrivilegedEntraObject {
             # odata type by directoryObject includes value of user which could be either user or agentUser
             $ObjectType = 'user'
             # Combine initial query with customSecurityAttributes to reduce API calls
-            $UserDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AadObjectId)?`$select=id,userPrincipalName,userType,displayName,customSecurityAttributes,identityParentId" -OutputType PSObject
+            $UserDetails = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AadObjectId)?`$select=id,userPrincipalName,userType,displayName,customSecurityAttributes,identityParentId,onPremisesSecurityIdentifier" -OutputType PSObject
             $IdentityParent = $($UserDetails.identityParentId)
+            $OnPremisesSecurityIdentifier = "$($UserDetails.onPremisesSecurityIdentifier)"
+            # Origin from another tenant (cross-tenant synchronization, invited guest); an object read in the managing
+            # tenant has access through Tenant Governance instead.
+            if (-not $IsCrossTenant) {
+                $OriginDetails = Get-EntraOpsObjectOriginTenantInfo -ObjectType user -ObjectId $AadObjectId
+                $OriginTenantInfo = $OriginDetails.OriginTenantInfo
+                $OriginTenantInfoAvailable = $OriginDetails.Available
+            }
 
             if ($null -ne $UserDetails.'@odata.type') {
                 $ObjectSubType = $UserDetails.'@odata.type'.Replace("#microsoft.graph.", "")
@@ -368,9 +411,16 @@ function Get-EntraOpsPrivilegedEntraObject {
             $RestrictedManagementByRAG = $ObjectMemberships.isAssignableToRole -contains $true
             Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/users/$($AAdObjectId)/memberOf/microsoft.graph.administrativeUnit?`$select=id,displayName" -OutputType PSObject | Select-Object id, displayName | ForEach-Object { $AssignedAdministrativeUnits.Add($_) | out-null }
 
-            # Relation between PAW and user
+            # Relation between PAW and user: the attribute names the device by its device ID or its object ID.
+            # AssociatedPawDevice keeps the reference as the attribute has it (as before, for example for Microsoft
+            # Sentinel and BloodHound); AssociatedPawDeviceObjectId is the object ID of the device
+            # (Resolve-EntraOpsPawDeviceObjectId), which the device lookups, the finding rules and the reports use.
             if ($null -ne $ObjectCustomSec.$($CustomSecurityUserPawAttribute)) {
-                $ObjectCustomSec.$($CustomSecurityUserPawAttribute) | ForEach-Object { $PawDevice.Add($_) | out-null }
+                foreach ($PawReference in @($ObjectCustomSec.$($CustomSecurityUserPawAttribute))) {
+                    $PawDevice.Add($PawReference) | out-null
+                    $PawObjectId = Resolve-EntraOpsPawDeviceObjectId -Value "$PawReference" -UserId $AadObjectId
+                    if ($PawObjectId -and -not $PawDeviceObjectId.Contains($PawObjectId)) { $PawDeviceObjectId.Add($PawObjectId) | out-null }
+                }
             }
             if ($null -ne $ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute)) {
                 $ObjectCustomSec.$($CustomSecurityUserWorkAccountAttribute) | ForEach-Object { $WorkAccount.Add($_) | out-null }
@@ -431,6 +481,15 @@ function Get-EntraOpsPrivilegedEntraObject {
             $AdminTierLevel = "Unclassified"
             $AdminTierLevelName = "Unclassified"
 
+            # Origin from another tenant (cross-tenant synchronization) and the SID of a group synchronized from Active
+            # Directory; an object read in the managing tenant has access through Tenant Governance instead.
+            if (-not $IsCrossTenant) {
+                $OriginDetails = Get-EntraOpsObjectOriginTenantInfo -ObjectType group -ObjectId $AadObjectId
+                $OriginTenantInfo = $OriginDetails.OriginTenantInfo
+                $OriginTenantInfoAvailable = $OriginDetails.Available
+                $OnPremisesSecurityIdentifier = $OriginDetails.OnPremisesSecurityIdentifier
+            }
+
             # Owners
             Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/groups/$AadObjectId/owners?`$select=id" -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
 
@@ -468,6 +527,27 @@ function Get-EntraOpsPrivilegedEntraObject {
             $RemoteGroupDisplayName = if (-not [string]::IsNullOrEmpty($RemoteTenantGroup.remoteGroupDisplayName)) { $RemoteTenantGroup.remoteGroupDisplayName } else { $ObjectDetails.displayName }
 
             Write-Verbose "Resolved $AadObjectId as remote tenant group (remote group $RemoteGroupId in tenant $RemoteGroupTenantId)."
+            # A group of another tenant has no custom security attributes of this tenant: the Object Classification File
+            # is the only way to declare its tier (by the ID of the remote group, as it is exported).
+            $RemoteGroupTierLevel = 'Unclassified'
+            $RemoteGroupTierLevelName = 'Unclassified'
+            if ($null -ne $ObjectClassificationFile -and $ObjectClassificationFile.Enabled -eq $true -and -not [string]::IsNullOrWhiteSpace($ObjectClassificationFile.FilePath)) {
+                try {
+                    $RemoteGroupClassificationEntries = Import-EntraOpsObjectClassificationFile -FilePath $ObjectClassificationFile.FilePath
+                    $RemoteGroupClassification = $RemoteGroupClassificationEntries["$RemoteGroupId".ToLowerInvariant()]
+                    if ($null -ne $RemoteGroupClassification -and -not [string]::IsNullOrEmpty($RemoteGroupClassification.ObjectType) -and $RemoteGroupClassification.ObjectType -ne 'group') {
+                        Write-Warning "Object Classification File entry for $RemoteGroupId declares ObjectType '$($RemoteGroupClassification.ObjectType)' but the object is 'group'. Entry ignored."
+                        $RemoteGroupClassification = $null
+                    }
+                    if ($null -ne $RemoteGroupClassification) {
+                        $RemoteGroupTierLevel = $RemoteGroupClassification.AdminTierLevel
+                        $RemoteGroupTierLevelName = $RemoteGroupClassification.AdminTierLevelName
+                        Write-Verbose "Remote tenant group $RemoteGroupId classified as $RemoteGroupTierLevelName by Object Classification File."
+                    }
+                } catch {
+                    Write-Warning "Object Classification File could not be used for $($RemoteGroupId): $($_.Exception.Message)"
+                }
+            }
             $StopwatchRegion.Stop()
             Write-Verbose "[Performance] Remote tenant group object details: $($StopwatchRegion.ElapsedMilliseconds)ms"
             $StopwatchTotal.Stop()
@@ -483,11 +563,12 @@ function Get-EntraOpsPrivilegedEntraObject {
                 'Owners'                        = @()
                 'Sponsors'                      = @()
                 'IdentityParent'                = $null
-                # Groups do not support custom security attributes — "Unclassified" instead of a blank bucket.
-                'AdminTierLevel'                = 'Unclassified'
-                'AdminTierLevelName'            = 'Unclassified'
+                # Groups do not support custom security attributes; use Object Classification File tier or "Unclassified".
+                'AdminTierLevel'                = $RemoteGroupTierLevel
+                'AdminTierLevelName'            = $RemoteGroupTierLevelName
                 'AssociatedWorkAccount'         = @()
                 'AssociatedPawDevice'           = @()
+                'AssociatedPawDeviceObjectId'   = @()
                 'OnPremSynchronized'            = $false
                 'RestrictedManagementByRAG'     = $true
                 'RestrictedManagementByAadRole' = $true
@@ -495,6 +576,10 @@ function Get-EntraOpsPrivilegedEntraObject {
                 'AssignedAdministrativeUnits'   = @()
                 'PasswordPolicyAssigned'        = @()
                 'OutsideOfHomeTenant'           = $true
+                # A group of the governing tenant with access through Tenant Governance.
+                'OriginType'                    = 'TenantGovernance'
+                'OriginTenantId'                = $(if ($RemoteGroupTenantId) { "$RemoteGroupTenantId".ToLowerInvariant() } else { $null })
+                'OriginId'                      = $RemoteGroupId
             }
         }
         #endregion
@@ -505,6 +590,11 @@ function Get-EntraOpsPrivilegedEntraObject {
             # Combine initial query with customSecurityAttributes to reduce API calls
             $SPObject = Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/beta/serviceprincipals/$($AAdObjectId)?`$select=id,appId,servicePrincipalType,appOwnerOrganizationId,customSecurityAttributes,agentAppId" -OutputType PSObject
             $ObjectSignInName = $SPObject.appId
+            $AppOwnerOrganizationId = $SPObject.appOwnerOrganizationId
+            # A managed identity belongs to the tenant of its Azure resource and cannot be consented in another tenant,
+            # but Microsoft Graph returns no appOwnerOrganizationId for it: its owner organization is this tenant.
+            if ("$($SPObject.servicePrincipalType)" -eq 'ManagedIdentity' -and [string]::IsNullOrWhiteSpace("$AppOwnerOrganizationId")) { $AppOwnerOrganizationId = $TenantId }
+            $OriginAppOwnerOrganizationId = $AppOwnerOrganizationId
             # Lowercase to stay consistent with the other ObjectType values ('user', 'group', 'application')
             # returned by this function - callers and downstream EAM files compare/store ObjectType as lowercase,
             # and a mismatched case here causes the same object to be treated as two different objects (e.g.
@@ -517,6 +607,17 @@ function Get-EntraOpsPrivilegedEntraObject {
 
             # Owners
             Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$AadObjectId/owners?`$select=id") -OutputType PSObject | ForEach-Object { $Owners.Add($_.id) | out-null }
+
+            # Owners of the app registration: like the owners of the service principal, they can add credentials and
+            # act as the workload identity, so they are owners of the service principal as well. Only an application
+            # of this tenant has its app registration here: managed identities, agent identities, Microsoft
+            # first-party and multi-tenant applications of other tenants have none and are not looked up. One cached
+            # request per application (the RBAC systems share the cache), owners only.
+            if ($SPObject.appId -and -not $IsForeignPrincipal -and $SPObject.appOwnerOrganizationId -eq $TenantId -and "$($SPObject.servicePrincipalType)" -in @('Application', 'AgentIdentityBlueprintPrincipal')) {
+                Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/applications(appId='$($SPObject.appId)')/owners?`$select=id") -OutputType PSObject -SuppressNotFoundWarning | ForEach-Object {
+                    if ($_.id -and -not $Owners.Contains($_.id)) { $Owners.Add($_.id) | out-null }
+                }
+            }
 
             # Owned Objects
             Invoke-EntraOpsMsGraphQuery -Method Get -Uri ("/beta/servicePrincipals/$AadObjectId/ownedObjects?`$select=id") -OutputType PSObject | ForEach-Object { $ObjectOwner.Add($_.id) | out-null }
@@ -536,7 +637,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             }
             $AdminTierLevel = (($ObjectCustomSec) | select-object -Unique $PrivilegedServicePrincipalAdminTierLevelAttribute).$PrivilegedServicePrincipalAdminTierLevelAttribute
             $AdminTierLevelName = (($ObjectCustomSec) | select-object -Unique $PrivilegedServicePrincipalAdminTierLevelNameAttribute).$PrivilegedServicePrincipalAdminTierLevelNameAttribute
-            $OutsideOfAadTenant = ($SPObject.AppOwnerOrganizationId -ne $TenantId)
+            $OutsideOfAadTenant = ($AppOwnerOrganizationId -ne $TenantId)
 
             #region Agent identity object details$
             if ( $SPObject.'@odata.type' -like "*agentIdentity*" ) {
@@ -554,6 +655,8 @@ function Get-EntraOpsPrivilegedEntraObject {
                 }
 
                 $OutsideOfAadTenant = ($AgentIdentityBlueprintPrincipalObject.AppOwnerOrganizationId -ne $TenantId)
+                # An agent identity comes from the tenant of its blueprint.
+                $OriginAppOwnerOrganizationId = $AgentIdentityBlueprintPrincipalObject.AppOwnerOrganizationId
 
                 # Sponsors
                 try {
@@ -691,6 +794,7 @@ function Get-EntraOpsPrivilegedEntraObject {
     if ($DeviceOwner.Count -gt 0) { $DeviceOwner.Sort() }
     if ($WorkAccount.Count -gt 0) { $WorkAccount.Sort() }
     if ($PawDevice.Count -gt 0) { $PawDevice.Sort() }
+    if ($PawDeviceObjectId.Count -gt 0) { $PawDeviceObjectId.Sort() }
 
     # Sort AssignedAdministrativeUnits by displayName then id if it contains items
     if ($AssignedAdministrativeUnits.Count -gt 0) {
@@ -701,6 +805,28 @@ function Get-EntraOpsPrivilegedEntraObject {
             $AssignedAdministrativeUnits = [System.Collections.ArrayList]@($SortedUnits)
         }
     }
+
+    #region Origin of the object (OriginType, OriginTenantId, OriginId)
+    $OriginParameters = @{
+        ObjectType                   = $ObjectType
+        ObjectSubType                = $ObjectSubType
+        ObjectId                     = "$($ObjectDetails.Id)"
+        TenantId                     = $TenantId
+        TenantGovernance             = [bool]$IsCrossTenant
+        OriginTenantInfo             = $OriginTenantInfo
+        OriginTenantInfoAvailable    = [bool]$OriginTenantInfoAvailable
+        UserType                     = "$($ObjectDetails.userType)"
+        UserPrincipalName            = "$($ObjectDetails.userPrincipalName)"
+        OnPremisesSyncEnabled        = $ObjectDetails.onPremisesSyncEnabled
+        OnPremisesSecurityIdentifier = $OnPremisesSecurityIdentifier
+        AppId                        = "$ObjectSignInName"
+        AppOwnerOrganizationId       = "$OriginAppOwnerOrganizationId"
+    }
+    $Origin = Resolve-EntraOpsObjectOrigin @OriginParameters
+    # An object from another tenant is outside the home tenant, also a member synchronized from another tenant whose user
+    # principal name has no #EXT#.
+    if ($Origin.OriginType -in 'CrossTenantSync', 'B2BInvitation', 'TenantGovernance') { $OutsideOfAadTenant = $true }
+    #endregion
 
     #region Object tier by Custom Security Attributes, Alternate Tier Level Attributes and Object Classification File
     # Precedence: Custom Security Attributes (read above), then enabled filters, then the file entry.
@@ -720,6 +846,18 @@ function Get-EntraOpsPrivilegedEntraObject {
     # pair validation
     $TierLevelByName = @{ ControlPlane = '0'; ManagementPlane = '1'; WorkloadPlane = '1'; UserAccess = '2' }
     $TierNameByLevel = @{ '0' = 'ControlPlane'; '1' = 'ManagementPlane'; '2' = 'UserAccess' }
+    # Tier names of custom security attributes are free text: 'controlPlane' or 'Control Plane' become the canonical
+    # name, as the reports and the finding rules compare tier names case-sensitively. An unknown name is ignored with
+    # a warning, so the next classification sources apply.
+    if ($AdminTierLevelName -is [string] -and -not [string]::IsNullOrWhiteSpace($AdminTierLevelName)) {
+        $CanonicalTierName = @('ControlPlane', 'ManagementPlane', 'WorkloadPlane', 'UserAccess', 'Unclassified') | Where-Object { $_ -eq ($AdminTierLevelName -replace '\s', '') } | Select-Object -First 1
+        if ($CanonicalTierName) { $AdminTierLevelName = $CanonicalTierName }
+        else {
+            Write-Warning "Object $AadObjectId has the unknown tier name '$AdminTierLevelName' as custom security attribute (expected ControlPlane, ManagementPlane, WorkloadPlane or UserAccess); it is ignored, like an empty tier name."
+            # Like an empty name: the tier level of the attribute, the filters or the Object Classification File apply.
+            $AdminTierLevelName = $null
+        }
+    }
     $HasTierLevel = -not [string]::IsNullOrWhiteSpace("$AdminTierLevel") -and "$AdminTierLevel" -ne 'Unclassified'
     $HasTierLevelName = -not [string]::IsNullOrWhiteSpace("$AdminTierLevelName") -and "$AdminTierLevelName" -ne 'Unclassified'
     if ($HasTierLevelName -and -not $HasTierLevel -and $TierLevelByName.ContainsKey("$AdminTierLevelName")) {
@@ -752,6 +890,8 @@ function Get-EntraOpsPrivilegedEntraObject {
             RestrictedManagementByRMAU    = $RestrictedManagementByRMAU
             OnPremSynchronized            = if ($null -eq $ObjectDetails.onPremisesSyncEnabled) { $false } else { $ObjectDetails.onPremisesSyncEnabled }
             OutsideOfHomeTenant           = $OutsideOfAadTenant
+            OriginType                    = $Origin.OriginType
+            OriginTenantId                = $Origin.OriginTenantId
         }
 
         $AlternateResult = Resolve-EntraOpsAlternateObjectTierLevel -ObjectType $AlternateObjectTypeName -Object $Object -AlternateObjectTierLevelAttributes $AlternateObjectTierLevelAttributes
@@ -801,6 +941,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             'ObjectSubType'                 = $ObjectSubType
             'ObjectDisplayName'             = $ObjectDetails.displayName
             'ObjectSignInName'              = $ObjectSignInName
+            'AppOwnerOrganizationId'        = $AppOwnerOrganizationId
             'OwnedObjects'                  = $ObjectOwner
             'OwnedDevices'                  = $DeviceOwner
             'Owners'                        = $Owners
@@ -810,6 +951,7 @@ function Get-EntraOpsPrivilegedEntraObject {
             'AdminTierLevelName'            = if ($null -eq $AdminTierLevelName) { "Unclassified" } else { $AdminTierLevelName }
             'AssociatedWorkAccount'         = $WorkAccount
             'AssociatedPawDevice'           = $PawDevice
+            'AssociatedPawDeviceObjectId'   = $PawDeviceObjectId
             'OnPremSynchronized'            = if ($null -eq $ObjectDetails.onPremisesSyncEnabled) { $false } else { $ObjectDetails.onPremisesSyncEnabled }
             'RestrictedManagementByRAG'     = $RestrictedManagementByRAG
             'RestrictedManagementByAadRole' = $RestrictedManagementByAadRole
@@ -817,6 +959,9 @@ function Get-EntraOpsPrivilegedEntraObject {
             'AssignedAdministrativeUnits'   = $AssignedAdministrativeUnits
             'PasswordPolicyAssigned'        = $PasswordPolicies
             'OutsideOfHomeTenant'           = $OutsideOfAadTenant
+            'OriginType'                    = $Origin.OriginType
+            'OriginTenantId'                = $Origin.OriginTenantId
+            'OriginId'                      = $Origin.OriginId
             'ResolutionStatus'              = if ($ObjectType -eq 'unknown') { $ResolutionStatus } else { 'Resolved' }
         }
     }

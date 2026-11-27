@@ -109,6 +109,10 @@ function Get-EntraOpsTenantGovernanceSnapshot {
         ,
         [Parameter(Mandatory = $false)]
         [switch]$SkipPrerequisiteCheck
+        ,
+        # Save-EntraOpsTenantGovernanceSnapshotJson writes a warning that names the resource types
+        [Parameter(Mandatory = $false, DontShow = $true)]
+        [switch]$SkipPartialSuccessWarning
     )
 
     $ErrorActionPreference = "Stop"
@@ -149,6 +153,10 @@ function Get-EntraOpsTenantGovernanceSnapshot {
     }
     #endregion
 
+    # Progress bars of the wait and of the download: own Ids, so they never replace a progress bar of the caller
+    # (Invoke-EntraOpsAssessment uses 4710 and 4711).
+    $ProgressId = 4720
+
     #region Create the configuration snapshot job (or reuse an existing one via -SnapshotJobId)
     $CreatedNewSnapshotJob = [string]::IsNullOrEmpty($SnapshotJobId)
     if (-not [string]::IsNullOrEmpty($SnapshotJobId)) {
@@ -172,6 +180,7 @@ function Get-EntraOpsTenantGovernanceSnapshot {
             throw "Failed to retrieve the snapshot job Id from the createSnapshot response."
         }
         Write-Verbose "Snapshot job created with Id $SnapshotJobId"
+        Write-Host "Tenant Governance snapshot job $SnapshotJobId created for $(@($ResourcesToInclude).Count) resource type(s)."
     }
     #endregion
 
@@ -227,29 +236,41 @@ function Get-EntraOpsTenantGovernanceSnapshot {
                 PollingError       = $null
             }
         }
-        if ($SnapshotJob.status -eq "partiallySuccessful") {
+        if ($SnapshotJob.status -eq "partiallySuccessful" -and -not $SkipPartialSuccessWarning) {
             Write-Warning "Snapshot job $SnapshotJobId completed as 'partiallySuccessful' - one or more resource types may have failed to capture. Check the snapshot job details in the Microsoft Entra admin center for more information."
         }
     } else {
         Write-Verbose "Waiting for snapshot job to complete (timeout: $($TimeoutInSeconds)s)..."
+        Write-Host "Waiting for Microsoft Graph to capture the snapshot (usually a few minutes, timeout $([math]::Ceiling($TimeoutInSeconds / 60)) minutes)..."
+        # Interactive sessions show the status and the elapsed time, refreshed every second.
+        $ProgressActivity = "Capturing Tenant Governance snapshot $SnapshotJobId"
+        $SnapshotStatus = if ($SnapshotJob -and -not [string]::IsNullOrWhiteSpace($SnapshotJob.status)) { $SnapshotJob.status } else { 'notStarted' }
         $StopWatch = [System.Diagnostics.Stopwatch]::StartNew()
-        do {
-            Start-Sleep -Seconds $PollIntervalInSeconds
-            try {
-                $SnapshotJob = Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri $SnapshotJobUri -OutputType PSObject -DisableCache -ThrowOnFailure
-                $LastPollingError = $null
-            } catch {
-                $LastPollingError = $_
-                Write-Warning "Failed to poll snapshot job status. Retrying... Error: $_"
-            }
-            $ElapsedSeconds = [math]::Floor($StopWatch.Elapsed.TotalSeconds)
-            $SnapshotStatus = if ([string]::IsNullOrWhiteSpace($SnapshotJob.status)) { 'unknown' } else { $SnapshotJob.status }
-            Write-Verbose "Snapshot job $SnapshotJobId status: $SnapshotStatus (elapsed: $ElapsedSeconds/$TimeoutInSeconds seconds)"
-        } while (
-            $SnapshotJob.status -notin @("succeeded", "completed", "partiallySuccessful", "failed") `
-                -and $StopWatch.Elapsed.TotalSeconds -lt $TimeoutInSeconds
-        )
-        $StopWatch.Stop()
+        try {
+            do {
+                for ($Second = 0; $Second -lt $PollIntervalInSeconds -and $StopWatch.Elapsed.TotalSeconds -lt $TimeoutInSeconds; $Second++) {
+                    Write-Progress -Id $ProgressId -Activity $ProgressActivity -Status ("Status: {0} - {1:mm\:ss} elapsed" -f $SnapshotStatus, $StopWatch.Elapsed)
+                    Start-Sleep -Seconds 1
+                }
+                try {
+                    $SnapshotJob = Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri $SnapshotJobUri -OutputType PSObject -DisableCache -ThrowOnFailure
+                    $LastPollingError = $null
+                } catch {
+                    $LastPollingError = $_
+                    Write-Warning "Failed to poll snapshot job status. Retrying... Error: $_"
+                }
+                $ElapsedSeconds = [math]::Floor($StopWatch.Elapsed.TotalSeconds)
+                $SnapshotStatus = if ([string]::IsNullOrWhiteSpace($SnapshotJob.status)) { 'unknown' } else { $SnapshotJob.status }
+                Write-Verbose "Snapshot job $SnapshotJobId status: $SnapshotStatus (elapsed: $ElapsedSeconds/$TimeoutInSeconds seconds)"
+            } while (
+                $SnapshotJob.status -notin @("succeeded", "completed", "partiallySuccessful", "failed") `
+                    -and $StopWatch.Elapsed.TotalSeconds -lt $TimeoutInSeconds
+            )
+        } finally {
+            $StopWatch.Stop()
+            Write-Progress -Id $ProgressId -Activity $ProgressActivity -Completed
+        }
+        Write-Host ("Tenant Governance snapshot job {0}: {1} after {2:mm\:ss}." -f $SnapshotJobId, $(if ($SnapshotJob.status) { $SnapshotJob.status } else { 'unknown' }), $StopWatch.Elapsed)
 
         if ($SnapshotJob.status -eq "failed") {
             throw (& $NewTerminalSnapshotJobError "Tenant Governance snapshot job $SnapshotJobId failed. Error: $($SnapshotJob.error | Out-String)")
@@ -276,7 +297,7 @@ function Get-EntraOpsTenantGovernanceSnapshot {
                 PollingError       = $PollingErrorMessage
             }
         }
-        if ($SnapshotJob.status -eq "partiallySuccessful") {
+        if ($SnapshotJob.status -eq "partiallySuccessful" -and -not $SkipPartialSuccessWarning) {
             Write-Warning "Snapshot job $SnapshotJobId completed as 'partiallySuccessful' - one or more resource types may have failed to capture. Check the snapshot job details in the Microsoft Entra admin center for more information."
         }
     }
@@ -294,9 +315,12 @@ function Get-EntraOpsTenantGovernanceSnapshot {
     }
 
     try {
+        Write-Progress -Id ($ProgressId + 1) -Activity "Tenant Governance snapshot $SnapshotJobId" -Status 'Downloading the captured resources...'
         $SnapshotResult = Invoke-EntraOpsMsGraphQuery -Method "GET" -Uri $ResourceLocation -OutputType PSObject -DisableCache -ThrowOnFailure
     } catch {
         throw "Failed to retrieve snapshot resources from $ResourceLocation. Error: $_"
+    } finally {
+        Write-Progress -Id ($ProgressId + 1) -Activity "Tenant Governance snapshot $SnapshotJobId" -Completed
     }
 
     $SnapshotResources = @($SnapshotResult.resources)

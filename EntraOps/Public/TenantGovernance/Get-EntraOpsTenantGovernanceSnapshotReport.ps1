@@ -199,6 +199,7 @@ function Get-EntraOpsTenantGovernanceSnapshotReport {
             PublishedSnapshotId    = $ResourceTypeState.PublishedSnapshotId
             PublishedSource        = $ResourceTypeState.PublishedSource
             AttemptSnapshotId      = $ResourceTypeState.AttemptSnapshotId
+            StaleSince             = $ResourceTypeState.StaleSince
             Diagnostics            = @($ResourceTypeState.Diagnostics)
         }
     }

@@ -107,7 +107,8 @@ function Invoke-EntraOpsTenantGovernanceSnapshot {
             if ($Report.SnapshotManifest -and -not [bool]$Report.SnapshotManifest.IsComplete) {
                 $PublishedCount = @($Report.SnapshotManifest.PublishedResourceTypes).Count
                 $StaleCount = @($Report.SnapshotManifest.StaleResourceTypes).Count
-                Write-Warning "Tenant Governance snapshot job $($Report.SnapshotManifest.SnapshotId) was $($Report.SnapshotManifest.SnapshotJobStatus); $PublishedCount resource type(s) were published and $StaleCount type(s) with Graph errors were preserved as stale."
+                # Save-EntraOpsTenantGovernanceSnapshotJson already warned
+                Write-Verbose "Tenant Governance snapshot job $($Report.SnapshotManifest.SnapshotId) was $($Report.SnapshotManifest.SnapshotJobStatus); $PublishedCount resource type(s) were published and $StaleCount type(s) with Graph errors were preserved as stale."
             }
             if (@($Report.MissingOrEmptyResourceTypes).Count -gt 0) {
                 Write-Warning "$(@($Report.MissingOrEmptyResourceTypes).Count) configured resource type(s) currently have no data on disk. This can be valid when the tenant has no objects of those types: $($Report.MissingOrEmptyResourceTypes -join ', ')"

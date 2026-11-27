@@ -28,6 +28,8 @@ param (
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '../../EntraOps')
+# Invoke-EntraOpsReportingGeneration connects without the welcome banner, so print the module version here
+Write-Host "EntraOps - Version $((Get-Module -Name EntraOps).Version) on PowerShell $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
 
 $AllowPartial = if ($EventName -eq 'workflow_dispatch') { $ManualAllowPartialTenantGovernance -eq 'true' } else { $AllowPartialTenantGovernance -eq 'true' }
 $ReportingParameters = @{

@@ -1,6 +1,11 @@
 (function () {
     "use strict";
 
+    // A page that resolves #object= links itself (Configuration Analyzer opens the resource) loads this script with
+    // data-object-deep-link="page": the inspector then neither opens nor writes #object= drawers on that page.
+    var currentScript = document.currentScript;
+    var pageOwnsObjectLinks = !!(currentScript && currentScript.getAttribute("data-object-deep-link") === "page");
+
     function esc(value) {
         return String(value == null ? "" : value).replace(/[&<>'"]/g, function (character) {
             return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;" }[character];
@@ -25,7 +30,9 @@
 
     function close() {
         hide();
-        if (objectReferenceFromHash() || /^#config-object=/.test(window.location.hash || "")) history.replaceState(null, "", window.location.pathname + window.location.search);
+        // The deep link is cleared also when the page resolves #object= itself (Configuration Analyzer): otherwise the
+        // next click on the same link would not change the hash, and the page would not open it again.
+        if (/^#(object|config-object)=/.test(window.location.hash || "")) history.replaceState(null, "", window.location.pathname + window.location.search);
     }
 
     function hide() {
@@ -37,6 +44,7 @@
     }
 
     function objectReferenceFromHash() {
+        if (pageOwnsObjectLinks) return null;
         var match = /^#object=([^&]+)$/.exec(window.location.hash || "");
         if (!match) return null;
         try { return decodeURIComponent(match[1]); } catch (error) { return null; }
@@ -281,7 +289,7 @@
             return [assignment.roleDefinitionId, assignment.roleDefinitionName].some(function (value) { return value && String(value).toUpperCase() === wanted; });
         });
         var rows = matching.slice(0, 30).map(function (assignment) {
-            var classificationsByTier = {};
+            var classificationsByTier = Object.create(null);
             values(assignment.classification).forEach(function (classification) {
                 var tier = classification.adminTierLevelName || "Unclassified";
                 if (!classificationsByTier[tier]) classificationsByTier[tier] = [];
@@ -351,7 +359,7 @@
         document.getElementById("objectInspector").classList.add("open");
         document.getElementById("objectInspectorBackdrop").classList.add("open");
         document.getElementById("objectInspector").setAttribute("aria-hidden", "false");
-        if (options.urlReference && options.updateUrl) history.pushState(null, "", objectDeepLink(options.urlReference));
+        if (options.urlReference && options.updateUrl && !pageOwnsObjectLinks) history.pushState(null, "", objectDeepLink(options.urlReference));
     }
 
     function openReference(reference) {
@@ -378,6 +386,7 @@
         deepLink: objectDeepLink,
         applyDeepLink: applyObjectDeepLink
     };
+    if (pageOwnsObjectLinks) return;
     window.addEventListener("hashchange", applyObjectDeepLink);
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", applyObjectDeepLink);
     else applyObjectDeepLink();

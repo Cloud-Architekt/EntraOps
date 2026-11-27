@@ -31,23 +31,30 @@ checkout, or the folder described in
 [Working folder](../get-started/index.html#working-folder)).
 If the reporting apps are missing (module-only installation), `New-EntraOpsReportingData` stops with
 an error. Install them first with `Initialize-EntraOpsWorkspace` or
-`Install-EntraOpsReportingFolder` (public EntraOps repository, `main` by default; pass `-Ref` with
-the release tag or commit that matches your module), or pass
-`New-EntraOpsReportingData -InstallMissingReportingFolder` to download them from `main`. Without
+`Install-EntraOpsReportingFolder`, or pass `New-EntraOpsReportingData -InstallMissingReportingFolder`. They
+install the apps of the module version: from the repository clone of the module, otherwise from the `main` branch
+of the EntraOps repository (its head, the release tag or the newest commit whose `EntraOps.psd1` has the module
+version). The repository is `AutomatedEntraOpsUpdate.Repository` of `EntraOpsConfig.json` (the release channel of
+the deployment), otherwise the public `EntraOps` repository; `-Repository` selects another one. For a module newer
+than `main` (Insiders or pre-release), pass `-Ref` with its branch or commit (and `-Repository EntraOps-Insiders`);
+otherwise the apps of `main` are installed with a warning. The installed source and version are recorded in
+`Reports/.EntraOpsContent.json`. Without
 classification templates (e.g. after `Invoke-EntraOpsPrivilegedEAM` without
 `-KeepClassificationFiles`), the Classification Explorer is skipped with a warning. Generated report data in an existing
 `Reports` folder is never overwritten; updating an existing folder requires `-Force`.
 
 An older or incomplete `Reports` folder can contain the portal but lack a newer app such as
 Privileged Assets. Repair it with `Initialize-EntraOpsWorkspace -Content Reports -Force` or
-`Install-EntraOpsReportingFolder -Force` (use `-Ref` to match the module version). These installers
+`Install-EntraOpsReportingFolder -Force`. These installers
 preserve existing generated report data. `-InstallMissingReportingFolder` also repairs missing apps
 before generation starts.
 
 Report generation resolves linked identities and related objects outside the export through
 Microsoft Graph by default. Keep the connection active until reporting finishes.
 `Invoke-EntraOpsPrivilegedEAM` disconnects during teardown, including with `-KeepClassificationFiles`,
-so run `Connect-EntraOps` again before `New-EntraOpsReportingData` if you want this enrichment.
+so run `Connect-EntraOps` again before `New-EntraOpsReportingData` if you want this enrichment, or use
+`Invoke-EntraOpsPrivilegedEAM -KeepConnection`. [`Invoke-EntraOpsAssessment`](../get-started/index.html#complete-assessment)
+runs the collection, a Tenant Governance snapshot and the report generation in one session.
 To generate from saved data without Graph lookups, use:
 
 ```powershell
@@ -84,6 +91,28 @@ Analyzer is skipped with a warning, matching the shipped workflow behavior.
   - **GitHub Releases (`PublishReportsAsRelease`, GitHub only, disabled by default):** additionally stores the verified `EntraOps-Reporting` bundle as a private-repository release, after the tests pass when they are enabled. Only the release job gets `contents: write`. `ReportingReleasesToKeep` limits retained `reporting-*` releases because each release contains a full tenant-data snapshot. Azure DevOps publishes the pipeline artifact only and ignores both settings.
   - Each run reports whether the published artifact was tested: in the GitHub job summary, and as the `reports-tested`, `reports-untested` or `reports-test-failed` build tag in Azure DevOps.
   - Both pipelines read `RunGeneratedReportTests`, `UploadReportTestDiagnostics` and `PublishReportsAsRelease` from `EntraOpsConfig.json` at runtime; changing them does not require re-running `Update-EntraOpsRequiredWorkflowParameters`.
+
+### History source {#history-source}
+
+Privilege History and Configuration Analyzer build their history from the git commits of the Privileged EAM
+export and of the Tenant Governance snapshots. `-HistorySource` of `New-EntraOpsReportingData`,
+`New-EntraOpsPrivilegedEamPrivilegeHistoryData` and `New-EntraOpsTenantGovernanceConfigurationAnalyzerData`
+selects the source:
+
+| Value            | Behavior                                                                                                                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Auto` (default) | The git history when the working folder is a git repository with git installed and the data has commits, otherwise the current folder (with a notice, not a warning).                     |
+| `Git`            | The git history; stops with an error without git or repository.                                                                                                                                |
+| `Folder`         | Only the current files: one snapshot from the export (dated by its newest file) and from the snapshot folder (dated by `CapturedDateTime` of its manifest), also inside a git repository. |
+
+With git, an export or snapshot that differs from the newest commit (or was never committed) is added as the
+newest snapshot, `(working tree)`, so the reports and the findings include data that is not committed yet.
+
+Without git history, both reports show a single point in time: no trend, no comparison between snapshots and no
+changes; the Privilege History findings (`EO.8001` to `EO.8003`) need two snapshots and are skipped. The data records
+the source (`historySource`: `git` or `folder`). Content hashes are computed like git (`git hash-object`), so the
+data of both sources has the same format. Commit the export and the snapshots, as the GitHub and Azure DevOps
+pipelines do, to build up the history.
 
 ### Classification Explorer
 
@@ -149,7 +178,28 @@ the run.
 
 [Reports/PrivilegedAssets](../../Reports/PrivilegedAssets/README.md) is an object-centric view of
 privileged users, groups, service principals and applications (all object sub types, including
-agent identities and guests), merged across RBAC systems. It has two views.
+agent identities and guests), merged across RBAC systems. It has three views.
+
+**Findings** (`index.html?view=findings`, a check opens with `#rule=<id>`) shows the results of all
+EntraOps checks, grouped by category with their status, severity and affected objects and filtered by status,
+severity and category. A panel per check shows its description, remediation action, effort and user impact,
+resources, the reason when it wasn't evaluated, and all affected objects. Without saved results, it shows the Privileged Assets checks evaluated in the browser.
+A category collapses to its status summary (*Collapse all* / *Expand all*). The view also maintains the
+[finding exceptions](#finding-exceptions): *Accept* at an affected object dismisses the finding or accepts
+its risk, and *Finding exceptions* exports the file to commit.
+
+Each affected object links to the report that shows it, opened at that object:
+
+| Affected object | Deep links |
+| --- | --- |
+| PIM role setting | PIM Request Flow (`#flow=` with the role and path), Configuration Analyzer (`#object=`) |
+| Access package assignment policy | Access Package Flow (`#flow=<policy ID>`), Configuration Analyzer (`#object=`) |
+| Conditional Access policy | Conditional Access Analysis (`#flow=<policy ID>`), Configuration Analyzer (`#object=`) |
+| Administrative unit | Configuration Analyzer (`#object=`) |
+| Tier breach path | Tier Breach Analyzer (`#sel=`), EAM Dashboard (`#assignment=`, `#asset=`), Access Path Map (`#node=`) |
+| Role assignment | EAM Dashboard (`#assignment=`, `#asset=`), Access Path Map (`#node=`) |
+| Privileged object | EAM Dashboard (`#asset=`), Access Path Map (`#node=`) |
+| Custom role | EAM Dashboard (`#assignment=` of its Control Plane assignments) |
 
 **Overview** shows metrics and the inventory with the object details that the assignment-centric
 views don't show:
@@ -158,15 +208,18 @@ views don't show:
   account and PAW device, each with its display name, type and tier. IDs outside the export are
   resolved through Microsoft Graph (`PrivilegedAssets.ResolveRelatedObjectIds`).
 - **Tier**: the object tier next to a per-tier summary of its role assignment classification.
-- **Findings**: object tier below its role assignments, unclassified objects, owners or identity
-  parents with a lower tier, owned objects with a higher tier, non-PAW devices of privileged users,
-  missing sponsors, synchronized Control Plane identities and missing restricted management.
-- **Filters** by object type, sub type, object and assignment tier, administrative unit,
-  restricted management, sync source, finding and worklist status.
+- **Findings**: the findings of every check that concerns the object, for example object tier below
+  its role assignments, owners with a lower tier, non-PAW devices, missing sponsors or restricted
+  management, Tier Breach Analyzer paths, new Control Plane access and access drift. The inventory
+  shows their highest severity and count, the side panel all of them by category.
+- **Filters**: search (including rule IDs and findings), pills for object type, sub type and
+  classification with live counts, a Finding filter by rule, category, severity or Maester test, and
+  more filters for the assignment tier, administrative unit, restricted management, sync source and
+  worklist status.
 - **Maester findings** (optional): `New-EntraOpsPrivilegedAssetsData -MaesterTestResultPath <file|folder>`
   (or `New-EntraOpsReportingData -PrivilegedAssetsMaesterTestResultPath`) reads the failed tests of a
   Maester `TestResults-*.json` and matches them to privileged objects by object ID, app ID or user
-  principal name. They show up as finding chips next to the other findings. Without the parameter, or
+  principal name. They are counted with the other findings of the object. Without the parameter, or
   without a result file, the integration is skipped. See the
   [Privileged Assets README](../../Reports/PrivilegedAssets/README.md#maester-findings).
 
@@ -287,7 +340,9 @@ and compare:
 - **Snapshot Resource Explorer**: browse captured resources in expandable resource-type folders,
   search by name, category, or type, and move between matching resources without leaving the detail
   pane. The grouped property view presents nested collections as **Entries** and structured values
-  as **Fields**, with controls to expand or collapse the complete property tree.
+  as **Fields**, with controls to expand or collapse the complete property tree. `#object=<id>` (or
+  `#object=<resource type>|<id>`) opens the resource with this `Id` in the newest detailed snapshot,
+  for example from the links of the EntraOps findings.
 - **Conditional Access Sankey**: visualizes how the tenant's Conditional Access policy set is
   configured as a flow of `Assignments → Policy → Target resources → Network → Conditions → Grant
   controls`. Every aspect can be filtered (policy state, included/excluded users, groups and roles,
@@ -390,8 +445,9 @@ the optional Access Package Flow enrichment requires an active Microsoft Graph c
 The four companion reports show the dataset generation time and selected snapshot, a live count of
 the currently filtered results, and **Reset filters** / **Export filtered** controls. Export creates
 both CSV and JSON files locally; it never uploads tenant data. Finding rows support browser-local
-review statuses (`New`, `Accepted risk`, and `Remediated`) so analysts can triage a report without
-changing its source snapshots or configured exclusions. PIM Request Flow and Access Package Flow
+review statuses (`Open`, `Reviewed: accepted`, and `Reviewed: remediated`) so analysts can triage a report without
+changing its source snapshots or configured exclusions. They are saved in this browser only; to accept or
+dismiss a finding for everyone, add a finding exception (see [Findings and Maester Pack](#findings)). PIM Request Flow and Access Package Flow
 also link each concrete finding to its captured source resource in Configuration Analyzer.
 
 When a flow node represents a resolved Entra object, Access Package Flow and Conditional Access
@@ -403,6 +459,202 @@ flow context. Configuration resources continue to use Configuration Analyzer's
 rather than being presented as a link to one arbitrary object. EIDSCA Findings provides an
 **Inspect source resource** action for each evaluated, resource-backed check; it opens the same
 panel with the captured resource, evaluated value, and recommendation.
+
+## Findings and Maester Pack {#findings}
+
+The findings of Privileged Assets, Tier Breach Analyzer, PIM Request Flow and Access Package Flow are
+EntraOps finding rules, evaluated in PowerShell. The reports show their results, and the same results
+are available outside the reports, for example as Maester tests.
+
+- `Get-EntraOpsFindingRule` lists the rules: a stable ID (`EO.<n>`), the key the report uses (for
+  example `tierBreach`), the finding title of the reports, the check title that states the expected
+  state (the title of the Maester test), description, remediation, severity and the Maester test ID
+  (`MP.EOPS.<n>`). `Effort` and `UserImpact` rate the remediation as `Low`, `Medium` or `High`, each
+  explained in one sentence (`EffortDescription`, `UserImpactDescription`), to plan and prioritize it.
+  `References` lists the resources of the rule (Microsoft Learn, the Microsoft Graph reference and the
+  EntraOps documentation), which the Findings view and the Maester test descriptions link.
+- The rules are grouped in categories; the first digit of the rule ID is the category. IDs never
+  change once released: a new rule gets the next number of its category.
+
+  | ID | Category | Checks |
+  | --- | --- | --- |
+  | `EO.1xxx` | Tier boundaries | Lower tiers that control objects, services or access of a more privileged tier |
+  | `EO.2xxx` | Classification | Objects, role assignments and approvers without a tier; custom roles to review |
+  | `EO.3xxx` | Just-in-time access | Standing access and the PIM settings of eligible assignments and activations |
+  | `EO.4xxx` | Account protection | Restricted management, cloud-only and member accounts, PAW, Conditional Access |
+  | `EO.5xxx` | Workload and agent identities | Service principals, applications and agents with privileged access |
+  | `EO.6xxx` | Access governance | Access packages: approval, requestor scope, expiration, access reviews and access drift |
+  | `EO.7xxx` | Ownership and delegation | Owners of privileged objects, role assignment delegation, nested groups, administrative units |
+  | `EO.8xxx` | Drift | Changes of privileged access between Privileged EAM snapshots |
+
+- `Invoke-EntraOpsFindingEvaluation` evaluates the rules and returns one result per rule (`Failed`,
+  `Passed`, `Skipped`, `Excluded` or `Error`, with the reason for the last three) with the affected
+  objects. `ReasonCode` classifies the reason (`NotApplicable`: nothing in scope, `MissingData`,
+  `Unclassified`, `Excluded`, `Deprecated`, `Error`, or `Note` for a hint on a `Failed` or `Passed` rule,
+  for example that all results exclude the same group). `Error` means the evaluation of the rule failed; deprecated rules are `Excluded`. Privileged
+  Assets, Privileged EAM and Tier Breach rules read the Privileged EAM export. The PIM Request Flow,
+  Access Package Flow, Tenant Governance and Privilege History rules read the generated report data, so
+  run `New-EntraOpsReportingData` first; without it, they are skipped with the reason.
+- `EO.1001` and `EO.1003` report one result per role assignment of an object, with the services it
+  reaches (`Services` in the evidence); an assignment that reaches a Control Plane service is reported
+  by `EO.1001` only. Delegated permissions are reported by `EO.5005` (the application acts within the
+  rights of the signed-in user), and service principals of Microsoft first-party applications aren't
+  reported. The Tier Breach Analyzer still flags every path that crosses a tier, including these.
+- Delegated permissions are role assignments of their own tier, not access of the object: the
+  application acts within the rights of the signed-in user. The checks of an object (`EO.1002`,
+  `EO.1004`, `EO.1005`, `EO.1007`, `EO.5001`, `EO.5002`, `EO.5004`, `EO.7001`) compare the tier of its
+  other role assignments (`assignmentSummary.highestAccessTierName` of the Privileged Assets data), and
+  `EO.8001`/`EO.8002` leave delegated permissions out. They are reported as role assignments: `EO.5005`
+  (Control Plane), `EO.2002` (without tier classification; the sign-in scopes `openid`, `profile`,
+  `email`, `offline_access` and `user_impersonation` aren't reported) and `EO.8003` (new since the
+  previous snapshot).
+- Drift (`EO.8xxx`) compares the two newest snapshots of the Privilege History, and lists only what is
+  new: `EO.8001` new Control Plane role assignments, `EO.8002` new tier breaches (counted like `EO.1001`
+  and `EO.1003`: no delegated permissions, no Microsoft first-party applications, no PIM activations,
+  unclassified objects apart; it fails on any new breach, also when the number of breaches stays the same) and `EO.8003` new
+  delegated Control or Management Plane permissions (consents to review). The tier breach chart of the
+  Privilege History still counts every assignment above the object tier. Privilege History data of
+  versions before this one has no role types: regenerate it (`New-EntraOpsReportingData`), otherwise
+  `EO.8003` is skipped.
+- `EO.1003` (an object below Management Plane reaches a Management Plane service) doesn't report
+  unclassified objects: their tier is unknown, so the check can't tell a tier breach from a missing
+  classification. It counts them apart (`UnclassifiedCount`, `UnclassifiedResults`), and is `Skipped`
+  when only unclassified objects are affected, with the reason to classify them (`EO.2001`). The
+  Privileged Assets Findings view shows the number in the panel of the check and lists the unclassified
+  objects on request (*Show unclassified objects in the list*).
+- The `Findings` section of `EntraOpsConfig.json` (`New-EntraOpsConfigFile -Findings*` or the
+  Configuration Wizard) configures the evaluation. The reports, `findings.json` and the Maester Pack use
+  the same settings:
+
+  | Setting | Default | Description |
+  | --- | --- | --- |
+  | `ExcludedRules` | none | Rules to exclude, by ID (`EO.4008`) or `<Area>.<Key>` (`PrivilegedAssets.pawMissing`). They are returned as `Excluded`. |
+  | `ControlPlaneActivationMaxHours` | `4` | `EO.3013`: maximum activation duration of Control Plane roles. |
+  | `EligibleAssignmentMaxDays` | `365` | `EO.3012`: maximum expiration of eligible assignments of Control and Management Plane roles. |
+  | `EmergencyAccessAccounts` | none | `EO.4003`: object IDs, user principal names or group display names that Conditional Access policies may exclude. `EO.3001`, `EO.4008`, `EO.4009`: the accounts (object ID or user principal name, not display names or groups) that keep permanent Control Plane role assignments, have no associated PAW, or have no linked personal work account without a finding. When empty, nothing counts as emergency access: excluded Control Plane users are reported, and `EO.4003` names the users excluded from every enabled policy (with at least two enabled policies) in a note as candidates for the setting. When the failed policies mostly exclude the same identity, the result of `EO.4003` names it in a note. |
+  | `ExceptionsFilePath` | `./Classification/FindingExceptions.json` | The [Finding Exceptions File](#finding-exceptions), relative to the EntraOps folder. |
+  | `ExceptionMaxDays` | `180` | Longest time a risk can be accepted, in days; `0` for no limit. |
+
+  `ConfigurationAnalyzer.PimRequestFlowExcludedRiskFlags` and `AccessPackageFlowExcludedRiskFlags` are
+  deprecated aliases of `ExcludedRules`.
+
+  The rules about principals of other tenants also read `ManagingTenantId` and `ManagingTenantName` from the root of
+  `EntraOpsConfig.json`, the governing tenant of
+  [Tenant Governance](../tenant-governance/index.html#cross-tenant-delegated-administration). Principals of this
+  tenant are informational only: `EO.4002` (guests), `EO.4011` (members and groups) and `EO.5001` (applications)
+  don't report them and name them in a note. `EO.4010` (Role assignment of a principal managed by another tenant)
+  still lists their role assignments, named as the managing tenant and marked with `ManagingTenant` in the
+  evidence. `ManagingTenantId` must be a tenant ID (GUID); the tenant name is
+  only shown. Without it, no tenant is accepted.
+- Service principals of Microsoft first-party applications are operated by Microsoft, so `EO.1001`,
+  `EO.1003`, `EO.1006`, `EO.2001`, `EO.3003`, `EO.4010`, `EO.5001`, `EO.5004`, `EO.5005`, `EO.7001`,
+  `EO.7003` and `EO.8002` don't report them. `EO.1002` and `EO.1004` do: the classification and the owners
+  of these service principals are still managed by the tenant. The Privileged EAM export names the tenant of the application of a
+  service principal (`OriginTenantId`, its `appOwnerOrganizationId`, EntraOps 1.2.0 or later); an application of a
+  Microsoft tenant is first-party, and so are Microsoft Graph Command Line Tools and Graph Explorer.
+  `EO.5005` still reports the delegated permissions of these two clients, Microsoft Intune PowerShell,
+  SharePoint Online Web Client Extensibility, Microsoft Developer Sample Data Packs, Azure AD Assessment and M365 Lighthouse API:
+  they exist only by consent of the tenant, which can revoke them. Older exports recognize only MS-PIM, the service of PIM for Azure
+  resources, by its application ID.
+- The approver checks (`EO.1008`, `EO.1009`, `EO.1010`) compare the classification of an approver, not
+  the tier of its access: an approver with access above its classification isn't protected for that
+  access. A group approver counts as its least protected member, and members without privileged access
+  as User Access, because any member can approve. Management and Workload Plane are both Tier 1, like in
+  the tier breach checks. An approval policy without a resolved approver isn't evaluated by `EO.1009` and
+  `EO.1010`; the note of the rule counts them.
+- `EO.4003` evaluates the members of excluded groups, which `New-EntraOpsReportingData` resolves when
+  it generates the Configuration Analyzer data. Excluded groups without member data are named in the
+  reason of the result instead of passing.
+- `Save-EntraOpsFindingJson` writes the results to `Reports/Findings/data/findings.json` (and
+  `findings.js`, from which Privileged Assets shows the findings of its objects).
+  `New-EntraOpsReportingData` saves them after the report data (`-SkipFindings` turns it off), so the
+  reporting pipelines publish them in the `EntraOps-Reporting` artifact (`Findings/data`). Like the other
+  report data, the file is ignored by git and removed by `Remove-EntraOpsReportingData`.
+- Data gaps: data that is missing in the evaluation, so that rules evaluate less than they seem to, are listed in
+  `DataGaps` of `findings.json` (`Code`, `Message`, `Count` and the affected `RuleIds`; files of earlier versions have
+  none), and the Findings view of Privileged Assets shows them in a box above the results:
+  `GroupOriginUnknown` (groups whose origin is unknown, mostly because `Group-XTenantIdentitySync.Read.All` is
+  missing, so a group synchronized from another tenant looks local), `RemoteGroupMembersMissing` (groups of other
+  tenants with Control or Management Plane access whose members were not collected: without `ManagingTenantId`, the
+  members of remote groups aren't read, and for groups of other tenants than the managing tenant they can't be read)
+  and `ObjectClassificationFileMissing` (`ObjectClassificationFile` is enabled, but the file doesn't exist). `EO.4010`
+  and `EO.4011` also name the first two in their note. The Privileged EAM collection warns about remote groups whose
+  members it didn't read and marks them in the export (`CrossTenantMembersExpanded`).
+- `New-EntraOpsReportFindingData` writes the PIM Request Flow and Access Package Flow risk flags and
+  tiers of every snapshot for the reports. `New-EntraOpsReportingData` runs it as its last step; the
+  two reports show only these risk flags and tiers, and a notice when they are missing or were
+  evaluated from other report data. Each risk flag names its rule (ID and title, linked to the Findings
+  view); a flag accepted by a [finding exception](#finding-exceptions) is shown as accepted and isn't
+  counted.
+
+```powershell
+Invoke-EntraOpsFindingEvaluation | Format-Table RuleId, CheckTitle, Status, FailedCount
+Invoke-EntraOpsFindingEvaluation -Category JustInTimeAccess | Where-Object Status -eq 'Failed'
+Invoke-EntraOpsFindingEvaluation | Save-EntraOpsFindingJson
+```
+
+The EntraOps Maester Pack (Maester 3.0 or later, code `EOPS`) reports one Maester test per rule from
+`findings.json`. It needs no connection or permission, and reads `Reports/Findings/data` of the EntraOps
+working folder (`ENTRAOPS_ROOT`, `<home>/EntraOps` or the current folder) unless `EntraOps.FindingsPath` in
+`maester-config.json` points elsewhere, for example to the `EntraOps-Reporting` artifact:
+
+```powershell
+Install-MtPack Cloud-Architekt/EntraOps-MaesterPack
+Invoke-Maester -Pack EOPS -SkipBuiltIn -SkipGraphConnect
+```
+
+A rule with the status `Error` is a Maester error, and excluded or skipped rules are skipped tests. A failed test
+links each affected object to the Microsoft Entra admin center and to these reports, with the same deep links as
+the Findings view, and every result links its rule in the Findings view (`#rule=`); the pack finds the reports
+next to `findings.json` or uses `EntraOps.ReportsPath`. The affected users, groups, service principals and
+Conditional Access policies are listed on Maester's Affected objects page with their EntraOps tier (by default
+since Maester 3.0.0-rc73), and each result shows the settings of the check and its finding exceptions. See the
+[EntraOps Maester Pack](https://github.com/Cloud-Architekt/EntraOps-MaesterPack) repository for its settings and
+results.
+
+### Finding exceptions {#finding-exceptions}
+
+**Finding exceptions** dismiss a finding (a false positive) or accept its
+risk until a date, without excluding the whole rule. The Finding Exceptions File
+(`Findings.ExceptionsFilePath`, default `./Classification/FindingExceptions.json`) lists them; the
+evaluation reads it also without `EntraOpsConfig.json`. The Privileged Assets Findings view maintains it:
+*Accept* at an affected object of a check adds an exception, which is kept in the browser until
+*Export FindingExceptions.json* downloads the file. Save it at the path of the setting, committed to the
+repository or in a local EntraOps folder; the next evaluation (`New-EntraOpsReportingData`) applies it.
+
+```json
+[
+  {
+    "RuleId": "EO.3001",
+    "InstanceId": "EO_RA_ga1",
+    "ObjectId": "11111111-1111-1111-1111-111111111111",
+    "DisplayName": "Break Glass 01",
+    "State": "RiskAccepted",
+    "Justification": "Emergency access account, monitored by an alert",
+    "AcceptedBy": "secops@contoso.com",
+    "AcceptedOn": "2026-10-29",
+    "ExpiresOn": "2027-04-27",
+    "Reference": "CHG-1234"
+  }
+]
+```
+
+An exception with `InstanceId` accepts this result of the rule (`Instance.Id`); without it, `ObjectId`
+accepts all results of the rule for the object. `State` is `RiskAccepted` (needs `AcceptedOn` and
+`ExpiresOn`, at most `ExceptionMaxDays` apart) or `Dismissed` (`ExpiresOn` is optional); a
+`Justification` is required. Accepted results are not failures: the rule result counts them apart
+(`AcceptedCount`, `AcceptedResults` with the exception), a rule whose results are all accepted is
+`Passed`, and the reports don't show them as findings of the object. A `Passed` rule with risk-accepted
+results doesn't meet the control: the Findings view marks it *Risk accepted*, and the Maester Pack skips its
+test with the accepted risks as the reason. With dismissed results only (false positives), the test passes;
+with open results, it fails and names the accepted ones apart. An exception that expired after the evaluation no longer accepts its result in the Maester Pack and the flow reports either: the result is open again. `Exceptions` lists the exceptions of a rule with their status: `Active`, `Expired` (expired
+since `ExpiresOn`: its findings are reported again, with a warning), `Stale` (no result matches, for
+example the finding was fixed; remove it) or `NotEvaluated`. Invalid entries and entries of unknown
+rules are skipped with a warning, and an `ExpiresOn` before `AcceptedOn` or an `AcceptedOn` in the future
+is reported. An active exception of either scope accepts a result, also when the other one has expired. The
+Findings view accepts or dismisses several selected results at once; changes in the browser that the file
+already contains are dropped when the page loads, and a notice warns when the file changed while changes
+were pending. Use `ExcludedRules` to turn off a rule for the whole tenant.
 
 ## GitHub Copilot Agents
 
@@ -466,6 +718,16 @@ parser also returns role assignments without classification, with an empty `Clas
 Redeploy the parser after updating EntraOps when the changelog lists parser changes.
 
 ### Ingest classification and enrichment data
+
+> **One writing deployment per tenant.** Let only one deployment (one GitHub repository or one Azure DevOps
+> pipeline) per tenant ingest and write: the WatchLists, the `PrivilegedEAM_CL` table through the data collection
+> rule and the `Apply*` automation (Administrative Units, RMAU, Conditional Access groups, catalogs) are shared, so
+> a second deployment replaces or mixes its data with the first on every run. The WatchList description records the
+> tenant and the deployment that wrote it (`EntraOps | Tenant: … | Deployment: …`), and
+> `Save-EntraOpsPrivilegedEAMWatchLists` warns with both names when another deployment wrote a WatchList last.
+> After each upload it checks that the WatchList exists and has rows, and reports missing or empty WatchLists as
+> an error at the end of the run. The GitHub workflow and Azure Pipeline fail the push run for such an error, after
+> the other push operations have run. The WatchList cmdlets install and use SentinelEnrichment 0.2.2.
 
 - `Save-EntraOpsPrivilegedEAMInsightsCustomTable` ingests classified Privileged EAM data into a Log Analytics/Sentinel custom table (`IngestToLogAnalytics` in `EntraOpsConfig.json`).
 - `Save-EntraOpsPrivilegedEAMWatchLists` ingests the same data as Sentinel WatchLists (`IngestToWatchLists`/`WatchListTemplates`), and can also generate the workload-identity enrichment WatchLists described below via `-WatchListWorkloadIdentity`.

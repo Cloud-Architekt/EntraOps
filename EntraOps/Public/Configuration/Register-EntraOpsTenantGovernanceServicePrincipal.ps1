@@ -124,9 +124,9 @@ function Register-EntraOpsTenantGovernanceServicePrincipal {
     if (-not $HasRequiredScopes) {
         Write-Output "Connect to Microsoft Graph..."
         if ($TenantId) {
-            Connect-MgGraph -Scopes $GraphScopes -TenantId $TenantId
+            Connect-MgGraph -Scopes $GraphScopes -TenantId $TenantId -ContextScope Process
         } else {
-            Connect-MgGraph -Scopes $GraphScopes
+            Connect-MgGraph -Scopes $GraphScopes -ContextScope Process
         }
     } else {
         Write-Verbose "Reusing existing Microsoft Graph session with sufficient permissions."

@@ -215,12 +215,14 @@
     or None to keep every snapshot commit. Default is P1W (weekly), which keeps the dataset size bounded.
 
 .PARAMETER PimRequestFlowExcludedRiskFlags
-    Array of PIM Request Flow risk-flag IDs to exclude from the generated report. Default is empty,
-    so every supported risk flag is reported. Use the Configuration Wizard to select flags by name.
+    Deprecated: use -FindingsExcludedRules. PIM Request Flow risk-flag IDs to exclude; they are written to
+    Findings.ExcludedRules as PimRequestFlow.<ID> (for example PimRequestFlow.noMfaActivation). Kept for the
+    scripts of EntraOps 1.1.0.
 
 .PARAMETER AccessPackageFlowExcludedRiskFlags
-    Array of Access Package Flow risk-flag IDs to exclude from the generated report. Default is empty, so every
-    supported risk flag is reported.
+    Deprecated: use -FindingsExcludedRules. Access Package Flow risk-flag IDs to exclude; they are written to
+    Findings.ExcludedRules as AccessPackageFlow.<ID> (for example AccessPackageFlow.broadRequestor). Kept for the
+    scripts of EntraOps 1.1.0.
 
 .PARAMETER ConditionalAccessAnalysisExcludedFindings
     Array of Conditional Access Analysis finding IDs to exclude from the generated report. Default is empty, so
@@ -228,6 +230,38 @@
 
 .PARAMETER EidscaExcludedFindings
     Array of EIDSCA check IDs to exclude from the generated report. Default is empty.
+
+.PARAMETER FindingsExcludedRules
+    EntraOps finding rules to exclude (Findings.ExcludedRules), by ID (for example EO.4008) or by area and key
+    (for example PrivilegedAssets.pawMissing or PimRequestFlow.noMfaActivation); Get-EntraOpsFindingRule lists
+    the rules. This is the one place to exclude rules, also the risk flags of the PIM Request Flow and Access
+    Package Flow reports. Excluded rules are not evaluated: the reports do not show them, and the finding results
+    (findings.json) and the EntraOps Maester Pack show them as Excluded (the pack as skipped tests). Default is
+    empty.
+
+.PARAMETER FindingsControlPlaneActivationMaxHours
+    Maximum activation duration of Control Plane roles in hours (Findings.ControlPlaneActivationMaxHours) that the
+    finding rule EO.3013 (controlPlaneActivationDuration) accepts. Default is 4.
+
+.PARAMETER FindingsEligibleAssignmentMaxDays
+    Maximum duration of eligible assignments of Control and Management Plane roles in days
+    (Findings.EligibleAssignmentMaxDays) that the finding rule EO.3012 (eligibleAssignmentDuration) accepts. Default is 365.
+
+.PARAMETER FindingsEmergencyAccessAccounts
+    Emergency access accounts and groups (Findings.EmergencyAccessAccounts): object IDs, user principal names or
+    group display names that Conditional Access policies may exclude (EO.4003); the accounts also keep their
+    permanent Control Plane role assignments without a finding (EO.3001, object IDs and user principal names only). When empty (default),
+    nothing counts as emergency access: excluded Control Plane users are reported, and EO.4003 names the users
+    excluded from every enabled policy as candidates.
+
+.PARAMETER FindingsExceptionsFilePath
+    Path of the Finding Exceptions File (Findings.ExceptionsFilePath), relative to the EntraOps repository root:
+    the dismissed and risk-accepted findings, which the evaluation doesn't report. The Findings view of the
+    Privileged Assets reporting app exports it. Default is "./Classification/FindingExceptions.json".
+
+.PARAMETER FindingsExceptionMaxDays
+    Longest time a risk can be accepted in the Finding Exceptions File, in days (Findings.ExceptionMaxDays);
+    0 for no limit. Default is 180.
 
 .PARAMETER EnableCustomSecurityAttributeClassification
     Defines if the tier of User, ServicePrincipal and Application objects is read from Custom Security Attributes (CustomSecurityAttributes.Enabled). Can be combined with Alternate Tier Level Attributes and the Object Classification File: Custom Security Attributes win, an object without tier falls back to the filters of its object type, then to the file. Default is true, or false when -EnableObjectClassificationFile is $true and this parameter isn't passed. The PAW device and work account attributes are always read.
@@ -268,6 +302,12 @@ When enabled, run New-EntraOpsWorkloadIdentity afterwards to grant the workload 
     Controls the file name used for each persisted Tenant Governance snapshot resource file. "ResourceId"
     (default) names files after the immutable resource Id; "DisplayName" produces readable paths but changes
     them on rename. Resource-ID naming falls back to a display-name path for singleton types without an Id.
+
+.PARAMETER TenantGovernanceSnapshotPendingJobMaxAgeInHours
+    Maximum age in hours of a pending Tenant Governance snapshot job that Microsoft Graph has not completed.
+    An older job is deleted, recorded as failed last attempt (SnapshotJobTimedOut) and replaced by the next
+    Start run, so a job that never starts can't block the snapshot. Written as
+    TenantGovernanceSnapshot.PendingJobMaxAgeInHours. Default is 24; 0 never releases a pending job by its age.
 
 .PARAMETER RbacSystems
     Array of RBAC systems to collect and classify. Written as RbacSystems and as
@@ -451,10 +491,12 @@ function New-EntraOpsConfigFile {
         [string]$ConfigurationAnalyzerSnapshotInterval = 'P1W',
 
         [Parameter(Mandatory = $false)]
+        # Deprecated (EntraOps 1.1.0): written to Findings.ExcludedRules; new rules are excluded with -FindingsExcludedRules.
         [ValidateSet('noMfaActivation', 'noApprovalActivation', 'approverNotEnforced', 'approverLowerTier', 'authContextMissing', 'permanentEligible', 'permanentActive', 'noMfaActiveAssign')]
         [string[]]$PimRequestFlowExcludedRiskFlags = @(),
 
         [Parameter(Mandatory = $false)]
+        # Deprecated (EntraOps 1.1.0): written to Findings.ExcludedRules; new rules are excluded with -FindingsExcludedRules.
         [ValidateSet('noApproval', 'broadRequestor', 'approverLowerTier', 'assignedMorePrivileged')]
         [string[]]$AccessPackageFlowExcludedRiskFlags = @(),
 
@@ -464,6 +506,29 @@ function New-EntraOpsConfigFile {
 
         [Parameter(Mandatory = $false)]
         [string[]]$EidscaExcludedFindings = @(),
+
+        [Parameter(Mandatory = $false)]
+        [ValidatePattern('^(EO\.\d{4}|[A-Za-z]+\.[A-Za-z0-9]+)$')]
+        [string[]]$FindingsExcludedRules = @(),
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 24)]
+        [int]$FindingsControlPlaneActivationMaxHours = 4,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 3650)]
+        [int]$FindingsEligibleAssignmentMaxDays = 365,
+
+        [Parameter(Mandatory = $false)]
+        [string[]]$FindingsEmergencyAccessAccounts = @(),
+
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string]$FindingsExceptionsFilePath = "./Classification/FindingExceptions.json",
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(0, 3650)]
+        [int]$FindingsExceptionMaxDays = 180,
 
         [Parameter(Mandatory = $false)]
         [boolean]$EnableCustomSecurityAttributeClassification = $true,
@@ -501,6 +566,10 @@ function New-EntraOpsConfigFile {
         [string]$TenantGovernanceSnapshotResourceFileNaming = "ResourceId",
 
         [Parameter(Mandatory = $false)]
+        [ValidateRange(0, 8760)]
+        [int]$TenantGovernanceSnapshotPendingJobMaxAgeInHours = 24,
+
+        [Parameter(Mandatory = $false)]
         [ValidateSet("Azure", "EntraID", "IdentityGovernance", "DeviceManagement", "ResourceApps", "Defender")]
         [Array]$RbacSystems = ("Azure", "EntraID", "IdentityGovernance", "ResourceApps", "DeviceManagement"),
 
@@ -536,7 +605,7 @@ function New-EntraOpsConfigFile {
     $AzContext = Get-AzContext
     if ($AzContext.Tenant.Id -ne $TenantId) {
         Write-Verbose "Call Connect-AzAccount to $($TenantId)..."
-        Connect-AzAccount -TenantId $TenantId
+        Connect-AzAccount -TenantId $TenantId -Scope Process
     } else {
         Write-Verbose "Already connected to $($AzContext.Tenant.Id)"
     }
@@ -559,6 +628,12 @@ function New-EntraOpsConfigFile {
     }
     # GitHub Actions and the Azure DevOps update pipeline both support PullRequest and DirectPush
     $DefaultUpdatePublicationMode = $UpdatePublicationMode
+
+    foreach ($Deprecated in @(@{ Name = 'PimRequestFlowExcludedRiskFlags'; Area = 'PimRequestFlow' }, @{ Name = 'AccessPackageFlowExcludedRiskFlags'; Area = 'AccessPackageFlow' })) {
+        if ($PSBoundParameters.ContainsKey($Deprecated.Name) -and @($PSBoundParameters[$Deprecated.Name]).Count -gt 0) {
+            Write-Warning "-$($Deprecated.Name) is deprecated. Its risk flags are written to Findings.ExcludedRules; use -FindingsExcludedRules $((@($PSBoundParameters[$Deprecated.Name]) | ForEach-Object { "$($Deprecated.Area).$_" }) -join ', ') instead."
+        }
+    }
 
     $EnvConfigSchema = [ordered]@{
         TenantId                                      = $($TenantId)
@@ -688,10 +763,17 @@ function New-EntraOpsConfigFile {
             StaleTenantGovernanceSnapshotAction       = $StaleTenantGovernanceSnapshotAction
             TimeRangeInDays                           = $ConfigurationAnalyzerTimeRangeInDays
             SnapshotInterval                          = $ConfigurationAnalyzerSnapshotInterval
-            PimRequestFlowExcludedRiskFlags           = @($PimRequestFlowExcludedRiskFlags)
-            AccessPackageFlowExcludedRiskFlags        = @($AccessPackageFlowExcludedRiskFlags)
             ConditionalAccessAnalysisExcludedFindings = @($ConditionalAccessAnalysisExcludedFindings)
             EidscaExcludedFindings                    = @($EidscaExcludedFindings)
+        }
+        Findings                                      = [ordered]@{
+            # The deprecated risk-flag parameters are finding rules of their report area.
+            ExcludedRules                  = @(@($FindingsExcludedRules) + @($PimRequestFlowExcludedRiskFlags | ForEach-Object { "PimRequestFlow.$_" }) + @($AccessPackageFlowExcludedRiskFlags | ForEach-Object { "AccessPackageFlow.$_" }) | Select-Object -Unique)
+            ControlPlaneActivationMaxHours = $FindingsControlPlaneActivationMaxHours
+            EligibleAssignmentMaxDays      = $FindingsEligibleAssignmentMaxDays
+            EmergencyAccessAccounts        = @($FindingsEmergencyAccessAccounts)
+            ExceptionsFilePath             = $FindingsExceptionsFilePath
+            ExceptionMaxDays               = $FindingsExceptionMaxDays
         }
         AutomatedElmCatalogProtection                 = [ordered]@{
             ApplyPrivilegedElmCatalogProtection = $ApplyPrivilegedElmCatalogProtection
@@ -755,6 +837,7 @@ function New-EntraOpsConfigFile {
             ResourcesToInclude                  = if ($TenantGovernanceResourcesToInclude) { $TenantGovernanceResourcesToInclude } else { (Get-EntraOpsTenantGovernanceResourceDefinition).DefaultResources }
             SnapshotDisplayNamePrefix           = "EntraOps TG"
             SnapshotResourceFileNaming          = $TenantGovernanceSnapshotResourceFileNaming
+            PendingJobMaxAgeInHours             = $TenantGovernanceSnapshotPendingJobMaxAgeInHours
             SnapshotScheduledTrigger            = $EnableTenantGovernanceSnapshot
             SnapshotScheduledCron               = $TenantGovernanceSnapshotScheduledCron
             SnapshotScheduledCronComplete       = $TenantGovernanceSnapshotScheduledCronComplete
@@ -779,6 +862,12 @@ function New-EntraOpsConfigFile {
                 UserAccess    = ""
             }
             UpdateObjectClassificationFile    = $false
+            WorkloadPlaneAdminRoles           = [ordered]@{
+                PermanentRoleDefinitionIds = @(
+                    "acdd72a7-3385-48ef-bd42-f606fba81ae7"  # Reader
+                )
+                EligibleRoleDefinitionIds  = @()
+            }
             ConstrainedDelegation             = [ordered]@{
                 ManagementPlane = [ordered]@{
                     ExcludedRoleDefinitionIds = @(

@@ -8,6 +8,7 @@ BeforeAll {
     $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
     . "$script:TestRepositoryRoot/EntraOps/Private/Write-EntraOpsGroupedRequestDetail.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Show-EntraOpsWarningSummary.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Write-EntraOpsConsoleItemList.ps1"
 }
 
 Describe 'EntraOps automation log privacy' {
@@ -77,5 +78,36 @@ Describe 'EntraOps automation log privacy' {
         ([regex]::Matches($Output, [regex]::Escape($script:ObjectId))).Count | Should -Be 1
         $Output | Should -Match '\[1 distinct ID\(s\) in 2 warning\(s\)\]'
         $Output | Should -Not -Match 'context'
+    }
+
+    It 'keeps tenant IDs as message context instead of listing them as object IDs' {
+        $TenantId = '22222222-2222-2222-2222-222222222222'
+        $Warnings = [System.Collections.Generic.List[psobject]]::new()
+        $Warnings.Add([pscustomobject]@{ Type = 'ForeignTenantObject'; Message = "Skipped 9 object(s) not owned by tenant $TenantId for Tier1-ManagementPlane.Azure" })
+        $Warnings.Add([pscustomobject]@{ Type = 'ForeignTenantObject'; Message = "Skipped 11 object(s) not owned by tenant $TenantId for Tier1-ManagementPlane.EntraID" })
+        $Warnings.Add([pscustomobject]@{ Type = 'ForeignTenantDeviceOwner'; Message = "Excluded devices for 1 privileged user(s) not owned by home tenant ID: $TenantId (user $script:ObjectId)" })
+
+        $Output = Show-EntraOpsWarningSummary -WarningMessages $Warnings 6>&1 | Out-String
+
+        $Output | Should -Not -Match "Object ID\(s\): $TenantId"
+        $Output | Should -Match "Skipped 9 object\(s\) not owned by tenant $TenantId for Tier1-ManagementPlane.Azure"
+        $Output | Should -Match "Skipped 11 object\(s\) not owned by tenant $TenantId"
+        # An object ID in the same message is still listed as object ID
+        $Output | Should -Match "Object ID\(s\): $([regex]::Escape($script:ObjectId)) \[1 distinct ID\(s\) in 1 warning\(s\)\]"
+    }
+}
+
+Describe 'Write-EntraOpsConsoleItemList' {
+    It 'writes only the count of an informational list by default' {
+        $Output = Write-EntraOpsConsoleItemList -Label 'Scope entries added' -Items @('/', '/administrativeUnits/11111111-1111-1111-1111-111111111111') -IncludeObjectDetails $false 6>&1 | Out-String
+
+        $Output | Should -Match 'Scope entries added: 2 \(including the directory scope /\)'
+        $Output | Should -Not -Match '11111111-1111-1111-1111-111111111111'
+    }
+
+    It 'writes every item when object details are enabled' {
+        $Output = Write-EntraOpsConsoleItemList -Label 'Scope entries added' -Items @('/administrativeUnits/11111111-1111-1111-1111-111111111111') -IncludeObjectDetails $true 6>&1 | Out-String
+
+        $Output | Should -Match '/administrativeUnits/11111111-1111-1111-1111-111111111111'
     }
 }

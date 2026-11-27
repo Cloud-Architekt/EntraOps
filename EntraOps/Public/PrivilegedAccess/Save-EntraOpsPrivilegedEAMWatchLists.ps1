@@ -4,6 +4,9 @@
 
 .DESCRIPTION
     Get information from EntraOps about classification based on Enterprise Access Model and save it as WatchList in Microsoft Sentinel.
+    Each WatchList is replaced by the pinned SentinelEnrichment module version. Its description records the tenant and the
+    deployment that wrote it; a warning names both deployments when another one wrote the WatchList last. After the upload,
+    every WatchList is checked for existence and rows, and missing or empty WatchLists are reported as an error at the end.
 
 .PARAMETER ImportPath
     Folder where the classification files should be stored. Default is ./PrivilegedEAM.
@@ -106,8 +109,9 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         if ([string]::IsNullOrEmpty($SentinelSubscriptionId) -or [string]::IsNullOrEmpty($SentinelResourceGroupName) -or [string]::IsNullOrEmpty($SentinelWorkspaceName)) {
             throw "SentinelSubscriptionId, SentinelResourceGroupName and SentinelWorkspaceName are required when SkipUploadSaveLocal is not set."
         }
-        Install-EntraOpsRequiredModule -ModuleName SentinelEnrichment        
+        Install-EntraOpsRequiredModule -ModuleName 'SentinelEnrichment' -Import | Out-Null
     }
+    $WatchListResults = [System.Collections.Generic.List[psobject]]::new()
     $NewPrincipalsWatchlistItems = New-Object System.Collections.ArrayList
     $NewRoleAssignmentsWatchlistItems = New-Object System.Collections.ArrayList
     $NewRoleAssignmentClassificationsWatchlistItems = New-Object System.Collections.ArrayList
@@ -132,6 +136,9 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
                     "ObjectAdminTierLevel"          = $Privilege.ObjectAdminTierLevel
                     "ObjectAdminTierLevelName"      = $Privilege.ObjectAdminTierLevelName
                     "OnPremSynchronized"            = $Privilege.OnPremSynchronized
+                    "OriginType"                    = $Privilege.OriginType
+                    "OriginTenantId"                = $Privilege.OriginTenantId
+                    "OriginId"                      = $Privilege.OriginId
                     "AssignedAdministrativeUnits"   = $Privilege.AssignedAdministrativeUnits | ConvertTo-Json -Depth 10 -Compress -AsArray
                     "RestrictedManagementByRAG"     = $Privilege.RestrictedManagementByRAG -eq $true
                     "RestrictedManagementByAadRole" = $Privilege.RestrictedManagementByAadRole -eq $true
@@ -215,19 +222,17 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
 
         $WatchListPath = Join-Path $ResolvedExportFolder "$($WatchListName).csv"
         $NewPrincipalsWatchlistItems | Sort-Object ObjectDisplayName | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
-        $Parameters = @{
-            WatchListFilePath        = $WatchListPath
-            DisplayName              = $WatchListName
-            itemsSearchKey           = "UniqueId"
-            SubscriptionId           = $SentinelSubscriptionId
-            ResourceGroupName        = $SentinelResourceGroupName
-            WorkspaceName            = $SentinelWorkspaceName
-            DefaultDuration          = "P14D"
-            ReplaceExistingWatchlist = $true
-        }
         if ( -not $SkipUploadSaveLocal ) {
-            New-GkSeAzSentinelWatchlist @Parameters -Verbose
-            $null = Test-EntraOpsSentinelWatchlistDeployment -SubscriptionId $SentinelSubscriptionId -ResourceGroupName $SentinelResourceGroupName -WorkspaceName $SentinelWorkspaceName -WatchListName $WatchListName -ExpectedItemCount $NewPrincipalsWatchlistItems.Count -WatchListFilePath $WatchListPath
+            $Parameters = @{
+                WatchListFilePath = $WatchListPath
+                WatchListName     = $WatchListName
+                SearchKey         = "UniqueId"
+                ExpectedItemCount = $NewPrincipalsWatchlistItems.Count
+                SubscriptionId    = $SentinelSubscriptionId
+                ResourceGroupName = $SentinelResourceGroupName
+                WorkspaceName     = $SentinelWorkspaceName
+            }
+            $WatchListResults.Add((Publish-EntraOpsSentinelWatchlist @Parameters))
             Remove-Item -Path $WatchListPath -Force
         }
     }
@@ -237,19 +242,17 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         Write-Output "Write information to watchlist: $WatchListName"
         $WatchListPath = Join-Path $ResolvedExportFolder "$($WatchListName).csv"
         $NewRoleAssignmentsWatchlistItems | Sort-Object AdminTierLevel, RoleSystem, ObjectDisplayName | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
-        $Parameters = @{
-            WatchListFilePath        = $WatchListPath
-            DisplayName              = $WatchListName
-            itemsSearchKey           = "UniqueId"
-            SubscriptionId           = $SentinelSubscriptionId
-            ResourceGroupName        = $SentinelResourceGroupName
-            WorkspaceName            = $SentinelWorkspaceName
-            DefaultDuration          = "P14D"
-            ReplaceExistingWatchlist = $true
-        }
         if ( -not $SkipUploadSaveLocal ) {
-            New-GkSeAzSentinelWatchlist @Parameters -Verbose
-            $null = Test-EntraOpsSentinelWatchlistDeployment -SubscriptionId $SentinelSubscriptionId -ResourceGroupName $SentinelResourceGroupName -WorkspaceName $SentinelWorkspaceName -WatchListName $WatchListName -ExpectedItemCount $NewRoleAssignmentsWatchlistItems.Count -WatchListFilePath $WatchListPath
+            $Parameters = @{
+                WatchListFilePath = $WatchListPath
+                WatchListName     = $WatchListName
+                SearchKey         = "UniqueId"
+                ExpectedItemCount = $NewRoleAssignmentsWatchlistItems.Count
+                SubscriptionId    = $SentinelSubscriptionId
+                ResourceGroupName = $SentinelResourceGroupName
+                WorkspaceName     = $SentinelWorkspaceName
+            }
+            $WatchListResults.Add((Publish-EntraOpsSentinelWatchlist @Parameters))
             Remove-Item -Path $WatchListPath -Force
         }
     }
@@ -259,19 +262,17 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         Write-Output "Write information to watchlist: $WatchListName"
         $WatchListPath = Join-Path $ResolvedExportFolder "$($WatchListName).csv"
         $NewRoleAssignmentClassificationsWatchlistItems | Sort-Object AdminTierLevel, Service | Export-Csv -Path $WatchListPath -NoTypeInformation -Encoding utf8 -Delimiter ","
-        $Parameters = @{
-            WatchListFilePath        = $WatchListPath
-            DisplayName              = $WatchListName
-            itemsSearchKey           = "UniqueId"
-            SubscriptionId           = $SentinelSubscriptionId
-            ResourceGroupName        = $SentinelResourceGroupName
-            WorkspaceName            = $SentinelWorkspaceName
-            DefaultDuration          = "P14D"
-            ReplaceExistingWatchlist = $true
-        }
         if ( -not $SkipUploadSaveLocal ) {
-            New-GkSeAzSentinelWatchlist @Parameters -Verbose
-            $null = Test-EntraOpsSentinelWatchlistDeployment -SubscriptionId $SentinelSubscriptionId -ResourceGroupName $SentinelResourceGroupName -WorkspaceName $SentinelWorkspaceName -WatchListName $WatchListName -ExpectedItemCount $NewRoleAssignmentClassificationsWatchlistItems.Count -WatchListFilePath $WatchListPath
+            $Parameters = @{
+                WatchListFilePath = $WatchListPath
+                WatchListName     = $WatchListName
+                SearchKey         = "UniqueId"
+                ExpectedItemCount = $NewRoleAssignmentClassificationsWatchlistItems.Count
+                SubscriptionId    = $SentinelSubscriptionId
+                ResourceGroupName = $SentinelResourceGroupName
+                WorkspaceName     = $SentinelWorkspaceName
+            }
+            $WatchListResults.Add((Publish-EntraOpsSentinelWatchlist @Parameters))
             Remove-Item -Path $WatchListPath -Force
         }
     }
@@ -299,7 +300,17 @@ function Save-EntraOpsPrivilegedEAMWatchLists {
         }
 
         if ( -not $SkipUploadSaveLocal ) {
+            # Its missing or empty watchlists are reported by the nested call, with the -ErrorAction of this caller
+            if ($PSBoundParameters.ContainsKey('ErrorAction')) { $Parameters.ErrorAction = $PSBoundParameters['ErrorAction'] }
             Save-EntraOpsWorkloadIdentityEnrichmentWatchLists @Parameters
         }                
+    }
+
+    # Reported after all uploads, so one failed watchlist doesn't stop the others or the following push operations
+    $FailedWatchLists = @($WatchListResults | Where-Object { $null -ne $_.Issue })
+    if ($FailedWatchLists.Count -gt 0) {
+        # Non-terminating under the module's "Stop" preference; an -ErrorAction passed by the caller still applies
+        $ReportErrorAction = if ($PSBoundParameters.ContainsKey('ErrorAction')) { $PSBoundParameters['ErrorAction'] } elseif ($ErrorActionPreference -eq 'Stop') { 'Continue' } else { $ErrorActionPreference }
+        Write-Error -ErrorAction $ReportErrorAction -Message "$($FailedWatchLists.Count) watchlist(s) missing or empty after the upload: $(($FailedWatchLists | ForEach-Object { "$($_.WatchListName) ($($_.Issue))" }) -join ', '). Re-run the watchlist upload and check the watchlists in Microsoft Sentinel."
     }
 }

@@ -32,7 +32,7 @@ function Import-EntraOpsGlobalExclusions {
             Write-Verbose "Loaded $($ExclusionList.Count) global exclusions from $GlobalJsonPath"
             return $ExclusionList
         } else {
-            Write-Warning "Global exclusion file not found at $GlobalJsonPath"
+            Write-EntraOpsWarningOnce -Key "GlobalExclusionMissing|$GlobalJsonPath" -Message "Global exclusion file not found at $GlobalJsonPath; no principal is excluded."
             return $null
         }
     } catch {

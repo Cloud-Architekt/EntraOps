@@ -410,6 +410,12 @@ function Get-EntraOpsPrivilegedEamDashboardObjects {
                     objectSubType                 = $objSubType
                     objectDisplayName             = $display
                     objectUserPrincipalName       = "$(Get-PropValue $o 'ObjectUserPrincipalName')"
+                    # Where the object comes from (EntraOps 1.2.0 or later): for example CrossTenantSync, OnPremises or
+                    # FirstPartyApplication, the tenant (of the application of a service principal, for Microsoft
+                    # first-party apps) and the ID there.
+                    originType                    = "$(Get-PropValue $o 'OriginType')"
+                    originTenantId                = "$(Get-PropValue $o 'OriginTenantId')"
+                    originId                      = "$(Get-PropValue $o 'OriginId')"
                     objectAdminTierLevel          = "$(Get-PropValue $o 'ObjectAdminTierLevel')"
                     objectAdminTierLevelName      = $objTierName
                     onPremSynchronized            = $onPremSync
@@ -423,7 +429,8 @@ function Get-EntraOpsPrivilegedEamDashboardObjects {
                     assignedAdministrativeUnits   = $adminUnits
                     associatedWorkAccount         = @(ConvertTo-StringArray (Get-PropValue $o 'AssociatedWorkAccount'))
                     ownedDevices                  = @(ConvertTo-StringArray (Get-PropValue $o 'OwnedDevices'))
-                    associatedPawDevice           = @(ConvertTo-StringArray (Get-PropValue $o 'AssociatedPawDevice'))
+                    # The object IDs of the PAW devices (AssociatedPawDeviceObjectId; AssociatedPawDevice for older exports).
+                    associatedPawDevice           = @(Get-EntraOpsPawDeviceObjectId -Object $o)
                     controlPlaneReasoning         = $controlPlaneReasoning
                     classification                = $objClassification
                     roleAssignments               = $assignments

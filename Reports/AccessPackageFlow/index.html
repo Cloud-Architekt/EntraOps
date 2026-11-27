@@ -13,6 +13,7 @@
     <script src="../shared/theme.js"></script>
     <link rel="stylesheet" href="css/styles.css" />
     <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="../shared/filters.css" />
 </head>
 
 <body>
@@ -47,6 +48,8 @@
                     Assets</span></a>
             <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html"><span
                     class="ico">&#9636;</span><span>Overview</span></a>
+            <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html?view=findings"><span
+                    class="ico">&#9873;</span><span>Findings</span></a>
             <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html?view=classification"><span
                     class="ico">&#9998;</span><span>Object Classification</span></a>
             <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
@@ -92,6 +95,7 @@
                     approver is classified at a lower privilege tier than the resource being approved.
                 </p>
             </div>
+            <div class="callout scope ca-gap-row flow-findings-notice" id="apFindingsNotice" data-risk-flag-notice role="status" hidden></div>
 
             <div class="card-pad" id="apEmptyState">
                 <p><strong>No Configuration Analyzer dataset found.</strong> This app reuses the same dataset as <a
@@ -142,91 +146,48 @@
                             Target resource role. Click a node to trace it, click the background to clear.</span>
                     </div>
                     <div class="card-pad">
-                        <div class="eam-filter-row" style="margin-bottom:10px;">
-                            <div class="eam-filter">
-                                <label for="apSnapshot">Snapshot</label>
-                                <select id="apSnapshot"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="apFltApproval">Approval</label>
-                                <select id="apFltApproval">
-                                    <option value="">All policies</option>
-                                    <option value="required">Approval required</option>
-                                    <option value="none">No approval required</option>
-                                </select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="apFltExpiration">Expiration</label>
-                                <select id="apFltExpiration">
-                                    <option value="">All policies</option>
-                                    <option value="none">No expiration</option>
-                                    <option value="fixed">Fixed expiration</option>
-                                </select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="apFltFlag">Risk flag</label>
-                                <select id="apFltFlag"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="apFltRequestorTier">Requestor access level</label>
-                                <select id="apFltRequestorTier">
-                                    <option value="">All levels</option>
-                                    <option value="ControlPlane">Control Plane</option>
-                                    <option value="ManagementPlane">Management Plane</option>
-                                    <option value="UserAccess">User Access</option>
-                                    <option value="Unclassified">Unclassified / unresolved</option>
-                                </select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="apFltMemberTier">Group member access level</label>
-                                <select id="apFltMemberTier">
-                                    <option value="">All member levels</option>
-                                    <option value="ControlPlane">Control Plane</option>
-                                    <option value="ManagementPlane">Management Plane</option>
-                                    <option value="UserAccess">User Access</option>
-                                </select>
+                        <div class="eo-searchbar">
+                            <label class="eo-search">
+                                <svg class="eo-search-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 1a5.5 5.5 0 0 1 4.38 8.83l3.65 3.64a.75.75 0 0 1-1.06 1.06l-3.64-3.65A5.5 5.5 0 1 1 6.5 1Zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg>
+                                <input type="search" id="apFltSearch" aria-label="Search policy paths"
+                                    placeholder="Search policy, access package, requestor, approver or target" autocomplete="off" />
+                            </label>
+                            <button class="btn small" type="button" id="apResetFilters">Reset filters</button>
+                            <div class="ap-filter-selects">
+                                <label class="eo-select">Snapshot<select id="apSnapshot"></select></label>
+                                <label class="eo-select">Catalog<select id="apFltCatalog"></select></label>
+                                <label class="eo-select">Risk flag<select id="apFltFlag"></select></label>
                             </div>
                         </div>
-                        <div class="eam-filter-row" style="margin-bottom:10px;">
-                            <div class="eam-filter">
-                                <label for="apFltCatalog">Catalog</label>
-                                <select id="apFltCatalog"></select>
+                        <div class="eo-facets" id="apFacets">
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="apApprovalLabel">Approval</span>
+                                <div class="eo-pills" id="apApprovalPills" role="group" aria-labelledby="apApprovalLabel"></div>
                             </div>
-                            <div class="eam-filter">
-                                <label for="apFltTargetType">Target resource type</label>
-                                <select id="apFltTargetType">
-                                    <option value="">All resource types</option>
-                                    <option value="Groups">Groups</option>
-                                    <option value="AzureRbac">Azure RBAC</option>
-                                    <option value="ApiPermissions">API permissions</option>
-                                    <option value="DirectoryRoles">Directory roles</option>
-                                    <option value="Other">Other</option>
-                                </select>
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="apExpirationLabel">Expiration</span>
+                                <div class="eo-pills" id="apExpirationPills" role="group" aria-labelledby="apExpirationLabel"></div>
                             </div>
-                        </div>
-                        <div class="eam-filter-row" style="margin-bottom:10px;">
-                            <div class="eam-filter grow">
-                                <label for="apFltSearch">Search</label>
-                                <div class="search">
-                                    <span class="search-ico">&#128269;</span>
-                                    <input type="text" id="apFltSearch"
-                                        placeholder="Policy, access package, requestor, approver, target&hellip;" />
-                                </div>
+                            <div class="eo-facet-row" id="apRequestorTierRow">
+                                <span class="eo-facet-label" id="apRequestorTierLabel">Requestor access level</span>
+                                <div class="eo-pills" id="apRequestorTierPills" role="group" aria-labelledby="apRequestorTierLabel"></div>
                             </div>
-                        </div>
-                        <div class="eam-filter-row" style="margin-bottom:6px;">
-                            <div class="eam-filter grow">
-                                <label>Columns</label>
-                                <div class="ca-toggle-row" id="apColToggles"></div>
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="apMemberTierLabel">Group member access level</span>
+                                <div class="eo-pills" id="apMemberTierPills" role="group" aria-labelledby="apMemberTierLabel"></div>
                             </div>
-                            <div class="eam-filter" style="align-self:flex-end;">
-                                <button class="btn small hidden" id="apClearTrace">Clear node trace</button>
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="apTargetTypeLabel">Target resource type</span>
+                                <div class="eo-pills" id="apTargetTypePills" role="group" aria-labelledby="apTargetTypeLabel"></div>
+                            </div>
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="apColumnsLabel">Columns</span>
+                                <div class="eo-pills" id="apColToggles" role="group" aria-labelledby="apColumnsLabel"></div>
                             </div>
                         </div>
                         <div class="eam-filter-row" style="margin-bottom:10px;align-items:flex-end;">
                             <div class="eam-filter grow"><span class="muted" id="apFreshness"></span><span class="muted" id="apFilterSummary"></span></div>
-                            <div class="eam-filter"><button class="btn small" type="button" id="apResetFilters">Reset filters</button></div>
-                            <div class="eam-filter"><button class="btn small" type="button" id="apExportFiltered">Export CSV + JSON</button></div>
+                            <div class="eam-filter" style="flex:0 0 auto;flex-direction:row;justify-content:flex-end;gap:8px;"><button class="btn small hidden" type="button" id="apClearTrace">Clear node trace</button><button class="btn small" type="button" id="apExportFiltered">Export CSV + JSON</button></div>
                         </div>
                         <div class="legend" style="margin-bottom:6px;">
                             <span class="item"><span class="swatch" style="background:#a4262c;"></span>Control Plane
@@ -257,41 +218,25 @@
                             approver's tier looks inconsistent with the privilege of the target resource</span>
                     </div>
                     <div class="card-pad">
-                        <div class="eam-filter-row" style="margin-bottom:10px;">
-                            <div class="eam-filter">
-                                <label for="apFlagGroup">Group flags by</label>
-                                <select id="apFlagGroup">
+                        <div class="eo-searchbar">
+                            <label class="eo-search">
+                                <svg class="eo-search-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 1a5.5 5.5 0 0 1 4.38 8.83l3.65 3.64a.75.75 0 0 1-1.06 1.06l-3.64-3.65A5.5 5.5 0 1 1 6.5 1Zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg>
+                                <input type="search" id="apFlagSearch" aria-label="Search risk flags"
+                                    placeholder="Search policy, catalog, access package or flag" autocomplete="off" />
+                            </label>
+                            <label class="eo-select">Group by<select id="apFlagGroup">
                                     <option value="none">No grouping</option>
                                     <option value="tier" selected>Access level</option>
                                     <option value="catalog">Catalog</option>
-                                </select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="apFlagSort">Sort flags by</label>
-                                <select id="apFlagSort">
+                                </select></label>
+                            <label class="eo-select">Sort by<select id="apFlagSort">
                                     <option value="severity">Severity</option>
                                     <option value="tier">Access level</option>
                                     <option value="catalog">Catalog</option>
                                     <option value="policy">Policy name</option>
-                                </select>
-                            </div>
-                            <div class="eam-filter" style="align-self:flex-end;">
-                                <label>Groups</label>
-                                <div class="ap-risk-actions">
-                                    <button class="btn small" id="apExpandAllRiskGroups" type="button">Expand all</button>
-                                    <button class="btn small" id="apCollapseAllRiskGroups" type="button">Collapse all</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="eam-filter-row" style="margin-bottom:10px;">
-                            <div class="eam-filter grow">
-                                <label for="apFlagSearch">Search risk flags</label>
-                                <div class="search">
-                                    <span class="search-ico">&#128269;</span>
-                                    <input type="text" id="apFlagSearch" placeholder="Policy, catalog, access package or flag&hellip;" />
-                                </div>
-                            </div>
-                            <div class="eam-filter" style="align-self:flex-end;"><button class="btn small" id="apExportRiskFlags" type="button">Export CSV + JSON</button></div>
+                                </select></label>
+                            <button class="btn small" id="apCollapseAllRiskGroups" type="button">Collapse all</button>
+                            <button class="btn small" id="apExportRiskFlags" type="button">Export CSV + JSON</button>
                         </div>
                         <div id="apFlagsBody"></div>
                     </div>
@@ -316,12 +261,16 @@
     <!-- Shared snapshot/blob parsing model. -->
     <script src="../ConfigurationAnalyzer/js/core.js"></script>
     <script src="../shared/report-utils.js"></script>
+    <script src="../shared/flow-findings.js"></script>
     <!-- d3 + d3-sankey vendored locally so the app is fully self-contained and
          works offline / behind the strict CSP above. -->
     <script src="assets/vendor/d3.min.js"></script>
     <script src="assets/vendor/d3-sankey.min.js"></script>
     <script src="js/navCollapse.js"></script>
     <script src="../shared/object-inspector.js"></script>
+    <script src="../shared/filters.js"></script>
+    <!-- Risk flags evaluated by EntraOps PowerShell (New-EntraOpsReportFindingData). -->
+    <script src="data/access-package-flow-findings.js"></script>
     <script src="js/app.js"></script>
 </body>
 

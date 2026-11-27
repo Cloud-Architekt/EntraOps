@@ -13,8 +13,11 @@ there first.
 
 - **CA Policy Flow** - a Sankey visualization of how the Conditional Access policy set is
   configured: `Assignments → Policy → Target resources → Network → Conditions → Grant controls`.
-  Columns can be toggled, and every aspect can be filtered (policy state, grant control, client
-  app type, free-text search across users/groups/roles/apps/locations). Click any node to trace
+  Columns can be toggled, and every aspect can be filtered: policy state (one or more states),
+  grant control, client app type and assignment access level are pills that show how many
+  policies each would match;
+  snapshot, assignment, target resource, network and condition are dropdowns next to the free-text
+  search across users/groups/roles/apps/locations. Click any node to trace
   every policy path through it; click a policy node to open its full detail (including exclusions
   and session controls). Link colors separate blocked (red), controlled (green), session-only
   (blue), report-only (dashed amber) and disabled/uncontrolled (grey) paths, so access paths
@@ -23,6 +26,9 @@ there first.
   in report-only/disabled state, legacy authentication not blocked, missing MFA coverage for all
   users or privileged roles, missing risk-based/device-based policies, guest coverage, client app
   types not covered by any all-user policy, and the accumulated exclusion surface.
+
+A `#flow=<policyId>` deep link (case-insensitive) traces the policy and clears the filters that would hide it.
+Without the EAM Dashboard dataset the assignment access level pills can't count users and roles, and a note says so.
 
 ### Finding exclusions
 

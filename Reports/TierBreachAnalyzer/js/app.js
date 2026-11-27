@@ -928,10 +928,17 @@
     }
 
     // ---- Deep links (#sel=... jumps back to a starred breach row) -----------
+    // #sel=<objectId>||<role>||<service>||<scopeId>[||<pathId>] or #path=<pathId>: a pathId identifies one breach
+    // path, also when two role assignments share object, role, service and scope (the tuple then picks the first).
     function applyDeepLink() {
-        const m = (location.hash || "").match(/^#sel=(.+)$/);
+        const hash = location.hash || "";
+        const pathMatch = hash.match(/^#path=(.+)$/);
+        const m = pathMatch || hash.match(/^#sel=(.+)$/);
         if (!m) return;
-        const [objectId, role, service, scopeId] = decodeURIComponent(m[1]).split("||");
+        let decoded;
+        try { decoded = decodeURIComponent(m[1]); } catch (_) { return; }
+        const [objectId, role, service, scopeId, linkPathId] = pathMatch ? ["", "", "", "", decoded] : decoded.split("||");
+        const pathId = String(linkPathId || "").toLowerCase();
         // The breach table lists breach paths of the current view; "breach" shows them all.
         if (state.view !== "breach" && state.view !== "all") {
             state.view = "breach";
@@ -940,14 +947,24 @@
             );
             render();
         }
-        const idx = currentBreaches.findIndex(
-            (p) =>
-                p.objectId === objectId &&
+        const matchesLink = (p) => pathId
+            ? String(p.pathId || "").toLowerCase() === pathId
+            : p.objectId === objectId &&
                 p.role === role &&
                 p.service === service &&
-                (p.scopeId || "") === (scopeId || "")
-        );
-        if (idx === -1) return;
+                (p.scopeId || "") === (scopeId || "");
+        let idx = currentBreaches.findIndex(matchesLink);
+        // A breach path hidden by the search, the system and type filters or a Sankey node filter: clear them.
+        if (idx === -1 && DATA.paths.some((p) => p.breach && matchesLink(p))) {
+            clearFiltersForDeepLink();
+            idx = currentBreaches.findIndex(matchesLink);
+        }
+        if (idx === -1) {
+            if (window.EntraOpsReportUtils) {
+                EntraOpsReportUtils.deepLinkNotFound("Tier breach path", pathId || [objectId, role, service, scopeId].filter(Boolean).join(" / "), "loaded breach paths");
+            }
+            return;
+        }
 
         // The table is paged, so the target row may not be rendered yet. Grow the page window to
         // include it and re-render; without this the deep link would silently do nothing for any
@@ -971,6 +988,17 @@
         tr.classList.remove("eo-flash");
         void tr.offsetWidth;
         tr.classList.add("eo-flash");
+    }
+
+    function clearFiltersForDeepLink() {
+        state.search = "";
+        document.getElementById("search").value = "";
+        systems.forEach((system) => state.systems.add(system));
+        ["user", "serviceprincipal"].forEach((type) => state.types.add(type));
+        document.querySelectorAll("#systemChecks input, #typeChecks input").forEach((checkbox) => { checkbox.checked = true; });
+        state.tableFilter = null;
+        updateFilterTag();
+        render();
     }
 
     // ---- Table node filter -------------------------------------------------

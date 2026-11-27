@@ -122,34 +122,34 @@ function Save-EntraOpsPrivilegedEAMJson {
         #region Entra ID
         if ($RbacSystems -contains "EntraID") {
             $EamAzureAD = Get-EntraOpsPrivilegedEAMEntraId -IncludeJustification:$IncludeJustification -IncludeObjectDetails $IncludeObjectDetails
-            Save-EntraOpsEAMRbacSystemJson -ExportFolder "$($ExportFolder)/EntraID" -RbacSystemName "EntraID" -EamData $EamAzureAD -AggregateFileName "EntraID.json"
+            Save-EntraOpsEAMRbacSystemJson -ExportFolder (Join-Path $ExportFolder 'EntraID') -RbacSystemName "EntraID" -EamData $EamAzureAD -AggregateFileName "EntraID.json"
         }
         #endregion
 
         #region Entra Resource Apps
         if ($RbacSystems -contains "ResourceApps") {
             $EamAzureAdResourceApps = Get-EntraOpsPrivilegedEAMResourceApps -IncludeJustification:$IncludeJustification -IncludeObjectDetails $IncludeObjectDetails
-            Save-EntraOpsEAMRbacSystemJson -ExportFolder "$($ExportFolder)/ResourceApps" -RbacSystemName "ResourceApps" -EamData $EamAzureAdResourceApps -AggregateFileName "ResourceApps.json"
+            Save-EntraOpsEAMRbacSystemJson -ExportFolder (Join-Path $ExportFolder 'ResourceApps') -RbacSystemName "ResourceApps" -EamData $EamAzureAdResourceApps -AggregateFileName "ResourceApps.json"
         }
         #endregion
 
         #region Device Management
         if ($RbacSystems -contains "DeviceManagement") {
             $EamDeviceMgmt = Get-EntraOpsPrivilegedEAMIntune -IncludeJustification:$IncludeJustification -IncludeObjectDetails $IncludeObjectDetails
-            Save-EntraOpsEAMRbacSystemJson -ExportFolder "$($ExportFolder)/DeviceManagement" -RbacSystemName "DeviceManagement" -EamData $EamDeviceMgmt -AggregateFileName "DeviceManagement.json"
+            Save-EntraOpsEAMRbacSystemJson -ExportFolder (Join-Path $ExportFolder 'DeviceManagement') -RbacSystemName "DeviceManagement" -EamData $EamDeviceMgmt -AggregateFileName "DeviceManagement.json"
         }
         #endregion
 
         #region Identity Governance
         if ($RbacSystems -contains "IdentityGovernance") {
             $EamIdGov = Get-EntraOpsPrivilegedEAMIdGov -IncludeJustification:$IncludeJustification -IncludeObjectDetails $IncludeObjectDetails
-            Save-EntraOpsEAMRbacSystemJson -ExportFolder "$($ExportFolder)/IdentityGovernance" -RbacSystemName "IdentityGovernance" -EamData $EamIdGov -AggregateFileName "IdentityGovernance.json"
+            Save-EntraOpsEAMRbacSystemJson -ExportFolder (Join-Path $ExportFolder 'IdentityGovernance') -RbacSystemName "IdentityGovernance" -EamData $EamIdGov -AggregateFileName "IdentityGovernance.json"
         }
         #endregion
         #region Defender
         if ($RbacSystems -contains "Defender") {
             $EamDefender = Get-EntraOpsPrivilegedEAMDefender -IncludeJustification:$IncludeJustification -IncludeObjectDetails $IncludeObjectDetails
-            Save-EntraOpsEAMRbacSystemJson -ExportFolder "$($ExportFolder)/Defender" -RbacSystemName "Defender" -EamData $EamDefender -AggregateFileName "Defender.json"
+            Save-EntraOpsEAMRbacSystemJson -ExportFolder (Join-Path $ExportFolder 'Defender') -RbacSystemName "Defender" -EamData $EamDefender -AggregateFileName "Defender.json"
         }
         #endregion
 
@@ -158,7 +158,7 @@ function Save-EntraOpsPrivilegedEAMJson {
         # systems) is available beforehand. Get-EntraOpsPrivilegedEAMAzure uses the Azure (Get-AzContext) tenant.
         if ($RbacSystems -contains "Azure") {
             $EamAzure = Get-EntraOpsPrivilegedEAMAzure -IncludeJustification:$IncludeJustification -IncludeObjectDetails $IncludeObjectDetails
-            Save-EntraOpsEAMRbacSystemJson -ExportFolder "$($ExportFolder)/Azure" -RbacSystemName "Azure" -EamData $EamAzure -AggregateFileName "Azure.json"
+            Save-EntraOpsEAMRbacSystemJson -ExportFolder (Join-Path $ExportFolder 'Azure') -RbacSystemName "Azure" -EamData $EamAzure -AggregateFileName "Azure.json"
         }
         #endregion
 

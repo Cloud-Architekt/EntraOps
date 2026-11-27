@@ -28,7 +28,7 @@ EOCE.views.customize = (function () {
             fileName: 'Classification_RoleDefinitionOverwrites.json',
             template: EOCE.templateFile('Classification_RoleDefinitionOverwrites.json'),
             // Systems whose EAM cmdlets consume Classification_RoleDefinitionOverwrites.json at runtime.
-            systems: ['EntraID', 'IdentityGovernance', 'DeviceManagement', 'Defender'],
+            systems: ['EntraID', 'IdentityGovernance', 'DeviceManagement', 'Defender', 'Azure'],
             hint: 'Down- or upgrade the tier of an entire role definition, identified by RoleDefinitionId and/or RoleDefinitionName. ' +
                 'EntraOps prefers a tenant-specific file (Classification/&lt;TenantName&gt;/) and falls back to the built-in template. Applied at runtime by the Get-EntraOpsPrivilegedEAM* cmdlets (TaggedBy: RoleDefinitionOverwrites).'
         },
@@ -39,7 +39,7 @@ EOCE.views.customize = (function () {
             fileName: 'Classification_RoleActionOverwrites.json',
             template: EOCE.templateFile('Classification_RoleActionOverwrites.json'),
             // ClassificationParameterScope of Update-EntraOpsClassificationControlPlaneScope.
-            systems: ['EntraID', 'IdentityGovernance', 'DeviceManagement', 'Defender'],
+            systems: ['EntraID', 'IdentityGovernance', 'DeviceManagement', 'Defender', 'Azure'],
             hint: 'Down- or upgrade the tier of individual role definition actions on a scope. ' +
                 'EntraOps reads this file <strong>only</strong> from the tenant-specific folder (Classification/&lt;TenantName&gt;/) &mdash; a Templates file serves as a starting point here but is ignored at runtime. ' +
                 'Applied at classification file generation time by Update-EntraOpsClassificationControlPlaneScope and baked into the tenant-specific Classification_*.json files. ' +
@@ -68,7 +68,8 @@ EOCE.views.customize = (function () {
         EntraID: EOCE.templateFile('Classification_AadResources.json'),
         IdentityGovernance: EOCE.templateFile('Classification_IdentityGovernance.json'),
         DeviceManagement: EOCE.templateFile('Classification_DeviceManagement.json'),
-        Defender: EOCE.templateFile('Classification_Defender.json')
+        Defender: EOCE.templateFile('Classification_Defender.json'),
+        Azure: EOCE.templateFile('Classification_Azure.json')
     };
 
     // Flat permission catalog used as the picker source for the API Permissions tab
@@ -87,6 +88,7 @@ EOCE.views.customize = (function () {
 
     // Reverse map: review items store the RBAC system's short label.
     function sysKeyFromShort(shortLabel) {
+        if (Object.prototype.hasOwnProperty.call(EOCE.RBAC_SYSTEMS, shortLabel)) return shortLabel;
         var keys = Object.keys(EOCE.RBAC_SYSTEMS);
         for (var i = 0; i < keys.length; i++) {
             if (EOCE.RBAC_SYSTEMS[keys[i]].short === shortLabel) return keys[i];
@@ -322,6 +324,13 @@ EOCE.views.customize = (function () {
         });
     }
 
+    function draftOutputs(type, draft) {
+        return draftFiles(type, draft).map(function (fileName) {
+            var entries = draft.entries.filter(function (e) { return !(e._src && e._src.removed) && targetFile(type, e) === fileName; });
+            return { fileName: fileName, jsonText: JSON.stringify(serializeEntries(type, entries), null, 2) + '\n' };
+        });
+    }
+
     // Issues that would make Import-EntraOpsClassificationOverwrites skip the entry.
     function validateEntries(type, entries) {
         var issues = [];
@@ -414,8 +423,7 @@ EOCE.views.customize = (function () {
     var rolesIndexPromise = null;
     function loadRolesIndex() {
         if (rolesIndexPromise) return rolesIndexPromise;
-        // Azure RBAC is excluded: the overwrite files are not consumed by the Azure EAM pipeline.
-        var keys = EOCE.rolesSystemKeys().filter(function (k) { return k !== 'Azure'; });
+        var keys = EOCE.rolesSystemKeys();
         rolesIndexPromise = Promise.all(keys.map(function (k) {
             return EOCE.data.load(EOCE.RBAC_SYSTEMS[k].file).catch(function () { return []; });
         })).then(function (sets) {
@@ -437,6 +445,20 @@ EOCE.views.customize = (function () {
             return { list: list, byId: byId };
         });
         return rolesIndexPromise;
+    }
+
+    // The role definition of a review item: by its ID, else by its name within the RBAC system of the item.
+    // The name alone is ambiguous across systems (for example "Reader" in Azure and in Intune); without a known
+    // system, only a name that exists in exactly one system is used. Returns { role, ambiguous }.
+    function findReviewRole(idx, res, name) {
+        if (res.sysKey && res.roleId && idx.byId[res.sysKey + '|' + res.roleId]) {
+            return { role: idx.byId[res.sysKey + '|' + res.roleId], ambiguous: false };
+        }
+        var lowerName = String(name).toLowerCase();
+        var matches = idx.list.filter(function (r) {
+            return r.name.toLowerCase() === lowerName && (!res.sysKey || r.sysKey === res.sysKey);
+        });
+        return { role: matches.length === 1 ? matches[0] : null, ambiguous: matches.length > 1 };
     }
 
     // ---- Review list helpers ---------------------------------------------------
@@ -948,18 +970,28 @@ EOCE.views.customize = (function () {
             var issues = validateEntries(type, d.entries);
             if (issues.length && !window.confirm('The draft has ' + issues.length + ' validation issue(s); EntraOps will skip those entries. Continue anyway?')) return;
 
-            var outputs = draftFiles(type, d).map(function (fileName) {
-                var entries = d.entries.filter(function (e) { return !(e._src && e._src.removed) && targetFile(type, e) === fileName; });
-                return { fileName: fileName, jsonText: JSON.stringify(serializeEntries(type, entries), null, 2) + '\n' };
-            });
+            var outputs = draftOutputs(type, d);
             var snapshot = JSON.stringify(outputs);
             clearError('custError');
 
             function done() {
+                // A picker/write can finish after the user edits or replaces the draft.
+                // Only finalize the version represented by the files that were written.
+                if (self.drafts[type] !== d) return;
+                if (JSON.stringify(draftOutputs(type, d)) !== snapshot) {
+                    d.dirty = true;
+                    persistDrafts(self.drafts);
+                    if (self.state.type === type) {
+                        self.updateStatus();
+                        showError('custError', 'The draft changed while saving. The saved files contain the earlier version; save again to write your latest changes.');
+                    }
+                    return;
+                }
                 d.entries = d.entries.filter(function (e) { return !(e._src && e._src.removed); });
                 d.files = outputs.map(function (o) { return o.fileName; });
                 d.dirty = false;
                 persistDrafts(self.drafts);
+                if (self.state.type !== type) return;
                 clearError('custError');
                 self.renderToolbar(); self.renderTable();
             }
@@ -1021,10 +1053,7 @@ EOCE.views.customize = (function () {
                 '<button type="button" class="btn small" id="custDownloadDismiss">Dismiss</button></div></div>';
             document.getElementById('custDownloadDone').addEventListener('click', function () {
                 var d = self.drafts[type];
-                var current = draftFiles(type, d).map(function (fileName) {
-                    var entries = d.entries.filter(function (e) { return !(e._src && e._src.removed) && targetFile(type, e) === fileName; });
-                    return { fileName: fileName, jsonText: JSON.stringify(serializeEntries(type, entries), null, 2) + '\n' };
-                });
+                var current = draftOutputs(type, d);
                 if (JSON.stringify(current) !== snapshot) {
                     showError('custError', 'The draft changed after the download. Export again to write the current entries.');
                     return;
@@ -1046,6 +1075,9 @@ EOCE.views.customize = (function () {
                 : normalizeEntry(type, { RbacSystem: TYPES[type].systems[0], EAMTierLevelName: '' });
             this.form = {
                 editIndex: editIndex, entry: entry, roleQ: '', actionQ: '', permQ: '', currentTier: null,
+                // Actions added from EAM Dashboard bookmarks (lowercased): while one of them is in the
+                // entry, the overwrite scope must be entered explicitly.
+                scopeEdited: editIndex >= 0, bookmarkedActions: {},
                 // Edited entries stay in their origin file; new entries go to the base file unless changed
                 targetFile: editIndex >= 0 ? targetFile(type, this.draft().entries[editIndex]) : TYPES[type].fileName
             };
@@ -1106,7 +1138,9 @@ EOCE.views.customize = (function () {
                     '<input class="f-input cell-mono" id="cfScopes" type="text" value="' + esc((e.RoleAssignmentScopeName || []).join(', ')) + '" placeholder="/*">';
             }
 
-            html += '<div class="section-title">&#9733; From your Review list</div><div id="cfReview"></div>';
+            html += '<div class="section-title">&#9733; From your Review list</div>' +
+                (type === 'roleaction' ? '<p class="muted f-note">Bookmarked scope/context is for reference only. For actions starred in the EAM Dashboard, explicitly enter the overwrite scope above; the source tier is not copied.</p>' : '') +
+                '<div id="cfReview"></div>';
 
             html += '<div class="section-title">New classification</div>';
             html += '<label class="f-label">Tier level (EAMTierLevelName)</label>' +
@@ -1146,6 +1180,13 @@ EOCE.views.customize = (function () {
             var e = this.form.entry;
 
             document.getElementById('cfSys').addEventListener('change', function (ev) {
+                // Role actions belong to one RBAC system: an entry saved with the actions of another
+                // system would never match.
+                if (type === 'roleaction' && e.RoleDefinitionActions.length && ev.target.value !== e.RbacSystem) {
+                    ev.target.value = e.RbacSystem;
+                    showError('cfError', 'The entry has actions of ' + sysShort(e.RbacSystem) + '. Remove them to change the RBAC system, or create a separate overwrite entry.');
+                    return;
+                }
                 e.RbacSystem = ev.target.value;
                 if (type === 'roledef') self.renderRoleResults();
                 else if (type === 'roleaction') self.renderActionResults();
@@ -1202,6 +1243,7 @@ EOCE.views.customize = (function () {
             } else {
                 document.getElementById('cfScopes').addEventListener('input', function (ev) {
                     e.RoleAssignmentScopeName = ev.target.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+                    self.form.scopeEdited = true;
                 });
                 document.getElementById('cfActionManualAdd').addEventListener('click', function () {
                     var inp = document.getElementById('cfActionManual');
@@ -1232,6 +1274,9 @@ EOCE.views.customize = (function () {
             var problems = [];
             if (type === 'roledef' && !e.RoleDefinitionId && !e.RoleDefinitionName) problems.push('RoleDefinitionId or RoleDefinitionName is required.');
             if (type === 'roleaction' && !e.RoleDefinitionActions.length) problems.push('At least one role definition action is required.');
+            if (type === 'roleaction' && this.needsExplicitScope() && !e.RoleAssignmentScopeName.length) {
+                problems.push('Enter the overwrite scope explicitly. The bookmarked assignment scope is context only.');
+            }
             if (type === 'apipermission' && !e.PermissionValue) problems.push('PermissionValue is required.');
             if (TIER_CHOICES.indexOf(e.EAMTierLevelName) === -1) problems.push('Select a tier level.');
             if (!e.Justification) problems.push('A Justification is mandatory.');
@@ -1346,7 +1391,8 @@ EOCE.views.customize = (function () {
             }).join('');
             box.querySelectorAll('[data-rm]').forEach(function (b) {
                 b.addEventListener('click', function () {
-                    self.form.entry.RoleDefinitionActions.splice(parseInt(b.getAttribute('data-rm'), 10), 1);
+                    var removed = self.form.entry.RoleDefinitionActions.splice(parseInt(b.getAttribute('data-rm'), 10), 1)[0];
+                    if (removed) delete self.form.bookmarkedActions[removed.toLowerCase()];
                     self.renderActionChips();
                 });
             });
@@ -1475,7 +1521,9 @@ EOCE.views.customize = (function () {
                 }
                 return '<div class="action-row" style="cursor:default;">' +
                     '<div style="min-width:0;"><div class="a-name">' + esc(it.name) + '</div>' +
-                    '<div class="a-cat">' + esc(it.kind) + (it.system ? ' &middot; ' + esc(it.system) : '') + (it.tier ? '' : '') + '</div></div>' +
+                    '<div class="a-cat">' + esc(it.kind) + (it.system ? ' &middot; ' + esc(it.system) : '') + '</div>' +
+                    (it.scope ? '<div class="muted cell-mono" style="overflow-wrap:anywhere;">Source scope/context: ' + esc(it.scope) + '</div>' : '') +
+                    '</div>' +
                     (it.tier ? EOCE.util.tierBadge(it.tier, { short: true }) : '') + btn + '</div>';
             }).join('');
 
@@ -1493,23 +1541,32 @@ EOCE.views.customize = (function () {
             var e = this.form.entry;
 
             if (type === 'roledef') {
+                if (res.sysKey && TYPES.roledef.systems.indexOf(res.sysKey) === -1) {
+                    showError('cfError', 'The RBAC system of "' + item.name + '" (' + res.sysKey + ') has no role definition overwrites.');
+                    return;
+                }
                 loadRolesIndex().then(function (idx) {
-                    var role = (res.sysKey && res.roleId) ? idx.byId[res.sysKey + '|' + res.roleId] : null;
-                    if (!role) {
-                        // Fallback: match by role name across supported systems.
-                        role = idx.list.filter(function (r) { return r.name.toLowerCase() === String(item.name).toLowerCase(); })[0];
+                    var found = findReviewRole(idx, res, item.name);
+                    var role = found.role;
+                    // The entry belongs to the RBAC system of the review item, also when its role isn't in the classified exports.
+                    var sysKey = role ? role.sysKey : res.sysKey;
+                    if (sysKey && TYPES.roledef.systems.indexOf(sysKey) !== -1 && e.RbacSystem !== sysKey) {
+                        e.RbacSystem = sysKey;
+                        var sysEl = document.getElementById('cfSys');
+                        if (sysEl) sysEl.value = sysKey;
                     }
                     if (role) {
-                        if (TYPES.roledef.systems.indexOf(role.sysKey) !== -1 && e.RbacSystem !== role.sysKey) {
-                            e.RbacSystem = role.sysKey;
-                            var sysEl = document.getElementById('cfSys');
-                            if (sysEl) sysEl.value = role.sysKey;
-                        }
+                        clearError('cfError');
                         self.selectRole(role);
                     } else {
                         e.RoleDefinitionName = item.name;
                         var nameEl = document.getElementById('cfRoleName');
                         if (nameEl) nameEl.value = item.name;
+                        if (!sysKey) {
+                            showError('cfError', found.ambiguous
+                                ? 'Several RBAC systems have a role named "' + item.name + '". Select its RBAC system and role.'
+                                : 'The RBAC system of "' + item.name + '" is unknown. Select it before you add the entry.');
+                        }
                     }
                 });
                 return;
@@ -1517,30 +1574,59 @@ EOCE.views.customize = (function () {
 
             // roleaction mode
             if (res.kind === 'action') {
-                if (res.sysKey && TYPES.roleaction.systems.indexOf(res.sysKey) !== -1 && e.RbacSystem !== res.sysKey) {
-                    e.RbacSystem = res.sysKey;
-                    var sysEl = document.getElementById('cfSys');
-                    if (sysEl) sysEl.value = res.sysKey;
-                    this.renderActionResults();
-                }
-                this.addAction(res.action);
+                this.addReviewActions(res.sysKey, [res.action], item);
                 return;
             }
 
             // Role on the review list: add ALL role actions of its role definition.
             loadRolesIndex().then(function (idx) {
-                var role = (res.sysKey && res.roleId) ? idx.byId[res.sysKey + '|' + res.roleId] : null;
-                if (!role) role = idx.list.filter(function (r) { return r.name.toLowerCase() === String(item.name).toLowerCase(); })[0];
-                if (!role) { showError('cfError', 'Could not resolve the role definition for "' + item.name + '" in the classified role exports.'); return; }
-                if (!role.actions.length) { showError('cfError', 'The role "' + role.name + '" has no role actions in its definition.'); return; }
-                if (TYPES.roleaction.systems.indexOf(role.sysKey) !== -1 && e.RbacSystem !== role.sysKey) {
-                    e.RbacSystem = role.sysKey;
-                    var sysEl = document.getElementById('cfSys');
-                    if (sysEl) sysEl.value = role.sysKey;
-                    self.renderActionResults();
+                var found = findReviewRole(idx, res, item.name);
+                var role = found.role;
+                if (!role) {
+                    showError('cfError', found.ambiguous
+                        ? 'Several RBAC systems have a role named "' + item.name + '". Add its actions from the role in its RBAC system.'
+                        : 'Could not resolve the role definition for "' + item.name + '"' + (res.sysKey ? ' in ' + res.sysKey : '') + ' in the classified role exports.');
+                    return;
                 }
-                role.actions.forEach(function (a) { self.addAction(a); });
+                if (!role.actions.length) { showError('cfError', 'The role "' + role.name + '" has no role actions in its definition.'); return; }
+                self.addReviewActions(role.sysKey, role.actions, item);
             });
+        },
+
+        // Shared by both Review-list imports (one starred action, or all actions of a starred role):
+        // an entry holds the actions of one RBAC system, and actions bookmarked in the EAM Dashboard
+        // need an explicit overwrite scope (their assignment scope is context only).
+        addReviewActions: function (sysKey, actions, item) {
+            var self = this;
+            var e = this.form.entry;
+            if (TYPES.roleaction.systems.indexOf(sysKey) === -1) {
+                showError('cfError', 'This Review item has no supported RBAC system. Use the appropriate overwrite tab or select the action from the primary source.');
+                return;
+            }
+            if (e.RoleDefinitionActions.length && e.RbacSystem !== sysKey) {
+                showError('cfError', 'Create a separate overwrite entry for actions from another RBAC system.');
+                return;
+            }
+            clearError('cfError');
+            if (item.app === 'EamDashboard') {
+                if (!this.form.scopeEdited) {
+                    e.RoleAssignmentScopeName = [];
+                    document.getElementById('cfScopes').value = '';
+                }
+                actions.forEach(function (a) { self.form.bookmarkedActions[String(a).toLowerCase()] = true; });
+            }
+            if (e.RbacSystem !== sysKey) {
+                e.RbacSystem = sysKey;
+                var sysEl = document.getElementById('cfSys');
+                if (sysEl) sysEl.value = sysKey;
+                this.renderActionResults();
+            }
+            actions.forEach(function (a) { self.addAction(a); });
+        },
+
+        needsExplicitScope: function () {
+            var bookmarked = this.form.bookmarkedActions;
+            return this.form.entry.RoleDefinitionActions.some(function (a) { return bookmarked[a.toLowerCase()]; });
         }
     };
 

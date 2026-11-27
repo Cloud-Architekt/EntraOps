@@ -48,6 +48,7 @@ jobs:
           ScriptType: InlineScript
           Inline: |
             Import-Module ./EntraOps
+            Write-Host "EntraOps - Version $((Get-Module -Name EntraOps).Version) on PowerShell $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
             $Config = Get-Content -LiteralPath '$(ConfigFile)' -Raw | ConvertFrom-Json -Depth 20
             if ($Config.TenantGovernanceSnapshot.EnableTenantGovernanceSnapshot -ne $true) {
               Write-Host 'Tenant Governance snapshots are disabled in the configuration.'

@@ -6,7 +6,8 @@
     Deletes EntraOps output that may contain tenant data, by content type:
 
         * PrivilegedEAM    - the Privileged EAM export folder (PrivilegedEAM/, including FailedRequests logs)
-        * Reports          - the generated report data bundles (Remove-EntraOpsReportingData); the apps are kept
+        * Reports          - the generated report data bundles and the saved finding results
+                             (Remove-EntraOpsReportingData); the apps are kept
         * Classification   - the tenant classification folders (Classification/<TenantName>/). The manually
                              maintained overwrite files (Classification_RoleActionOverwrites.json,
                              Classification_RoleDefinitionOverwrites.json, Classification_ApiPermissionOverwrites.json

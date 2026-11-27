@@ -144,6 +144,20 @@ Describe 'ServiceEM security and consistency' {
             (Get-EntraOpsServiceEMConfigValue -Path 'Roles').Count | Should -Be 2
             $null -eq (Get-EntraOpsServiceEMConfigValue -Path 'Missing') | Should -BeTrue
         }
+
+        It 'returns an empty or single-item list as list (<Type>)' -ForEach @(
+            @{ Type = 'hashtable'; Config = @{ ServiceEM = @{ Lists = @{ Empty = @(); Single = @('a') } } } }
+            @{ Type = 'PSCustomObject'; Config = [pscustomobject]@{ ServiceEM = [pscustomobject]@{ Lists = [pscustomobject]@{ Empty = @(); Single = @('a') } } } }
+        ) {
+            $Global:EntraOpsConfig = $Config
+
+            $empty = Get-EntraOpsServiceEMConfigValue -Path 'Lists.Empty'
+            $null -ne $empty | Should -BeTrue
+            $empty -is [array] | Should -BeTrue
+            $empty.Count | Should -Be 0
+            (Get-EntraOpsServiceEMConfigValue -Path 'Lists.Single') -is [array] | Should -BeTrue
+            $null -eq (Get-EntraOpsServiceEMConfigValue -Path 'Lists.Missing') | Should -BeTrue
+        }
     }
 
     Describe 'ServiceEM workload plane admin and group ownership' {
@@ -1239,9 +1253,9 @@ Describe 'ServiceEM security and consistency' {
         BeforeAll {
             . "$script:TestRepositoryRoot/EntraOps/Public/ServiceEM/New-EntraOpsServiceAZContainer.ps1"
             function New-AzResourceGroup { param($Name, $Location, $Tag) }
-            function Get-AzRoleDefinition { param($Name, $WarningAction) }
+            function Get-AzRoleDefinition { param($Name, $Id, $WarningAction) }
             function Get-AzRoleAssignment { param($Scope, $ObjectId) }
-            function New-AzRoleAssignment { param($Scope, $ResourceGroupName, $RoleDefinitionName, $ObjectId) }
+            function New-AzRoleAssignment { param($Scope, $ResourceGroupName, $RoleDefinitionName, $RoleDefinitionId, $ObjectId) }
             function Get-AzRoleEligibilitySchedule { param($Scope) }
             function Get-AzRoleEligibilityScheduleInstance { param($Scope, $Filter, $ErrorAction) }
             function Get-AzRoleManagementPolicy { param($Scope, $Name, $WarningAction) }
@@ -1253,10 +1267,17 @@ Describe 'ServiceEM security and consistency' {
 
         BeforeEach {
             $script:InheritedScope = $null
+            $script:UnknownRoleId = $null
             Mock Get-AzContext { [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = 'sub1' } } }
             Mock Get-AzResourceGroup { [pscustomobject]@{ ResourceId = '/subscriptions/sub1/resourceGroups/RG-X'; ResourceGroupName = 'RG-X' } }
             Mock New-AzResourceGroup {}
-            Mock Get-AzRoleDefinition { [pscustomobject]@{ Name = $Name; Id = "rd-$Name" } }
+            Mock Get-AzRoleDefinition {
+                if ($Id) {
+                    if ($Id -ne $script:UnknownRoleId) { [pscustomobject]@{ Name = "Role $Id"; Id = $Id } }
+                } else {
+                    [pscustomobject]@{ Name = $Name; Id = "rd-$Name" }
+                }
+            }
             Mock Get-AzRoleAssignment {}
             Mock New-AzRoleAssignment {}
             Mock Get-AzRoleEligibilitySchedule {}
@@ -1274,7 +1295,8 @@ Describe 'ServiceEM security and consistency' {
 
             Should -Invoke Get-AzResourceGroup -Times 0 -Exactly
             Should -Invoke New-AzResourceGroup -Times 0 -Exactly
-            Should -Invoke New-AzRoleAssignment -Times 1 -Exactly -ParameterFilter { $Scope -eq '/subscriptions/sub1' -and $ObjectId -eq 'id:SG-Sub-X-WorkloadPlane-Admins' }
+            Should -Invoke New-AzRoleAssignment -Times 1 -Exactly
+            Should -Invoke New-AzRoleAssignment -Times 1 -Exactly -ParameterFilter { $Scope -eq '/subscriptions/sub1' -and $ObjectId -eq 'id:SG-Sub-X-WorkloadPlane-Admins' -and $RoleDefinitionId -eq 'acdd72a7-3385-48ef-bd42-f606fba81ae7' }
             Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 4 -Exactly -ParameterFilter { $Scope -eq '/subscriptions/sub1' }
             Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly -ParameterFilter { $PrincipalId -eq 'id:SG-Sub-X-WorkloadPlane-Admins' -and $RoleDefinitionId -like '*rd-Contributor' }
             Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter { $PrincipalId -eq 'id:SG-Sub-X-WorkloadPlane-Admins' -and $RoleDefinitionId -like '*rd-Role Based Access Control Administrator' }
@@ -1328,6 +1350,121 @@ Describe 'ServiceEM security and consistency' {
             foreach ($attribute in '@Request', '@Resource') {
                 $script:MgmtCondition | Should -BeLike "*$attribute[[]Microsoft.Authorization/roleAssignments:RoleDefinitionId[]] ForAnyOfAllValues:GuidNotEquals {$excluded}*"
                 $script:MgmtCondition | Should -BeLike "*$attribute[[]Microsoft.Authorization/roleAssignments:PrincipalId[]] ForAnyOfAnyValues:GuidEquals {id:SG-Sub-X-WorkloadPlane-Admins}*"
+            }
+        }
+
+        Context 'WorkloadPlane-Admins role configuration' {
+            BeforeAll {
+                $script:ReaderId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
+                $script:ContributorId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
+                $script:WebsiteContributorId = 'de139f84-1756-47ae-9be6-808fbbe84772'
+                $script:WpAdminsId = 'id:SG-Sub-X-WorkloadPlane-Admins'
+                $script:InvokeContainer = {
+                    New-EntraOpsServiceAZContainer -ServiceName 'Sub-X' -ServiceGroups $script:Groups -AzureScope Subscription -WarningAction SilentlyContinue 6>$null | Out-Null
+                }
+            }
+
+            AfterEach {
+                $Global:EntraOpsConfig = $null
+            }
+
+            It 'assigns the configured permanent and eligible roles' {
+                $Global:EntraOpsConfig = @{ ServiceEM = @{ WorkloadPlaneAdminRoles = @{
+                            PermanentRoleDefinitionIds = @($script:ReaderId, $script:WebsiteContributorId.ToUpperInvariant())
+                            EligibleRoleDefinitionIds  = @("{$($script:ContributorId)}")
+                        } } }
+
+                & $script:InvokeContainer
+
+                Should -Invoke New-AzRoleAssignment -Times 2 -Exactly
+                Should -Invoke New-AzRoleAssignment -Times 1 -Exactly -ParameterFilter { $ObjectId -eq $script:WpAdminsId -and $RoleDefinitionId -eq $script:ReaderId }
+                Should -Invoke New-AzRoleAssignment -Times 1 -Exactly -ParameterFilter { $ObjectId -eq $script:WpAdminsId -and $RoleDefinitionId -eq $script:WebsiteContributorId }
+                Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter {
+                    $PrincipalId -eq $script:WpAdminsId -and $RoleDefinitionId -like "*/$($script:ContributorId)" -and $Scope -eq '/subscriptions/sub1' -and -not $Condition
+                }
+                Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter { $PrincipalId -eq $script:WpAdminsId -and $RoleDefinitionId -like '*rd-Role Based Access Control Administrator' }
+            }
+
+            It 'assigns no permanent role with an empty permanent list' {
+                $Global:EntraOpsConfig = @{ ServiceEM = @{ WorkloadPlaneAdminRoles = @{ PermanentRoleDefinitionIds = @(); EligibleRoleDefinitionIds = @($script:ReaderId) } } }
+
+                & $script:InvokeContainer
+
+                Should -Invoke New-AzRoleAssignment -Times 0 -Exactly
+                Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter { $PrincipalId -eq $script:WpAdminsId -and $RoleDefinitionId -like "*/$($script:ReaderId)" }
+            }
+
+            It 'keeps permanent Reader as default when only the eligible list is configured' {
+                $Global:EntraOpsConfig = [pscustomobject]@{ ServiceEM = [pscustomobject]@{ WorkloadPlaneAdminRoles = [pscustomobject]@{ EligibleRoleDefinitionIds = @($script:WebsiteContributorId) } } }
+
+                & $script:InvokeContainer
+
+                Should -Invoke New-AzRoleAssignment -Times 1 -Exactly -ParameterFilter { $RoleDefinitionId -eq $script:ReaderId }
+                Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter { $PrincipalId -eq $script:WpAdminsId -and $RoleDefinitionId -like "*/$($script:WebsiteContributorId)" }
+            }
+
+            It 'skips roles that are already assigned or eligible' {
+                $Global:EntraOpsConfig = @{ ServiceEM = @{ WorkloadPlaneAdminRoles = @{ PermanentRoleDefinitionIds = @($script:ReaderId); EligibleRoleDefinitionIds = @($script:ContributorId, $script:WebsiteContributorId) } } }
+                Mock Get-AzRoleAssignment { [pscustomobject]@{ ObjectId = $script:WpAdminsId; RoleDefinitionId = $script:ReaderId } }
+                Mock Get-AzRoleEligibilitySchedule {
+                    [pscustomobject]@{ RoleDefinitionDisplayName = 'Contributor'; RoleDefinitionId = "/subscriptions/sub1/providers/Microsoft.Authorization/roleDefinitions/$($script:ContributorId)"; PrincipalId = $script:WpAdminsId; Scope = '/subscriptions/sub1' }
+                    [pscustomobject]@{ RoleDefinitionDisplayName = 'Website Contributor'; RoleDefinitionId = "/subscriptions/sub1/providers/Microsoft.Authorization/roleDefinitions/$($script:WebsiteContributorId)"; PrincipalId = 'another-group'; Scope = '/subscriptions/sub1' }
+                }
+
+                & $script:InvokeContainer
+
+                Should -Invoke New-AzRoleAssignment -Times 0 -Exactly
+                Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly -ParameterFilter { $PrincipalId -eq $script:WpAdminsId -and $RoleDefinitionId -like "*/$($script:ContributorId)" }
+                Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 1 -Exactly -ParameterFilter { $PrincipalId -eq $script:WpAdminsId -and $RoleDefinitionId -like "*/$($script:WebsiteContributorId)" }
+            }
+
+            It 'rejects <Role> in the <List> list before assigning anything' -ForEach @(
+                @{ Role = 'Owner'; List = 'Permanent'; RoleId = '8E3AF657-A8FF-443C-A75C-2FE8C4BCB635'; Expected = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635' }
+                @{ Role = 'User Access Administrator'; List = 'Eligible'; RoleId = '{18d7d88d-d35e-4fb5-a5c3-7773c20a72d9}'; Expected = '18d7d88d-d35e-4fb5-a5c3-7773c20a72d9' }
+                @{ Role = 'Role Based Access Control Administrator'; List = 'Eligible'; RoleId = 'f58310d9a9f6439a9e8df62e7b41a168'; Expected = 'f58310d9-a9f6-439a-9e8d-f62e7b41a168' }
+            ) {
+                $Global:EntraOpsConfig = @{ ServiceEM = @{ WorkloadPlaneAdminRoles = @{ "${List}RoleDefinitionIds" = @($RoleId) } } }
+
+                { & $script:InvokeContainer } | Should -Throw "*WorkloadPlaneAdminRoles.${List}RoleDefinitionIds must not contain*$Expected*"
+
+                Should -Invoke New-AzRoleAssignment -Times 0 -Exactly
+                Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly
+            }
+
+            It 'rejects an invalid GUID' {
+                $Global:EntraOpsConfig = @{ ServiceEM = @{ WorkloadPlaneAdminRoles = @{ EligibleRoleDefinitionIds = @('Contributor') } } }
+
+                { & $script:InvokeContainer } | Should -Throw '*WorkloadPlaneAdminRoles.EligibleRoleDefinitionIds contains invalid GUIDs: Contributor*'
+
+                Should -Invoke New-AzRoleAssignment -Times 0 -Exactly
+            }
+
+            It 'rejects a role that is permanent and eligible' {
+                $Global:EntraOpsConfig = @{ ServiceEM = @{ WorkloadPlaneAdminRoles = @{ PermanentRoleDefinitionIds = @($script:ReaderId); EligibleRoleDefinitionIds = @($script:ReaderId.ToUpperInvariant()) } } }
+
+                { & $script:InvokeContainer } | Should -Throw "*same role as permanent and eligible*$($script:ReaderId)*"
+
+                Should -Invoke New-AzRoleAssignment -Times 0 -Exactly
+            }
+
+            It 'rejects a role definition that does not exist before assigning anything' {
+                $script:UnknownRoleId = $script:WebsiteContributorId
+                $Global:EntraOpsConfig = @{ ServiceEM = @{ WorkloadPlaneAdminRoles = @{ EligibleRoleDefinitionIds = @($script:WebsiteContributorId) } } }
+
+                { & $script:InvokeContainer } | Should -Throw "*Role definition $($script:WebsiteContributorId)*wasn't found*"
+
+                Should -Invoke New-AzRoleAssignment -Times 0 -Exactly
+                Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly
+            }
+
+            It 'assigns no role without WorkloadPlane-Admins' {
+                $Global:EntraOpsConfig = @{ ServiceEM = @{ WorkloadPlaneAdminRoles = @{ EligibleRoleDefinitionIds = @($script:ContributorId) } } }
+                $groups = @($script:Groups | Where-Object DisplayName -notlike '*-WorkloadPlane-Admins')
+
+                New-EntraOpsServiceAZContainer -ServiceName 'Sub-X' -ServiceGroups $groups -AzureScope Subscription -WarningAction SilentlyContinue 6>$null | Out-Null
+
+                Should -Invoke New-AzRoleAssignment -Times 0 -Exactly
+                Should -Invoke New-AzRoleEligibilityScheduleRequest -Times 0 -Exactly -ParameterFilter { $RoleDefinitionId -like "*/$($script:ContributorId)" }
             }
         }
 
@@ -2661,7 +2798,9 @@ Describe 'ServiceEM security and consistency' {
             $result = Set-EntraOpsServiceEMWorkloadClassification -ServiceGroups $script:WorkloadGroups -ServiceName 'Rg-X' 6>$null
 
             @($script:AuPosts | Sort-Object) | Should -Be @("$($script:AuWorkload)|wa", "$($script:AuUsers)|wu")
+            ($result | Where-Object Id -EQ 'wa').AdminTierLevelName | Should -Be 'ManagementPlane'
             ($result | Where-Object Id -EQ 'wu').AdminTierLevelName | Should -Be 'UserAccess'
+            ($result | Where-Object Id -EQ 'wa').AdministrativeUnitId | Should -Be $script:AuWorkload
         }
 
         It 'warns and skips role-assignable or PIM-managed groups for a restricted management administrative unit' {
@@ -2687,7 +2826,8 @@ Describe 'ServiceEM security and consistency' {
             $warnings = @(Set-EntraOpsServiceEMWorkloadClassification -ServiceGroups $groups -ServiceName 'Rg-X' 3>&1 6>$null | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
 
             $entries = Get-Content $filePath -Raw | ConvertFrom-Json
-            ($entries | Where-Object ObjectId -EQ $groups[0].Id).AdminTierLevelName | Should -Be 'WorkloadPlane'
+            # WorkloadPlane-Admins are classified ManagementPlane; the existing entry of WorkloadPlane-Users keeps its tier
+            ($entries | Where-Object ObjectId -EQ $groups[0].Id).AdminTierLevelName | Should -Be 'ManagementPlane'
             ($entries | Where-Object ObjectId -EQ $groups[1].Id).AdminTierLevelName | Should -Be 'WorkloadPlane'
             @($entries).Count | Should -Be 2
             @($warnings | Where-Object { "$_" -like '*already lists*kept*' }).Count | Should -Be 1

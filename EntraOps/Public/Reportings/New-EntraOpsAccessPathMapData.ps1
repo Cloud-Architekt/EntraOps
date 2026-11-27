@@ -47,7 +47,7 @@
     node, matching the BloodHound export. Defaults to the ObjectTenantId found in the export.
 
 .PARAMETER RepoRoot
-    Path to the EntraOps repository root that contains the PrivilegedEAM export folder.
+    Path to the EntraOps repository root that contains the PrivilegedEAM export folder (alias: -Path).
     Defaults to the repository this module lives in.
 
 .PARAMETER ImportPath
@@ -94,6 +94,8 @@ function New-EntraOpsAccessPathMapData {
         [System.String]$TenantId,
 
         [Parameter(Mandatory = $false)]
+
+        [Alias('Path')]
         [System.String]$RepoRoot,
 
         [Parameter(Mandatory = $false)]
@@ -131,7 +133,7 @@ function New-EntraOpsAccessPathMapData {
     if ([string]::IsNullOrWhiteSpace($OutFile)) { $OutFile = Join-Path $AppRoot 'data/access-path-map-data.js' }
 
     if (-not (Test-Path -LiteralPath $ImportPath)) {
-        throw "Privileged EAM import path not found: $ImportPath. Run Save-EntraOpsPrivilegedEAMJson first or pass -ImportPath."
+        throw "Privileged EAM import path not found: $ImportPath. Run Invoke-EntraOpsPrivilegedEAM (or Save-EntraOpsPrivilegedEAMJson) first or pass -ImportPath."
     }
 
     # Config-driven default: EntraOpsConfig.json "AccessPathMap.ResolveObjectIdsOutsidePrivilegedEAM"

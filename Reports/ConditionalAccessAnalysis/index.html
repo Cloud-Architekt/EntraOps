@@ -13,6 +13,7 @@
     <script src="../shared/theme.js"></script>
     <link rel="stylesheet" href="css/styles.css" />
     <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="../shared/filters.css" />
 </head>
 
 <body>
@@ -47,6 +48,8 @@
                     Assets</span></a>
             <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html"><span
                     class="ico">&#9636;</span><span>Overview</span></a>
+            <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html?view=findings"><span
+                    class="ico">&#9873;</span><span>Findings</span></a>
             <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html?view=classification"><span
                     class="ico">&#9998;</span><span>Object Classification</span></a>
             <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
@@ -121,74 +124,47 @@
                             clear.</span>
                     </div>
                     <div class="card-pad">
-                        <div class="eam-filter-row" style="margin-bottom:10px;">
-                            <div class="eam-filter">
-                                <label for="caSnapshot">Snapshot</label>
-                                <select id="caSnapshot"></select>
+                        <div class="eo-searchbar">
+                            <label class="eo-search">
+                                <svg class="eo-search-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 1a5.5 5.5 0 0 1 4.38 8.83l3.65 3.64a.75.75 0 0 1-1.06 1.06l-3.64-3.65A5.5 5.5 0 1 1 6.5 1Zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg>
+                                <input type="search" id="caFltSearch" aria-label="Search policies"
+                                    placeholder="Search policy, user, group, role, app, location&hellip;" autocomplete="off" />
+                            </label>
+                            <label class="eo-select">Snapshot<select id="caSnapshot"></select></label>
+                            <button class="btn small" type="button" id="caResetFilters">Reset filters</button>
+                            <button class="btn small" type="button" id="caExportFiltered">Export CSV + JSON</button>
+                        </div>
+                        <div class="eo-searchbar ca-select-bar">
+                            <label class="eo-select">Assignment<select id="caFltAssignment"></select></label>
+                            <label class="eo-select">Target resource<select id="caFltTarget"></select></label>
+                            <label class="eo-select">Network<select id="caFltNetwork"></select></label>
+                            <label class="eo-select">Condition<select id="caFltCondition"></select></label>
+                        </div>
+                        <div class="eo-facets" id="caFacets">
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="caStateLabel">Policy state</span>
+                                <div class="eo-pills" id="caStateToggles" role="group" aria-labelledby="caStateLabel"></div>
                             </div>
-                            <div class="eam-filter">
-                                <label>Policy state</label>
-                                <div class="ca-toggle-row" id="caStateToggles"></div>
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="caGrantLabel">Grant control</span>
+                                <div class="eo-pills" id="caGrantPills" role="group" aria-labelledby="caGrantLabel"></div>
                             </div>
-                            <div class="eam-filter">
-                                <label for="caFltGrant">Grant control</label>
-                                <select id="caFltGrant"></select>
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="caClientAppLabel">Client app type</span>
+                                <div class="eo-pills" id="caClientAppPills" role="group" aria-labelledby="caClientAppLabel"></div>
                             </div>
-                            <div class="eam-filter">
-                                <label for="caFltClientApp">Client app type</label>
-                                <select id="caFltClientApp"></select>
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="caAssignmentTierLabel">Access level</span>
+                                <div class="eo-pills" id="caAssignmentTierPills" role="group" aria-labelledby="caAssignmentTierLabel"></div>
+                            </div>
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="caColumnsLabel">Columns</span>
+                                <div class="eo-pills" id="caColToggles" role="group" aria-labelledby="caColumnsLabel"></div>
                             </div>
                         </div>
-                        <div class="eam-filter-row" style="margin-bottom:10px;">
-                            <div class="eam-filter">
-                                <label for="caFltAssignment">Assignment</label>
-                                <select id="caFltAssignment"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="caFltAssignmentTier">Assignment access level</label>
-                                <select id="caFltAssignmentTier">
-                                    <option value="">All levels</option>
-                                    <option value="ControlPlane">Control Plane</option>
-                                    <option value="ManagementPlane">Management Plane</option>
-                                    <option value="UserAccess">User Access</option>
-                                </select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="caFltTarget">Target resource</label>
-                                <select id="caFltTarget"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="caFltNetwork">Network</label>
-                                <select id="caFltNetwork"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="caFltCondition">Condition</label>
-                                <select id="caFltCondition"></select>
-                            </div>
-                        </div>
-                        <div class="eam-filter-row" style="margin-bottom:10px;">
-                            <div class="eam-filter grow">
-                                <label for="caFltSearch">Search</label>
-                                <div class="search">
-                                    <span class="search-ico">&#128269;</span>
-                                    <input type="text" id="caFltSearch"
-                                        placeholder="Policy, user, group, role, app, location&hellip;" />
-                                </div>
-                            </div>
-                        </div>
-                        <div class="eam-filter-row" style="margin-bottom:6px;">
-                            <div class="eam-filter grow">
-                                <label>Columns</label>
-                                <div class="ca-toggle-row" id="caColToggles"></div>
-                            </div>
-                            <div class="eam-filter" style="align-self:flex-end;">
-                                <button class="btn small hidden" id="caClearTrace">Clear node trace</button>
-                            </div>
-                        </div>
-                        <div class="eam-filter-row" style="margin-bottom:10px;align-items:flex-end;">
-                            <div class="eam-filter grow"><span class="muted" id="caFreshness"></span><span class="muted" id="caFilterSummary"></span></div>
-                            <div class="eam-filter"><button class="btn small" type="button" id="caResetFilters">Reset filters</button></div>
-                            <div class="eam-filter"><button class="btn small" type="button" id="caExportFiltered">Export CSV + JSON</button></div>
+                        <div class="ca-flow-status">
+                            <span class="muted"><span id="caFreshness"></span><span id="caFilterSummary"></span></span>
+                            <button class="btn small hidden" type="button" id="caClearTrace">Clear node trace</button>
                         </div>
                         <div class="legend" style="margin-bottom:6px;">
                             <span class="item"><span class="swatch" style="background:#a4262c;"></span>Block</span>
@@ -239,6 +215,7 @@
     <script src="assets/vendor/d3-sankey.min.js"></script>
     <script src="js/navCollapse.js"></script>
     <script src="../shared/object-inspector.js"></script>
+    <script src="../shared/filters.js"></script>
     <script src="js/app.js"></script>
 </body>
 

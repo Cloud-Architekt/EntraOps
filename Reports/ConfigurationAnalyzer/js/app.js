@@ -14,7 +14,7 @@
     "use strict";
 
     function configurationView() {
-        if (/^#resource=/.test(location.hash)) return "resources";
+        if (/^#(resource|object)=/.test(location.hash)) return "resources";
         var requested = new URLSearchParams(location.search).get("view");
         return requested === "resources" || requested === "privileged" ? requested : "configuration";
     }
@@ -50,7 +50,8 @@
 
     // ---- Diff two snapshots ----------------------------------------------------------
     function diffSnapshots(base, cur, typeFilter) {
-        var baseMap = {}, curMap = {};
+        // Resource paths as keys: maps without prototype.
+        var baseMap = Object.create(null), curMap = Object.create(null);
         base.resources.forEach(function (r) { if (!typeFilter || r.type === typeFilter) baseMap[r.p] = r; });
         cur.resources.forEach(function (r) { if (!typeFilter || r.type === typeFilter) curMap[r.p] = r; });
         var added = [], removed = [], modified = [];
@@ -78,13 +79,44 @@
         timelineView: "recent",
         selectedIdx: snapshots.length > 1 ? snapshots.length - 1 : -1,
         // Row-level filters applied inside renderChangeList (after diffSnapshots), shared
-        // by both the "Snapshot changes" and "Compare two snapshots" sections.
+        // by both the "Snapshot changes" and "Compare two snapshots" sections. statusFilter is a
+        // multi-select facet of pills ([] = all); tierFilter a single-select one ("" = all,
+        // PRIVILEGED_ANY = any access tier).
         categoryFilter: "",
-        statusFilter: new Set(["added", "modified", "removed"]),
-        privilegedOnly: false,
+        statusFilter: [],
         tierFilter: "",
         classificationFilter: ""
     };
+    var CHANGE_STATUSES = ["added", "modified", "removed"];
+    var STATUS_LABELS = { added: "Added", modified: "Modified", removed: "Removed" };
+    var PRIVILEGED_ANY = "__privileged";
+    var TIER_LABELS = { ControlPlane: "Control Plane", ManagementPlane: "Management Plane", WorkloadPlane: "Workload Plane", UserAccess: "User Access", Unclassified: "Unclassified" };
+
+    // Pills of the access tier facet: all, any privileged asset, then the tiers found (in tier order).
+    function tierFacetPills(facetState, facet, tierNames, total, counts) {
+        var tiers = TIER_ORDER.filter(function (tier) { return tierNames[tier] || facetState[facet] === tier; })
+            .concat(Object.keys(tierNames).filter(function (tier) { return TIER_ORDER.indexOf(tier) === -1; }).sort());
+        return EntraOpsFilters.pill(facetState, facet, "", "All", total) +
+            EntraOpsFilters.pill(facetState, facet, PRIVILEGED_ANY, "Privileged assets", counts[PRIVILEGED_ANY] || 0, { title: "Resources that reference an identity of any access tier" }) +
+            tiers.map(function (tier) { return EntraOpsFilters.tierPill(facetState, facet, tier, TIER_LABELS[tier] || tier, counts[tier] || 0); }).join("");
+    }
+
+    // The values of a resource for the access tier facet: any privileged asset plus its tiers.
+    function tierFacetValues(privileged) {
+        return privileged ? [PRIVILEGED_ANY].concat(Array.from(privileged.tierNames)) : [];
+    }
+
+    function tierFilterMatches(filter, privileged) {
+        if (!filter) return true;
+        if (!privileged) return false;
+        return filter === PRIVILEGED_ANY || privileged.tierNames.has(filter);
+    }
+
+    function selectOptions(allLabel, values, selected) {
+        return '<option value="">' + esc(allLabel) + "</option>" + values.map(function (value) {
+            return '<option value="' + esc(value) + '"' + (value === selected ? " selected" : "") + ">" + esc(value) + "</option>";
+        }).join("");
+    }
 
     function changesAt(idx, typeFilter) {
         if (idx <= 0 || idx >= snapshots.length) return null;
@@ -307,17 +339,28 @@
         return { diff: diff, allRows: allRows };
     }
 
-    function changeRowMatchesFilters(row) {
-        if (!state.statusFilter.has(row.status)) return false;
-        if (state.categoryFilter && (row.r.category || "(none)") !== state.categoryFilter) return false;
-        if (state.privilegedOnly && !row.privileged) return false;
-        if (state.tierFilter && (!row.privileged || !row.privileged.tierNames.has(state.tierFilter))) return false;
-        if (state.classificationFilter && (!row.privileged || !row.privileged.services.has(state.classificationFilter))) return false;
+    // The change filters (change status, category, access tier, classification) of each change list: "Snapshot
+    // changes" keeps them in state, "Compare two snapshots" in its own object, so a filter set in one section never
+    // filters (or exports) the other one. The resource type filter stays shared (it filters the whole page).
+    var compareFilterState = { categoryFilter: "", statusFilter: [], tierFilter: "", classificationFilter: "" };
+    function changeFilterState(container) {
+        return container && container.id === "cmpResult" ? compareFilterState : state;
+    }
+
+    // skip leaves out one facet, for the counts of its pills; fs is the filter state of the list (default: Snapshot changes).
+    function changeRowMatchesFilters(row, skip, fs) {
+        fs = fs || state;
+        if (skip !== "statusFilter" && !EntraOpsFilters.matchesFacet(fs, "statusFilter", row.status)) return false;
+        if (fs.categoryFilter && (row.r.category || "(none)") !== fs.categoryFilter) return false;
+        if (skip !== "tierFilter" && !tierFilterMatches(fs.tierFilter, row.privileged)) return false;
+        if (fs.classificationFilter && (!row.privileged || !row.privileged.services.has(fs.classificationFilter))) return false;
         return true;
     }
 
     function renderChangeList(base, cur, container) {
         var typeFilter = state.typeFilter;
+        var fs = changeFilterState(container);
+        function matches(row, skip) { return changeRowMatchesFilters(row, skip, fs); }
         var built = buildChangeRows(base, cur);
         var diff = built.diff;
         var allRows = built.allRows;
@@ -335,48 +378,36 @@
             row.privileged.tierNames.forEach(function (t) { tierNames[t] = true; });
             row.privileged.services.forEach(function (s) { services[s] = true; });
         });
-        if (state.categoryFilter && Object.keys(categories).indexOf(state.categoryFilter) === -1) state.categoryFilter = "";
-        if (state.tierFilter && Object.keys(tierNames).indexOf(state.tierFilter) === -1) state.tierFilter = "";
-        if (state.classificationFilter && Object.keys(services).indexOf(state.classificationFilter) === -1) state.classificationFilter = "";
+        if (fs.categoryFilter && Object.keys(categories).indexOf(fs.categoryFilter) === -1) fs.categoryFilter = "";
+        if (fs.tierFilter && fs.tierFilter !== PRIVILEGED_ANY && Object.keys(tierNames).indexOf(fs.tierFilter) === -1) fs.tierFilter = "";
+        if (fs.classificationFilter && Object.keys(services).indexOf(fs.classificationFilter) === -1) fs.classificationFilter = "";
 
-        var rows = allRows.filter(changeRowMatchesFilters);
-        var filtersActive = state.categoryFilter || state.privilegedOnly || state.tierFilter || state.classificationFilter || state.statusFilter.size < 3;
+        var rows = allRows.filter(function (row) { return matches(row); });
+        var filtersActive = fs.categoryFilter || fs.tierFilter || fs.classificationFilter || fs.statusFilter.length;
+        var statusFacet = EntraOpsFilters.facetCounts(allRows, "statusFilter", matches, function (row) { return row.status; });
+        var tierFacet = EntraOpsFilters.facetCounts(allRows, "tierFilter", matches, function (row) { return tierFacetValues(row.privileged); });
 
-        var html = "";
-        html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">';
-        ["added", "modified", "removed"].forEach(function (s) {
-            html += '<span class="status-chip ' + s + '" data-status-toggle="' + s + '" style="cursor:pointer;' +
-                (state.statusFilter.has(s) ? "" : "opacity:.4;") + '" title="Click to show/hide ' + s + ' changes">' +
-                diff[s].length + " " + s + "</span>";
-        });
-        html += '<span class="chip">' + cur.resources.length.toLocaleString() + " resources in current snapshot</span>";
-        html += "</div>";
-
-        html += '<div class="eam-filter-row" style="margin-bottom:6px;">';
-        html += '<div class="eam-filter"><label>Category</label><select data-flt="category"><option value="">All categories</option>';
-        Object.keys(categories).sort().forEach(function (c) {
-            html += '<option value="' + esc(c) + '"' + (c === state.categoryFilter ? " selected" : "") + ">" + esc(c) + "</option>";
-        });
-        html += "</select></div>";
+        var html = '<div class="eo-searchbar">';
+        html += '<label class="eo-select">Category<select data-flt="category">' + selectOptions("All categories", Object.keys(categories).sort(), fs.categoryFilter) + "</select></label>";
         if (objectTierIndex.size) {
-            html += '<div class="eam-filter"><label>&nbsp;</label><span class="ca-toggle' + (state.privilegedOnly ? " on" : "") + '" data-flt="privilegedOnly">Privileged assets only</span></div>';
-            html += '<div class="eam-filter"><label>Access tier</label><select data-flt="tier"><option value="">All tiers</option>';
-            Object.keys(tierNames).sort().forEach(function (t) {
-                html += '<option value="' + esc(t) + '"' + (t === state.tierFilter ? " selected" : "") + ">" + esc(t) + "</option>";
-            });
-            html += "</select></div>";
-            html += '<div class="eam-filter"><label>Classification</label><select data-flt="classification"><option value="">All classifications</option>';
-            Object.keys(services).sort().forEach(function (s) {
-                html += '<option value="' + esc(s) + '"' + (s === state.classificationFilter ? " selected" : "") + ">" + esc(s) + "</option>";
-            });
-            html += "</select></div>";
-        } else {
-            html += '<div class="eam-filter grow"><label>&nbsp;</label><span class="muted" style="font-size:12px;">Generate <code>Reports/EamDashboard/data/eam-dashboard-data.js</code> (New-EntraOpsPrivilegedEamDashboardData) to filter by privileged asset / access tier / classification.</span></div>';
+            html += '<label class="eo-select">Classification<select data-flt="classification">' + selectOptions("All classifications", Object.keys(services).sort(), fs.classificationFilter) + "</select></label>";
         }
-        if (filtersActive) {
-            html += '<div class="eam-filter" style="align-self:flex-end;"><button class="btn small" data-flt="clear">Clear filters</button></div>';
-        }
+        html += '<span class="chip ca-bar-end">' + cur.resources.length.toLocaleString() + " resources in current snapshot</span>";
+        html += '<button type="button" class="btn small" data-flt="clear"' + (filtersActive ? "" : " disabled") + ">Clear filters</button>";
         html += "</div>";
+
+        html += '<div class="eo-facets" data-change-facets>';
+        html += '<div class="eo-facet-row"><span class="eo-facet-label">Change</span><div class="eo-pills" role="group" aria-label="Change">' +
+            EntraOpsFilters.pill(fs, "statusFilter", "", "All", statusFacet.total, { multi: true }) + CHANGE_STATUSES.map(function (status) {
+                return EntraOpsFilters.pill(fs, "statusFilter", status, STATUS_LABELS[status], statusFacet.counts[status] || 0, { multi: true, prefix: '<span class="ca-status-dot ' + status + '" aria-hidden="true"></span>' });
+            }).join("") + "</div></div>";
+        html += '<div class="eo-facet-row"><span class="eo-facet-label">Access tier</span>';
+        if (objectTierIndex.size) {
+            html += '<div class="eo-pills" role="group" aria-label="Access tier">' + tierFacetPills(fs, "tierFilter", tierNames, tierFacet.total, tierFacet.counts) + "</div>";
+        } else {
+            html += '<span class="eo-facet-note">Generate <code>Reports/EamDashboard/data/eam-dashboard-data.js</code> (New-EntraOpsPrivilegedEamDashboardData) to filter by privileged asset / access tier / classification.</span>';
+        }
+        html += "</div></div>";
 
         if (filtersActive) {
             html += '<p class="muted" style="font-size:12px;margin-bottom:8px;">Showing ' + rows.length.toLocaleString() + " of " + allRows.length.toLocaleString() + " change(s).</p>";
@@ -422,23 +453,24 @@
         wireChangeListFilters(container, base, cur);
     }
 
-    // Wires the filter row + clickable status/type/category values rendered by
+    // Wires the filter bar, the pills + clickable status/type/category values rendered by
     // renderChangeList. Re-invokes renderChangeList (closing over base/cur/container) after
     // any filter change, so this section always reflects the shared filter state.
     function wireChangeListFilters(container, base, cur) {
-        container.querySelectorAll("[data-status-toggle]").forEach(function (el) {
-            el.addEventListener("click", function () {
-                var s = el.getAttribute("data-status-toggle");
-                if (state.statusFilter.has(s)) state.statusFilter.delete(s); else state.statusFilter.add(s);
-                renderChangeList(base, cur, container);
-            });
-        });
+        var fs = changeFilterState(container);
+        function rerender() { renderChangeList(base, cur, container); }
+        // The pills are bound once per list container (it outlives the renders, so bindPills can
+        // restore the focus) and re-render the snapshots of its latest render.
+        container.__changeListRender = rerender;
+        if (!container.__changeListPills) {
+            container.__changeListPills = true;
+            EntraOpsFilters.bindPills(container, fs, function () { container.__changeListRender(); });
+        }
         container.querySelectorAll("[data-status-flt]").forEach(function (el) {
             el.addEventListener("click", function (ev) {
                 ev.stopPropagation();
-                var s = el.getAttribute("data-status-flt");
-                state.statusFilter = new Set([s]);
-                renderChangeList(base, cur, container);
+                fs.statusFilter = [el.getAttribute("data-status-flt")];
+                rerender();
             });
         });
         container.querySelectorAll("[data-type-flt]").forEach(function (el) {
@@ -452,29 +484,24 @@
                 renderTypeFilter();
                 renderTimeline();
                 renderAllSnapshotResources();
-                renderChangeList(base, cur, container);
+                rerender();
             });
         });
         container.querySelectorAll("[data-cat-flt]").forEach(function (el) {
             el.addEventListener("click", function (ev) {
                 ev.stopPropagation();
-                state.categoryFilter = el.getAttribute("data-cat-flt");
-                renderChangeList(base, cur, container);
+                fs.categoryFilter = el.getAttribute("data-cat-flt");
+                rerender();
             });
         });
         var catSel = container.querySelector('select[data-flt="category"]');
-        if (catSel) catSel.addEventListener("change", function () { state.categoryFilter = this.value; renderChangeList(base, cur, container); });
-        var tierSel = container.querySelector('select[data-flt="tier"]');
-        if (tierSel) tierSel.addEventListener("change", function () { state.tierFilter = this.value; renderChangeList(base, cur, container); });
+        if (catSel) catSel.addEventListener("change", function () { fs.categoryFilter = this.value; rerender(); });
         var classSel = container.querySelector('select[data-flt="classification"]');
-        if (classSel) classSel.addEventListener("change", function () { state.classificationFilter = this.value; renderChangeList(base, cur, container); });
-        var privToggle = container.querySelector('[data-flt="privilegedOnly"]');
-        if (privToggle) privToggle.addEventListener("click", function () { state.privilegedOnly = !state.privilegedOnly; renderChangeList(base, cur, container); });
+        if (classSel) classSel.addEventListener("change", function () { fs.classificationFilter = this.value; rerender(); });
         var clearBtn = container.querySelector('[data-flt="clear"]');
         if (clearBtn) clearBtn.addEventListener("click", function () {
-            state.categoryFilter = ""; state.privilegedOnly = false; state.tierFilter = ""; state.classificationFilter = "";
-            state.statusFilter = new Set(["added", "modified", "removed"]);
-            renderChangeList(base, cur, container);
+            fs.categoryFilter = ""; fs.tierFilter = ""; fs.classificationFilter = ""; fs.statusFilter = [];
+            rerender();
         });
     }
 
@@ -662,11 +689,11 @@
         $("secChanges").scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
-    function exportChangeRows(base, current) {
+    function exportChangeRows(base, current, fs) {
         if (!base || !current) return [];
         // Same row pipeline and filter predicate as renderChangeList - exports exactly the
-        // rows the table currently displays.
-        return buildChangeRows(base, current).allRows.filter(changeRowMatchesFilters).map(function (row) {
+        // rows the table of the section currently displays (fs: the filters of that section).
+        return buildChangeRows(base, current).allRows.filter(function (row) { return changeRowMatchesFilters(row, null, fs); }).map(function (row) {
             return { baseline: snapshotLabel(base, snapshots.indexOf(base)), current: snapshotLabel(current, snapshots.indexOf(current)), status: row.status, resourceType: row.r.type, category: row.r.category || "", name: row.r.name, path: row.r.p, privilegedTiers: row.privileged ? Array.from(row.privileged.tierNames).join("; ") : "", classifications: row.privileged ? Array.from(row.privileged.services).join("; ") : "" };
         });
     }
@@ -686,9 +713,10 @@
     // =====================================================================================
     // Snapshot Resources
     // =====================================================================================
+    // changeMode and tierFilter are facets of pills: "" = all current resources / all tiers.
     var asrState = {
-        snapshotIdx: -1, type: "", category: "", changeMode: "all", search: "", selectedPath: "",
-        baselineIdx: -1, currentIdx: -1, privilegedOnly: false, tierFilter: "", classificationFilter: "",
+        snapshotIdx: -1, type: "", category: "", changeMode: "", search: "", selectedPath: "",
+        baselineIdx: -1, currentIdx: -1, tierFilter: "", classificationFilter: "",
         propertyView: "tree", expandedProducts: new Set(), expandedFamilies: new Set()
     };
 
@@ -748,31 +776,61 @@
         return baseResource && currentResource && baseResource.h !== currentResource.h ? "modified" : "unchanged";
     }
 
-    function asrListResources() {
-        var snapshot = snapshots[asrState.changeMode === "removed" ? asrState.baselineIdx : asrState.snapshotIdx];
+    // Removed resources are listed from the baseline snapshot, all others from the selected snapshot.
+    function asrListResources(changeMode) {
+        if (changeMode === undefined) changeMode = asrState.changeMode;
+        var snapshot = snapshots[changeMode === "removed" ? asrState.baselineIdx : asrState.snapshotIdx];
         return snapshot ? snapshot.resources : [];
     }
+
+    var ASR_CHANGE_MODES = [
+        { value: "changed", label: "Changed", title: "Changed from baseline" },
+        { value: "added", label: "Added", title: "Added since baseline" },
+        { value: "modified", label: "Modified", title: "Modified since baseline" },
+        { value: "removed", label: "Removed", title: "Removed since baseline" }
+    ];
 
     function asrPrivilege(resource) {
         return relatedPrivilegedObjects(resource.h, resource.type);
     }
 
-    function asrMatchesFilters(resource) {
+    function asrModeMatches(changeMode, status) {
+        return !changeMode || (changeMode === "changed" && status !== "unchanged") || status === changeMode;
+    }
+
+    // skip leaves out one facet, for the counts of its pills.
+    function asrMatchesFilters(resource, skip) {
         var query = asrState.search.trim().toLowerCase();
-        var status = asrResourceStatus(resource.p);
         var privileged = asrPrivilege(resource);
-        var modeMatches = asrState.changeMode === "all" ||
-            (asrState.changeMode === "changed" && status !== "unchanged") || status === asrState.changeMode;
         return (!asrState.type || resource.type === asrState.type) &&
-            (!asrState.category || (resource.category || "(none)") === asrState.category) && modeMatches &&
+            (!asrState.category || (resource.category || "(none)") === asrState.category) &&
+            (skip === "changeMode" || asrModeMatches(asrState.changeMode, asrResourceStatus(resource.p))) &&
             (!query || [resource.name, resource.category, resource.type].join(" ").toLowerCase().indexOf(query) !== -1) &&
-            (!asrState.privilegedOnly || !!privileged) &&
-            (!asrState.tierFilter || (privileged && privileged.tierNames.has(asrState.tierFilter))) &&
+            (skip === "tierFilter" || tierFilterMatches(asrState.tierFilter, privileged)) &&
             (!asrState.classificationFilter || (privileged && privileged.services.has(asrState.classificationFilter)));
     }
 
     function asrFilteredResources() {
-        return asrListResources().filter(asrMatchesFilters).sort(function (a, b) { return a.p.localeCompare(b.p); });
+        return asrListResources().filter(function (resource) { return asrMatchesFilters(resource); }).sort(function (a, b) { return a.p.localeCompare(b.p); });
+    }
+
+    // Pills of the resource state (each counts the resources it would list) and of the access tier.
+    function renderAsrFacets(allResources, tiers) {
+        var countFor = function (changeMode) {
+            return asrListResources(changeMode).filter(function (resource) {
+                return asrMatchesFilters(resource, "changeMode") && asrModeMatches(changeMode, asrResourceStatus(resource.p));
+            }).length;
+        };
+        $("asrChangeModePills").innerHTML = EntraOpsFilters.pill(asrState, "changeMode", "", "All", countFor(""), { title: "All current resources" }) +
+            ASR_CHANGE_MODES.map(function (mode) {
+                return EntraOpsFilters.pill(asrState, "changeMode", mode.value, mode.label, countFor(mode.value), { title: mode.title, prefix: mode.value === "changed" ? "" : '<span class="ca-status-dot ' + mode.value + '" aria-hidden="true"></span>' });
+            }).join("");
+        if (!objectTierIndex.size) {
+            $("asrTierPills").innerHTML = '<span class="eo-facet-note">Privileged-asset filters require the EAM Dashboard dataset.</span>';
+            return;
+        }
+        var tierFacet = EntraOpsFilters.facetCounts(allResources, "tierFilter", asrMatchesFilters, function (resource) { return tierFacetValues(asrPrivilege(resource)); });
+        $("asrTierPills").innerHTML = tierFacetPills(asrState, "tierFilter", tiers, tierFacet.total, tierFacet.counts);
     }
 
     function asrHistory(path) {
@@ -813,10 +871,11 @@
     }
 
     function asrResourceGroups(resources) {
-        var products = {};
+        // Product and family keys come from the resource types of the snapshot: maps without prototype.
+        var products = Object.create(null);
         resources.forEach(function (resource) {
             var hierarchy = asrTypeHierarchy(resource.type);
-            if (!products[hierarchy.productKey]) products[hierarchy.productKey] = { key: hierarchy.productKey, meta: hierarchy.product, families: {} };
+            if (!products[hierarchy.productKey]) products[hierarchy.productKey] = { key: hierarchy.productKey, meta: hierarchy.product, families: Object.create(null) };
             if (!products[hierarchy.productKey].families[hierarchy.familyKey]) products[hierarchy.productKey].families[hierarchy.familyKey] = { key: hierarchy.familyKey, name: hierarchy.family, resources: [] };
             products[hierarchy.productKey].families[hierarchy.familyKey].resources.push(resource);
         });
@@ -935,10 +994,7 @@
         var categories = allResources.filter(function (resource) { return !asrState.type || resource.type === asrState.type; })
             .map(function (resource) { return resource.category || "(none)"; }).filter(function (category, index, values) { return values.indexOf(category) === index; }).sort();
         if (categories.indexOf(asrState.category || "(none)") === -1) asrState.category = "";
-        $("asrCategory").innerHTML = '<option value="">All categories</option>' + categories.map(function (category) {
-            return '<option value="' + esc(category) + '"' + (asrState.category === category ? ' selected' : '') + '>' + esc(category) + '</option>';
-        }).join("");
-        $("asrChangeMode").value = asrState.changeMode;
+        $("asrCategory").innerHTML = selectOptions("All categories", categories, asrState.category);
 
         var privilegeContexts = allResources.map(asrPrivilege).filter(Boolean);
         var tiers = {}, classifications = {};
@@ -946,18 +1002,12 @@
             context.tierNames.forEach(function (tier) { tiers[tier] = true; });
             context.services.forEach(function (service) { classifications[service] = true; });
         });
-        if (asrState.tierFilter && Object.keys(tiers).indexOf(asrState.tierFilter) === -1) asrState.tierFilter = "";
+        if (asrState.tierFilter && asrState.tierFilter !== PRIVILEGED_ANY && Object.keys(tiers).indexOf(asrState.tierFilter) === -1) asrState.tierFilter = "";
         if (asrState.classificationFilter && Object.keys(classifications).indexOf(asrState.classificationFilter) === -1) asrState.classificationFilter = "";
-        if (objectTierIndex.size) {
-            $("asrPrivilegedToggle").innerHTML = '<label class="check-label"><input type="checkbox" id="asrPrivilegedOnly"' + (asrState.privilegedOnly ? ' checked' : '') + ' /> Privileged assets only</label>';
-            $("asrTierFilter").innerHTML = '<label for="asrTier">Access tier</label><select id="asrTier"><option value="">All tiers</option>' + Object.keys(tiers).sort().map(function (tier) { return '<option value="' + esc(tier) + '"' + (tier === asrState.tierFilter ? ' selected' : '') + '>' + esc(tier) + '</option>'; }).join("") + '</select>';
-            $("asrClassificationFilter").innerHTML = '<label for="asrClassification">Classification</label><select id="asrClassification"><option value="">All classifications</option>' + Object.keys(classifications).sort().map(function (service) { return '<option value="' + esc(service) + '"' + (service === asrState.classificationFilter ? ' selected' : '') + '>' + esc(service) + '</option>'; }).join("") + '</select>';
-        } else {
-            $("asrPrivilegedToggle").innerHTML = '<span class="muted asr-filter-note">Privileged-asset filters require the EAM Dashboard dataset.</span>';
-            $("asrTierFilter").innerHTML = "";
-            $("asrClassificationFilter").innerHTML = "";
-        }
-        $("asrSearch").value = asrState.search;
+        $("asrClassificationFilter").hidden = !objectTierIndex.size;
+        $("asrClassification").innerHTML = selectOptions("All classifications", Object.keys(classifications).sort(), asrState.classificationFilter);
+        renderAsrFacets(allResources, tiers);
+        if ($("asrSearch").value !== asrState.search) $("asrSearch").value = asrState.search;
         var resources = asrFilteredResources();
         var groups = asrResourceGroups(resources);
         var familyCount = groups.reduce(function (count, product) { return count + product.families.length; }, 0);
@@ -1007,12 +1057,6 @@
                 renderAllSnapshotResources();
             });
         });
-        var privilegedToggle = $("asrPrivilegedOnly");
-        if (privilegedToggle) privilegedToggle.addEventListener("change", function () { asrState.privilegedOnly = this.checked; asrState.selectedPath = ""; renderAllSnapshotResources(); });
-        var tierFilter = $("asrTier");
-        if (tierFilter) tierFilter.addEventListener("change", function () { asrState.tierFilter = this.value; asrState.selectedPath = ""; renderAllSnapshotResources(); });
-        var classificationFilter = $("asrClassification");
-        if (classificationFilter) classificationFilter.addEventListener("change", function () { asrState.classificationFilter = this.value; asrState.selectedPath = ""; renderAllSnapshotResources(); });
         renderAsrDetail();
     }
 
@@ -1027,6 +1071,62 @@
 
     function configurationObjectDeepLink(snapshotIdx, resourcePath) {
         return "#config-object=" + snapshotIdx + "|" + encodeURIComponent(resourcePath);
+    }
+
+    // #object=<id> or #object=<resource type>|<id> (links of the EntraOps findings): the resource of the newest
+    // detailed snapshot whose Id property is the object ID, for example a Conditional Access policy or a PIM role setting.
+    function resourceForObjectDeepLink() {
+        var match = /^#object=(.+)$/.exec(location.hash);
+        if (!match) return null;
+        var value;
+        try { value = decodeURIComponent(match[1]); } catch (_) { return null; }
+        var separator = value.lastIndexOf("|");
+        var type = separator > 0 ? value.slice(0, separator).toLowerCase() : "";
+        var objectId = (separator > 0 ? value.slice(separator + 1) : value).toLowerCase();
+        if (!objectId) return null;
+        var idxs = detailedSnapshotIdxs();
+        for (var index = idxs.length - 1; index >= 0; index--) {
+            var matches = snapshots[idxs[index]].resources.filter(function (item) {
+                if (type && String(item.type || "").toLowerCase() !== type) return false;
+                var blob = blobContent(item.h);
+                return !!(blob && blob.properties && String(blob.properties.Id || "").toLowerCase() === objectId);
+            });
+            // Without a type, an ID can match several resources (a PIM role setting has the ID of its role definition):
+            // the role setting wins (the findings link role settings), then the other types in a fixed order.
+            matches.sort(function (a, b) { return objectLinkTypeRank(a.type) - objectLinkTypeRank(b.type) || String(a.type).localeCompare(String(b.type)) || String(a.p).localeCompare(String(b.p)); });
+            if (matches.length) return { snapshotIdx: idxs[index], path: matches[0].p };
+        }
+        return null;
+    }
+    var OBJECT_LINK_TYPE_ORDER = ["microsoft.entra.rolesetting", "microsoft.entra.conditionalaccesspolicy", "microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy"];
+    function objectLinkTypeRank(resourceType) {
+        var rank = OBJECT_LINK_TYPE_ORDER.indexOf(String(resourceType || "").toLowerCase());
+        return rank < 0 ? OBJECT_LINK_TYPE_ORDER.length : rank;
+    }
+
+    // A #object=, #resource= or #config-object= link whose resource is not in the loaded snapshots.
+    function notifyUnresolvedDeepLink() {
+        var match = /^#(object|resource|config-object)=(.+)$/.exec(location.hash);
+        if (!match) return;
+        var reference;
+        try { reference = decodeURIComponent(match[2]); } catch (_) { reference = match[2]; }
+        if (match[1] !== "object") reference = reference.replace(/^\d+\|/, "");
+        var kind = match[1] === "object" ? "Object" : "Resource";
+        // #object=<resource type>|<id>: the readable resource type (for example "Role setting") and the ID only.
+        var separator = match[1] === "object" ? reference.lastIndexOf("|") : -1;
+        if (separator > 0) {
+            var typeNames = {
+                "microsoft.entra.rolesetting": "Role setting",
+                "microsoft.entra.conditionalaccesspolicy": "Conditional Access policy",
+                "microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy": "Assignment policy",
+                "microsoft.entra.administrativeunit": "Administrative unit"
+            };
+            // The type comes from the URL: "constructor" is not one of the names.
+            var typeName = reference.slice(0, separator).toLowerCase();
+            kind = Object.prototype.hasOwnProperty.call(typeNames, typeName) ? typeNames[typeName] : "Resource";
+            reference = reference.slice(separator + 1);
+        }
+        EntraOpsReportUtils.deepLinkNotFound(kind, reference, "loaded snapshots");
     }
 
     function applyConfigurationObjectDeepLink() {
@@ -1048,10 +1148,16 @@
 
     function applyResourceDeepLink() {
         var match = /^#resource=(\d+)\|(.+)$/.exec(location.hash);
-        if (!match) return false;
-        var snapshotIdx = Number(match[1]);
-        var resourcePath;
-        try { resourcePath = decodeURIComponent(match[2]); } catch (_) { return false; }
+        var snapshotIdx, resourcePath;
+        if (match) {
+            snapshotIdx = Number(match[1]);
+            try { resourcePath = decodeURIComponent(match[2]); } catch (_) { return false; }
+        } else {
+            var target = resourceForObjectDeepLink();
+            if (!target) return false;
+            snapshotIdx = target.snapshotIdx;
+            resourcePath = target.path;
+        }
         var snapshot = snapshots[snapshotIdx];
         var resource = snapshot && snapshotResourceByPath(snapshot).get(resourcePath);
         if (!resource || !snapshot.hasDetail) {
@@ -1067,9 +1173,8 @@
         asrState.baselineIdx = snapshotIdx > 0 ? snapshotIdx - 1 : -1;
         asrState.type = "";
         asrState.category = "";
-        asrState.changeMode = "all";
+        asrState.changeMode = "";
         asrState.search = "";
-        asrState.privilegedOnly = false;
         asrState.tierFilter = "";
         asrState.classificationFilter = "";
         asrState.selectedPath = resourcePath;
@@ -1181,14 +1286,28 @@
         return filteredPrivilegedResources(true, type).length > 0;
     }
 
-    // Shared row pipeline: renderPrivilegedAssets and the paExport handler must display/export
-    // the SAME rows (tier/search/include-all filtering) so the CSV can never drift from the table.
-    function displayedPrivilegedRows(snapshot) {
+    // The rows of the search and include-all filters, before the access tier filter (the counts of its pills).
+    function privilegedRowsBeforeTier(snapshot) {
         var rows = privilegedAssetsForSnapshot(snapshot);
         var withIdentities = rows.filter(function (r) { return r.totalWithIdentities > 0; });
-        return (paState.includeAllTypes ? rows : withIdentities).filter(function (row) {
-            return (!paState.tierFilter || row.tiers[paState.tierFilter].length > 0) && typeMatchesSearch(row.type);
+        return (paState.includeAllTypes ? rows : withIdentities).filter(function (row) { return typeMatchesSearch(row.type); });
+    }
+
+    // Shared row pipeline: renderPrivilegedAssets and the paExport handler must display/export
+    // the SAME rows (tier/search/include-all filtering) so the CSV can never drift from the table.
+    function displayedPrivilegedRows(snapshot, rowsBeforeTier) {
+        return (rowsBeforeTier || privilegedRowsBeforeTier(snapshot)).filter(function (row) {
+            return !paState.tierFilter || row.tiers[paState.tierFilter].length > 0;
         });
+    }
+
+    // Access tier pills: the number of resource types with resources of the tier.
+    function renderPaTierPills(rowsBeforeTier) {
+        var rows = rowsBeforeTier || [];
+        $("paTierPills").innerHTML = EntraOpsFilters.pill(paState, "tierFilter", "", "All", rows.length) + ["ControlPlane", "ManagementPlane", "UserAccess"].map(function (tier) {
+            var count = rows.filter(function (row) { return row.tiers[tier].length > 0; }).length;
+            return EntraOpsFilters.tierPill(paState, "tierFilter", tier, PA_TIER_LABELS[tier], count);
+        }).join("");
     }
 
     function assetTierCountsHtml(assets) {
@@ -1251,11 +1370,14 @@
     function renderPrivilegedAssets() {
         var el = $("privilegedAssetsBody");
         if (paState.snapshotIdx < 0) {
+            renderPaTierPills([]);
             el.innerHTML = '<div class="muted">No detailed snapshot available - regenerate the dataset with a higher <code>-MaxDetailedSnapshots</code>.</div>';
             renderRelatedAssets();
             return;
         }
-        var displayedRows = displayedPrivilegedRows(snapshots[paState.snapshotIdx]);
+        var rowsBeforeTier = privilegedRowsBeforeTier(snapshots[paState.snapshotIdx]);
+        renderPaTierPills(rowsBeforeTier);
+        var displayedRows = displayedPrivilegedRows(snapshots[paState.snapshotIdx], rowsBeforeTier);
         if (!displayedRows.length) {
             el.innerHTML = '<div class="muted">No captured resource in this snapshot references a user or group in a field this app knows how to resolve.</div>';
             renderRelatedAssets();
@@ -1297,7 +1419,6 @@
                 paState.resourceType = row.type;
                 paState.tierFilter = sameSelection ? "" : tier;
                 paState.expandTierSelection = !sameSelection;
-                $("paTierFilter").value = paState.tierFilter;
                 renderPrivilegedAssets();
                 renderRelatedAssets();
                 if (!sameSelection) $("secRelatedAssets").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1428,11 +1549,13 @@
             renderAllSnapshotResources();
         });
         $("asrCategory").addEventListener("change", function () { asrState.category = this.value; asrState.selectedPath = ""; renderAllSnapshotResources(); });
-        $("asrChangeMode").addEventListener("change", function () {
-            asrState.changeMode = this.value;
+        $("asrClassification").addEventListener("change", function () { asrState.classificationFilter = this.value; asrState.selectedPath = ""; renderAllSnapshotResources(); });
+        EntraOpsFilters.bindPills($("asrFacets"), asrState, function (facet) {
             asrState.selectedPath = "";
-            asrState.expandedProducts = new Set();
-            asrState.expandedFamilies = new Set();
+            if (facet === "changeMode") {
+                asrState.expandedProducts = new Set();
+                asrState.expandedFamilies = new Set();
+            }
             renderAllSnapshotResources();
         });
         var asrSearchTimer = null;
@@ -1442,8 +1565,8 @@
             asrSearchTimer = setTimeout(function () { asrState.search = value; asrState.selectedPath = ""; renderAllSnapshotResources(); }, 120);
         });
         $("asrClearFilters").addEventListener("click", function () {
-            asrState.type = ""; asrState.category = ""; asrState.changeMode = "all"; asrState.search = "";
-            asrState.privilegedOnly = false; asrState.tierFilter = ""; asrState.classificationFilter = "";
+            asrState.type = ""; asrState.category = ""; asrState.changeMode = ""; asrState.search = "";
+            asrState.tierFilter = ""; asrState.classificationFilter = "";
             asrState.selectedPath = ""; asrState.expandedProducts = new Set(); asrState.expandedFamilies = new Set();
             state.typeFilter = "";
             renderTypeFilter(); renderTimeline(); renderAllSnapshotResources();
@@ -1471,8 +1594,9 @@
 
         var paDetailIdxs = detailedSnapshotIdxs();
         if (paDetailIdxs.length) paState.snapshotIdx = paDetailIdxs[paDetailIdxs.length - 1];
-        applyResourceDeepLink();
-        applyConfigurationObjectDeepLink();
+        var deepLinkResolved = applyResourceDeepLink();
+        deepLinkResolved = applyConfigurationObjectDeepLink() || deepLinkResolved;
+        if (!deepLinkResolved) notifyUnresolvedDeepLink();
         renderPrivilegedAssetsControls();
         renderPrivilegedAssets();
         $("paSnapshot").addEventListener("change", function () {
@@ -1485,8 +1609,7 @@
             paState.expandTierSelection = false;
             renderPrivilegedAssets();
         });
-        $("paTierFilter").addEventListener("change", function () {
-            paState.tierFilter = this.value;
+        EntraOpsFilters.bindPills($("paTierPills"), paState, function () {
             paState.expandTierSelection = false;
             renderPrivilegedAssets();
         });
@@ -1547,7 +1670,7 @@
         });
         $("compareExport").addEventListener("click", function () {
             var baseline = Number($("cmpBaseline").value), current = Number($("cmpCurrent").value);
-            EntraOpsReportUtils.exportRows("entraops-configuration-snapshot-compare", baseline === current ? [] : exportChangeRows(snapshots[Math.min(baseline, current)], snapshots[Math.max(baseline, current)]));
+            EntraOpsReportUtils.exportRows("entraops-configuration-snapshot-compare", baseline === current ? [] : exportChangeRows(snapshots[Math.min(baseline, current)], snapshots[Math.max(baseline, current)], compareFilterState));
         });
         $("asrExport").addEventListener("click", function () {
             var rows = asrFilteredResources().map(function (resource) {
@@ -1576,6 +1699,8 @@
                 applyConfigurationView();
                 renderPrivilegedAssetsControls();
                 renderPrivilegedAssets();
+            } else {
+                notifyUnresolvedDeepLink();
             }
         });
     });

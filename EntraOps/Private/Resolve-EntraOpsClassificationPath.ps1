@@ -45,7 +45,7 @@ function Resolve-EntraOpsClassificationPath {
         # there, not a configuration gap, and must not raise a warning.
         $ParamVariantPath = Join-Path -Path (Join-Path -Path $FolderClassification -ChildPath 'Templates') -ChildPath ($ClassificationFileName -replace '\.json$', '.Param.json')
         if (Test-Path -Path $ParamVariantPath) {
-            Write-Warning "Tenant-specific classification file not found ($TenantSpecificPath). Falling back to template $TemplatePath - tenant-scoped placeholders (e.g. privileged scope IDs) are not applied. Run Update-EntraOpsClassificationControlPlaneScope to generate the tenant-specific file."
+            Write-EntraOpsWarningOnce -Key "TenantClassificationMissing|$TenantSpecificPath" -Message "Tenant-specific classification file not found ($TenantSpecificPath). Falling back to template $TemplatePath - tenant-scoped placeholders (e.g. privileged scope IDs) are not applied. Run Update-EntraOpsClassificationControlPlaneScope to generate the tenant-specific file."
         } else {
             Write-Verbose "Using shipped template for $ClassificationFileName ($TemplatePath). This classification has no tenant-scoped placeholders; a tenant-specific file is only generated when overwrites are configured (e.g. Classification_ApiPermissionOverwrites.json)."
         }

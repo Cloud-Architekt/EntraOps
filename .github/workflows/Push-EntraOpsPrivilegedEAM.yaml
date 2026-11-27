@@ -59,7 +59,10 @@ jobs:
             Save-EntraOpsPrivilegedEAMInsightsCustomTable @LogAnalyticsParam
           azPSVersion: latest
 
+      # -ErrorAction Stop fails this step when a watchlist is missing or empty after the upload; the check runs after
+      # all watchlists are uploaded. The following push operations still run after such a failure.
       - name: Upload Data to WatchList
+        id: watchlists
         if: env.IngestToWatchLists == 'true'
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3
         with:
@@ -67,10 +70,10 @@ jobs:
             Import-Module ./EntraOps
             Connect-EntraOps -AuthenticationType FederatedCredentials -TenantName ${env:TenantName} -ConfigFile ${env:ConfigFile}
             $SentinelWatchListsParams = $EntraOpsConfig.SentinelWatchLists
-            Save-EntraOpsPrivilegedEAMWatchLists @SentinelWatchListsParams
+            Save-EntraOpsPrivilegedEAMWatchLists @SentinelWatchListsParams -ErrorAction Stop
           azPSVersion: "latest"
       - name: Apply Assignment for Privileged Users and Groups to (Restricted) Administrative Units
-        if: env.ApplyAdministrativeUnitAssignments == 'true'
+        if: (success() || steps.watchlists.outcome == 'failure') && env.ApplyAdministrativeUnitAssignments == 'true'
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3
         with:
           inlineScript: |
@@ -81,7 +84,7 @@ jobs:
             Update-EntraOpsPrivilegedAdministrativeUnit @AutomatedAuParams
           azPSVersion: latest
       - name: Apply Assignment for unprotected assets to (Restricted) Administrative Unit
-        if: env.ApplyRmauAssignmentsForUnprotectedObjects == 'true'
+        if: (success() || steps.watchlists.outcome == 'failure') && env.ApplyRmauAssignmentsForUnprotectedObjects == 'true'
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3
         with:
           inlineScript: |
@@ -92,7 +95,7 @@ jobs:
             Update-EntraOpsPrivilegedUnprotectedAdministrativeUnit @AutomatedUnprotectedRmauParams
           azPSVersion: latest
       - name: Update Entitlement Management catalogs with Control Plane scope to privileged catalogs
-        if: env.ApplyPrivilegedElmCatalogProtection == 'true'
+        if: (success() || steps.watchlists.outcome == 'failure') && env.ApplyPrivilegedElmCatalogProtection == 'true'
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3
         with:
           inlineScript: |
@@ -102,7 +105,7 @@ jobs:
             Update-EntraOpsPrivilegedUnprotectedElmCatalog @AutomatedElmCatalogParams
           azPSVersion: latest
       - name: Apply Group Assignment for Conditional Access Policies
-        if: env.ApplyConditionalAccessTargetGroups == 'true'
+        if: (success() || steps.watchlists.outcome == 'failure') && env.ApplyConditionalAccessTargetGroups == 'true'
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3
         with:
           inlineScript: |
@@ -114,6 +117,7 @@ jobs:
           azPSVersion: latest
 
       - name: Disconnect EntraOps
+        if: success() || steps.watchlists.outcome == 'failure'
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3
         with:
           inlineScript: |

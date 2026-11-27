@@ -30,12 +30,13 @@
     over HTTP and when opened directly from the file system. The Configuration
     Analyzer app shows setup instructions instead of failing until this file exists.
 
-    Requires the repository to be a git working copy (git history is the only source
-    of historic data - there is no separate time-series store).
+    Git history is the only source of historic data (there is no separate time-series store).
+    Without git, or outside a git working copy, the current snapshot folder is used as one
+    snapshot without history and drift (-HistorySource Folder, the automatic fallback).
 
 .PARAMETER RepoRoot
     Path to the EntraOps repository root (and git working copy) that contains the
-    TenantGovernance snapshot folder. Defaults to the repository this module lives in.
+    TenantGovernance snapshot folder (alias: -Path). Defaults to the repository this module lives in.
 
 .PARAMETER ImportPath
     Folder with the Tenant Governance snapshot export whose git history is walked.
@@ -98,6 +99,11 @@ resources therefore become visible only in a later snapshot.
 .PARAMETER SkipWorkingTree
     Do not append the "(working tree)" snapshot for uncommitted on-disk changes.
 
+.PARAMETER HistorySource
+    Where the snapshots come from: Git (the git history of the snapshot folder, plus uncommitted changes),
+    Folder (the current snapshot folder as one snapshot, without history and drift) or Auto (default: Git
+    when git is available and the folder is in a git working copy, otherwise Folder with a note in the output).
+
 .PARAMETER PassThru
     Emit the generated payload object to the pipeline.
 
@@ -126,6 +132,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param (
         [Parameter(Mandatory = $false)]
+        [Alias('Path')]
         [System.String]$RepoRoot,
 
         [Parameter(Mandatory = $false)]
@@ -161,6 +168,10 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
 
         [Parameter(Mandatory = $false)]
         [switch]$SkipWorkingTree,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Auto', 'Git', 'Folder')]
+        [System.String]$HistorySource = 'Auto',
 
         [Parameter(Mandatory = $false)]
         [switch]$PassThru
@@ -219,19 +230,13 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
         }
     }
 
-    $PimRequestFlowExcludedRiskFlags = @()
-    $AccessPackageFlowExcludedRiskFlags = @()
+    # The excluded risk flags of PIM Request Flow and Access Package Flow are finding rules: the report data of
+    # New-EntraOpsReportFindingData leaves them out (Findings.ExcludedRules), so they are not embedded here.
     $ConditionalAccessAnalysisExcludedFindings = @()
     $EidscaExcludedFindings = @()
     if (Test-Path -LiteralPath $ConfigFilePath -PathType Leaf) {
         try {
             $Config = Get-Content -LiteralPath $ConfigFilePath -Raw | ConvertFrom-Json
-            if ($null -ne $Config.ConfigurationAnalyzer -and $null -ne $Config.ConfigurationAnalyzer.PimRequestFlowExcludedRiskFlags) {
-                $PimRequestFlowExcludedRiskFlags = @($Config.ConfigurationAnalyzer.PimRequestFlowExcludedRiskFlags | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_) })
-            }
-            if ($null -ne $Config.ConfigurationAnalyzer -and $null -ne $Config.ConfigurationAnalyzer.AccessPackageFlowExcludedRiskFlags) {
-                $AccessPackageFlowExcludedRiskFlags = @($Config.ConfigurationAnalyzer.AccessPackageFlowExcludedRiskFlags | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_) })
-            }
             if ($null -ne $Config.ConfigurationAnalyzer -and $null -ne $Config.ConfigurationAnalyzer.ConditionalAccessAnalysisExcludedFindings) {
                 $ConditionalAccessAnalysisExcludedFindings = @($Config.ConfigurationAnalyzer.ConditionalAccessAnalysisExcludedFindings | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_) })
             }
@@ -317,7 +322,13 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
         throw "Tenant Governance snapshot manifest does not describe a successful complete capture (status: '$($SnapshotManifest.SnapshotJobStatus)'). Use -AllowPartialSnapshot to explicitly analyze a mixed snapshot with stale resource types."
     }
     if (-not $IsCompleteSnapshot) {
-        Write-Warning "Generating Configuration Analyzer data from a partial Tenant Governance snapshot. Stale resource types: $(@($SnapshotManifest.StaleResourceTypes) -join ', ')."
+        $StaleTypes = @($SnapshotManifest.StaleResourceTypes | Where-Object { $_ })
+        $TypesWithErrors = @($SnapshotManifest.PublishedWithErrorsResourceTypes | Where-Object { $_ })
+        $PartialDetails = @(
+            if ($StaleTypes.Count) { "stale resource types (kept from the previous snapshot): $($StaleTypes -join ', ')" }
+            if ($TypesWithErrors.Count) { "resource types with per-resource export errors (resources that could not be exported are kept from the previous snapshot): $($TypesWithErrors -join ', ')" }
+        )
+        Write-Warning "Generating Configuration Analyzer data from a partial Tenant Governance snapshot$(if ($PartialDetails.Count) { ". $($PartialDetails -join '; ')" } else { ' (Microsoft Graph reported errors without resource types)' })."
     }
     # Same parser as the pre-check in Invoke-EntraOpsReportingGeneration, so both agree on the snapshot age.
     $SnapshotAge = Get-EntraOpsTenantGovernanceSnapshotAge -ManifestPath $ManifestPath
@@ -334,129 +345,164 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
         Write-Warning "Generating Configuration Analyzer data from a stale Tenant Governance snapshot ($([math]::Round($SnapshotAgeHours, 1)) hour(s) old, limit $MaxSnapshotAgeHours hour(s)). The report shows it as stale."
     }
 
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        throw "git was not found on PATH. The Configuration Analyzer reads historic Tenant Governance snapshots from the git history, so git is required."
-    }
-
-    $GitRoot = (git -C $RepoRoot rev-parse --show-toplevel 2>$null)
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($GitRoot)) {
-        throw "$RepoRoot is not inside a git working copy. The Configuration Analyzer requires the Tenant Governance snapshots to be tracked in git history."
-    }
-    $GitRoot = $GitRoot.Trim()
-
-    # Git-relative path (forward slashes) of the snapshot folder, used as the pathspec
-    # for `git log` / `git ls-tree`.
+    # Snapshot history from git, or (without git) the current snapshot folder as one snapshot.
     $ImportPathFull = [System.IO.Path]::GetFullPath($ImportPath)
-    $GitRootFull = [System.IO.Path]::GetFullPath($GitRoot)
-    # Compare with a trailing separator so a sibling folder such as <root>-2 does not pass as
-    # being inside <root>.
-    if (-not ($ImportPathFull.Equals($GitRootFull, [System.StringComparison]::OrdinalIgnoreCase) -or
-            $ImportPathFull.StartsWith($GitRootFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase))) {
-        throw "ImportPath ($ImportPath) is not inside the git working copy ($GitRootFull)."
+    $UseGit = $HistorySource -ne 'Folder'
+    if ($UseGit) {
+        $GitIssue = $null
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            $GitIssue = 'git was not found on PATH'
+        } else {
+            $GitRoot = (git -C $RepoRoot rev-parse --show-toplevel 2>$null)
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($GitRoot)) { $GitIssue = "$RepoRoot is not inside a git working copy" }
+            else {
+                # A snapshot folder outside the working copy has no git history either: Auto uses the folder, Git fails.
+                $GitRootPath = [System.IO.Path]::GetFullPath($GitRoot.Trim())
+                $ImportFullPath = [System.IO.Path]::GetFullPath($ImportPath)
+                if (-not ($ImportFullPath.Equals($GitRootPath, [System.StringComparison]::OrdinalIgnoreCase) -or
+                        $ImportFullPath.StartsWith($GitRootPath + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase))) {
+                    $GitIssue = "ImportPath ($ImportPath) is not inside the git working copy ($GitRootPath)"
+                }
+            }
+        }
+        if ($GitIssue) {
+            if ($HistorySource -eq 'Git') { throw "$GitIssue. The Configuration Analyzer reads historic Tenant Governance snapshots from the git history (-HistorySource Git)." }
+            $FolderReason = $GitIssue
+            $UseGit = $false
+        }
     }
-    $RelPath = $ImportPathFull.Substring($GitRootFull.Length).TrimStart('\', '/') -replace '\\', '/'
-    if ([string]::IsNullOrWhiteSpace($RelPath)) {
-        throw "ImportPath resolved to the git working copy root; expected a subfolder such as TenantGovernance/Snapshots."
-    }
-
     # Snapshot state/manifest files are bookkeeping (see
     # Save-EntraOpsTenantGovernanceSnapshotJson), not captured resources.
     $ExcludedFileNames = @('.PendingSnapshotJob.json', '.SnapshotManifest.json', '.LastAttemptManifest.json')
-
-    # ---- Enumerate commits that published snapshots --------------------------------
-    $logArgs = @('-C', $GitRoot, 'log', "--format=%H%x1f%cI%x1f%s")
-    if ($TimeRangeInDays) {
-        $since = (Get-Date).ToUniversalTime().AddDays(-1 * [Math]::Abs($TimeRangeInDays)).ToString('o')
-        $logArgs += "--since=$since"
-    }
-    $logArgs += @('--', $RelPath)
-    # Start/Collect polls and rejected attempts update only bookkeeping files. They must
-    # not take a sampling interval away from the completed capture that follows them.
-    # Keep .SnapshotManifest.json in the history: a successful capture can publish a new
-    # manifest even when all resource content is unchanged.
-    foreach ($BookkeepingFile in @('.PendingSnapshotJob.json', '.LastAttemptManifest.json')) {
-        $logArgs += ":(top,exclude,literal)$RelPath/$BookkeepingFile"
-    }
-
-    $logOutput = & git @logArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "git log failed with exit code $LASTEXITCODE while enumerating history of $RelPath."
-    }
-
-    $commits = @($logOutput | Where-Object { $_ } | ForEach-Object {
-            $parts = $_ -split "`u{1f}"
-            [pscustomobject]@{ Sha = $parts[0]; Date = [datetimeoffset]::Parse($parts[1]); Subject = $parts[2] }
-        }) | Sort-Object -Property Date
-
-    # A fully-stale partial snapshot (e.g. Graph returned no parseable per-type errors) commits only
-    # its manifest, preserving the last known-good resources unchanged - do not present that as a
-    # historical capture at the partial job time. A mixed partial snapshot still publishes real,
-    # changed resource files for its non-stale types (stale types simply keep their previous blob
-    # hash, so they never appear as a diff), so it must not be dropped from history wholesale.
-    $commits = @($commits | Where-Object {
-            $manifestAtCommit = & git -C $GitRoot show "$($_.Sha):$RelPath/.SnapshotManifest.json" 2>$null
-            if ($LASTEXITCODE -ne 0 -or -not $manifestAtCommit) { return $true }
-            try {
-                $commitManifest = ($manifestAtCommit -join "`n") | ConvertFrom-Json -Depth 10
-                return -not ($commitManifest.IsComplete -eq $false -and @($commitManifest.PublishedResourceTypes).Count -eq 0)
-            } catch {
-                return $true
-            }
-        })
-
-    if (-not $commits) {
-        Write-Warning "No commits touching $RelPath were found$(if ($TimeRangeInDays) { " in the last $TimeRangeInDays day(s)" }). The dataset will only contain the current working tree state (if any)."
-    }
-    Write-Verbose "Found $($commits.Count) commit(s) touching $RelPath."
-
-    # ---- Thin commits down to the requested snapshot interval ----------------------
-    if ($null -ne $SnapshotIntervalComponents -and $commits.Count -gt 2) {
-        $thinned = Select-EntraOpsSnapshotIntervalCommit -Commit @($commits) -Years $SnapshotIntervalComponents.Years -Months $SnapshotIntervalComponents.Months -Days $SnapshotIntervalComponents.Days
-        Write-Verbose "Snapshot interval '$SnapshotInterval' reduced $($commits.Count) commit(s) to $($thinned.Count) snapshot(s)."
-        $commits = $thinned
-    }
-
-    # ---- Build one snapshot (file path + blob hash listing) per commit -------------
     $snapshots = [System.Collections.Generic.List[object]]::new()
-    foreach ($commit in $commits) {
-        # -z: NUL-separated entries, so file names with special characters parse reliably.
-        $lsTree = & git -C $GitRoot ls-tree -r -z $commit.Sha -- $RelPath
+
+    if (-not $UseGit) {
+        $RelPath = [System.IO.Path]::GetRelativePath($RepoRoot, $ImportPathFull) -replace '\\', '/'
+        $FolderFiles = @(Get-ChildItem -LiteralPath $ImportPath -Recurse -File -Filter '*.json' | Where-Object { $ExcludedFileNames -notcontains $_.Name } | Sort-Object FullName)
+        if ($FolderFiles.Count -gt 0) {
+            $Hashes = @(Get-EntraOpsGitBlobHash -LiteralPath @($FolderFiles.FullName))
+            $snapshots.Add([ordered]@{
+                    commitSha   = '(snapshot folder)'
+                    commitDate  = $CapturedDateTime.ToUniversalTime().ToString('o')
+                    subject     = 'Current snapshot folder (no git history)'
+                    hasDetail   = $false
+                    resources   = @(for ($Index = 0; $Index -lt $FolderFiles.Count; $Index++) {
+                            [ordered]@{ p = ($FolderFiles[$Index].FullName.Substring($ImportPathFull.Length).TrimStart('\', '/') -replace '\\', '/'); h = $Hashes[$Index] }
+                        })
+                    workingTree = $true
+                })
+        }
+    } else {
+        $GitRoot = $GitRoot.Trim()
+
+        # Git-relative path (forward slashes) of the snapshot folder, used as the pathspec
+        # for `git log` / `git ls-tree`.
+        $GitRootFull = [System.IO.Path]::GetFullPath($GitRoot)
+        # Compare with a trailing separator so a sibling folder such as <root>-2 does not pass as
+        # being inside <root>.
+        if (-not ($ImportPathFull.Equals($GitRootFull, [System.StringComparison]::OrdinalIgnoreCase) -or
+                $ImportPathFull.StartsWith($GitRootFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase))) {
+            throw "ImportPath ($ImportPath) is not inside the git working copy ($GitRootFull)."
+        }
+        $RelPath = $ImportPathFull.Substring($GitRootFull.Length).TrimStart('\', '/') -replace '\\', '/'
+        if ([string]::IsNullOrWhiteSpace($RelPath)) {
+            throw "ImportPath resolved to the git working copy root; expected a subfolder such as TenantGovernance/Snapshots."
+        }
+
+        # ---- Enumerate commits that published snapshots --------------------------------
+        $logArgs = @('-C', $GitRoot, 'log', "--format=%H%x1f%cI%x1f%s")
+        if ($TimeRangeInDays) {
+            $since = (Get-Date).ToUniversalTime().AddDays(-1 * [Math]::Abs($TimeRangeInDays)).ToString('o')
+            $logArgs += "--since=$since"
+        }
+        $logArgs += @('--', $RelPath)
+        # Start/Collect polls and rejected attempts update only bookkeeping files. They must
+        # not take a sampling interval away from the completed capture that follows them.
+        # Keep .SnapshotManifest.json in the history: a successful capture can publish a new
+        # manifest even when all resource content is unchanged.
+        foreach ($BookkeepingFile in @('.PendingSnapshotJob.json', '.LastAttemptManifest.json')) {
+            $logArgs += ":(top,exclude,literal)$RelPath/$BookkeepingFile"
+        }
+
+        $logOutput = & git @logArgs
         if ($LASTEXITCODE -ne 0) {
-            Write-Verbose "Skipped commit $($commit.Sha): git ls-tree failed."
-            continue
+            throw "git log failed with exit code $LASTEXITCODE while enumerating history of $RelPath."
         }
-        $resources = [System.Collections.Generic.List[object]]::new()
-        foreach ($entry in ($lsTree -join "`n") -split "`0") {
-            if ([string]::IsNullOrWhiteSpace($entry)) { continue }
-            # "<mode> <type> <hash>\t<path>"
-            $tabIdx = $entry.IndexOf("`t")
-            if ($tabIdx -lt 0) { continue }
-            $metaParts = $entry.Substring(0, $tabIdx) -split '\s+'
-            if ($metaParts.Count -lt 3 -or $metaParts[1] -ne 'blob') { continue }
-            $path = $entry.Substring($tabIdx + 1)
-            if (-not $path.EndsWith('.json', [System.StringComparison]::OrdinalIgnoreCase)) { continue }
-            $leaf = Split-Path -Leaf $path
-            if ($ExcludedFileNames -contains $leaf) { continue }
-            # Store the path relative to the snapshot folder - the app derives
-            # resource type/category/name from its segments.
-            $rel = $path.Substring($RelPath.Length).TrimStart('/')
-            $resources.Add([ordered]@{ p = $rel; h = $metaParts[2] })
-        }
-        if ($resources.Count -eq 0) {
-            Write-Verbose "Skipped commit $($commit.Sha): no snapshot resource files."
-            continue
-        }
-        $snapshots.Add([ordered]@{
-                commitSha  = $commit.Sha
-                commitDate = $commit.Date.ToString('o')
-                subject    = $commit.Subject
-                hasDetail  = $false
-                resources  = @($resources)
+
+        $commits = @($logOutput | Where-Object { $_ } | ForEach-Object {
+                $parts = $_ -split "`u{1f}"
+                [pscustomobject]@{ Sha = $parts[0]; Date = [datetimeoffset]::Parse($parts[1]); Subject = $parts[2] }
+            }) | Sort-Object -Property Date
+
+        # A fully-stale partial snapshot (e.g. Graph returned no parseable per-type errors) commits only
+        # its manifest, preserving the last known-good resources unchanged - do not present that as a
+        # historical capture at the partial job time. A mixed partial snapshot still publishes real,
+        # changed resource files for its non-stale types (stale types simply keep their previous blob
+        # hash, so they never appear as a diff), so it must not be dropped from history wholesale.
+        $commits = @($commits | Where-Object {
+                $manifestAtCommit = & git -C $GitRoot show "$($_.Sha):$RelPath/.SnapshotManifest.json" 2>$null
+                if ($LASTEXITCODE -ne 0 -or -not $manifestAtCommit) { return $true }
+                try {
+                    $commitManifest = ($manifestAtCommit -join "`n") | ConvertFrom-Json -Depth 10
+                    return -not ($commitManifest.IsComplete -eq $false -and @($commitManifest.PublishedResourceTypes).Count -eq 0)
+                } catch {
+                    return $true
+                }
             })
+
+        if (-not $commits) {
+            Write-Warning "No commits touching $RelPath were found$(if ($TimeRangeInDays) { " in the last $TimeRangeInDays day(s)" }). The dataset will only contain the current working tree state (if any)."
+        }
+        Write-Verbose "Found $($commits.Count) commit(s) touching $RelPath."
+
+        # ---- Thin commits down to the requested snapshot interval ----------------------
+        if ($null -ne $SnapshotIntervalComponents -and $commits.Count -gt 2) {
+            $thinned = Select-EntraOpsSnapshotIntervalCommit -Commit @($commits) -Years $SnapshotIntervalComponents.Years -Months $SnapshotIntervalComponents.Months -Days $SnapshotIntervalComponents.Days
+            Write-Verbose "Snapshot interval '$SnapshotInterval' reduced $($commits.Count) commit(s) to $($thinned.Count) snapshot(s)."
+            $commits = $thinned
+        }
+
+        # ---- Build one snapshot (file path + blob hash listing) per commit -------------
+        foreach ($commit in $commits) {
+            # -z: NUL-separated entries, so file names with special characters parse reliably.
+            $lsTree = & git -C $GitRoot ls-tree -r -z $commit.Sha -- $RelPath
+            if ($LASTEXITCODE -ne 0) {
+                Write-Verbose "Skipped commit $($commit.Sha): git ls-tree failed."
+                continue
+            }
+            $resources = [System.Collections.Generic.List[object]]::new()
+            foreach ($entry in ($lsTree -join "`n") -split "`0") {
+                if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+                # "<mode> <type> <hash>\t<path>"
+                $tabIdx = $entry.IndexOf("`t")
+                if ($tabIdx -lt 0) { continue }
+                $metaParts = $entry.Substring(0, $tabIdx) -split '\s+'
+                if ($metaParts.Count -lt 3 -or $metaParts[1] -ne 'blob') { continue }
+                $path = $entry.Substring($tabIdx + 1)
+                if (-not $path.EndsWith('.json', [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+                $leaf = Split-Path -Leaf $path
+                if ($ExcludedFileNames -contains $leaf) { continue }
+                # Store the path relative to the snapshot folder - the app derives
+                # resource type/category/name from its segments.
+                $rel = $path.Substring($RelPath.Length).TrimStart('/')
+                $resources.Add([ordered]@{ p = $rel; h = $metaParts[2] })
+            }
+            if ($resources.Count -eq 0) {
+                Write-Verbose "Skipped commit $($commit.Sha): no snapshot resource files."
+                continue
+            }
+            $snapshots.Add([ordered]@{
+                    commitSha  = $commit.Sha
+                    commitDate = $commit.Date.ToString('o')
+                    subject    = $commit.Subject
+                    hasDetail  = $false
+                    resources  = @($resources)
+                })
+        }
     }
 
     # ---- Append the current working tree state when it adds information -------------
-    if (-not $SkipWorkingTree -and (Test-Path -LiteralPath $ImportPath -PathType Container)) {
+    if ($UseGit -and -not $SkipWorkingTree -and (Test-Path -LiteralPath $ImportPath -PathType Container)) {
         $wtFiles = @(Get-ChildItem -LiteralPath $ImportPath -Recurse -File -Filter '*.json' |
             Where-Object { $ExcludedFileNames -notcontains $_.Name } | Sort-Object FullName)
         if ($wtFiles.Count -gt 0) {
@@ -555,6 +601,21 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
     $ResolvedGroupTiers = [ordered]@{}
     $ResolvedDeviceTiers = [ordered]@{}
     $ResolvedPolicyGroupIds = [ordered]@{}
+    # Groups and approvers are looked up in the connected tenant, partly by display name: with a connection to another
+    # tenant than the one of the snapshot, groups of the same name there would end up in this tenant's report.
+    if ($ResolveGroupMembersForPrivilegedAssets -and [string]::IsNullOrWhiteSpace([string]$SnapshotManifest.TenantId)) {
+        Write-Warning "The Tenant Governance snapshot records no tenant (captured with EntraOps before 1.2.0), so EntraOps cannot check that the members of its groups are resolved in the same tenant. Capture a new snapshot (Save-EntraOpsTenantGovernanceSnapshotJson) to record it."
+    }
+    if ($ResolveGroupMembersForPrivilegedAssets -and -not [string]::IsNullOrWhiteSpace([string]$SnapshotManifest.TenantId)) {
+        $ConnectedTenantId = [string]$Global:TenantIdContext
+        if ([string]::IsNullOrWhiteSpace($ConnectedTenantId) -and (Get-Command -Name Get-MgContext -ErrorAction SilentlyContinue)) {
+            $ConnectedTenantId = [string](Get-MgContext -ErrorAction SilentlyContinue).TenantId
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ConnectedTenantId) -and $ConnectedTenantId -ne [string]$SnapshotManifest.TenantId) {
+            Write-Warning "The members of groups in policies are not resolved: the Tenant Governance snapshot belongs to tenant $($SnapshotManifest.TenantId), but the connection is to tenant $ConnectedTenantId. Connect to the tenant of the snapshot (Connect-EntraOps) and generate the Configuration Analyzer data again."
+            $ResolveGroupMembersForPrivilegedAssets = $false
+        }
+    }
     if ($ResolveGroupMembersForPrivilegedAssets) {
         $PrivilegedEamPath = Join-Path $RepoRoot 'PrivilegedEAM'
         if (-not (Test-Path -LiteralPath $PrivilegedEamPath -PathType Container)) {
@@ -594,30 +655,49 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
 
             $IncludedGroupReferences = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
             $AssignmentPolicyIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            # The requestor and approver groups of an assignment policy are read live from Microsoft Graph, so only the
+            # policies of the latest snapshot are looked up. A policy that is only in older snapshots was deleted in the
+            # tenant: its lookup would answer 404 in every run for as long as it stays in the git history.
+            $LatestSnapshot = if ($snapshots.Count -gt 0) { $snapshots[$snapshots.Count - 1] } else { $null }
             foreach ($Snapshot in @($snapshots | Where-Object { $_.hasDetail })) {
+                $IsLatestSnapshot = [object]::ReferenceEquals($Snapshot, $LatestSnapshot)
                 foreach ($Resource in @($Snapshot.resources)) {
                     $Blob = $blobs[$Resource.h]
                     if ($null -eq $Blob -or $null -eq $Blob.properties) { continue }
                     $ResourceType = "$($Blob.resourceType)".ToLowerInvariant()
                     if ($ResourceType -eq 'microsoft.entra.conditionalaccesspolicy') {
-                        foreach ($Group in @($Blob.properties.IncludeGroups)) {
+                        # Excluded groups as well: the finding rule EO.4003 evaluates the Control Plane members a
+                        # policy excludes, and the Conditional Access Analysis shows their tier.
+                        foreach ($Group in @(@($Blob.properties.IncludeGroups) + @($Blob.properties.ExcludeGroups))) {
                             if ($Group) { [void]$IncludedGroupReferences.Add("$Group") }
+                        }
+                    } elseif ($ResourceType -eq 'microsoft.entra.rolesetting') {
+                        # PIM activation approvers that are groups (display names; users are user principal names), so
+                        # the approver checks (EO.1008) can compare the least protected member of an approver group.
+                        # Every approver is looked up as a group: a group name can contain '@' too, and a user
+                        # principal name matches no group.
+                        foreach ($Approver in @($Blob.properties.ActivateApprover)) {
+                            if ($Approver) { [void]$IncludedGroupReferences.Add("$Approver") }
                         }
                     } elseif ($ResourceType.StartsWith('microsoft.entra.authenticationmethodpolicy') -and $ResourceType -ne 'microsoft.entra.authenticationmethodpolicy') {
                         foreach ($Target in @($Blob.properties.IncludeTargets)) {
                             if ($null -ne $Target -and $Target.Id) { [void]$IncludedGroupReferences.Add("$($Target.Id)") }
                         }
-                    } elseif ($ResourceType -eq 'microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy') {
+                    } elseif ($IsLatestSnapshot -and $ResourceType -eq 'microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy') {
                         $PolicyId = "$($Blob.properties.Id)"
                         if ($PolicyId) { [void]$AssignmentPolicyIds.Add($PolicyId) }
                     }
                 }
             }
 
+            # Inside New-EntraOpsReportingData the run's cache is used, which the Access Package Flow data shares: a
+            # deleted policy is requested and reported once per run. Called on its own, this generator reports them.
+            $OwnsReportingRunCache = Start-EntraOpsReportingRunCache
             foreach ($PolicyId in $AssignmentPolicyIds) {
                 try {
-                    # A deleted policy is reported once by the catch below, not again by the Graph helper
-                    $Policy = Invoke-EntraOpsMsGraphQuery -Uri "/beta/identityGovernance/entitlementManagement/accessPackageAssignmentPolicies/$PolicyId" -OutputType PSObject -ThrowOnFailure -SuppressNotFoundWarning
+                    # $null for a deleted policy, which is reported once per run by Complete-EntraOpsReportingRunCache
+                    $Policy = Get-EntraOpsAccessPackageAssignmentPolicyForReport -PolicyId $PolicyId
+                    if ($null -eq $Policy) { continue }
                     $PolicyGroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
                     $UserSets = @($Policy.requestorSettings.allowedRequestors) + @($Policy.requestApprovalSettings.approvalStages | ForEach-Object { $_.primaryApprovers })
                     foreach ($UserSet in $UserSets) {
@@ -631,6 +711,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
                     Write-Warning "Could not resolve requestor and approver groups for access package assignment policy ${PolicyId}: $($_.Exception.Message)"
                 }
             }
+            if ($OwnsReportingRunCache) { Complete-EntraOpsReportingRunCache }
 
             foreach ($GroupReference in $IncludedGroupReferences) {
                 if ($GroupReference -in @('All', 'None', 'GuestsOrExternalUsers', 'All_Users')) { continue }
@@ -639,7 +720,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
                     try {
                         $Groups = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/v1.0/groups/${GroupReference}?`$select=id,displayName" -OutputType PSObject -ThrowOnFailure)
                     } catch {
-                        Write-Warning "Could not resolve included group id '${GroupReference}': $($_.Exception.Message)"
+                        Write-Warning "Could not resolve group id '${GroupReference}': $($_.Exception.Message)"
                         continue
                     }
                 } else {
@@ -650,7 +731,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
                     try {
                         $Groups = @(Invoke-EntraOpsMsGraphQuery -Method Get -Uri "/v1.0/groups?`$filter=displayName eq '$EscapedReference'&`$select=id,displayName" -OutputType PSObject -ThrowOnFailure)
                     } catch {
-                        Write-Warning "Could not resolve included group '$GroupReference': $($_.Exception.Message)"
+                        Write-Warning "Could not resolve group '$GroupReference': $($_.Exception.Message)"
                         continue
                     }
                 }
@@ -668,15 +749,17 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
                             tierNames             = $TierNames
                             displayName           = "$($Group.DisplayName)"
                             totalMembers          = $Members.Count
+                            # Members that can act themselves (users and service principals, not nested groups).
+                            principalCount        = @($Members | Where-Object { "$($_.'@odata.type')" -ne '#microsoft.graph.group' }).Count
                             privilegedMemberCount = $PrivilegedMembers.Count
-                            members               = @($PrivilegedMembers | ForEach-Object { [ordered]@{ id = "$($_.Id)"; displayName = "$($_.DisplayName)"; tierName = $TierByObjectId["$($_.Id)"] } })
+                            members               = @($PrivilegedMembers | ForEach-Object { [ordered]@{ id = "$($_.Id)"; displayName = "$($_.DisplayName)"; tierName = $TierByObjectId["$($_.Id)"]; objectType = "$($_.'@odata.type')" -replace '^#microsoft\.graph\.', '' } })
                         }
                     } catch {
-                        Write-Warning "Could not resolve transitive members of included group '$($Group.DisplayName)': $($_.Exception.Message)"
+                        Write-Warning "Could not resolve transitive members of group '$($Group.DisplayName)': $($_.Exception.Message)"
                     }
                 }
             }
-            Write-Verbose "Resolved $($ResolvedGroupTiers.Count) included group(s) for Privileged Assets."
+            Write-Verbose "Resolved $($ResolvedGroupTiers.Count) referenced group(s) for Privileged Assets and Conditional Access."
         }
     }
 
@@ -732,6 +815,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
         tenantName                                = Get-EntraOpsReportingTenantName -RepoRoot $RepoRoot
         generatedAt                               = (Get-Date).ToUniversalTime().ToString('o')
         snapshotFolder                            = $RelPath
+        historySource                             = $(if ($UseGit) { 'git' } else { 'folder' })
         snapshotHealth                            = $SnapshotHealth
         timeRangeInDays                           = $TimeRangeInDays
         snapshotInterval                          = $SnapshotInterval
@@ -740,8 +824,6 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
         resolvedGroupTiers                        = $ResolvedGroupTiers
         resolvedPolicyGroupIds                    = $ResolvedPolicyGroupIds
         resolvedDeviceTiers                       = $ResolvedDeviceTiers
-        pimRequestFlowExcludedRiskFlags           = $PimRequestFlowExcludedRiskFlags
-        accessPackageFlowExcludedRiskFlags        = $AccessPackageFlowExcludedRiskFlags
         conditionalAccessAnalysisExcludedFindings = $ConditionalAccessAnalysisExcludedFindings
         eidscaExcludedFindings                    = $EidscaExcludedFindings
     }
@@ -756,6 +838,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
         Write-Host "Snapshots written:      $($snapshots.Count)"
         Write-Host "Detailed snapshots:     $($detailIdx.Count)"
         Write-Host "Unique content blobs:   $($blobs.Count)"
+        if (-not $UseGit) { Write-Host "History source:         current snapshot only, no history and drift ($(if ($FolderReason) { $FolderReason } else { '-HistorySource Folder' }))" }
         if ($SkippedBlobCount -gt 0) {
             Write-Warning "$SkippedBlobCount content blob(s) could not be parsed; affected resources have no property-level diff data."
         }

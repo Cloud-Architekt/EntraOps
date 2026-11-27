@@ -97,12 +97,38 @@ Describe 'Update-EntraOpsClassificationControlPlaneScope during an Exposure Mana
         Get-Content -LiteralPath (Join-Path $script:TenantFolder 'ScopeReasoning_ControlPlane.json') -Raw | Should -Be ($script:PreviousReasoning + [Environment]::NewLine)
         @(Get-ChildItem -LiteralPath $script:TenantFolder).Name | Should -Be @('ScopeReasoning_ControlPlane.json')
     }
+
+    It 'names the RBAC systems without an EAM export once with -SkipMissingEamDataWarning (Skip: <Skip>)' -ForEach @(@{ Skip = $true }, @{ Skip = $false }) {
+        # The outage ends the update early with the warnings summary, which shows how the missing exports are reported.
+        Mock -ModuleName EntraOps Get-EntraOpsClassificationControlPlaneObjects {
+            param([hashtable]$ExposureManagementResult)
+            Write-Warning 'No privileged objects found for EntraID in EntraOps! File /eam/EntraID/EntraID.json not found.'
+            Write-Warning 'No privileged objects found for Azure in EntraOps! File /eam/Azure/Azure.json not found.'
+            Write-Warning 'No privileged objects found in EntraOps!'
+            $ExposureManagementResult['Status'] = 'Failed'
+            $ExposureManagementResult['HasUnusablePreviousResults'] = $true
+            $ExposureManagementResult['Warnings'] = @()
+        }
+
+        $Output = Update-EntraOpsClassificationControlPlaneScope -ClassificationParameterScope 'EntraID' -SkipMissingEamDataWarning:$Skip -WarningAction SilentlyContinue 6>&1 | Out-String
+
+        if ($Skip) {
+            $Output | Should -Match ([regex]::Escape("No Privileged EAM export yet for EntraID, Azure: the Control Plane scope is refined from this run's export."))
+            $Output | Should -Not -Match 'MissingEamData'
+            $Output | Should -Not -Match 'No privileged objects found'
+        } else {
+            $Output | Should -Not -Match 'No Privileged EAM export yet'
+            $Output | Should -Match 'MissingEamData'
+            $Output | Should -Match 'No privileged objects found for Azure in EntraOps'
+        }
+    }
 }
 
 Describe 'Intune device scope selection gaps' {
     BeforeAll {
         $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
         . (Join-Path $script:TestRepositoryRoot 'EntraOps/Private/Get-EntraOpsIntuneDeviceScopeSelectionGap.ps1')
+        . (Join-Path $script:TestRepositoryRoot 'EntraOps/Private/Get-EntraOpsPawDeviceObjectId.ps1')
         . (Join-Path $script:TestRepositoryRoot 'EntraOps/Private/Show-EntraOpsWarningSummary.ps1')
 
         function New-DeviceScopeUser {
@@ -243,5 +269,64 @@ Describe 'Intune device scope selection gaps' {
         @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects $null -Tier0Users $null -Tier1Users $null -SelectedDeviceIds $null -HomeTenantId $null).Count | Should -Be 0
         $SparseUser = [pscustomobject]@{ ObjectId = 'sparse-user'; ObjectType = 'user'; OwnedDevices = @('device-one') }
         @(Get-EntraOpsIntuneDeviceScopeSelectionGap -PrivilegedObjects @($SparseUser) -Tier0Users @() -Tier1Users @() -SelectedDeviceIds @() -HomeTenantId 'home-tenant').Count | Should -Be 1
+    }
+}
+
+Describe 'Update-EntraOpsClassificationControlPlaneScope deterministic scope output' {
+    BeforeAll {
+        $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $ScriptPath = Join-Path $script:TestRepositoryRoot 'EntraOps/Public/PrivilegedAccess/Update-EntraOpsClassificationControlPlaneScope.ps1'
+        $script:ScriptContent = [System.IO.File]::ReadAllText($ScriptPath)
+        $script:ScriptAst = [System.Management.Automation.Language.Parser]::ParseFile($ScriptPath, [ref]$null, [ref]$null)
+    }
+
+    It 'sorts Intune scope tag names before joining them' {
+        # Graph returns role assignments in no fixed order; unsorted joins produced both 'Tier0.SAW, Tier1.SAW' and 'Tier1.SAW, Tier0.SAW'.
+        $script:ScriptContent | Should -Not -Match ([regex]::Escape('Select-Object -Unique ScopeTagName | ForEach-Object { $_.ScopeTagName }) -join'))
+        $SortedJoin = [regex]::Escape('ScopeTagNames    = (@($MatchedTags | ForEach-Object { "$($_.ScopeTagName)" }) | Sort-Object -Unique) -join '', ''')
+        [regex]::Matches($script:ScriptContent, $SortedJoin).Count | Should -Be 2
+    }
+
+    It 'joins scope tag names in the same order regardless of input order' {
+        $Expression = [regex]::Match($script:ScriptContent, 'ScopeTagNames    = (\(@\(\$MatchedTags[^\r\n]+)').Groups[1].Value
+        $Expression | Should -Not -BeNullOrEmpty
+        $Join = [scriptblock]::Create("param(`$MatchedTags) $Expression")
+        $Forward = & $Join @([pscustomobject]@{ ScopeTagName = 'Tier0.SAW' }, [pscustomobject]@{ ScopeTagName = 'Tier1.SAW' }, [pscustomobject]@{ ScopeTagName = 'Tier0.SAW' })
+        $Reverse = & $Join @([pscustomobject]@{ ScopeTagName = 'Tier1.SAW' }, [pscustomobject]@{ ScopeTagName = 'Tier0.SAW' })
+        $Forward | Should -BeExactly 'Tier0.SAW, Tier1.SAW'
+        $Reverse | Should -BeExactly $Forward
+    }
+
+    It 'writes the directory-level ScopeId of ScopeReasoning_EntraID.json as a string' {
+        $script:ScriptContent | Should -Not -Match 'ScopeId\s*=\s*\$DirectoryLevelAssignmentScope'
+        [regex]::Matches($script:ScriptContent, "ScopeId\s*=\s*'/'").Count | Should -Be 3
+    }
+
+    It 'de-duplicates DeviceManagement scope group IDs of groups that are both Tier0 and Tier1' {
+        $DedupLoop = $script:ScriptAst.Find({
+                param($Node)
+                $Node -is [System.Management.Automation.Language.ForEachStatementAst] -and $Node.Variable.VariablePath.UserPath -eq 'DeviceMgmtTier'
+            }, $true)
+        $DedupLoop | Should -Not -BeNullOrEmpty
+
+        $Template = Get-Content -Raw (Join-Path $script:TestRepositoryRoot 'Classification/Templates/Classification_DeviceManagement.Param.json')
+        $Template = $Template.Replace('<Tier0IncludedGroupIds>', '"group-a", "group-b"').Replace('<Tier1IncludedGroupIds>', '"group-b", "group-c"')
+        $DeviceMgmtRoleClassificationDefinition = @($Template | ConvertFrom-Json -Depth 10)
+        . ([scriptblock]::Create($DedupLoop.Extent.Text))
+
+        $Definitions = @($DeviceMgmtRoleClassificationDefinition.TierLevelDefinition)
+        $Combined = @($Definitions | Where-Object { @($_.RoleAssignmentScopeName) -contains 'group-c' -or @($_.ExcludedRoleAssignmentScopeName) -contains 'group-c' })
+        $Combined.Count | Should -BeGreaterThan 0
+        foreach ($Definition in $Definitions) {
+            foreach ($Property in 'RoleAssignmentScopeName', 'ExcludedRoleAssignmentScopeName') {
+                $Values = @($Definition.$Property)
+                @($Values | Select-Object -Unique).Count | Should -Be $Values.Count -Because "$($Definition.Service) $Property must not repeat group IDs"
+                if ($Values -contains 'group-c') { @($Values | Where-Object { $_ -like 'group-*' }) | Should -Be @('group-a', 'group-b', 'group-c') }
+            }
+        }
+        # Arrays stay arrays (also with a single entry) so the JSON shape of the template is unchanged.
+        $Json = $DeviceMgmtRoleClassificationDefinition | ConvertTo-Json -Depth 10
+        $Json | Should -Match '"RoleAssignmentScopeName": \[\s*("/",\s*)?"group-a",\s*"group-b",\s*"group-c"\s*\]'
+        $Json | Should -Not -Match '"RoleAssignmentScopeName": "'
     }
 }

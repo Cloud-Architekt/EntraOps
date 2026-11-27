@@ -764,7 +764,13 @@ The **`ServiceEM`** section of `EntraOpsConfig.json` contains the following basi
       "WorkloadPlane": "",
       "UserAccess": ""
     },
-    "UpdateObjectClassificationFile": false
+    "UpdateObjectClassificationFile": false,
+    "WorkloadPlaneAdminRoles": {
+      "PermanentRoleDefinitionIds": [
+        "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+      ],
+      "EligibleRoleDefinitionIds": []
+    }
   }
 }
 ```
@@ -783,8 +789,9 @@ The **`ServiceEM`** section of `EntraOpsConfig.json` contains the following basi
 | `AddWorkloadPlaneAdminToUsers`      | Default of `-AddWorkloadPlaneAdminToUsers`: `true` also assigns the `-WorkloadPlaneAdmin` to the WorkloadPlane-Users access package; an explicitly passed parameter wins                                                                                                           |
 | `GroupPrefix`                       | Default of `-GroupPrefix`: prefix of the security group display names (`SG` = `SG-Rg-MyApp-WorkloadPlane-Users`, `SG_` = `SG_Rg-MyApp-WorkloadPlane-Users`); letters, digits, `_`, `.` or `-`; an explicitly passed parameter wins (see [Naming Conventions](#naming-conventions)) |
 | `RoleAssignableWorkloadPlaneAdmins` | Default of `-RoleAssignableWorkloadPlaneAdmins`: `true` creates WorkloadPlane-Admins as role-assignable group (see [Role-assignable groups](#role-assignable-groups)); an explicitly passed parameter wins                                                                         |
-| `AdministrativeUnits`               | Object IDs of administrative units for WorkloadPlane-Admins (`WorkloadPlane`) and WorkloadPlane-Users (`UserAccess`); empty skips the assignment (see [Classification of workload groups](#classification-of-workload-groups))                                                     |
+| `AdministrativeUnits`               | Object IDs of administrative units for WorkloadPlane-Admins (`WorkloadPlane`, classified `ManagementPlane`) and WorkloadPlane-Users (`UserAccess`); empty skips the assignment (see [Classification of workload groups](#classification-of-workload-groups))                                                     |
 | `UpdateObjectClassificationFile`    | `true` adds WorkloadPlane-Admins and WorkloadPlane-Users to the Object Classification File (see [Classification of workload groups](#classification-of-workload-groups))                                                                                                           |
+| `WorkloadPlaneAdminRoles`           | Azure roles of WorkloadPlane-Admins on the landing zone resource group or subscription: `PermanentRoleDefinitionIds` (default: Reader) and `EligibleRoleDefinitionIds` (default: empty); see [Roles of WorkloadPlane-Admins](#roles-of-workloadplane-admins) |
 
 > **Note:** The `ControlPlaneDelegationGroupId` and `ManagementPlaneDelegationGroupId` values must be **role-assignable Security Groups**; ServiceEM stops before creating any object when such a group isn't role-assignable, and the name-based lookup only accepts role-assignable security groups. A value that isn't a valid object ID stops with an error; a configured group that no longer exists (HTTP 404) falls back to the name-based lookup with a warning, without changing the configured ID. They are also honored in the PerService model (see [How ServiceEM Reads EntraOpsConfig.json](#how-serviceem-reads-entraopsconfigjson)).
 
@@ -795,10 +802,16 @@ creates in two ways, which can be combined. Both identify the groups by mailNick
 `.Users`), not by display name. ControlPlane-Admins, ManagementPlane-Admins and the administrator group (CatalogPlane-Members)
 aren't handled; classify them in another way, e.g. by the Object Classification File of the tenant-wide groups.
 
-| Group                | Tier            | Administrative unit                           |
-| -------------------- | --------------- | --------------------------------------------- |
-| WorkloadPlane-Admins | `WorkloadPlane` | `ServiceEM.AdministrativeUnits.WorkloadPlane` |
-| WorkloadPlane-Users  | `UserAccess`    | `ServiceEM.AdministrativeUnits.UserAccess`    |
+| Group                | Tier              | Administrative unit                           |
+| -------------------- | ----------------- | --------------------------------------------- |
+| WorkloadPlane-Admins | `ManagementPlane` | `ServiceEM.AdministrativeUnits.WorkloadPlane` |
+| WorkloadPlane-Users  | `UserAccess`      | `ServiceEM.AdministrativeUnits.UserAccess`    |
+
+WorkloadPlane-Admins are classified `ManagementPlane`, not `WorkloadPlane`: their role assignments on the landing zone
+(the constrained Role Based Access Control Administrator and the resource roles assigned by ManagementPlane-Admins) are
+classified Management Plane, and the classification templates don't know a Workload Plane tier for role assignments. With
+the object tier `ManagementPlane`, the group is protected for the tier of its access and the reports show no mismatch
+between object tier and role assignments. The administrative unit setting keeps the name `WorkloadPlane`, after the group.
 
 - **Administrative unit:** ServiceEM adds each group to the administrative unit of its tier. Classify the groups with an
   [Alternate Tier Level Attributes](../core/index.html#classify-by-alternate-tier-level-attributes) filter for groups, matched
@@ -807,7 +820,7 @@ aren't handled; classify them in another way, e.g. by the Object Classification 
   ```json
   "Group": {
     "Enabled": true,
-    "WorkloadPlane": "$Object.AssignedAdministrativeUnits.id -contains \"<WorkloadPlane AU id>\"",
+    "ManagementPlane": "$Object.AssignedAdministrativeUnits.id -contains \"<WorkloadPlane AU id>\"",
     "UserAccess": "$Object.AssignedAdministrativeUnits.id -contains \"<UserAccess AU id>\""
   }
   ```
@@ -817,8 +830,9 @@ aren't handled; classify them in another way, e.g. by the Object Classification 
   group requires Privileged Role Administrator.
 - **Object Classification File** (`UpdateObjectClassificationFile`): ServiceEM adds the groups to the
   [Object Classification File](../core/index.html#classify-by-object-classification-file) of the repository, and
-  `Remove-EntraOpsServiceCatalog` removes them again. An existing entry with another tier is kept with a warning. Commit the
-  file and enable `ObjectClassificationFile.Enabled` to use it.
+  `Remove-EntraOpsServiceCatalog` removes them again. An existing entry with another tier is kept with a warning, e.g. the
+  `WorkloadPlane` entry of WorkloadPlane-Admins written by an earlier version: change it to `ManagementPlane` in the file.
+  Commit the file and enable `ObjectClassificationFile.Enabled` to use it.
 
 Failures (e.g. an administrative unit that can't be read) are shown as warnings and don't stop the deployment.
 
@@ -1218,7 +1232,7 @@ Constrained delegations are applied as [Azure ABAC conditions](https://learn.mic
 > managed identities of the scope. Add Contributor and custom roles with role assignment or identity permissions to
 > `ExcludedRoleDefinitionIds` if WorkloadPlane-Admins must stay below the ManagementPlane.
 
-**Use Case:** Management-tier administrators assign resource-level or limited roles (e.g. Website Contributor) to the WorkloadPlane-Admins group without granting control-plane access. WorkloadPlane-Admins get no Contributor on the resource group from ServiceEM (see [Azure RBAC Implementation](#azure-rbac-implementation-resource-group-or-subscription-scope)).
+**Use Case:** Management-tier administrators assign resource-level or limited roles (e.g. Website Contributor) to the WorkloadPlane-Admins group without granting control-plane access. By default, WorkloadPlane-Admins get no Contributor on the resource group from ServiceEM; roles that every landing zone needs are configured in `WorkloadPlaneAdminRoles` (see [Roles of WorkloadPlane-Admins](#roles-of-workloadplane-admins)).
 
 ### WorkloadPlane Constrained Delegation
 
@@ -1872,7 +1886,8 @@ their roles on the same resource group or subscription. The table shows the reso
 
 | Group (if present in the scope)                   | Azure RBAC Role                         | Type                        | Notes                                                                                                                                                                   |
 | ------------------------------------------------- | --------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`        | Reader                                  | Permanent (active)          | Always assigned                                                                                                                                                         |
+| `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`        | Reader                                  | Permanent (active)          | Default of `WorkloadPlaneAdminRoles.PermanentRoleDefinitionIds`                                                                                                         |
+| `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`        | None by default                         | PIM eligible, no expiration | Roles of `WorkloadPlaneAdminRoles.EligibleRoleDefinitionIds`                                                                                                            |
 | `SG-{Scope}-{Prefix}-WorkloadPlane-Admins`        | Role Based Access Control Administrator | PIM eligible, no expiration | ABAC: only `WorkloadPlane.AllowedRoleDefinitionIds` → WorkloadPlane-Users                                                                                               |
 | ManagementPlane-Admins (per-service or delegated) | Contributor                             | PIM eligible, no expiration | Skipped if already eligible at a parent scope                                                                                                                           |
 | ManagementPlane-Admins (per-service or delegated) | Role Based Access Control Administrator | PIM eligible, no expiration | ABAC: all roles except Owner, User Access Administrator, Role Based Access Control Administrator and `ManagementPlane.ExcludedRoleDefinitionIds` → WorkloadPlane-Admins |
@@ -1896,12 +1911,62 @@ delegation of another landing zone on the same scope, is kept. The remaining ass
 deployment stops with an error because the constrained delegation for this landing zone isn't assigned. Remove or
 adjust the existing assignment and run the deployment again.
 
-> **No Contributor for WorkloadPlane-Admins:** Contributor on the resource group (or subscription) equals ManagementPlane control
-> (e.g. managed identities, Key Vault access policies, run command on virtual machines) and would be a tier breach for the
-> WorkloadPlane. WorkloadPlane-Admins therefore only get Reader and the constrained Role Based Access Control Administrator;
-> resource-level or other roles (e.g. Website Contributor) are assigned to them by ManagementPlane-Admins through their constrained
-> Role Based Access Control Administrator. Without any ManagementPlane-Admins for the scope (e.g.
-> custom `-ServiceRoles`), a warning states that nobody gets Contributor from ServiceEM.
+> **No Contributor for WorkloadPlane-Admins by default:** Contributor on the resource group (or subscription) equals ManagementPlane
+> control (e.g. managed identities, Key Vault access policies, run command on virtual machines) and would be a tier breach for the
+> WorkloadPlane. By default, WorkloadPlane-Admins therefore only get Reader and the constrained Role Based Access Control
+> Administrator; resource-level or other roles (e.g. Website Contributor) are assigned to them by ManagementPlane-Admins through
+> their constrained Role Based Access Control Administrator, or configured for all landing zones in `WorkloadPlaneAdminRoles`.
+> Without any ManagementPlane-Admins for the scope (e.g. custom `-ServiceRoles`), a warning states that nobody gets Contributor
+> from ServiceEM.
+
+#### Roles of WorkloadPlane-Admins
+
+`ServiceEM.WorkloadPlaneAdminRoles` in `EntraOpsConfig.json` defines the Azure roles that ServiceEM assigns to WorkloadPlane-Admins
+on the landing zone resource group or subscription, as two lists of role definition IDs:
+
+```json
+{
+  "ServiceEM": {
+    "WorkloadPlaneAdminRoles": {
+      "PermanentRoleDefinitionIds": [
+        "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+      ],
+      "EligibleRoleDefinitionIds": []
+    }
+  }
+}
+```
+
+| Setting                      | Assignment                  | Default                                           |
+| ---------------------------- | --------------------------- | ------------------------------------------------- |
+| `PermanentRoleDefinitionIds` | Permanent (active)          | Reader (`acdd72a7-3385-48ef-bd42-f606fba81ae7`)   |
+| `EligibleRoleDefinitionIds`  | PIM eligible, no expiration | Empty: ServiceEM assigns no privileged role       |
+
+- A missing list means its default. An empty list assigns no role of this type, so an empty `PermanentRoleDefinitionIds` also
+  assigns no Reader.
+- The constrained Role Based Access Control Administrator of WorkloadPlane-Admins is always assigned as PIM eligible and isn't part
+  of these lists.
+- Owner, User Access Administrator and Role Based Access Control Administrator are rejected in both lists, as are invalid GUIDs, a
+  role in both lists and a role definition that doesn't exist in the subscription. ServiceEM checks the lists before it assigns
+  any Azure role.
+- An eligible role is skipped when WorkloadPlane-Admins are already eligible for it on the scope or a parent scope. For each
+  eligible role, ServiceEM changes the PIM for Azure resources policy of the role on the scope so that eligible assignments are not
+  required to expire.
+- The lists apply to every landing zone deployed with this configuration. Roles removed from a list are not removed from
+  existing landing zones; remove these assignments in Azure.
+
+Example: eligible Website Contributor (`de139f84-1756-47ae-9be6-808fbbe84772`) in addition to permanent Reader:
+
+```json
+"WorkloadPlaneAdminRoles": {
+  "PermanentRoleDefinitionIds": ["acdd72a7-3385-48ef-bd42-f606fba81ae7"],
+  "EligibleRoleDefinitionIds": ["de139f84-1756-47ae-9be6-808fbbe84772"]
+}
+```
+
+> **Warning:** Contributor (`b24988ac-6180-42a0-ab88-20f7382dd24c`) in one of the lists gives WorkloadPlane-Admins ManagementPlane
+> control of the scope. Prefer resource-specific roles or a custom role without identity and role assignment permissions, and
+> prefer `EligibleRoleDefinitionIds` over `PermanentRoleDefinitionIds` for every role that can change resources.
 
 #### Prerequisites for Azure RBAC
 

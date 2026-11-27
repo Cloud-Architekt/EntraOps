@@ -1,7 +1,7 @@
 Parser:
     Title: PrivilegedEAM (WatchLists)
-    Version: 0.5
-    LastUpdated: 2026-10-19
+    Version: 0.6
+    LastUpdated: 2026-11-13
 Product:
     Name: EntraOps
 References:
@@ -94,6 +94,10 @@ ParserQuery: |
         ObjectAdminTierLevel,
         ObjectAdminTierLevelName,
         OnPremSynchronized,
+        // Origin of the object (EntraOps 1.2.0 or later); empty for watchlists of older versions.
+        OriginType = column_ifexists('OriginType', ''),
+        OriginTenantId = column_ifexists('OriginTenantId', ''),
+        OriginId = column_ifexists('OriginId', ''),
         AssignedAdministrativeUnits,
         RestrictedManagementByRAG,
         RestrictedManagementByAadRole,

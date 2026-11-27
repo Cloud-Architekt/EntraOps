@@ -17,6 +17,7 @@
           "microsoft.directory/agentIdentities/delete",
           "microsoft.directory/agentIdentities/disable",
           "microsoft.directory/agentIdentities/enable",
+          "microsoft.directory/agentIdentities/idJagConfiguration/update",
           "microsoft.directory/agentIdentities/owners/update",
           "microsoft.directory/agentIdentities/tag/update",
           "microsoft.directory/agentIdentityBlueprintPrincipals/appRoleAssignedTo/update",
@@ -26,6 +27,7 @@
           "microsoft.directory/agentIdentityBlueprintPrincipals/delete",
           "microsoft.directory/agentIdentityBlueprintPrincipals/disable",
           "microsoft.directory/agentIdentityBlueprintPrincipals/enable",
+          "microsoft.directory/agentIdentityBlueprintPrincipals/idJagConfiguration/update",
           "microsoft.directory/agentIdentityBlueprintPrincipals/owners/update",
           "microsoft.directory/agentIdentityBlueprintPrincipals/tag/update",
           "microsoft.directory/agentIdentityBlueprints/allProperties/update",
@@ -47,6 +49,22 @@
           "microsoft.directory/deletedItems.agentIdentityBlueprints/delete",
           "microsoft.directory/deletedItems.agentIdentityBlueprints/restore",
           "microsoft.directory/agentIdentityBlueprints/verification/update"
+        ]
+      },
+      {
+        "Category": "Microsoft.AzureAD",
+        "Service": "Resource Policy",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "microsoft.directory/resourcePolicy/assignments/basic/update",
+          "microsoft.directory/resourcePolicy/assignments/create",
+          "microsoft.directory/resourcePolicy/assignments/delete",
+          "microsoft.directory/resourcePolicy/configuration/basic/update",
+          "microsoft.directory/resourcePolicy/definitions/basic/update",
+          "microsoft.directory/resourcePolicy/definitions/create",
+          "microsoft.directory/resourcePolicy/definitions/delete"
         ]
       },
       {
@@ -1403,6 +1421,11 @@
           "microsoft.directory/permissionGrantPolicies/standard/read",
           "microsoft.directory/policies/allProperties/read",
           "microsoft.directory/privilegedIdentityManagement/allProperties/read",
+          "microsoft.directory/resourcePolicy/assignments/standard/read",
+          "microsoft.directory/resourcePolicy/configuration/standard/read",
+          "microsoft.directory/resourcePolicy/definitions/standard/read",
+          "microsoft.directory/resourcePolicy/evaluateAssignedPolicies",
+          "microsoft.directory/resourcePolicy/evaluatePolicy",
           "microsoft.directory/roleAssignments/allProperties/read",
           "microsoft.directory/roleDefinitions/allProperties/read",
           "microsoft.directory/scopedRoleMemberships/allProperties/read",

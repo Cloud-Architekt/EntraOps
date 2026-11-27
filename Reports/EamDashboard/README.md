@@ -67,6 +67,28 @@ All views, filters and drill-downs of the Overview workbook are available:
   Classification Explorer, Access Path Map and Tier Breach Analyzer (shared via
   `localStorage`). Every starred item and grid row keeps a deep link that jumps
   straight back to the same selection on reload.
+  Individual matched role actions can also be starred in the classification evidence
+  blades for assets, assignments and classification rows. Each bookmark retains its
+  RBAC system, assignment scope and observed tier; the same action at different scopes
+  stays separate. Its link reopens the source assignment's evidence at that action.
+  The evidence of a classification row lists up to five assignment scopes per action
+  (starred scopes first); star further scopes in the classification reasoning of their
+  role assignment.
+  In **Classification Explorer > Customize Overwrites > Role Actions > Add entry**,
+  use **From your Review list > Add action**, then explicitly enter the overwrite
+  scope, tier and justification. The observed scope and tier are context, not an
+  automatically applied overwrite. Cross-app sharing requires the apps to be served
+  from the same origin; sharing `localStorage` between `file://` pages is browser-dependent.
+
+### Deep links and hand-over parameters
+
+- `#asset=<objectId>` and `#assignment=<instance ID or assignment ID>` scroll to and highlight the row. When the
+  current filters hide it, all filters are cleared first (like the Tier Breach Analyzer); the notice appears only for
+  an ID that is not in the Privileged EAM data. Asset IDs match case-insensitively.
+- `#assignment=<encoded assignment ID>&action=<encoded action>` opens the assignment's
+  classification evidence and focuses the bookmarked action.
+- `?rs=<systems|*>&objectTier=<tier[,tier]|*>&q=<text>` (from the Privilege History) sets the RBAC systems, one or
+  several identity classifications and the search.
 
 ## Computed columns
 

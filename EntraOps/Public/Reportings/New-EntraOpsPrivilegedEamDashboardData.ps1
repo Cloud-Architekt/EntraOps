@@ -51,7 +51,7 @@
     contains the Reports/EamDashboard folder.
 
 .PARAMETER RepoRoot
-    Path to the EntraOps repository root that contains the PrivilegedEAM export folder.
+    Path to the EntraOps repository root that contains the PrivilegedEAM export folder (alias: -Path).
     Defaults to the repository this module lives in.
 
 .PARAMETER ImportPath
@@ -94,6 +94,7 @@ function New-EntraOpsPrivilegedEamDashboardData {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param (
         [Parameter(Mandatory = $false)]
+        [Alias('Path')]
         [System.String]$RepoRoot,
 
         [Parameter(Mandatory = $false)]
@@ -138,7 +139,7 @@ function New-EntraOpsPrivilegedEamDashboardData {
     if ([string]::IsNullOrWhiteSpace($OutFile)) { $OutFile = Join-Path $AppRoot 'data/eam-dashboard-data.js' }
 
     if (-not (Test-Path -LiteralPath $ImportPath)) {
-        throw "Privileged EAM import path not found: $ImportPath. Run Save-EntraOpsPrivilegedEAMJson first or pass -ImportPath."
+        throw "Privileged EAM import path not found: $ImportPath. Run Invoke-EntraOpsPrivilegedEAM (or Save-EntraOpsPrivilegedEAMJson) first or pass -ImportPath."
     }
 
     if (-not $PSBoundParameters.ContainsKey('ResolveLinkedIdentityObjectIds')) {

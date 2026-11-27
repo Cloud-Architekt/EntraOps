@@ -5,6 +5,31 @@
     "TierLevelDefinition": [
       {
         "Category": "Microsoft.Graph",
+        "Service": "Backup and Restore",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "EntraBackup.ReadWrite.Preview",
+          "EntraBackup.ReadWrite.Recovery"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
+        "Service": "Backup and Restore",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "All",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "HardDeletionSetting.ReadWrite.Enable"
+        ]
+      },
+      {
+        "Category": "Microsoft.Graph",
         "Service": "Agent Identity",
         "ResourceAppId": "00000003-0000-0000-c000-000000000000",
         "ResourceScope": "All",
@@ -152,6 +177,7 @@
           "EventListener.ReadWrite.All",
           "Policy.ReadWrite.AuthenticationFlows",
           "Policy.ReadWrite.AuthenticationMethod",
+          "Policy.ReadWrite.AuthFeatureToggle",
           "Policy.ReadWrite.Authorization",
           "UserAuthenticationMethod.Delete.All",
           "UserAuthenticationMethod.ReadWrite.All",
@@ -443,6 +469,7 @@
           "DeviceManagementApps.ReadWrite.All",
           "DeviceManagementConfiguration.ReadWrite.All",
           "DeviceManagementDeploymentPlans.ReadWrite.All",
+          "DeviceManagementEndpointSecurity.ReadWrite.All",
           "DeviceManagementManagedDevices.PrivilegedOperations.All",
           "DeviceManagementManagedDevices.ReadWrite.All",
           "DeviceManagementScripts.ReadWrite.All",
@@ -504,6 +531,7 @@
         "RoleDefinitionActions": [
           "AttackSimulation.ReadWrite.All",
           "AuditActivity.Write",
+          "AutomationRules.ReadWrite.All",
           "CaseManagement.ConfigManage.All",
           "CaseManagement.ReadWrite.All",
           "ContentActivity.Write",
@@ -514,10 +542,7 @@
           "SecurityAlert.ReadWrite.All",
           "SecurityAnalyzedMessage.ReadWrite.All",
           "SecurityEvents.ReadWrite.All",
-          "SecurityIdentitiesAutoConfig.Read.All",
-          "SecurityIdentitiesHealth.Read.All",
           "SecurityIdentitiesMigration.ReadWrite.All",
-          "SecurityIdentitiesSensors.Read.All",
           "SecurityIncident.ReadWrite.All",
           "ThreatHunting.ReadWrite.All",
           "ThreatIndicators.ReadWrite.OwnedBy",
@@ -654,6 +679,7 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "CloudLicensing.ClaimLicenses.All",
           "LicenseAssignment.ReadWrite.All"
         ]
       },
@@ -733,6 +759,7 @@
           "RoleAssignmentSchedule.Remove.Directory",
           "RoleEligibilitySchedule.ReadWrite.Directory",
           "RoleEligibilitySchedule.Remove.Directory",
+          "RoleManagement-Authorization.ReadWrite.All",
           "RoleManagement.ReadWrite.CloudPC",
           "RoleManagement.ReadWrite.Defender",
           "RoleManagement.ReadWrite.Directory",
@@ -816,6 +843,7 @@
           "CustomObjectDefinition.ReadWrite.All",
           "DelegatedAdminRelationship.ReadWrite.All",
           "Directory.ReadWrite.All",
+          "Directory.Write.Restricted",
           "DirectoryRecommendations.ReadWrite.All",
           "Domain-InternalFederation.ReadWrite.All",
           "Domain.ReadWrite.All",
@@ -876,7 +904,10 @@
           "Policy.ReadWrite.FedTokenValidation",
           "Policy.ReadWrite.IdentityProtection",
           "Policy.ReadWrite.Recovery",
-          "Policy.ReadWrite.SecurityDefaults"
+          "Policy.ReadWrite.SecurityDefaults",
+          "ResourcePolicyAssignment.ReadWrite.All",
+          "ResourcePolicyConfiguration.ReadWrite.All",
+          "ResourcePolicyDefinition.ReadWrite.All"
         ]
       },
       {
@@ -891,6 +922,30 @@
           "VerifiedId.GetKeys.DefaultDid",
           "VerifiedId.PerformCallback.Presentation",
           "VerifiedId.Sign.VerifiablePresentationRequest"
+        ]
+      },
+      {
+        "Category": "Microsoft.PartnerCenter",
+        "Service": "Partner Delegated Administration",
+        "ResourceAppId": "2832473f-ec63-45fb-976f-5d45a7d4bb91",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "PartnerCustomerDelegatedAdministration.ReadWrite.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.MCPServerForEnterprise",
+        "Service": "Global Secure Access Management",
+        "ResourceAppId": "e8c77dc2-69b3-43f4-bc51-3213c9d915b4",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "MCP.NetworkAccess-Reports.Read.All"
         ]
       }
     ]
@@ -1025,19 +1080,6 @@
       },
       {
         "Category": "Microsoft.Graph",
-        "Service": "Backup and Restore",
-        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
-        "ResourceScope": "Delegation",
-        "RoleAssignmentScopeName": [
-          "/"
-        ],
-        "RoleDefinitionActions": [
-          "EntraBackup.ReadWrite.Preview",
-          "EntraBackup.ReadWrite.Recovery"
-        ]
-      },
-      {
-        "Category": "Microsoft.Graph",
         "Service": "Business Scenarios",
         "ResourceAppId": "00000003-0000-0000-c000-000000000000",
         "ResourceScope": "All",
@@ -1110,6 +1152,12 @@
           "/"
         ],
         "RoleDefinitionActions": [
+          "CopilotCostManagement-Assignment.Read.All",
+          "CopilotCostManagement-Assignment.ReadWrite.All",
+          "CopilotCostManagement-Policy.Read.All",
+          "CopilotCostManagement-Policy.ReadWrite.All",
+          "CopilotCostManagement-Reports.Read.All",
+          "CopilotCostManagement.Read.All",
           "CopilotPackages.Read.All",
           "CopilotPackages.ReadWrite.All",
           "CopilotPolicySettings.Read",
@@ -1126,14 +1174,9 @@
         ],
         "RoleDefinitionActions": [
           "CopilotConversation.Delete",
-          "CopilotCostManagement-Assignment.Read.All",
-          "CopilotCostManagement-Assignment.ReadWrite.All",
           "CopilotCostManagement-CreditReq.Read.All",
           "CopilotCostManagement-CreditReq.ReadWrite.All",
-          "CopilotCostManagement-Policy.Read.All",
-          "CopilotCostManagement-Policy.ReadWrite.All",
           "CopilotCostManagement-UserData.Read.All",
-          "CopilotCostManagement.Read.All",
           "CopilotSettings-LimitedMode.Read",
           "CopilotSettings-LimitedMode.ReadWrite"
         ]
@@ -1784,6 +1827,7 @@
           "Group.ManageProtection.All",
           "InfoProtectABACPolicy.Read.All",
           "InfoProtectABACPolicy.ReadWrite.All",
+          "InfoProtectAttributeAssignment.Read",
           "InfoProtectAttributeAssignment.Read.All",
           "InfoProtectAttributeAssignment.ReadWrite.All",
           "InfoProtectAttributeDefinition.Read.All",
@@ -1920,7 +1964,8 @@
           "AllSites.FullControl",
           "ProjectWebApp.FullControl",
           "SharePointTenantSettings.Read.All",
-          "SharePointTenantSettings.ReadWrite.All"
+          "SharePointTenantSettings.ReadWrite.All",
+          "Sites.FullControl.All"
         ]
       },
       {
@@ -2204,6 +2249,19 @@
         ]
       },
       {
+        "Category": "Microsoft.Graph",
+        "Service": "Perception",
+        "ResourceAppId": "00000003-0000-0000-c000-000000000000",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "Perception.Manage.All",
+          "Perception.Read.All"
+        ]
+      },
+      {
         "Category": "Microsoft.PowerBI",
         "Service": "Power BI Administration",
         "ResourceAppId": "00000009-0000-0000-c000-000000000000",
@@ -2315,6 +2373,7 @@
           "AuditLogsQuery-OneDrive.Read.All",
           "AuditLogsQuery-SharePoint.Read.All",
           "AuditLogsQuery.Read.All",
+          "AutomationRules.Read.All",
           "CaseManagement.Read.All",
           "ChangeManagement.Read.All",
           "CloudApp-Discovery.Read.All",
@@ -2350,7 +2409,10 @@
           "SecurityAnalyzedMessage.Read.All",
           "SecurityEvents.Read.All",
           "SecurityIdentitiesAccount.Read.All",
+          "SecurityIdentitiesAutoConfig.Read.All",
+          "SecurityIdentitiesHealth.Read.All",
           "SecurityIdentitiesMigration.Read.All",
+          "SecurityIdentitiesSensors.Read.All",
           "SecurityIdentitiesUserActions.Read.All",
           "SecurityIncident.Read.All",
           "SpiffeTrustDomain.Read.All",
@@ -2473,6 +2535,57 @@
           "Project.Write",
           "ProjectWebAppReporting.Read",
           "Sites.Search.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.SharePointOnline",
+        "Service": "SharePoint Operations",
+        "ResourceAppId": "00000003-0000-0ff1-ce00-000000000000",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "Files.ReadWrite.All",
+          "Sites.ReadWrite.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.GraphConnectorService",
+        "Service": "Graph Connectors",
+        "ResourceAppId": "56c1da01-2129-48f7-9355-af6d59d42766",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "ExternalConnection.ReadWrite.All",
+          "Sites.FullControl.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.ThreatProtection",
+        "Service": "Security and Compliance",
+        "ResourceAppId": "8ee8fdad-f234-4243-8f3b-15c294843740",
+        "ResourceScope": "Application",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "AdvancedHunting.Read.All",
+          "Incident.Read.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.PowerPlatform",
+        "Service": "Power Platform Administration",
+        "ResourceAppId": "475226c6-020e-4fb2-8a90-7a972cbfc1d4",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "user_impersonation"
         ]
       },
       {
@@ -2638,6 +2751,7 @@
           "PendingExternalUserProfile.Read.All",
           "Policy.Read.All",
           "Policy.Read.AuthenticationMethod",
+          "Policy.Read.AuthFeatureToggle",
           "Policy.Read.B2BManagementPolicy",
           "Policy.Read.ConditionalAccess",
           "Policy.Read.CrossTenantAccess",
@@ -2655,6 +2769,10 @@
           "PrivilegedEligibilitySchedule.Read.AzureADGroup",
           "PrivilegedEligibilitySchedule.Read.EntraAppRole",
           "RemoteTenantGroups.Read.All",
+          "ResourcePolicyAssignment.Read.All",
+          "ResourcePolicyConfiguration.Read.All",
+          "ResourcePolicyDefinition.Read.All",
+          "ResourcePolicyEvaluation.Read.All",
           "RoleAssignmentSchedule.Read.Directory",
           "RoleEligibilitySchedule.Read.Directory",
           "RoleManagement.Read.Defender",
@@ -2779,6 +2897,83 @@
           "VerifiableCredential.Create.IssueRequest",
           "VerifiableCredential.Create.IssueRequest.User",
           "VerifiedId.MyAccountEligibility.Read"
+        ]
+      },
+      {
+        "Category": "Microsoft.MCPServerForEnterprise",
+        "Service": "Entitlement Management",
+        "ResourceAppId": "e8c77dc2-69b3-43f4-bc51-3213c9d915b4",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "MCP.AccessReview.Read.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.MCPServerForEnterprise",
+        "Service": "Security and Compliance",
+        "ResourceAppId": "e8c77dc2-69b3-43f4-bc51-3213c9d915b4",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "MCP.AuditLog.Read.All",
+          "MCP.IdentityRiskEvent.Read.All",
+          "MCP.IdentityRiskyServicePrincipal.Read.All",
+          "MCP.IdentityRiskyUser.Read.All",
+          "MCP.ProvisioningLog.Read.All",
+          "MCP.Reports.Read.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.MCPServerForEnterprise",
+        "Service": "Conditional Access",
+        "ResourceAppId": "e8c77dc2-69b3-43f4-bc51-3213c9d915b4",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "MCP.AuthenticationContext.Read.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.MCPServerForEnterprise",
+        "Service": "Tenant Configuration (Reader)",
+        "ResourceAppId": "e8c77dc2-69b3-43f4-bc51-3213c9d915b4",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "MCP.DirectoryRecommendations.Read.All",
+          "MCP.EntitlementManagement.Read.All",
+          "MCP.LifecycleWorkflows-CustomExt.Read.All",
+          "MCP.LifecycleWorkflows-Reports.Read.All",
+          "MCP.LifecycleWorkflows-Workflow.Read.All",
+          "MCP.LifecycleWorkflows-Workflow.ReadBasic.All",
+          "MCP.LifecycleWorkflows.Read.All",
+          "MCP.NetworkAccess.Read.All",
+          "MCP.Policy.Read.All",
+          "MCP.Policy.Read.ConditionalAccess",
+          "MCP.RoleAssignmentSchedule.Read.Directory",
+          "MCP.RoleEligibilitySchedule.Read.Directory",
+          "MCP.Synchronization.Read.All"
+        ]
+      },
+      {
+        "Category": "Microsoft.MCPServerForEnterprise",
+        "Service": "Health Monitoring",
+        "ResourceAppId": "e8c77dc2-69b3-43f4-bc51-3213c9d915b4",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "MCP.HealthMonitoringAlert.Read.All"
         ]
       }
     ]
@@ -3082,6 +3277,7 @@
           "GroupSettings.Read.All",
           "LicenseAssignment.Read.All",
           "Organization.Read.All",
+          "RoleManagement-Authorization.Read.All",
           "RoleManagement.Read.All",
           "RoleManagement.Read.CloudPC",
           "RoleManagement.Read.Directory",
@@ -3125,6 +3321,7 @@
           "email",
           "Family.Read",
           "Files.ReadWrite",
+          "MCP.Server.Access",
           "Notifications.ReadWrite.CreatedByApp",
           "offline_access",
           "openid",
@@ -3144,7 +3341,8 @@
           "UserActivity.ReadWrite.CreatedByApp",
           "UserCloudClipboard.Read",
           "UserTeamwork.Read",
-          "UserTimelineActivity.Write.CreatedByApp"
+          "UserTimelineActivity.Write.CreatedByApp",
+          "Zone.Read.All"
         ]
       },
       {
@@ -3353,6 +3551,18 @@
         ]
       },
       {
+        "Category": "Microsoft.Forms",
+        "Service": "Default Member",
+        "ResourceAppId": "c9a559d2-7aab-4f13-a6ed-e7e9c52aec87",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "Forms.ReadWrite"
+        ]
+      },
+      {
         "Category": "Microsoft.SharePointOnline",
         "Service": "Default Member",
         "ResourceAppId": "00000003-0000-0ff1-ce00-000000000000",
@@ -3494,6 +3704,28 @@
           "Tasks.Read.Shared",
           "Tasks.ReadWrite",
           "Tasks.ReadWrite.Shared"
+        ]
+      },
+      {
+        "Category": "Microsoft.MCPServerForEnterprise",
+        "Service": "Default Member",
+        "ResourceAppId": "e8c77dc2-69b3-43f4-bc51-3213c9d915b4",
+        "ResourceScope": "Delegation",
+        "RoleAssignmentScopeName": [
+          "/"
+        ],
+        "RoleDefinitionActions": [
+          "MCP.AdministrativeUnit.Read.All",
+          "MCP.Application.Read.All",
+          "MCP.Device.Read.All",
+          "MCP.Domain.Read.All",
+          "MCP.GroupMember.Read.All",
+          "MCP.LicenseAssignment.Read.All",
+          "MCP.Organization.Read.All",
+          "MCP.RoleManagement.Read.Directory",
+          "MCP.Server.Access",
+          "MCP.User.Read.All",
+          "MCP.UserAuthenticationMethod.Read.All"
         ]
       }
     ]

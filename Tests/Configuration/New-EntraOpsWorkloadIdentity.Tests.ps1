@@ -7,7 +7,7 @@ BeforeDiscovery {
 BeforeAll {
     $script:TestRepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
     function Install-EntraOpsRequiredModule { param($ModuleName) }
-    function Connect-MgGraph { param($Scopes, $TenantId) }
+    function Connect-MgGraph { param($Scopes, $TenantId, $ContextScope) }
     function Get-MgServicePrincipal { param($Filter, $ServicePrincipalId) }
     function Get-MgApplication { param($Filter) }
     function New-MgApplication { param($DisplayName, $SignInAudience) }
@@ -17,7 +17,7 @@ BeforeAll {
     function Get-MgApplicationFederatedIdentityCredential { param($ApplicationId, [switch]$All) }
     function New-MgApplicationFederatedIdentityCredential { param($ApplicationId, $BodyParameter) }
     function Get-AzContext {}
-    function Connect-AzAccount { param($Tenant) }
+    function Connect-AzAccount { param($Tenant, $Scope) }
     function Get-AzRoleAssignment { param($ObjectId, $RoleDefinitionName, $Scope) }
     function New-AzRoleAssignment { param($ObjectId, $ApplicationId, $RoleDefinitionName, $Scope) }
     function Register-EntraOpsTenantGovernanceServicePrincipal { param($ResourcesToInclude, $TenantId) }
@@ -36,6 +36,7 @@ BeforeAll {
         'DirectoryRecommendations.Read.All'
         'EntitlementManagement.Read.All'
         'Group.Read.All'
+        'Group-XTenantIdentitySync.Read.All'
         'RemoteTenantGroups.Read.All'
         'PrivilegedAccess.Read.AzureADGroup'
         'PrivilegedEligibilitySchedule.Read.AzureADGroup'

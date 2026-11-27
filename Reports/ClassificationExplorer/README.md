@@ -34,7 +34,15 @@ interactive, Microsoft **Fluent UI / Azure Portal** styled experience.
 - **Customize Overwrites** – editor for the overwrite files, including tagged files
   (`<BaseName>_<Tag>.json`); every entry shows its origin (*Base* or the tag, prefixed with *Custom*
   for editor changes), items overwritten in more than one file are listed, and several files can be
-  imported and exported at once
+  imported and exported at once. Azure RBAC is supported for both role definitions
+  and role actions, including the role/action pickers and starred Review list items.
+  The Azure action picker uses the tenant-specific classification when available,
+  otherwise the built-in template.
+  Actions starred in the EAM Dashboard appear under **From your Review list**, with
+  their source scope and tier as context. Adding one requires an explicit overwrite
+  scope, tier and justification; actions from different RBAC systems need separate entries.
+  The same applies to **Add all role actions** of a role starred in the EAM Dashboard. The RBAC
+  system of an entry can't be changed while it has actions.
 - **Role Overwrites** – roles classified independently of their listed actions
   (`Classification_RoleDefinitionOverwrites.json`), each with its justification and a
   reference to the applicable role actions of the service.
@@ -199,4 +207,11 @@ keeps duplicate copies of the JSON.
 Plain HTML, CSS and JavaScript — **no build step, no dependencies**. Just static
 files. The classification data is the single source of truth and is never modified by
 the app.
+
+
+### Overwrite editor regression tests
+
+Run `npm ci`, `npx playwright install chromium`, then `npm run test:browser -- classification-explorer-customize.spec.mjs` from the repository root. The shared suite covers tagged files, origin tracking, multi-file saves, and recovery from failed or partial writes.
+
+Backport changes to shared app files from EntraOps into AzurePrivilegedIAM before syncing. `Sync-EntraOpsClassificationExplorerSource` stops before copying if the target contains app files absent from the source; `-RemoveStaleAppFiles` permits intentional removals. Deployment mode, generated data, theme paths, and the Pester command remain deployment-specific.
 

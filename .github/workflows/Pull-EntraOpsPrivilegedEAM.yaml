@@ -41,6 +41,8 @@ jobs:
       - name: Get updated definition files for classification
         if: env.ApplyAutomatedClassificationUpdate == 'true'
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           inlineScript: |
             Import-Module ./EntraOps

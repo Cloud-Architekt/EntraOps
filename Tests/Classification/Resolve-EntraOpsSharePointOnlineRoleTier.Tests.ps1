@@ -11,7 +11,7 @@ BeforeAll {
 
 Describe "Resolve-EntraOpsSharePointOnlineRoleTier" {
     It "maps English role name <RoleDisplayName> to <ExpectedTier>" -TestCases @(
-        @{ RoleDisplayName = "Give @ CloudLab Visitors"; ExpectedTier = "UserAccess" }
+        @{ RoleDisplayName = "Give @ Contoso Visitors"; ExpectedTier = "UserAccess" }
         @{ RoleDisplayName = "Site Members"; ExpectedTier = "UserAccess" }
         @{ RoleDisplayName = "Contributors"; ExpectedTier = "UserAccess" }
         @{ RoleDisplayName = "Site Owners"; ExpectedTier = "ManagementPlane" }

@@ -24,7 +24,7 @@ function Resolve-EntraOpsSharePointOnlineRoleTier {
         catalog can expose any of the site's roles (including owner-level) through its access
         packages, but it is not an "unknown role" condition and must not raise that warning.
     .PARAMETER RoleDisplayName
-        Display name of the accessPackageResourceRole (e.g. "Give @ CloudLab Visitors").
+        Display name of the accessPackageResourceRole (e.g. "Give @ Contoso Visitors").
     .PARAMETER RoleOriginId
         originId of the accessPackageResourceRole - the SharePoint site group ID as a string.
     #>

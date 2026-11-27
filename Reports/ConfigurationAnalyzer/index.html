@@ -13,6 +13,7 @@
     <script src="../shared/theme.js"></script>
     <link rel="stylesheet" href="css/styles.css" />
     <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="../shared/filters.css" />
 </head>
 
 <body>
@@ -47,6 +48,8 @@
                     Assets</span></a>
             <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html"><span
                     class="ico">&#9636;</span><span>Overview</span></a>
+            <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html?view=findings"><span
+                    class="ico">&#9873;</span><span>Findings</span></a>
             <a class="nav-item nav-subitem" href="../PrivilegedAssets/index.html?view=classification"><span
                     class="ico">&#9998;</span><span>Object Classification</span></a>
             <a class="nav-item" href="../AccessPathMap/index.html"><span class="ico">&#10565;</span><span>Access
@@ -162,29 +165,18 @@
                             <button class="btn small" id="timelineExport" type="button">Export CSV + JSON</button>
                         </div>
                         <div class="card-pad">
-                            <div class="eam-filter-row" style="margin-bottom:10px;">
-                                <div class="eam-filter">
-                                    <label for="timelineView">Time scale</label>
-                                    <select id="timelineView">
+                            <div class="eo-searchbar">
+                                <label class="eo-select">Time scale<select id="timelineView">
                                         <option value="recent">Last 12 snapshots</option>
                                         <option value="week">Weekly totals (last 12)</option>
                                         <option value="month">Monthly totals (last 12)</option>
                                         <option value="all">All snapshots</option>
-                                    </select>
-                                </div>
-                                <div class="eam-filter">
-                                    <label for="fltResourceType">Resource type</label>
-                                    <select id="fltResourceType"></select>
-                                </div>
-                                <div class="eam-filter grow" style="align-self:flex-end;">
-                                    <div class="legend">
-                                        <span class="item"><span class="swatch"
-                                                style="background:#0e700e;"></span>Added</span>
-                                        <span class="item"><span class="swatch"
-                                                style="background:#c07807;"></span>Modified</span>
-                                        <span class="item"><span class="swatch"
-                                                style="background:#a4262c;"></span>Removed</span>
-                                    </div>
+                                    </select></label>
+                                <label class="eo-select">Resource type<select id="fltResourceType"></select></label>
+                                <div class="legend ca-bar-end">
+                                    <span class="item"><span class="swatch" style="background:#0e700e;"></span>Added</span>
+                                    <span class="item"><span class="swatch" style="background:#c07807;"></span>Modified</span>
+                                    <span class="item"><span class="swatch" style="background:#a4262c;"></span>Removed</span>
                                 </div>
                             </div>
                             <div class="tm-chart-wrap" id="timelineChart"></div>
@@ -211,21 +203,12 @@
                         <button class="btn small" id="compareExport" type="button">Export CSV + JSON</button>
                     </div>
                     <div class="card-pad">
-                        <div class="eam-filter-row">
-                            <div class="eam-filter">
-                                <label for="cmpBaseline">Baseline</label>
-                                <select id="cmpBaseline"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="cmpCurrent">Current</label>
-                                <select id="cmpCurrent"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label>&nbsp;</label>
-                                <button class="btn small primary" id="cmpRun">Compare</button>
-                            </div>
+                        <div class="eo-searchbar">
+                            <label class="eo-select">Baseline<select id="cmpBaseline"></select></label>
+                            <label class="eo-select">Current<select id="cmpCurrent"></select></label>
+                            <button class="btn small primary" id="cmpRun" type="button">Compare</button>
                         </div>
-                        <div id="cmpResult" style="margin-top:12px;"></div>
+                        <div id="cmpResult"></div>
                     </div>
                 </section>
 
@@ -237,40 +220,28 @@
                         <button class="btn small" id="asrExport" type="button">Export CSV + JSON</button>
                     </div>
                     <div class="card-pad">
-                        <div class="eam-filter-row" style="margin-bottom:12px;">
-                            <div class="eam-filter">
-                                <label for="asrSnapshot">Snapshot</label>
-                                <select id="asrSnapshot"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="asrType">Resource type</label>
-                                <select id="asrType"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="asrCategory">Category</label>
-                                <select id="asrCategory"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="asrChangeMode">Resource state</label>
-                                <select id="asrChangeMode">
-                                    <option value="all">All current resources</option>
-                                    <option value="changed">Changed from baseline</option>
-                                    <option value="added">Added since baseline</option>
-                                    <option value="modified">Modified since baseline</option>
-                                    <option value="removed">Removed since baseline</option>
-                                </select>
-                            </div>
-                            <div class="eam-filter grow">
-                                <label for="asrSearch">Search resources</label>
-                                <input id="asrSearch" placeholder="Name, category or resource type" />
-                            </div>
+                        <div class="eo-searchbar">
+                            <label class="eo-search">
+                                <svg class="eo-search-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 1a5.5 5.5 0 0 1 4.38 8.83l3.65 3.64a.75.75 0 0 1-1.06 1.06l-3.64-3.65A5.5 5.5 0 1 1 6.5 1Zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg>
+                                <input type="search" id="asrSearch" aria-label="Search resources"
+                                    placeholder="Search name, category or resource type" autocomplete="off" />
+                            </label>
+                            <label class="eo-select">Snapshot<select id="asrSnapshot"></select></label>
+                            <label class="eo-select">Resource type<select id="asrType"></select></label>
+                            <label class="eo-select">Category<select id="asrCategory"></select></label>
+                            <label class="eo-select" id="asrClassificationFilter" hidden>Classification<select
+                                    id="asrClassification"></select></label>
+                            <button class="btn small ca-bar-end" id="asrClearFilters" type="button">Clear filters</button>
                         </div>
-                        <div class="eam-filter-row asr-asset-filters" style="margin-bottom:12px;">
-                            <div class="eam-filter" id="asrPrivilegedToggle"></div>
-                            <div class="eam-filter" id="asrTierFilter"></div>
-                            <div class="eam-filter" id="asrClassificationFilter"></div>
-                            <div class="eam-filter" style="align-self:flex-end;"><button class="btn small"
-                                    id="asrClearFilters" type="button">Clear filters</button></div>
+                        <div class="eo-facets" id="asrFacets">
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="asrChangeModeLabel">Resource state</span>
+                                <div class="eo-pills" id="asrChangeModePills" role="group" aria-labelledby="asrChangeModeLabel"></div>
+                            </div>
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="asrTierLabel">Access tier</span>
+                                <div class="eo-pills" id="asrTierPills" role="group" aria-labelledby="asrTierLabel"></div>
+                            </div>
                         </div>
                         <div class="asr-layout">
                             <div class="asr-list" id="asrList" aria-label="Snapshot resources"></div>
@@ -287,28 +258,20 @@
                         <button class="btn small" id="paExport" type="button">Export CSV + JSON</button>
                     </div>
                     <div class="card-pad">
-                        <div class="eam-filter-row" style="margin-bottom:10px;">
-                            <div class="eam-filter">
-                                <label for="paSnapshot">Snapshot</label>
-                                <select id="paSnapshot"></select>
-                            </div>
-                            <div class="eam-filter">
-                                <label for="paTierFilter">Access tier</label>
-                                <select id="paTierFilter">
-                                    <option value="">All tiers</option>
-                                    <option value="ControlPlane">Control Plane</option>
-                                    <option value="ManagementPlane">Management Plane</option>
-                                    <option value="UserAccess">User Access</option>
-                                </select>
-                            </div>
-                            <div class="eam-filter grow">
-                                <label for="paSearch">Search resource types and assets</label>
-                                <input id="paSearch" type="search"
-                                    placeholder="Resource type, resource, identity, UPN or service" />
-                            </div>
-                            <div class="eam-filter" style="align-self:flex-end;">
-                                <label class="check-label"><input type="checkbox" id="paIncludeAllTypes" /> Show types
-                                    without identity references</label>
+                        <div class="eo-searchbar">
+                            <label class="eo-search">
+                                <svg class="eo-search-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 1a5.5 5.5 0 0 1 4.38 8.83l3.65 3.64a.75.75 0 0 1-1.06 1.06l-3.64-3.65A5.5 5.5 0 1 1 6.5 1Zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /></svg>
+                                <input id="paSearch" type="search" aria-label="Search resource types and assets"
+                                    placeholder="Search resource type, resource, identity, UPN or service" autocomplete="off" />
+                            </label>
+                            <label class="eo-select">Snapshot<select id="paSnapshot"></select></label>
+                            <label class="ca-check"><input type="checkbox" id="paIncludeAllTypes" /> Show types without
+                                identity references</label>
+                        </div>
+                        <div class="eo-facets">
+                            <div class="eo-facet-row">
+                                <span class="eo-facet-label" id="paTierLabel">Access tier</span>
+                                <div class="eo-pills" id="paTierPills" role="group" aria-labelledby="paTierLabel"></div>
                             </div>
                         </div>
                         <div class="legend" style="margin-bottom:10px;">
@@ -364,7 +327,8 @@
     <script src="js/core.js"></script>
     <script src="../shared/report-utils.js"></script>
     <script src="js/navCollapse.js"></script>
-    <script src="../shared/object-inspector.js"></script>
+    <script src="../shared/object-inspector.js" data-object-deep-link="page"></script>
+    <script src="../shared/filters.js"></script>
     <script src="js/app.js"></script>
 </body>
 

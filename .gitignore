@@ -5,6 +5,8 @@
 # workflow artifact/release (may contain tenant data), never committed.
 Reports/*/data/*
 Reports/ClassificationExplorer/data-manifest.json
+# Source and version of reporting apps installed by Initialize-EntraOpsWorkspace or Install-EntraOpsReportingFolder.
+Reports/.EntraOpsContent.json
 Review/*
 
 # Local documentation browser-test dependencies and output.

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Default table views of the EntraOps finding objects:
+      * EntraOps.FindingRule (Get-EntraOpsFindingRule)
+      * EntraOps.FindingRuleResult (Invoke-EntraOpsFindingEvaluation)
+      * EntraOps.Finding (the Results of a rule result)
+    All properties stay available, for example with Format-List * or Select-Object.
+-->
+<Configuration>
+  <ViewDefinitions>
+    <View>
+      <Name>EntraOps.FindingRule</Name>
+      <ViewSelectedBy>
+        <TypeName>EntraOps.FindingRule</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Id</Label><Width>7</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Area</Label><Width>17</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Severity</Label><Width>8</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Title</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Id</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Area</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Severity</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Title</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>EntraOps.FindingRuleResult</Name>
+      <ViewSelectedBy>
+        <TypeName>EntraOps.FindingRuleResult</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>RuleId</Label><Width>7</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Severity</Label><Width>8</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label><Width>8</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Failed/Evaluated</Label><Width>16</Width><Alignment>Right</Alignment></TableColumnHeader>
+          <TableColumnHeader><Label>Title</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>RuleId</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Severity</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Status</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>'{0}/{1}' -f $_.FailedCount, $_.EvaluatedCount</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>Title</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>EntraOps.Finding</Name>
+      <ViewSelectedBy>
+        <TypeName>EntraOps.Finding</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>RuleId</Label><Width>7</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Severity</Label><Width>8</Width></TableColumnHeader>
+          <TableColumnHeader><Label>DisplayName</Label><Width>30</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>RuleId</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Severity</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$_.Instance.DisplayName</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>Message</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+  </ViewDefinitions>
+</Configuration>

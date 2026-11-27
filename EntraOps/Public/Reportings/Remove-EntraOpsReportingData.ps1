@@ -23,8 +23,13 @@
             - data/access-path-map-data.js
         * Configuration Analyzer (Reports/ConfigurationAnalyzer):
             - data/configuration-analyzer-data.js
+        * PIM Request Flow (Reports/PimRequestFlow):
+            - data/pim-request-flow-findings.js
         * Access Package Flow (Reports/AccessPackageFlow):
             - data/access-package-assignments-data.js
+            - data/access-package-flow-findings.js
+        * Finding results (Reports/Findings, Save-EntraOpsFindingJson):
+            - data/findings.json, data/findings.js
 
     Only these known generated files are removed; the app shell (index.html, css/, js/,
     assets/) and the data/ folders themselves are left in place. Use this before sharing
@@ -32,7 +37,7 @@
     to reset an app back to its "no dataset found" state.
 
 .PARAMETER EntraOpsRoot
-    Path to the EntraOps repository root. Defaults to the repository this module lives in.
+    Path to the EntraOps repository root (alias: -Path). Defaults to the repository this module lives in.
 
 .PARAMETER ClassificationExplorerAppRoot
     Path to the Classification Explorer app folder. Defaults to Reports/ClassificationExplorer
@@ -60,6 +65,9 @@
     Path to the Configuration Analyzer app folder. Defaults to
     Reports/ConfigurationAnalyzer under EntraOpsRoot.
 
+.PARAMETER PimRequestFlowAppRoot
+    Path to the PIM Request Flow app folder. Defaults to Reports/PimRequestFlow under EntraOpsRoot.
+
 .PARAMETER AccessPackageFlowAppRoot
     Path to the Access Package Flow app folder. Defaults to Reports/AccessPackageFlow under
     EntraOpsRoot.
@@ -85,8 +93,14 @@
 .PARAMETER SkipConfigurationAnalyzer
     Do not remove Configuration Analyzer generated data.
 
+.PARAMETER SkipPimRequestFlow
+    Do not remove PIM Request Flow generated data.
+
 .PARAMETER SkipAccessPackageFlow
     Do not remove Access Package Flow generated data.
+
+.PARAMETER SkipFindings
+    Do not remove the saved finding results (Reports/Findings/data/findings.json and findings.js).
 
 .PARAMETER PassThru
     Emit an object for every generated file found (with its removal status) to the pipeline.
@@ -107,6 +121,7 @@ function Remove-EntraOpsReportingData {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param (
         [Parameter(Mandatory = $false)]
+        [Alias('Path')]
         [System.String]$EntraOpsRoot,
 
         [Parameter(Mandatory = $false)]
@@ -129,6 +144,9 @@ function Remove-EntraOpsReportingData {
 
         [Parameter(Mandatory = $false)]
         [System.String]$ConfigurationAnalyzerAppRoot,
+
+        [Parameter(Mandatory = $false)]
+        [System.String]$PimRequestFlowAppRoot,
 
         [Parameter(Mandatory = $false)]
         [System.String]$AccessPackageFlowAppRoot,
@@ -155,7 +173,13 @@ function Remove-EntraOpsReportingData {
         [switch]$SkipConfigurationAnalyzer,
 
         [Parameter(Mandatory = $false)]
+        [switch]$SkipPimRequestFlow,
+
+        [Parameter(Mandatory = $false)]
         [switch]$SkipAccessPackageFlow,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipFindings,
 
         [Parameter(Mandatory = $false)]
         [switch]$PassThru
@@ -195,6 +219,9 @@ function Remove-EntraOpsReportingData {
     if ([string]::IsNullOrWhiteSpace($ConfigurationAnalyzerAppRoot)) {
         $ConfigurationAnalyzerAppRoot = Join-Path $EntraOpsRoot 'Reports/ConfigurationAnalyzer'
     }
+    if ([string]::IsNullOrWhiteSpace($PimRequestFlowAppRoot)) {
+        $PimRequestFlowAppRoot = Join-Path $EntraOpsRoot 'Reports/PimRequestFlow'
+    }
     if ([string]::IsNullOrWhiteSpace($AccessPackageFlowAppRoot)) {
         $AccessPackageFlowAppRoot = Join-Path $EntraOpsRoot 'Reports/AccessPackageFlow'
     }
@@ -232,8 +259,18 @@ function Remove-EntraOpsReportingData {
         $candidateFiles.Add((Join-Path $ConfigurationAnalyzerAppRoot 'data/configuration-analyzer-data.js'))
     }
 
+    if (-not $SkipPimRequestFlow) {
+        $candidateFiles.Add((Join-Path $PimRequestFlowAppRoot 'data/pim-request-flow-findings.js'))
+    }
+
     if (-not $SkipAccessPackageFlow) {
         $candidateFiles.Add((Join-Path $AccessPackageFlowAppRoot 'data/access-package-assignments-data.js'))
+        $candidateFiles.Add((Join-Path $AccessPackageFlowAppRoot 'data/access-package-flow-findings.js'))
+    }
+
+    if (-not $SkipFindings) {
+        $candidateFiles.Add((Join-Path $EntraOpsRoot 'Reports/Findings/data/findings.json'))
+        $candidateFiles.Add((Join-Path $EntraOpsRoot 'Reports/Findings/data/findings.js'))
     }
 
     $results = [System.Collections.Generic.List[object]]::new()

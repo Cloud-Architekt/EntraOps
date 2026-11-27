@@ -12,7 +12,12 @@ BeforeAll {
     . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsCustomSecurityAttributeClassificationEnabled.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsAlternateObjectTierLevelEnabled.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Resolve-EntraOpsAlternateObjectTierLevel.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Resolve-EntraOpsPawDeviceObjectId.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Write-EntraOpsWarningOnce.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/PrivilegedAccess/Get-EntraOpsPrivilegedEntraObject.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Resolve-EntraOpsObjectOrigin.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsObjectOriginTenantInfo.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Findings/Test-EntraOpsMicrosoftFirstParty.ps1"
 
     $script:UserId = '11111111-1111-1111-1111-111111111111'
     $script:GroupId = '55555555-5555-5555-5555-555555555555'
@@ -172,6 +177,45 @@ Describe 'Get-EntraOpsPrivilegedEntraObject with Object Classification File' {
 
         $Result.AdminTierLevel | Should -Be '0'
         $Result.AdminTierLevelName | Should -Be 'ControlPlane'
+    }
+
+    It 'writes the canonical tier name for the custom security attribute value <Value>' -ForEach @(
+        @{ Value = 'controlPlane' }
+        @{ Value = 'Control Plane' }
+        @{ Value = 'CONTROLPLANE' }
+    ) {
+        $script:UserCsa = [pscustomobject]@{ privilegedUser = [pscustomobject]@{ adminTierLevelName = $Value } }
+        $Disabled = [pscustomobject]@{ Enabled = $false; FilePath = './Classification/ObjectClassification.json' }
+
+        $Result = Get-EntraOpsPrivilegedEntraObject -AadObjectId $script:UserId -TenantId $global:TenantIdContext -CustomSecurityUserAttribute 'privilegedUser' -ObjectClassificationFile $Disabled -WarningAction SilentlyContinue
+
+        $Result.AdminTierLevelName | Should -BeExactly 'ControlPlane'
+        $Result.AdminTierLevel | Should -Be '0'
+    }
+
+    It 'warns about an unknown custom security attribute tier name and falls back to the Object Classification File' {
+        $script:UserCsa = [pscustomobject]@{ privilegedUser = [pscustomobject]@{ adminTierLevelName = 'Tier Zero' } }
+        $Global:EntraOpsConfig.ObjectClassificationFile = $script:FileSettings
+
+        $Result = Get-EntraOpsPrivilegedEntraObject -AadObjectId $script:UserId -TenantId $global:TenantIdContext -CustomSecurityUserAttribute 'privilegedUser' -CustomSecurityAttributeClassification $true -ObjectClassificationFile $script:FileSettings -WarningVariable Warnings -WarningAction SilentlyContinue
+
+        @($Warnings | Where-Object { "$_" -like "*unknown tier name 'Tier Zero'*" }).Count | Should -Be 1
+        $Result.AdminTierLevelName | Should -Be 'ManagementPlane'
+    }
+
+    It 'exports the PAW reference of the attribute and the object ID of the device' {
+        $DeviceId = '22222222-2222-2222-2222-222222222222'
+        $DeviceObjectId = '33333333-3333-3333-3333-333333333333'
+        $script:UserCsa = [pscustomobject]@{ privilegedUser = [pscustomobject]@{ adminTierLevelName = 'ControlPlane'; associatedSecureAdminWorkstation = @($DeviceId, '99999999-9999-9999-9999-999999999999') } }
+        Mock Resolve-EntraOpsPawDeviceObjectId { if ($Value -eq '22222222-2222-2222-2222-222222222222') { '33333333-3333-3333-3333-333333333333' } }
+        $Disabled = [pscustomobject]@{ Enabled = $false; FilePath = './Classification/ObjectClassification.json' }
+
+        $Result = Get-EntraOpsPrivilegedEntraObject -AadObjectId $script:UserId -TenantId $global:TenantIdContext -CustomSecurityUserAttribute 'privilegedUser' -CustomSecurityUserPawAttribute 'associatedSecureAdminWorkstation' -ObjectClassificationFile $Disabled -WarningAction SilentlyContinue
+
+        # The references as the attribute has them (for example for Microsoft Sentinel and BloodHound) ...
+        @($Result.AssociatedPawDevice) | Should -Be @($DeviceId, '99999999-9999-9999-9999-999999999999')
+        # ... and the object IDs of the devices they name; a reference that matches no device has none.
+        @($Result.AssociatedPawDeviceObjectId) | Should -Be @($DeviceObjectId)
     }
 
     It 'uses the file entry for objects without custom security attribute tier when both are enabled' {
