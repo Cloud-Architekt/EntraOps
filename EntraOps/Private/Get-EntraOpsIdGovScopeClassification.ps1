@@ -134,6 +134,9 @@ function Get-EntraOpsIdGovScopeClassification {
     # AadApplication origin IDs are service-principal object IDs, so classify them from the
     # ResourceApps EAM output rather than from the API-permission appId lookup.
     $ResourceAppsClassificationCache = @{}
+    # The role assignments of the service principal in the classified RBAC systems count too
+    # (Get-EntraOpsAadApplicationClassification reads every '<RbacSystem>:ByObjectId' index).
+    foreach ($RbacSystem in @($ClassifiedObjectsByRbacAndId.Keys)) { $ResourceAppsClassificationCache["${RbacSystem}:ByObjectId"] = $ClassifiedObjectsByRbacAndId[$RbacSystem] }
     $ResourceAppsFile = Join-Path -Path $EntraOpsEamFolder -ChildPath "ResourceApps" -AdditionalChildPath "ResourceApps.json"
     if (Test-Path -Path $ResourceAppsFile) {
         try {
@@ -355,7 +358,21 @@ function Get-EntraOpsIdGovScopeClassification {
             # The tier is a proxy: it reflects the application's OWN classified permissions
             # (ResourceApps), on the basis that access to an app which itself holds
             # privileged permissions is equivalent exposure - not permissions granted to the assignee.
-            Reason       = "Application '$ApplicationDisplayName' is classified as $($TierRankToName[[int]$BestRank]) based on its own ResourceApps permission classification (app access tiered by the application's privilege)$RoleSuffix$(if ($Services.Count -gt 0) { ' (' + ($Services -join ', ') + ')' })"
+            Reason       = $(
+                $DriverSources = @($TierDrivers | ForEach-Object { if ($null -ne $_.PSObject.Properties['ClassificationSource']) { "$($_.ClassificationSource)" } else { 'ResourceApps' } } | Select-Object -Unique)
+                $RoleSystems = @($DriverSources | Where-Object { $_ -notin 'ResourceApps', 'NoPermissions', 'ResourceAppsMissing' })
+                $ServiceSuffix = if ($Services.Count -gt 0) { ' (' + ($Services -join ', ') + ')' } else { '' }
+                if ($DriverSources -contains 'NoPermissions') {
+                    "Application '$ApplicationDisplayName' holds no API permissions in ResourceApps and no classified role assignments - classified as UserAccess$RoleSuffix"
+                } elseif ($DriverSources -contains 'ResourceAppsMissing') {
+                    "Application '$ApplicationDisplayName' could not be classified because no ResourceApps data was loaded - treated as ControlPlane (conservative)$RoleSuffix"
+                } elseif ($RoleSystems.Count -gt 0) {
+                    $Basis = if ($DriverSources -contains 'ResourceApps') { "its own ResourceApps permission classification and the role assignments of its service principal in $($RoleSystems -join ', ')" } else { "the role assignments of its service principal in $($RoleSystems -join ', ')" }
+                    "Application '$ApplicationDisplayName' is classified as $($TierRankToName[[int]$BestRank]) based on $Basis (app access tiered by the application's privilege)$RoleSuffix$ServiceSuffix"
+                } else {
+                    "Application '$ApplicationDisplayName' is classified as $($TierRankToName[[int]$BestRank]) based on its own ResourceApps permission classification (app access tiered by the application's privilege)$RoleSuffix$ServiceSuffix"
+                }
+            )
         }
     }
 
@@ -439,12 +456,18 @@ function Get-EntraOpsIdGovScopeClassification {
         $ResourceRole = $ResourceRoleScope.accessPackageResourceRole
         $ResourceScope = $ResourceRoleScope.accessPackageResourceScope
         $IsPending = ($null -ne $ResourceRoleScope.PSObject.Properties['isPending'] -and $ResourceRoleScope.isPending -eq $true)
+        # The display name of a resource scope is the scope's own name ('Root' for the whole group or
+        # application), not the resource's: use the catalog resource of the same origin ID when known.
+        $ScopeResourceName = "$($ResourceScope.displayName)"
+        if ($null -ne $CatalogResourceNameByOriginId -and $CatalogResourceNameByOriginId.ContainsKey("$($ResourceScope.originId)")) {
+            $ScopeResourceName = $CatalogResourceNameByOriginId["$($ResourceScope.originId)"]
+        }
 
         $Details = switch ($ResourceScope.originSystem) {
-            'AadGroup' { Get-ClassifiedGroupDetail -GroupId $ResourceScope.originId -GroupDisplayName $ResourceScope.displayName -Source $Source }
-            'DirectoryRole' { Get-ClassifiedDirectoryRoleDetail -RoleDefinitionId $ResourceScope.originId -RoleDisplayName $ResourceScope.displayName -Source $Source }
+            'AadGroup' { Get-ClassifiedGroupDetail -GroupId $ResourceScope.originId -GroupDisplayName $ScopeResourceName -Source $Source }
+            'DirectoryRole' { Get-ClassifiedDirectoryRoleDetail -RoleDefinitionId $ResourceScope.originId -RoleDisplayName $ScopeResourceName -Source $Source }
             'OAuthApplication' { Get-ClassifiedApiPermissionDetail -ResourceAppId $ResourceScope.originId -ResourceAppDisplayName $ResourceScope.displayName -PermissionDisplayName $ResourceRole.displayName -PermissionOriginId $ResourceRole.originId -Source $Source }
-            'AadApplication' { Get-ClassifiedAadApplicationDetail -ServicePrincipalObjectId $ResourceScope.originId -ApplicationDisplayName $ResourceScope.displayName -Source $Source -RoleContext $ResourceRole.displayName }
+            'AadApplication' { Get-ClassifiedAadApplicationDetail -ServicePrincipalObjectId $ResourceScope.originId -ApplicationDisplayName $ScopeResourceName -Source $Source -RoleContext $ResourceRole.displayName }
             'SharePointOnline' { Get-ClassifiedSharePointOnlineDetail -SiteUrl $ResourceScope.originId -SiteDisplayName $ResourceScope.displayName -RoleDisplayName $ResourceRole.displayName -RoleOriginId "$($ResourceRole.originId)" -Source $Source }
             'AzureResources' { Get-ClassifiedAzureResourceDetail -ArmScopeId $ResourceScope.originId -ResourceDisplayName $ResourceScope.displayName -Source $Source -RoleContext $ResourceRole.displayName }
             default {
@@ -488,6 +511,10 @@ function Get-EntraOpsIdGovScopeClassification {
         } catch {
             Add-IdGovScopeWarning -Type "CatalogResolutionError" -Message "Error resolving resources of catalog $($Catalog.id): $($_.Exception.Message) - catalog is treated as ControlPlane (conservative)." -Target $Catalog.id
             $CatalogResources = $null
+        }
+        $CatalogResourceNameByOriginId = @{}
+        foreach ($CatalogResource in @($CatalogResources)) {
+            if ($CatalogResource.originId -and $CatalogResource.displayName) { $CatalogResourceNameByOriginId["$($CatalogResource.originId)"] = "$($CatalogResource.displayName)" }
         }
         try {
             # Neither accessPackageCatalogs/{id}/accessPackages (invalid navigation path, 404) nor

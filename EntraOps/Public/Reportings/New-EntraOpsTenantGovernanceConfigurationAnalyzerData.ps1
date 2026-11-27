@@ -316,7 +316,8 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
             throw "Tenant Governance resource type '$CountResourceType' has $($SnapshotFileCounts[$CountResourceType]) file(s) but no PublishedResourceTypeCounts manifest entry. Refusing to generate a potentially misleading report."
         }
     }
-    $IsCompleteSnapshot = $SnapshotManifest.IsComplete -eq $true -and $SnapshotManifest.SnapshotJobStatus -in @('completed', 'succeeded')
+    # partiallySuccessful with IsComplete: only the known limitation of the snapshot export (KnownLimitationResourceTypes).
+    $IsCompleteSnapshot = $SnapshotManifest.IsComplete -eq $true -and $SnapshotManifest.SnapshotJobStatus -in @('completed', 'succeeded', 'partiallySuccessful')
     $IsSupportedPartialSnapshot = $SnapshotManifest.SnapshotJobStatus -eq 'partiallySuccessful' -and @($SnapshotManifest.ResourceTypeStates).Count -gt 0
     if (-not $IsCompleteSnapshot -and -not ($AllowPartialSnapshot -and $IsSupportedPartialSnapshot)) {
         throw "Tenant Governance snapshot manifest does not describe a successful complete capture (status: '$($SnapshotManifest.SnapshotJobStatus)'). Use -AllowPartialSnapshot to explicitly analyze a mixed snapshot with stale resource types."
@@ -326,7 +327,11 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
         $TypesWithErrors = @($SnapshotManifest.PublishedWithErrorsResourceTypes | Where-Object { $_ })
         $PartialDetails = @(
             if ($StaleTypes.Count) { "stale resource types (kept from the previous snapshot): $($StaleTypes -join ', ')" }
-            if ($TypesWithErrors.Count) { "resource types with per-resource export errors (resources that could not be exported are kept from the previous snapshot): $($TypesWithErrors -join ', ')" }
+            if ($TypesWithErrors.Count) {
+                $RetainedTotal = [int](@($SnapshotManifest.ResourceTypeStates | ForEach-Object { [int]$_.RetainedResourceCount }) | Measure-Object -Sum).Sum
+                $RetainedNote = if ($RetainedTotal -gt 0) { 'resources that could not be exported are kept from the previous snapshot' } else { 'references that could not be resolved are missing in the exported resources' }
+                "resource types with per-resource export errors ($RetainedNote): $($TypesWithErrors -join ', ')"
+            }
         )
         Write-Warning "Generating Configuration Analyzer data from a partial Tenant Governance snapshot$(if ($PartialDetails.Count) { ". $($PartialDetails -join '; ')" } else { ' (Microsoft Graph reported errors without resource types)' })."
     }
@@ -794,6 +799,7 @@ function New-EntraOpsTenantGovernanceConfigurationAnalyzerData {
                         message           = "$($_.Message)"
                         remediationHint   = "$($_.RemediationHint)"
                         attemptSnapshotId = $null
+                        knownLimitation   = $(if ($null -eq $_) { $false } elseif ($null -ne $_.PSObject.Properties['KnownLimitation']) { [bool]$_.KnownLimitation } else { Test-EntraOpsTenantGovernanceKnownExportLimitation -ResourceType "$($_.ResourceType)" -ErrorCategory "$($_.ErrorCategory)" -ErrorCode "$($_.ErrorCode)" -Message "$($_.Message)" })
                     }
                 })
             @($LastAttemptDiagnostics | ForEach-Object {

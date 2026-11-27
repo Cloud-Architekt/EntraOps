@@ -143,7 +143,13 @@ resource types without a known direct endpoint. Covered are access package assig
 connected organizations, Conditional Access policies, named locations, authentication strengths,
 authentication contexts, administrative units and role definitions. Types
 whose backing workload could not be reached (`ConnectionError`) or that returned no resource at all
-keep their previous files and are marked `PreservedStale`. Both states keep `IsComplete` at `false`.
+keep their previous files and are marked `PreservedStale`. Both states keep `IsComplete` at `false`,
+with one exception: the snapshot export cannot resolve the group and connected organization members that
+access package assignment policies name as approvers, requestors or reviewers, and reports each as
+`Request_ResourceNotFound` without policy context. When these are the only errors of the type and no policy
+was retained, the policies are current (EntraOps reads their approvers and requestors from Microsoft Graph
+for the Access Package Flow data): the manifest lists the type in `KnownLimitationResourceTypes`, marks the
+diagnostics `KnownLimitation`, and the snapshot counts as complete.
 A `PreservedStale` type records `StaleSince`, the time since which it has been stale in consecutive
 snapshots, and the warning of a partial snapshot names each stale type with that date and its age in days.
 

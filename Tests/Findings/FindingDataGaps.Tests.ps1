@@ -232,12 +232,15 @@ Describe 'Finding data gaps' {
             Write-TestExport $Root @(New-TestObject 2 'user' 'Member' 'ControlPlane' @(& $script:ControlPlane))
             New-Item -ItemType Directory -Path "$Root/Classification" -Force | Out-Null
             '[]' | Set-Content -LiteralPath "$Root/Classification/ObjectClassification.json"
+            # The user has no PAW and no work account: those gaps are tested on their own.
+            $AttributeGaps = 'PawAssociationNotPopulated', 'WorkAccountNotPopulated'
             $Present = Invoke-TestEvaluation $Root @{ ObjectClassificationFile = @{ Enabled = $true; FilePath = './Classification/ObjectClassification.json' } }
-            @($Present.Values | ForEach-Object { $_.DataGaps }).Count | Should -Be 0
+            @($Present.Values | ForEach-Object { $_.DataGaps } | Where-Object { $_.Code -notin $AttributeGaps }).Count | Should -Be 0
             $Disabled = Invoke-TestEvaluation $Root @{ ObjectClassificationFile = @{ Enabled = $false; FilePath = './Classification/Missing.json' } }
-            @($Disabled.Values | ForEach-Object { $_.DataGaps }).Count | Should -Be 0
+            @($Disabled.Values | ForEach-Object { $_.DataGaps } | Where-Object { $_.Code -notin $AttributeGaps }).Count | Should -Be 0
 
             $Out = Join-Path $Root 'out'
+            foreach ($Result in $Disabled.Values) { $Result.DataGaps = @($Result.DataGaps | Where-Object { $_.Code -notin $AttributeGaps }) }
             $Disabled.Values | Save-EntraOpsFindingJson -ExportFolder $Out -ConfigFilePath (Join-Path $Root 'EntraOpsConfig.json') -TenantId 't' -TenantName 't' 6> $null
             $Json = Get-Content -LiteralPath "$Out/findings.json" -Raw
             $Json | Should -BeLike '*"DataGaps": `[`]*'
@@ -271,6 +274,63 @@ Describe 'Finding data gaps' {
             $Default = @($Rule.Results | Where-Object { $_.Message -like '*00000000-0000-0000-0000-000000000000*' })
             $Default.Count | Should -Be 1
             $Default[0].Message | Should -Not -Match 'no longer offers|remove the assignment'
+        }
+    }
+
+    Context 'classification coverage and account attributes' {
+        It 'notes a low classification coverage of the privileged users and service principals on the tier rules' {
+            $Root = Join-Path $TestDrive 'coverage-low'
+            Write-TestExport $Root @(
+                New-TestObject 1 'user' 'Member' 'ControlPlane' @(& $script:ControlPlane)
+                New-TestObject 2 'user' 'Member' 'Unclassified' @(& $script:ControlPlane)
+                New-TestObject 3 'serviceprincipal' 'Application' 'Unclassified' @(New-TestAssignment 'User Administrator' 'ManagementPlane')
+            )
+            $Results = Invoke-TestEvaluation $Root
+            # EO.1002: the tier rule of the Privileged Assets area (the tests evaluate PrivilegedEAM and PrivilegedAssets).
+            $Gap = @($Results['EO.1002'].DataGaps | Where-Object Code -eq 'ObjectTierCoverageLow')
+            $Gap.Count | Should -Be 1
+            $Gap[0].Message | Should -BeLike '2 of 3 users and service principals of the tenant with Control or Management Plane access have no classification*'
+            @($Results['EO.2001'].DataGaps.Code) | Should -Contain 'ObjectTierCoverageLow'
+            @($Results['EO.4002'].DataGaps.Code) | Should -Not -Contain 'ObjectTierCoverageLow'
+        }
+
+        It 'raises no coverage gap when most privileged principals are classified' {
+            $Root = Join-Path $TestDrive 'coverage-ok'
+            Write-TestExport $Root @(
+                New-TestObject 1 'user' 'Member' 'ControlPlane' @(& $script:ControlPlane)
+                New-TestObject 2 'user' 'Member' 'ControlPlane' @(& $script:ControlPlane)
+                New-TestObject 3 'serviceprincipal' 'Application' 'Unclassified' @(New-TestAssignment 'User Administrator' 'ManagementPlane')
+            )
+            $Results = Invoke-TestEvaluation $Root
+            @($Results.Values | ForEach-Object { $_.DataGaps } | Where-Object Code -eq 'ObjectTierCoverageLow').Count | Should -Be 0
+        }
+
+        It 'notes PAW and work account attributes that no user of the tenant has, and not when one user has them' {
+            $Root = Join-Path $TestDrive 'attributes-missing'
+            Write-TestExport $Root @(New-TestObject 1 'user' 'Member' 'ControlPlane' @(& $script:ControlPlane))
+            $Results = Invoke-TestEvaluation $Root
+            @($Results['EO.4008'].DataGaps.Code) | Should -Contain 'PawAssociationNotPopulated'
+            @($Results['EO.4009'].DataGaps.Code) | Should -Contain 'WorkAccountNotPopulated'
+            ($Results['EO.4009'].DataGaps | Where-Object Code -eq 'WorkAccountNotPopulated').Message | Should -BeLike 'No user of the tenant has an associated work account*so all 1 privileged user(s) in the scope of EO.4009 are all reported*'
+
+            $Root = Join-Path $TestDrive 'attributes-present'
+            Write-TestExport $Root @(
+                New-TestObject 1 'user' 'Member' 'ControlPlane' @(& $script:ControlPlane)
+                New-TestObject 2 'user' 'Member' 'ManagementPlane' @(New-TestAssignment 'User Administrator' 'ManagementPlane') @{ AssociatedWorkAccount = @('worker@contoso.com') }
+            )
+            $Results = Invoke-TestEvaluation $Root
+            @($Results['EO.4009'].DataGaps.Code) | Should -Not -Contain 'WorkAccountNotPopulated'
+        }
+
+        It 'does not report users of other tenants for a missing PAW or work account' {
+            $Root = Join-Path $TestDrive 'attributes-foreign'
+            Write-TestExport $Root @(
+                New-TestObject 1 'user' 'Member' 'ControlPlane' @(& $script:ControlPlane) @{ ObjectDisplayName = 'Synchronized admin'; OriginType = 'CrossTenantSync'; OriginTenantId = $script:OtherTenant }
+                New-TestObject 2 'user' 'Member' 'ControlPlane' @(& $script:ControlPlane) @{ ObjectDisplayName = 'Local admin' }
+            )
+            $Results = Invoke-TestEvaluation $Root
+            @($Results['EO.4008'].Results.Instance.DisplayName) | Should -Be @('Local admin')
+            @($Results['EO.4009'].Results.Instance.DisplayName) | Should -Be @('Local admin')
         }
     }
 }

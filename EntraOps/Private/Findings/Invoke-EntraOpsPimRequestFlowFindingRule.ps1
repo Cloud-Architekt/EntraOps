@@ -1,3 +1,37 @@
+# Built-in directory roles that cannot be assigned (template IDs): User, Guest User, Restricted Guest User, Device Users,
+# Workplace Device Join, Device Join and the deprecated Device Managers. PIM has role settings for them, but no assignment
+# can use these settings, so the role setting rules do not evaluate them.
+$script:EntraOpsNonAssignableDirectoryRoleIds = [System.Collections.Generic.HashSet[string]]::new([string[]]@(
+        'a0b1b346-4d3e-4e8b-98f8-753987be4970', '10dae51f-b6af-4016-8d66-8c2a99b929b3', '2af84b1e-32c8-42b7-82bc-daa82404023b',
+        'd405c6df-0af8-4e3b-95e4-4d06e542189e', 'c34f683f-4d5a-4403-affd-6615e00e3a7f', '9c094953-4995-41c8-84c8-3ebb9b32c93f',
+        '2b499bcd-da44-4968-8aec-78e1674fa64d'), [System.StringComparer]::OrdinalIgnoreCase)
+
+function Test-EntraOpsPimRoleSettingInScope {
+    <#
+    .SYNOPSIS
+        Tells whether the role setting rules evaluate the role of a PIM flow.
+    .DESCRIPTION
+        A Control Plane role is always evaluated: its setting applies to every future assignment. A Management
+        Plane role is evaluated when it has a current eligible or active assignment (roleAssigned; unknown without
+        Privileged EAM data counts as assigned). Roles that cannot be assigned are never evaluated. With
+        -ControlPlaneOnly, only Control Plane roles are in scope.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param (
+        [Parameter(Mandatory = $true)]
+        [object]$Flow,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$ControlPlaneOnly
+    )
+
+    if ($null -ne $Flow.PSObject.Properties['roleAssignable'] -and $Flow.roleAssignable -eq $false) { return $false }
+    if ($Flow.roleTier -ceq 'ControlPlane') { return $true }
+    if ($ControlPlaneOnly -or -not (Test-EntraOpsPrivilegedTier $Flow.roleTier)) { return $false }
+    return -not ($null -ne $Flow.PSObject.Properties['roleAssigned'] -and $Flow.roleAssigned -eq $false)
+}
+
 function Get-EntraOpsPimRequestFlowFlag {
     <#
     .SYNOPSIS
@@ -6,7 +40,8 @@ function Get-EntraOpsPimRequestFlowFlag {
         Applies tells whether the flow is in the scope of the rule (for example the activation flows of
         privileged roles for noMfaActivation), Failed whether it fails the rule, and Text the risk flag the
         PIM Request Flow report shows (New-EntraOpsReportFindingData keeps only the failed keys). A role is
-        privileged when its tier is ControlPlane or ManagementPlane. New-EntraOpsPimRequestFlowFindingContext
+        in scope when it is Control Plane, or Management Plane with a current assignment, and can be assigned
+        (Test-EntraOpsPimRoleSettingInScope). New-EntraOpsPimRequestFlowFindingContext
         evaluates every flow once (checks of the flow).
     #>
     [CmdletBinding()]
@@ -17,7 +52,7 @@ function Get-EntraOpsPimRequestFlowFlag {
 
     $Properties = $Flow.p
     $RoleTier = $Flow.roleTier
-    $Privileged = Test-EntraOpsPrivilegedTier $RoleTier
+    $Privileged = Test-EntraOpsPimRoleSettingInScope -Flow $Flow
     # Approvers are compared by admin tier level: Management and Workload Plane are both Tier 1 (like EO.1001 and EO.1002).
     $RoleLevel = Get-EntraOpsAdminTierLevel $RoleTier
     # "the Control Plane role 'Global Administrator'", for the messages.

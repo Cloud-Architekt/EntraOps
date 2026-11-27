@@ -92,7 +92,8 @@ Describe 'PIM Request Flow and Access Package Flow findings' {
             $EamObject = { param($Id, $Upn, $Name, $Tier, $RoleAssignments = @()) [ordered]@{ objectId = $Id; objectType = 'user'; objectUserPrincipalName = $Upn; objectDisplayName = $Name; objectAdminTierLevelName = $Tier; classification = @(); roleAssignments = $RoleAssignments } }
             Write-TestDataFile "$Root/EamDashboard/data/eam-dashboard-data.js" 'ENTRAOPS_EAM_DATA' ([ordered]@{
                     objects         = @(
-                        & $EamObject $script:Users.ControlPlane 'cp.admin@contoso.com' 'CP Admin' 'ControlPlane'
+                        # The current assignment of the Management Plane custom role keeps it in the scope of the role setting rules.
+                        & $EamObject $script:Users.ControlPlane 'cp.admin@contoso.com' 'CP Admin' 'ControlPlane' @(@{ roleDefinitionId = $script:Roles.Custom; classification = @(@{ adminTierLevelName = 'ManagementPlane'; service = 'Groups' }) })
                         & $EamObject $script:Users.ManagementPlane 'mp.admin@contoso.com' 'MP Admin' 'ManagementPlane' @(@{ roleDefinitionId = $script:Roles.Helpdesk; classification = @(@{ adminTierLevelName = 'UserAccess' }, @{ adminTierLevelName = 'ManagementPlane'; service = 'Groups' }) })
                         & $EamObject $script:Users.UserAccess 'ua.user@contoso.com' 'UA User' 'UserAccess'
                         # The target group of pk1, classified by its own role assignments.

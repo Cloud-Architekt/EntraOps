@@ -1,14 +1,15 @@
 # Change Log
 All essential changes on EntraOps will be documented in this changelog.
 
-## [1.2.0] - 2026-11-20
+## [1.2.0] - 2026-11-27
 
 ### Added
 - **Findings**: The security checks of the reports are now EntraOps finding rules, evaluated in PowerShell, so the reports, `findings.json` and Maester show the same results. See [Findings and Maester Pack](https://www.entraops.com/docs/reportings/index.html#findings).
   - 59 rules in eight categories with a stable ID (`EO.<n>`), severity, remediation steps, effort, user impact, references and Maester test ID (`MP.EOPS.<n>`).
   - `Get-EntraOpsFindingRule` lists the rules, `Invoke-EntraOpsFindingEvaluation` evaluates them and `Save-EntraOpsFindingJson` saves `Reports/Findings/data/findings.json`, which `New-EntraOpsReportingData` writes and the reporting pipelines publish.
   - The `Findings` section of `EntraOpsConfig.json` excludes rules (`ExcludedRules`) and sets thresholds (`ControlPlaneActivationMaxHours`, `EligibleAssignmentMaxDays`, `EmergencyAccessAccounts`); `New-EntraOpsConfigFile -Findings*` and the Configuration Wizard write it.
-  - `findings.json` lists missing data that limits the evaluation (`DataGaps`).
+  - `findings.json` lists missing data that limits the evaluation (`DataGaps`): groups of unknown origin, uncollected members of remote groups, a missing Object Classification File, a low classification coverage of privileged principals, PAW and work account attributes that no user has, and resource types of the Tenant Governance snapshot that are outdated, stale or were exported with errors.
+  - The PIM role setting rules evaluate Control Plane roles always and Management Plane roles only when they have a current assignment (all of them when the Privileged EAM data has no Entra ID assignments); built-in roles that cannot be assigned (User, Guest User, Device Join, ...) are not evaluated.
 - **Finding exceptions**: dismiss a finding (false positive) or accept its risk until a date in the Finding Exceptions File (`Findings.ExceptionsFilePath`, default `./Classification/FindingExceptions.json`; `Findings.ExceptionMaxDays`, default 180 days). Accepted results are counted apart (`AcceptedCount`) and not reported as failures; expired and invalid exceptions are warned about.
 - **Privileged Assets Findings view** (`?view=findings`): the results of all checks by category with filters, a panel per check (description, remediation, effort, user impact, evidence) and links from each affected object to the report that opens at it. Exceptions are added and exported from the panel.
 - **EntraOps Maester Pack** ([Cloud-Architekt/EntraOps-MaesterPack](https://github.com/Cloud-Architekt/EntraOps-MaesterPack), code `EOPS`): one Maester test per finding rule that reports the results of `findings.json`, without connection, permission or module. Install it with `Install-MtPack Cloud-Architekt/EntraOps-MaesterPack`.
@@ -50,11 +51,11 @@ All essential changes on EntraOps will be documented in this changelog.
   - A job that Microsoft Graph never completed blocked every later snapshot. A job older than `TenantGovernanceSnapshot.PendingJobMaxAgeInHours` (default 24 hours; `0` keeps the previous behavior) is deleted and replaced. See [Tenant Governance](https://www.entraops.com/docs/tenant-governance/index.html).
   - Resources of a type whose export failed were kept even after they were deleted in the tenant; resources that Microsoft Graph reports as not found are removed (`RemovedResources` in the manifest).
   - The manifest records its tenant, so a working folder shared by several tenants no longer mixes snapshots, pending jobs and connections.
-  - The warning about a partial snapshot names the affected resource types.
+  - The warning about a partial snapshot names the affected resource types, and says that resources were kept from the previous snapshot only when some were.
 - **GitHub rate limit**: `Update-EntraOpsClassificationFiles` and the source downloads of the setup cmdlets and the EntraOps update authenticate with `GITHUB_TOKEN` or `GH_TOKEN` when set and retry rate limit, server and network errors. When the template list can't be read, existing local templates are used with a warning (`-FailOnUnavailableRepository` restores the failure).
 - **Sentinel WatchLists**: `Save-EntraOpsPrivilegedEAMWatchLists` uses SentinelEnrichment 0.2.2 and installs it only when missing. Every WatchList is checked for existence and rows after its upload, missing or empty WatchLists are reported as an error, and a warning names both deployments when another one wrote the WatchList last.
 - **Pipeline logs**: the push steps no longer print the subscription ID, workspace, WatchList URIs and data collection endpoint, and the Control Plane scope update writes counts instead of object ID lists without `ConsoleOutput.IncludeObjectDetails`. Paths no longer print a double slash, missing classification files are warned about once per session, progress bars no longer stay on screen, and the pipelines print the EntraOps version.
-- **Reports**: the Privilege History *vs. today* deltas, case-insensitive deep links (`#flow=`, `#asset=`, `#assignment=`) and several filters of Configuration Analyzer, EAM Dashboard and EIDSCA Findings.
+- **Reports**: Privileged Assets counted an object once per result of a rule that reports each assignment (for example 58 findings for two rules), and the classification reason of an access package resource named the scope (`Root`) instead of the group or application. Also the Privilege History *vs. today* deltas, case-insensitive deep links (`#flow=`, `#asset=`, `#assignment=`) and several filters of Configuration Analyzer, EAM Dashboard and EIDSCA Findings.
 - **Classification maintenance**: `Update-EntraOpsClassificationModels` runs through the imported module, and `Export-EntraOpsClassificationDirectoryRolesFromMsftDocs` excludes owner-only permissions like the Microsoft Graph exporter.
 - **Microsoft Graph caching**: the batch lookup of the principals of Entra ID role assignments failed and fell back to slower lookups, the role data cache was never reused on systems with a non-US date format, and cache files of long requests could not be written.
 

@@ -56,12 +56,13 @@ Describe 'Tenant Governance and Privilege History findings' {
                     @{ sys = 'EntraID'; roleId = $script:Roles.ManagementPlane; roleClass = 'ManagementPlane' }
                 )
             })
-        $EamObject = { param($Id, $Type, $Upn, $Name, $Tier, $Units = @()) [ordered]@{ objectId = $Id; objectType = $Type; objectUserPrincipalName = $Upn; objectDisplayName = $Name; objectAdminTierLevelName = $Tier; assignedAdministrativeUnits = @($Units | ForEach-Object { @{ id = $_; displayName = 'AU' } }) } }
+        $EamObject = { param($Id, $Type, $Upn, $Name, $Tier, $Units = @(), $RoleAssignments = @()) [ordered]@{ objectId = $Id; objectType = $Type; objectUserPrincipalName = $Upn; objectDisplayName = $Name; objectAdminTierLevelName = $Tier; assignedAdministrativeUnits = @($Units | ForEach-Object { @{ id = $_; displayName = 'AU' } }); roleAssignments = @($RoleAssignments) } }
         Write-TestDataFile "$script:Root/EamDashboard/data/eam-dashboard-data.js" 'ENTRAOPS_EAM_DATA' ([ordered]@{
                 objects = @(
                     & $EamObject (Get-TestId 1) 'user' 'breakglass@contoso.com' 'Break glass' 'ControlPlane'
                     & $EamObject (Get-TestId 2) 'group' '' 'CP Admins' 'ControlPlane'
-                    & $EamObject (Get-TestId 3) 'user' 'admin@contoso.com' 'Admin' 'ManagementPlane' @($script:Units.Dynamic, $script:Units.Assigned)
+                    # The current assignment of the Management Plane role keeps it in the scope of the role setting rules.
+                    & $EamObject (Get-TestId 3) 'user' 'admin@contoso.com' 'Admin' 'ManagementPlane' @($script:Units.Dynamic, $script:Units.Assigned) @(@{ roleDefinitionId = $script:Roles.ManagementPlane; roleSystem = 'EntraID'; classification = @(@{ adminTierLevelName = 'ManagementPlane' }) })
                     & $EamObject (Get-TestId 4) 'user' 'user@contoso.com' 'User' 'UserAccess' @($script:Units.DynamicUnprivileged)
                 )
             })
@@ -204,6 +205,39 @@ Describe 'Tenant Governance and Privilege History findings' {
         $Text | Should -Match "Findings.EligibleAssignmentMaxDays must be a number, but is '1y'"
         $Text | Should -Match 'Unknown Findings setting\(s\) in .*: MaxDayz\. Valid settings: ExcludedRules, .*EligibleAssignmentMaxDays'
         $Text | Should -Match "Findings.ExcludedRules: 'EO.9999' matches no finding rule.*EO.1001, EO.1002"
+    }
+
+    It 'notes Tenant Governance resource types exported with errors on the rules that read them, but not the known export limitation' {
+        $Folder = Join-Path $TestDrive 'snapshot-health'
+        Copy-Item -LiteralPath $script:Root -Destination $Folder -Recurse
+        $Path = "$Folder/ConfigurationAnalyzer/data/configuration-analyzer-data.js"
+        $Content = Get-Content -LiteralPath $Path -Raw
+        $Data = $Content.Substring($Content.IndexOf('=') + 1).TrimEnd().TrimEnd(';') | ConvertFrom-Json -AsHashtable -DateKind String
+        $Policy = 'microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy'
+        $Data.snapshotHealth = [ordered]@{
+            status = 'partiallySuccessful'; isComplete = $false; isStale = $false; ageHours = 1; maxAgeHours = 30
+            staleResourceTypes = @('microsoft.securityandcompliance.deviceconfigurationpolicy')
+            resourceTypeStates = @(
+                [ordered]@{ resourceType = 'microsoft.entra.conditionalaccesspolicy'; status = 'PublishedWithErrors'; retainedResourceCount = 0 }
+                [ordered]@{ resourceType = $Policy; status = 'PublishedWithErrors'; retainedResourceCount = 0 }
+                # No rule reads this type: not a gap of the findings.
+                [ordered]@{ resourceType = 'microsoft.securityandcompliance.deviceconfigurationpolicy'; status = 'PreservedStale'; retainedResourceCount = 0 }
+            )
+            diagnostics = @(
+                [ordered]@{ resourceType = 'microsoft.entra.conditionalaccesspolicy'; errorCategory = 'ExportError'; errorCode = 'Request_ResourceNotFound'; occurrences = 2; message = "Couldn't find ExcludedGroup '<id>', that is defined in policy 'Block legacy'. Skipping group. [Request_ResourceNotFound] : Resource '<id>' does not exist." }
+                [ordered]@{ resourceType = $Policy; errorCategory = 'ExportError'; errorCode = 'Request_ResourceNotFound'; occurrences = 49; message = "[Request_ResourceNotFound] : Resource '<id>' does not exist or one of its queried reference-property objects are not present." }
+            )
+        }
+        "window.ENTRAOPS_CONFIGANALYZER_DATA = $($Data | ConvertTo-Json -Depth 20 -Compress);" | Set-Content -LiteralPath $Path
+
+        $Results = @{}
+        foreach ($Result in Invoke-EntraOpsFindingEvaluation -Area TenantGovernance -ReportPath $Folder -ConfigFilePath (Join-Path $TestDrive 'none.json') -WarningAction SilentlyContinue) { $Results[$Result.Key] = $Result }
+        $Gap = @($Results['conditionalAccessControlPlaneExclusion'].DataGaps | Where-Object Code -eq 'TenantGovernanceResourceTypeIncomplete')
+        $Gap.Count | Should -Be 1
+        $Gap[0].Message | Should -BeLike "*microsoft.entra.conditionalaccesspolicy (2 error(s), for example: Couldn't find ExcludedGroup '<id>', that is defined in policy 'Block legacy'. Skipping group.)"
+        $Gap[0].Message | Should -Not -BeLike "*$Policy*"
+        @($Results['accessPackageExpiration'].DataGaps).Count | Should -Be 0
+        @($Results.Values | ForEach-Object { $_.DataGaps } | Where-Object Code -eq 'TenantGovernanceResourceTypeStale').Count | Should -Be 0
     }
 
     It 'skips the PIM role setting rules with missing data when no privileged role has the setting in the snapshot' {
@@ -623,7 +657,7 @@ Describe 'Tenant Governance and Privilege History findings' {
         $Result.Status | Should -Be 'Failed'
         $Result.FailedCount | Should -Be 2
         $Result.ReasonCode | Should -Be 'Note'
-        $Result.Reason | Should -BeLike 'All 2 evaluated roles fail this check, which suggests the tenant default setting was not changed. Apply it to all roles at once*Update-MgPolicyRoleManagementPolicyRule*'
+        $Result.Reason | Should -BeLike "All 2 evaluated roles fail this check, so the setting was probably never changed from Microsoft's default. PIM keeps one policy per role*Update-MgPolicyRoleManagementPolicyRule*"
     }
 
     It 'converts ISO 8601 durations to hours' {

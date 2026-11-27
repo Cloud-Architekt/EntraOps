@@ -347,7 +347,8 @@ function New-EntraOpsPrivilegedAssetsData {
         foreach ($Result in $RuleResult.Results) {
             $FindingObjectId = $Result.Instance.ObjectId
             if (-not $FindingsByObject.Contains($FindingObjectId)) { $FindingsByObject[$FindingObjectId] = [System.Collections.Generic.List[string]]::new() }
-            $FindingsByObject[$FindingObjectId].Add($RuleResult.Key)
+            # A rule can report one object several times (EO.4010 reports each assignment): list each rule once per object.
+            if (-not $FindingsByObject[$FindingObjectId].Contains($RuleResult.Key)) { $FindingsByObject[$FindingObjectId].Add($RuleResult.Key) }
         }
     }
     $FindingsPayload = [ordered]@{

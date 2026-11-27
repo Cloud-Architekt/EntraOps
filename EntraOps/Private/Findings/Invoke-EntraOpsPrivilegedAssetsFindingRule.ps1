@@ -109,8 +109,10 @@ function Get-EntraOpsPrivilegedAssetsObjectFinding {
             # a blueprint (agentidentityblueprintprincipal) has none, its sponsors are kept on the blueprint.
             sponsorMissing          = New-Check ($SubType.StartsWith('agent', [System.StringComparison]::Ordinal) -and $SubType -notin 'agentidentityblueprint', 'agentidentityblueprintprincipal') ($Sponsors.Count -eq 0)
             deviceNotPaw            = New-Check ($IsUser -and $Needed -le 1) ($NonPawDevices.Count -gt 0) $NonPawDevices
-            pawMissing              = New-Check ($IsUser -and $Needed -eq 0) ($PawDevices.Count -eq 0)
-            workAccountMissing      = New-Check ($IsUser -and $Needed -le 1 -and $SubType -eq 'member') ($WorkAccounts.Count -eq 0)
+            # A user of another tenant (guest, B2B member, synchronized or Tenant Governance user) has its PAW and work
+            # account in its home tenant: reported by EO.4010/EO.4011, not here.
+            pawMissing              = New-Check ($IsUser -and $Needed -eq 0 -and -not $Object.isForeign) ($PawDevices.Count -eq 0)
+            workAccountMissing      = New-Check ($IsUser -and $Needed -le 1 -and $SubType -eq 'member' -and -not $Object.isForeign) ($WorkAccounts.Count -eq 0)
             hybridPrivileged        = New-Check ($Needed -eq 0) ([bool]$Object.onPremSynchronized)
             # A group with Control or Management Plane access is reported by unprotectedPrivilegedGroup (EO.4004), not twice.
             # EO.4004 reads highestAccessTierName only, so data without it keeps the group here.

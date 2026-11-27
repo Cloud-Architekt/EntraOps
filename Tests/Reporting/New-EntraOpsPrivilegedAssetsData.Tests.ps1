@@ -68,6 +68,23 @@ Describe 'New-EntraOpsPrivilegedAssetsData' {
         Test-Path -LiteralPath "$script:Root/App/data/privileged-assets-data.js" | Should -BeTrue
     }
 
+    It 'lists each finding rule once per object, also when a rule reports several assignments of the object' {
+        # A service principal of another tenant with three role assignments: EO.4010 reports each assignment.
+        @([ordered]@{
+                ObjectId = '77777777-7777-7777-7777-777777777777'; ObjectTenantId = 't2'; ObjectType = 'serviceprincipal'; ObjectSubType = 'Application'; ObjectDisplayName = 'Partner App'
+                ObjectAdminTierLevelName = 'Unclassified'
+                RoleAssignments = @(
+                    foreach ($Index in 1..3) { @{ RoleAssignmentId = "fa$Index"; RoleAssignmentInstanceId = "fi$Index"; RoleDefinitionName = "Role $Index"; RoleAssignmentScopeId = "/subscriptions/s$Index"; PIMAssignmentType = 'Permanent'; Classification = @(@{ AdminTierLevelName = 'ManagementPlane'; Service = 'Azure' }) } }
+                )
+            }) | ConvertTo-Json -Depth 10 -AsArray | Set-Content -LiteralPath "$script:Root/PrivilegedEAM/Azure/Azure.json"
+
+        $Payload = New-EntraOpsPrivilegedAssetsData -RepoRoot $script:Root -AppRoot "$script:Root/App" -PassThru 6>$null -WarningAction SilentlyContinue
+        $Keys = @($Payload.findings.byObject['77777777-7777-7777-7777-777777777777'])
+        $Keys | Should -Contain 'foreign'
+        @($Keys | Where-Object { $_ -eq 'foreign' }).Count | Should -Be 1
+        $Keys.Count | Should -Be @($Keys | Select-Object -Unique).Count
+    }
+
     It 'adds an object to the owned objects of its owners, as an owner of its app registration lists only the application' {
         # App D names Admin A as owner (an owner of its app registration); Admin A lists only the application object.
         $AppD = '77777777-7777-7777-7777-777777777777'

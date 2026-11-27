@@ -62,7 +62,7 @@ function Get-EntraOpsPackNotFoundAdvice {
         $script:EntraOpsPackHasModule = [bool](Get-Module -ListAvailable -Name 'EntraOps' | Select-Object -First 1)
     }
     if ($script:EntraOpsPackHasModule) { return '' }
-    ' The EntraOps module is not installed on this machine: install it with Install-PSResource -Name EntraOps -Prerelease -Repository PSGallery -Scope CurrentUser, then run Invoke-EntraOpsAssessment (it saves findings.json to <home>/EntraOps/Reports/Findings/data, where the pack finds it without a setting).'
+    ' The EntraOps module is not installed on this machine: install it with Install-PSResource -Name EntraOps -Repository PSGallery -Scope CurrentUser, then run Invoke-EntraOpsAssessment (it saves findings.json to <home>/EntraOps/Reports/Findings/data, where the pack finds it without a setting).'
 }
 
 function Get-EntraOpsPackFindingSet {

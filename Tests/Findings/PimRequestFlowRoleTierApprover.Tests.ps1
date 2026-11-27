@@ -147,4 +147,60 @@ Describe 'PIM Request Flow role tiers and approvers' {
         $Flags.approverLowerTier.Failed | Should -BeFalse
         $Flags.approverUnclassified.Failed | Should -BeTrue
     }
+
+    It 'records whether a role has a current assignment in the Privileged EAM data' {
+        $script:Tier[$script:Roles.AssignedOnly].roleAssigned | Should -BeTrue
+        # Control Plane in the catalog, without assignments.
+        $script:Tier[$script:Roles.Approved].roleAssigned | Should -BeFalse
+        $script:Tier[$script:Roles.Approved].roleAssignable | Should -BeTrue
+    }
+
+    It 'treats the assignments as unknown when the Privileged EAM data has no Entra ID assignment' {
+        # Privileged EAM data collected without Entra ID (Azure only): no role counts as unassigned.
+        $Root = New-TestReportData -Root (Join-Path $TestDrive 'pim-azure-only')
+        $EamFile = Join-Path $Root 'EamDashboard/data/eam-dashboard-data.js'
+        $Eam = ((Get-Content -LiteralPath $EamFile -Raw) -replace '^window\.ENTRAOPS_EAM_DATA = ', '').Trim().TrimEnd(';') | ConvertFrom-Json -AsHashtable
+        foreach ($Object in $Eam['objects']) { $Object['roleSystem'] = 'Azure' }
+        Write-TestDataFile $EamFile 'ENTRAOPS_EAM_DATA' $Eam
+        $Context = & (Get-Module EntraOps) { param($Root) New-EntraOpsPimRequestFlowFindingContext -ReportData (Import-EntraOpsReportFindingData -ReportPath $Root) } $Root
+        $Flow = @($Context.Flows | Where-Object { $_.path -eq 'activation' -and $_.roleId -eq $script:Roles.Lowered })[0]
+        $Flow.roleTier | Should -Be 'ManagementPlane'
+        $Flow.roleAssigned | Should -BeNullOrEmpty
+        & (Get-Module EntraOps) { param($Flow) Test-EntraOpsPimRoleSettingInScope -Flow $Flow } $Flow | Should -BeTrue
+    }
+
+    It 'evaluates the role settings of Control Plane roles always and of Management Plane roles only with an assignment' {
+        $InScope = & (Get-Module EntraOps) {
+            $Flow = { param($Tier, $Assigned, $Assignable = $true) [pscustomobject]@{ roleTier = $Tier; roleAssigned = $Assigned; roleAssignable = $Assignable } }
+            [ordered]@{
+                ControlPlaneUnassigned     = Test-EntraOpsPimRoleSettingInScope -Flow (& $Flow 'ControlPlane' $false)
+                ManagementPlaneUnassigned  = Test-EntraOpsPimRoleSettingInScope -Flow (& $Flow 'ManagementPlane' $false)
+                ManagementPlaneAssigned    = Test-EntraOpsPimRoleSettingInScope -Flow (& $Flow 'ManagementPlane' $true)
+                ManagementPlaneUnknown     = Test-EntraOpsPimRoleSettingInScope -Flow (& $Flow 'ManagementPlane' $null)
+                ManagementPlaneCpOnly      = Test-EntraOpsPimRoleSettingInScope -Flow (& $Flow 'ManagementPlane' $true) -ControlPlaneOnly
+                UserAccessAssigned         = Test-EntraOpsPimRoleSettingInScope -Flow (& $Flow 'UserAccess' $true)
+                ControlPlaneNotAssignable  = Test-EntraOpsPimRoleSettingInScope -Flow (& $Flow 'ControlPlane' $false $false)
+                # A flow without the new properties (older callers) keeps the tier-only scope.
+                ManagementPlaneWithoutData = Test-EntraOpsPimRoleSettingInScope -Flow ([pscustomobject]@{ roleTier = 'ManagementPlane' })
+            }
+        }
+        $InScope.ControlPlaneUnassigned | Should -BeTrue
+        $InScope.ManagementPlaneUnassigned | Should -BeFalse
+        $InScope.ManagementPlaneAssigned | Should -BeTrue
+        $InScope.ManagementPlaneUnknown | Should -BeTrue
+        $InScope.ManagementPlaneCpOnly | Should -BeFalse
+        $InScope.UserAccessAssigned | Should -BeFalse
+        $InScope.ControlPlaneNotAssignable | Should -BeFalse
+        $InScope.ManagementPlaneWithoutData | Should -BeTrue
+    }
+
+    It 'does not evaluate the PIM settings of built-in roles that cannot be assigned' {
+        $Flags = & (Get-Module EntraOps) {
+            # Device Managers (deprecated, cannot be assigned) is Control Plane in the catalog.
+            $Flow = [pscustomobject]@{ path = 'activation'; roleId = '2b499bcd-da44-4968-8aec-78e1674fa64d'; roleTier = 'ControlPlane'; roleName = 'Device Managers'; roleAssignable = $false; roleAssigned = $false; p = @{ ActivationReqMFA = $false; ApprovaltoActivate = $false }; approvers = @() }
+            Get-EntraOpsPimRequestFlowFlag -Flow $Flow
+        }
+        $Flags.noMfaActivation.Applies | Should -BeFalse
+        $Flags.noApprovalActivation.Applies | Should -BeFalse
+    }
 }

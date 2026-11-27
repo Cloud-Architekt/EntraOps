@@ -129,7 +129,7 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
             $Unreadable = 0
             $Evaluated = 0
             foreach ($Flow in $Context.Pim.Flows) {
-                if ($Flow.path -ne 'eligibleAssignment' -or -not (Test-EntraOpsPrivilegedTier $Flow.roleTier)) { continue }
+                if ($Flow.path -ne 'eligibleAssignment' -or -not (Test-EntraOpsPimRoleSettingInScope -Flow $Flow)) { continue }
                 # A role that allows permanent eligible assignments is reported by permanentEligible (the same test as EO.3004).
                 $ExpirationRequired = Get-Setting $Flow 'PermanentEligibleAssignmentisExpirationRequired'
                 if ($ExpirationRequired -is [bool] -and -not $ExpirationRequired) { $PermanentAllowed++; continue }
@@ -141,7 +141,7 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
             }
             if ($Evaluated -eq 0 -and $PermanentAllowed -gt 0) {
                 $UnreadableText = if ($Unreadable -gt 0) { " $Unreadable more role(s) have no readable expiration." } else { '' }
-                $Subject = if ($Unreadable -gt 0) { "$PermanentAllowed of $($PermanentAllowed + $Unreadable) Control and Management Plane roles allow" } else { "All $PermanentAllowed Control and Management Plane roles allow" }
+                $Subject = if ($Unreadable -gt 0) { "$PermanentAllowed of $($PermanentAllowed + $Unreadable) evaluated Control and Management Plane roles allow" } else { "All $PermanentAllowed evaluated Control and Management Plane roles allow" }
                 [pscustomobject]@{ SkipReason = "$Subject permanent eligible assignments, so no expiration applies (reported by EO.3004).$UnreadableText"; SkipCode = 'NotApplicable' }
             } elseif ($Evaluated -eq 0 -and $Unreadable -gt 0) {
                 [pscustomobject]@{ SkipReason = "None of the $Unreadable Control and Management Plane roles has a readable expiration of eligible assignments (ExpireEligibleAssignment) in the Tenant Governance snapshot." }
@@ -151,7 +151,7 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
             $Evaluated = 0
             $Unreadable = 0
             foreach ($Flow in $Context.Pim.Flows) {
-                if ($Flow.path -ne 'activation' -or $Flow.roleTier -cne 'ControlPlane') { continue }
+                if ($Flow.path -ne 'activation' -or -not (Test-EntraOpsPimRoleSettingInScope -Flow $Flow -ControlPlaneOnly)) { continue }
                 $Hours = ConvertFrom-EntraOpsIsoDuration (Get-Setting $Flow 'ActivationMaxDuration')
                 if ($null -eq $Hours) { $Unreadable++; continue }
                 $Evaluated++
@@ -164,7 +164,7 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
         }
         'controlPlaneActivationAuthContext' {
             foreach ($Flow in $Context.Pim.Flows) {
-                if ($Flow.path -ne 'activation' -or $Flow.roleTier -cne 'ControlPlane') { continue }
+                if ($Flow.path -ne 'activation' -or -not (Test-EntraOpsPimRoleSettingInScope -Flow $Flow -ControlPlaneOnly)) { continue }
                 New-RoleInstance $Flow (-not (Test-EntraOpsJsTruthy (Get-Setting $Flow 'AuthenticationContextRequired'))) "The activation of the Control Plane role '$($Flow.roleName)' does not require an authentication context."
             }
         }
@@ -175,7 +175,7 @@ function Invoke-EntraOpsTenantGovernanceFindingRule {
             $Evaluated = 0
             $NotExported = 0
             foreach ($Flow in $Context.Pim.Flows) {
-                if ($Flow.path -ne 'activation' -or -not (Test-EntraOpsPrivilegedTier $Flow.roleTier)) { continue }
+                if ($Flow.path -ne 'activation' -or -not (Test-EntraOpsPimRoleSettingInScope -Flow $Flow)) { continue }
                 # A snapshot without the notification settings of the role (older schema) cannot be evaluated: not reported.
                 $Exported = @($Alerts.Keys | Where-Object { $null -ne (Get-Setting $Flow "$($_)AlertNotificationDefaultRecipient") })
                 if ($Exported.Count -eq 0) { $NotExported++; continue }

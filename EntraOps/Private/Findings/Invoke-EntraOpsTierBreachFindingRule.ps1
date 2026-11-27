@@ -50,6 +50,11 @@ function Invoke-EntraOpsTierBreachFindingRule {
         $Groups[$Key].Add($Path)
     }
 
+    # tier0Breach keeps unclassified objects as results (an unclassified object with Control Plane access is a breach
+    # unless the object is Control Plane), but counts them for a note, so a tenant without object classification sees
+    # that most results ask for a classification first.
+    $UnclassifiedTier0Count = 0
+    $Tier0Count = 0
     foreach ($Key in $Groups.Keys) {
         $GroupPaths = @($Groups[$Key])
         $Failing = @($GroupPaths | Where-Object { Test-EntraOpsTierBreachPath -Key $Rule.Key -Path $_ } | Sort-Object { [int]$_.serviceTier }, { "$($_.service)" })
@@ -61,6 +66,7 @@ function Invoke-EntraOpsTierBreachFindingRule {
         $Path = $Failing[0]
         # Unclassified objects count as User Access; the message says so instead of calling them User Access objects.
         $IsUnclassified = "$($Path.objectTierName)" -eq 'Unclassified'
+        if ($Rule.Key -eq 'tier0Breach') { $Tier0Count++; if ($IsUnclassified) { $UnclassifiedTier0Count++ } }
         $ObjectTierName = if ($script:EntraOpsTierRank.ContainsKey("$($Path.objectTierName)")) { "$($Path.objectTierName)" } else { Get-Tier $Path.objectTier }
         $ObjectLabel = if ($IsUnclassified) { "Unclassified object (counted as $(Get-Tier $Path.objectTier))" } else { "$(Get-Tier $ObjectTierName) object" }
         $ServiceTier = if ("$($Path.serviceTierName)") { Get-Tier $Path.serviceTierName } else { Get-Tier $Path.serviceTier }
@@ -100,7 +106,14 @@ function Invoke-EntraOpsTierBreachFindingRule {
                 PimAssignmentType    = $Path.pimAssignmentType
                 TransitiveBy         = $Path.transitiveBy
                 PathIds              = @($Failing | ForEach-Object { $_.pathId })
+                ObjectUnclassified   = $IsUnclassified
             }
+        }
+    }
+    if ($UnclassifiedTier0Count -gt 0) {
+        [pscustomobject]@{
+            NoteOnly = $true
+            Note     = "$UnclassifiedTier0Count of $Tier0Count results are objects without a classification, counted as User Access (ObjectUnclassified in the evidence). Classify these objects first (EO.2001): an object that is Control Plane and protected as such is not a breach, every other one is."
         }
     }
 }

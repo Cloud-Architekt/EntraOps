@@ -577,8 +577,15 @@ are available outside the reports, for example as Maester tests.
   missing, so a group synchronized from another tenant looks local), `RemoteGroupMembersMissing` (groups of other
   tenants with Control or Management Plane access whose members were not collected: without `ManagingTenantId`, the
   members of remote groups aren't read, and for groups of other tenants than the managing tenant they can't be read)
-  and `ObjectClassificationFileMissing` (`ObjectClassificationFile` is enabled, but the file doesn't exist). `EO.4010`
-  and `EO.4011` also name the first two in their note. The Privileged EAM collection warns about remote groups whose
+  `ObjectClassificationFileMissing` (`ObjectClassificationFile` is enabled, but the file doesn't exist),
+  `ObjectTierCoverageLow` (at least half of the users and service principals of the tenant with Control or
+  Management Plane access have no classification, so the tier rules mostly ask for a classification),
+  `PawAssociationNotPopulated` and `WorkAccountNotPopulated` (no user of the tenant has an associated PAW or work
+  account, so EO.4007/EO.4008 or EO.4009 report every privileged user), and the gaps of the Tenant Governance
+  snapshot that the rules read: `TenantGovernanceSnapshotOutdated` (older than its maximum age),
+  `TenantGovernanceResourceTypeStale` (a type that could not be captured and comes from an earlier snapshot) and
+  `TenantGovernanceResourceTypeIncomplete` (a type exported with errors, for example a Conditional Access policy
+  whose excluded group no longer exists). `EO.4010` and `EO.4011` also name the first two in their note. The Privileged EAM collection warns about remote groups whose
   members it didn't read and marks them in the export (`CrossTenantMembersExpanded`).
 - `New-EntraOpsReportFindingData` writes the PIM Request Flow and Access Package Flow risk flags and
   tiers of every snapshot for the reports. `New-EntraOpsReportingData` runs it as its last step; the

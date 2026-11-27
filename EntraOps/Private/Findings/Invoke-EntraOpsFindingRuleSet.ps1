@@ -132,10 +132,10 @@ function Invoke-EntraOpsFindingRuleSet {
                     # a Failed or Passed result, so a pass that is not complete says so.
                     $Notes = [System.Collections.Generic.List[string]]::new()
                     foreach ($Text in @($Instances | Where-Object { $null -ne $_ -and $null -ne $_.PSObject.Properties['Note'] -and $_.Note } | ForEach-Object { "$($_.Note)" } | Select-Object -Unique)) { $Notes.Add($Text) }
-                    # A setting of PIM that fails for every evaluated role suggests the default setting of the tenant (inferred, not
-                    # checked): one change fixes all.
+                    # A PIM setting that fails for every evaluated role is usually still Microsoft's default (inferred, not
+                    # checked). Each role has its own policy, so the fix is a change of every role's policy, best scripted.
                     if ($Results.Count -gt 1 -and $Results.Count -eq $EvaluatedCount -and $Rule.Key -cin $script:EntraOpsTenantWideRoleSettingKeys) {
-                        $Notes.Add("All $EvaluatedCount evaluated roles fail this check, which suggests the tenant default setting was not changed. Apply it to all roles at once, for example with Microsoft Graph PowerShell (Update-MgPolicyRoleManagementPolicyRule).")
+                        $Notes.Add("All $EvaluatedCount evaluated roles fail this check, so the setting was probably never changed from Microsoft's default. PIM keeps one policy per role: change it on every role, for example with a Microsoft Graph PowerShell script that updates the rule of each role's policy (Get-MgPolicyRoleManagementPolicyAssignment, Update-MgPolicyRoleManagementPolicyRule).")
                     }
                     $Note = $Notes -join ' '
                     if ($Results.Count -gt 0) {

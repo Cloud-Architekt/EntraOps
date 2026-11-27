@@ -791,13 +791,25 @@ Describe 'Invoke-EntraOpsAssessment' {
         New-AssessmentWorkingFolder | Out-Null
         Set-AssessmentMock
         $script:SessionConfig = @{ ConfigurationAnalyzer = @{ AllowPartialTenantGovernanceSnapshot = $false } }
-        $script:CollectedManifest = @{ SnapshotId = 'job1'; SnapshotJobStatus = 'partiallySuccessful'; CapturedResourceCount = 40; IsComplete = $false; PublishedWithErrorsResourceTypes = @('microsoft.entra.accesspackage') }
+        $script:CollectedManifest = @{ SnapshotId = 'job1'; SnapshotJobStatus = 'partiallySuccessful'; CapturedResourceCount = 40; IsComplete = $false; PublishedWithErrorsResourceTypes = @('microsoft.entra.accesspackage'); ResourceTypeStates = @(@{ ResourceType = 'microsoft.entra.accesspackage'; Status = 'PublishedWithErrors'; RetainedResourceCount = 1 }) }
 
         $Result = Invoke-EntraOpsAssessment -TenantName 'contoso.onmicrosoft.com' -PassThru 6>$null
 
         Should -Invoke -ModuleName EntraOps New-EntraOpsReportingData -Times 1 -Exactly -ParameterFilter { -not $AllowPartialTenantGovernanceSnapshot }
         $Result.TenantGovernanceSnapshot.Status | Should -Be 'Partial'
         $Result.TenantGovernanceSnapshot.Reason | Should -Match 'resources of 1 resource type\(s\) could not be exported and are kept from the previous snapshot; Configuration Analyzer is skipped \(ConfigurationAnalyzer.AllowPartialTenantGovernanceSnapshot is false\)$'
+    }
+
+    It 'does not claim resources were kept from the previous snapshot when none were retained' {
+        New-AssessmentWorkingFolder | Out-Null
+        Set-AssessmentMock
+        $script:CollectedManifest = @{ SnapshotId = 'job1'; SnapshotJobStatus = 'partiallySuccessful'; CapturedResourceCount = 40; IsComplete = $false; PublishedWithErrorsResourceTypes = @('microsoft.entra.conditionalaccesspolicy'); ResourceTypeStates = @(@{ ResourceType = 'microsoft.entra.conditionalaccesspolicy'; Status = 'PublishedWithErrors'; RetainedResourceCount = 0 }) }
+
+        $Result = Invoke-EntraOpsAssessment -TenantName 'contoso.onmicrosoft.com' -PassThru 6>$null
+
+        $Result.TenantGovernanceSnapshot.Status | Should -Be 'Partial'
+        $Result.TenantGovernanceSnapshot.Reason | Should -Match '1 resource type\(s\) with references that Microsoft Graph could not resolve$'
+        $Result.TenantGovernanceSnapshot.Reason | Should -Not -Match 'kept from the previous snapshot'
     }
 
     It 'generates the reports that do not need the snapshot while it is captured, the others with it' {

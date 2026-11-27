@@ -134,6 +134,43 @@ Describe "Get-EntraOpsPrivilegedEamAccessPackageResourceRoleScopeClassification"
             $script:WarningMessages[0].Type | Should -Be "Unresolved AadApplication"
         }
 
+        It "fails closed when the ResourceApps data is empty" {
+            $Result = @(Get-EntraOpsPrivilegedEamAccessPackageResourceRoleScopeClassification -ResourceRoleScopes @($script:ApplicationScope) -FilterClassifiedRbacs @("Azure") -ClassificationCache @{ "ResourceApps:ByObjectId" = @{} } -ApiPermissionsClassLookup @{} -ContextLabel "test package" -WarningMessages $script:WarningMessages)
+
+            $Result[0].AdminTierLevelName | Should -Be "ControlPlane"
+            $script:WarningMessages[0].Type | Should -Be "Unresolved AadApplication"
+            $Result[0].PSObject.Properties['ClassificationSource'] | Should -BeNullOrEmpty
+        }
+
+        It "classifies an application without API permissions by the role assignments of its service principal" {
+            $Cache = @{
+                "ResourceApps:ByObjectId" = @{ "other-service-principal" = @([pscustomobject]@{ Classification = @([pscustomobject]@{ AdminTierLevel = "2"; AdminTierLevelName = "UserAccess"; Service = "Reader" }) }) }
+                "EntraID:ByObjectId"      = @{ "service-principal-id" = @([pscustomobject]@{ Classification = @([pscustomobject]@{ AdminTierLevel = "0"; AdminTierLevelName = "ControlPlane"; Service = "Privileged Role Management" }) }) }
+            }
+
+            $Result = @(Get-EntraOpsPrivilegedEamAccessPackageResourceRoleScopeClassification -ResourceRoleScopes @($script:ApplicationScope) -FilterClassifiedRbacs @("Azure") -ClassificationCache $Cache -ApiPermissionsClassLookup @{} -ContextLabel "test package" -WarningMessages $script:WarningMessages)
+
+            $Result.Count | Should -Be 1
+            $Result[0].AdminTierLevelName | Should -Be "ControlPlane"
+            $Result[0].TaggedByRoleSystem | Should -Be "EntraID"
+            $Result[0].PSObject.Properties['ClassificationSource'] | Should -BeNullOrEmpty
+            # The cached classification is not changed.
+            $Cache["EntraID:ByObjectId"]["service-principal-id"][0].Classification[0].PSObject.Properties['ClassificationSource'] | Should -BeNullOrEmpty
+            $script:WarningMessages.Count | Should -Be 0
+        }
+
+        It "adds the role assignments of the service principal to its ResourceApps classification" {
+            $Cache = @{
+                "ResourceApps:ByObjectId" = @{ "service-principal-id" = @([pscustomobject]@{ Classification = @([pscustomobject]@{ AdminTierLevel = "1"; AdminTierLevelName = "ManagementPlane"; Service = "Mail" }) }) }
+                "Azure:ByObjectId"        = @{ "service-principal-id" = @([pscustomobject]@{ Classification = @([pscustomobject]@{ AdminTierLevel = "0"; AdminTierLevelName = "ControlPlane"; Service = "Azure Core" }) }) }
+            }
+
+            $Result = @(Get-EntraOpsPrivilegedEamAccessPackageResourceRoleScopeClassification -ResourceRoleScopes @($script:ApplicationScope) -FilterClassifiedRbacs @("Azure") -ClassificationCache $Cache -ApiPermissionsClassLookup @{} -ContextLabel "test package" -WarningMessages $script:WarningMessages)
+
+            @($Result.AdminTierLevelName) | Should -Be @("ManagementPlane", "ControlPlane")
+            @($Result.TaggedByRoleSystem) | Should -Be @("ResourceApps", "Azure")
+        }
+
         It "classifies an application with exclusively Unclassified entries as UserAccess" {
             # Real ResourceApps exports carry explicit Unclassified entries; an app with ONLY those
             # is a known app without privileged classifications and must not surface as Unclassified.

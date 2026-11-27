@@ -103,8 +103,9 @@
         if (object.objectType === "user" && needed <= 1) {
             var paw = (object.associatedPawDevice || []).map(function (id) { return String(id).toLowerCase(); });
             if ((object.ownedDevices || []).some(function (id) { return paw.indexOf(String(id).toLowerCase()) < 0; })) found.push("deviceNotPaw");
-            if (needed === 0 && !paw.length) found.push("pawMissing");
-            if (subType === "member" && !(object.associatedWorkAccount || []).length) found.push("workAccountMissing");
+            // A user of another tenant has its PAW and work account in its home tenant (EO.4010/EO.4011 report it).
+            if (needed === 0 && !paw.length && !object.isForeign) found.push("pawMissing");
+            if (subType === "member" && !(object.associatedWorkAccount || []).length && !object.isForeign) found.push("workAccountMissing");
         }
         if (object.onPremSynchronized && needed === 0) found.push("hybridPrivileged");
         // "Conflict" (a role-assignable group in a restricted management administrative unit) is protected by the role-assignable group.
@@ -130,8 +131,8 @@
             case "parentLowerTier": return Boolean(object.identityParent);
             case "sponsorMissing": return subType.indexOf("agent") === 0 && subType !== "agentidentityblueprint" && subType !== "agentidentityblueprintprincipal";
             case "deviceNotPaw": return isUser && needed <= 1;
-            case "pawMissing": return isUser && needed === 0;
-            case "workAccountMissing": return isUser && needed <= 1 && subType === "member";
+            case "pawMissing": return isUser && needed === 0 && !object.isForeign;
+            case "workAccountMissing": return isUser && needed <= 1 && subType === "member" && !object.isForeign;
             case "hybridPrivileged": return needed === 0;
             case "restrictedManagementGap": return restrictedManagementScope(object) && needed <= 1;
             case "foreign": return !object.isMicrosoftFirstParty;

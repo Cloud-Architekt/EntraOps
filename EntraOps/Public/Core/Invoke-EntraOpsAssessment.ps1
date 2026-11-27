@@ -721,7 +721,12 @@ function Invoke-EntraOpsAssessment {
                 $Snapshot.Reason += if ($StaleCount -gt 0) {
                     ", $StaleCount resource type(s) kept from the previous snapshot because of Microsoft Graph errors"
                 } elseif ($WithErrorsCount -gt 0) {
-                    ", resources of $WithErrorsCount resource type(s) could not be exported and are kept from the previous snapshot"
+                    $RetainedTotal = [int](@($Manifest.ResourceTypeStates | ForEach-Object { [int]$_.RetainedResourceCount }) | Measure-Object -Sum).Sum
+                    if ($RetainedTotal -gt 0) {
+                        ", resources of $WithErrorsCount resource type(s) could not be exported and are kept from the previous snapshot"
+                    } else {
+                        ", $WithErrorsCount resource type(s) with references that Microsoft Graph could not resolve"
+                    }
                 } else {
                     ', Microsoft Graph reported errors'
                 }

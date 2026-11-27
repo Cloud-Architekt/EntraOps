@@ -405,16 +405,24 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
         Group-Object ResourceType, ErrorCategory, ErrorCode, NormalizedMessage |
         ForEach-Object {
             $First = $_.Group[0]
+            # See Test-EntraOpsTenantGovernanceKnownExportLimitation; it only counts as harmless while no resource of
+            # the type was retained (KnownLimitationResourceTypes).
+            $KnownLimitation = Test-EntraOpsTenantGovernanceKnownExportLimitation -ResourceType $First.ResourceType -ErrorCategory $First.ErrorCategory -ErrorCode $First.ErrorCode -Message $First.NormalizedMessage
             [PSCustomObject][ordered]@{
                 ResourceType    = if ($First.ResourceType) { $First.ResourceType.ToLowerInvariant() } else { $null }
                 ErrorCategory   = $First.ErrorCategory
                 ErrorCode       = $First.ErrorCode
                 Occurrences     = $_.Count
                 Message         = $First.NormalizedMessage
-                RemediationHint = switch ($First.ErrorCategory) {
-                    'ConnectionError' { 'Retry the snapshot and verify the backing workload/API is available.' }
-                    'ExportError' { 'Review the resource-type permission, referenced object and UTCM support, then retry.' }
-                    default { 'Inspect the protected workflow diagnostics or query the snapshot job with Get-EntraOpsTenantGovernanceSnapshotReport.' }
+                KnownLimitation = $KnownLimitation
+                RemediationHint = if ($KnownLimitation) {
+                    'Known limitation of the snapshot export: group and connected organization members named in access package assignment policies (approvers, requestors, reviewers) cannot be resolved. The policies are exported, and EntraOps reads their approvers and requestors from Microsoft Graph for the Access Package Flow data. No action is needed unless resources of this type were retained from the previous snapshot.'
+                } else {
+                    switch ($First.ErrorCategory) {
+                        'ConnectionError' { 'Retry the snapshot and verify the backing workload/API is available.' }
+                        'ExportError' { 'Review the resource-type permission, referenced object and UTCM support, then retry.' }
+                        default { 'Inspect the protected workflow diagnostics or query the snapshot job with Get-EntraOpsTenantGovernanceSnapshotReport.' }
+                    }
                 }
             }
         }
@@ -1004,6 +1012,18 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
     )
     #endregion
 
+    # Resource types whose only errors are the known limitation of the snapshot export, with every resource exported
+    # (none retained): their files are current, so they do not make the snapshot incomplete.
+    [string[]]$KnownLimitationResourceTypes = @(
+        foreach ($State in $ResourceTypeStates) {
+            if ($State.Status -ne 'PublishedWithErrors' -or [int]$State.RetainedResourceCount -gt 0) { continue }
+            $TypeDiagnostics = @($State.Diagnostics)
+            if ($TypeDiagnostics.Count -gt 0 -and @($TypeDiagnostics | Where-Object { -not $_.KnownLimitation }).Count -eq 0) { $State.ResourceType }
+        }
+    )
+    $ActionableErrorResourceTypes = @($ResourceTypesWithErrors | Where-Object { $KnownLimitationResourceTypes -notcontains $_ })
+    $RetainedResourceTotal = [int](@($ResourceTypeStates | ForEach-Object { [int]$_.RetainedResourceCount }) | Measure-Object -Sum).Sum
+
     #region Build the command summary and persisted snapshot manifests
     $SnapshotSummary = [PSCustomObject]@{
         TenantId            = $Global:TenantIdContext
@@ -1030,6 +1050,7 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
         ResourceTypeFileCounts           = $PublishedResourceTypeCounts
         PublishedResourceTypes           = @($PublishableResourceTypes)
         PublishedWithErrorsResourceTypes = @($ResourceTypesWithRetainedResources)
+        KnownLimitationResourceTypes     = @($KnownLimitationResourceTypes)
         StaleResourceTypes               = @($StaleResourceTypes)
         ResourceTypeStates               = @($ResourceTypeStates)
         # Files of retained resources dropped because Microsoft Graph returned 404 for their own Id. The deletion
@@ -1037,7 +1058,7 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
         RemovedResources                 = @($RemovedResources | Sort-Object -Property ResourceType, ResourceId, File)
         Diagnostics                      = @($SnapshotDiagnostics)
         ErrorDetailsUnavailable          = $ParsedErrorDetails.Count -eq 0 -and $SnapshotJobStatus -eq 'partiallySuccessful'
-        IsComplete                       = $SnapshotJobStatus -in @('completed', 'succeeded') -and $ResourceTypesWithErrors.Count -eq 0
+        IsComplete                       = $ActionableErrorResourceTypes.Count -eq 0 -and ($SnapshotJobStatus -in @('completed', 'succeeded') -or ($SnapshotJobStatus -eq 'partiallySuccessful' -and $KnownLimitationResourceTypes.Count -gt 0))
     }
     $SnapshotManifest | ConvertTo-Json -Depth 10 | Set-Content -Path $LastAttemptManifestFilePath -Encoding utf8
     $SnapshotManifest | ConvertTo-Json -Depth 10 | Set-Content -Path $SnapshotManifestFilePath -Encoding utf8
@@ -1052,10 +1073,14 @@ function Save-EntraOpsTenantGovernanceSnapshotJson {
     }
 
     if ($SnapshotManifest.IsComplete) {
-        Write-Output "Tenant Governance snapshot completed. $($Snapshot.ResourceCount) resource(s) captured and saved under $ExportFolder. Commit and push these files to track this point-in-time in Git history."
+        $KnownLimitationText = if ($KnownLimitationResourceTypes.Count -gt 0) { " Microsoft Graph reported references it could not resolve in $($KnownLimitationResourceTypes -join ', ') (a known limitation of the snapshot export; the resources are exported)." }
+        Write-Output "Tenant Governance snapshot completed. $($Snapshot.ResourceCount) resource(s) captured and saved under $ExportFolder.$KnownLimitationText Commit and push these files to track this point-in-time in Git history."
     } else {
         $StaleAge = Format-EntraOpsTenantGovernanceStaleAge -ResourceTypeStates $ResourceTypeStates
-        $RetainedText = if ($ResourceTypesWithRetainedResources.Count -gt 0) { ", $($ResourceTypesWithRetainedResources.Count) of them with per-resource export errors (resources that could not be exported are kept from the previous snapshot): $($ResourceTypesWithRetainedResources -join ', ')" }
+        # Only resources the export did not return are kept from the previous snapshot; errors about references inside
+        # exported resources keep nothing.
+        $RetainedNote = if ($RetainedResourceTotal -gt 0) { "resources that could not be exported are kept from the previous snapshot" } else { "references that could not be resolved are missing in the exported resources; no resource was kept from the previous snapshot" }
+        $RetainedText = if ($ResourceTypesWithRetainedResources.Count -gt 0) { ", $($ResourceTypesWithRetainedResources.Count) of them with per-resource export errors ($RetainedNote): $($ResourceTypesWithRetainedResources -join ', ')" }
         $StaleText = if ($StaleResourceTypes.Count -gt 0) { " $($StaleResourceTypes.Count) type(s) with Graph errors were preserved as stale: $(if ($StaleAge) { $StaleAge } else { $StaleResourceTypes -join ', ' })." }
         Write-Warning "Tenant Governance snapshot job $($Snapshot.SnapshotId) completed as '$SnapshotJobStatus'. $($PublishableResourceTypes.Count) resource type(s) were published$RetainedText.$StaleText"
     }

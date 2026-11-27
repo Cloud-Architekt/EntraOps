@@ -57,6 +57,7 @@ Describe "Get-EntraOpsIdGovScopeClassification AadApplication and SharePointOnli
                 accessPackages = @(
                     [pscustomobject]@{ id = "ap-sharepoint"; displayName = "SharePoint Visitors Package" }
                     [pscustomobject]@{ id = "ap-unresolved-app"; displayName = "Unresolved App Package" }
+                    [pscustomobject]@{ id = "ap-root-scope-app"; displayName = "Root Scope App Package" }
                 )
             }
         }
@@ -85,6 +86,19 @@ Describe "Get-EntraOpsIdGovScopeClassification AadApplication and SharePointOnli
             }
         }
 
+        Mock Invoke-EntraOpsMsGraphQuery -ParameterFilter { $Uri -like "*accessPackages/ap-root-scope-app?*" } -MockWith {
+            [pscustomobject]@{
+                id                              = "ap-root-scope-app"
+                displayName                     = "Root Scope App Package"
+                accessPackageResourceRoleScopes = @(
+                    [pscustomobject]@{
+                        accessPackageResourceRole  = [pscustomobject]@{ displayName = "User"; originId = "role-guid" }
+                        accessPackageResourceScope = [pscustomobject]@{ originSystem = "AadApplication"; originId = $script:KnownSpId; displayName = "Root" }
+                    }
+                )
+            }
+        }
+
         $script:Warnings = [System.Collections.Generic.List[psobject]]::new()
         $script:Result = @(Get-EntraOpsIdGovScopeClassification -EntraOpsEamFolder $script:EamFolder -FilterClassifiedRbacs @("Azure") -FolderClassification $script:ClassificationFolder -WarningMessages $script:Warnings)
     }
@@ -104,10 +118,45 @@ Describe "Get-EntraOpsIdGovScopeClassification AadApplication and SharePointOnli
         $AppDetail.Reason | Should -BeLike "*ResourceApps*"
     }
 
-    It "fails closed to ControlPlane for an unresolved AadApplication and records a warning" {
+    It "classifies an AadApplication without ResourceApps entry (no API permissions) as UserAccess" {
         $ApScope = $script:Result | Where-Object { $_.ScopeId -eq "/AccessPackage/ap-unresolved-app" }
+        $ApScope.EAMTier | Should -Be "UserAccess"
+        $AppDetail = @($ApScope.ClassifiedResources | Where-Object { $_.OriginSystem -eq "AadApplication" })[0]
+        $AppDetail.Reason | Should -BeLike "*holds no API permissions*"
+        @($script:Warnings | Where-Object { $_.Type -eq "Unresolved AadApplication" }).Count | Should -Be 0
+    }
+
+    It "classifies an AadApplication without API permissions by the role assignments of its service principal" {
+        New-Item -ItemType Directory -Path (Join-Path $script:EamFolder "Azure") -Force | Out-Null
+        @(
+            [pscustomobject]@{
+                ObjectId       = $script:UnknownSpId
+                Classification = @([pscustomobject]@{ AdminTierLevel = "0"; AdminTierLevelName = "ControlPlane"; Service = "Azure Core" })
+            }
+        ) | ConvertTo-Json -Depth 5 -AsArray | Set-Content -Path (Join-Path $script:EamFolder "Azure/Azure.json")
+        $Warnings = [System.Collections.Generic.List[psobject]]::new()
+        $Result = @(Get-EntraOpsIdGovScopeClassification -EntraOpsEamFolder $script:EamFolder -FilterClassifiedRbacs @("Azure") -FolderClassification $script:ClassificationFolder -WarningMessages $Warnings)
+        $ApScope = $Result | Where-Object { $_.ScopeId -eq "/AccessPackage/ap-unresolved-app" }
         $ApScope.EAMTier | Should -Be "ControlPlane"
-        @($script:Warnings | Where-Object { $_.Type -eq "Unresolved AadApplication" }).Count | Should -Be 1
+        $AppDetail = @($ApScope.ClassifiedResources | Where-Object { $_.OriginSystem -eq "AadApplication" })[0]
+        $AppDetail.Reason | Should -BeLike "*based on the role assignments of its service principal in Azure*"
+        @($Warnings | Where-Object { $_.Type -eq "Unresolved AadApplication" }).Count | Should -Be 0
+    }
+
+    It "names an application scope after its catalog resource instead of the 'Root' scope" {
+        $ApScope = $script:Result | Where-Object { $_.ScopeId -eq "/AccessPackage/ap-root-scope-app" }
+        $AppDetail = @($ApScope.ClassifiedResources | Where-Object { $_.OriginSystem -eq "AadApplication" })[0]
+        $AppDetail.ResourceName | Should -Be "Known App"
+        $AppDetail.Reason | Should -BeLike "Application 'Known App' *"
+    }
+
+    It "fails closed to ControlPlane with a warning when no ResourceApps data is available" {
+        Remove-Item -Path (Join-Path $script:EamFolder "ResourceApps/ResourceApps.json") -Force
+        $Warnings = [System.Collections.Generic.List[psobject]]::new()
+        $Result = @(Get-EntraOpsIdGovScopeClassification -EntraOpsEamFolder $script:EamFolder -FilterClassifiedRbacs @("Azure") -FolderClassification $script:ClassificationFolder -WarningMessages $Warnings)
+        $ApScope = $Result | Where-Object { $_.ScopeId -eq "/AccessPackage/ap-unresolved-app" }
+        $ApScope.EAMTier | Should -Be "ControlPlane"
+        @($Warnings | Where-Object { $_.Type -eq "Unresolved AadApplication" }).Count | Should -BeGreaterThan 0
     }
 
     It "treats the catalog-level SharePoint resource as ManagementPlane without an unknown-role warning" {

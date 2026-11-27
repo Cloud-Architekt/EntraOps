@@ -194,7 +194,10 @@ function Get-EntraOpsPrivilegedEamAccessPackageResourceRoleScopeClassification {
                     $TaggedClassItem | Add-Member -NotePropertyName "TaggedBy"                   -NotePropertyValue "AssignedAadApplicationResource" -Force
                     $TaggedClassItem | Add-Member -NotePropertyName "TaggedByObjectIds"          -NotePropertyValue @($ResourceScope.originId)         -Force
                     $TaggedClassItem | Add-Member -NotePropertyName "TaggedByObjectDisplayNames" -NotePropertyValue @("$($ResourceScope.displayName) ($($ResourceRole.displayName))$PendingSuffix") -Force
-                    $TaggedClassItem | Add-Member -NotePropertyName "TaggedByRoleSystem"         -NotePropertyValue "ResourceApps"                    -Force
+                    # ClassificationSource is internal to Get-EntraOpsAadApplicationClassification and is not saved.
+                    $ClassItemSource = if ($null -ne $ClassItem.PSObject.Properties['ClassificationSource']) { "$($ClassItem.ClassificationSource)" } else { '' }
+                    $TaggedClassItem.PSObject.Properties.Remove('ClassificationSource')
+                    $TaggedClassItem | Add-Member -NotePropertyName "TaggedByRoleSystem" -NotePropertyValue $(if ($ClassItemSource -and $ClassItemSource -notin 'NoPermissions', 'ResourceAppsMissing') { $ClassItemSource } else { 'ResourceApps' }) -Force
                     $MatchedClassification.Add($TaggedClassItem) | Out-Null
                 }
             } 'SharePointOnline' {

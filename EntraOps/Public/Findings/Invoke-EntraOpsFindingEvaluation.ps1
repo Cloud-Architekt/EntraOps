@@ -219,7 +219,8 @@ function Invoke-EntraOpsFindingEvaluation {
     # Data gaps: data that is missing, so that rules evaluate less than they seem to (see Get-EntraOpsFindingDataGap).
     # Each rule result carries the gaps that affect it (DataGaps); Save-EntraOpsFindingJson lists them in findings.json.
     $Inventory = if ($Contexts.ContainsKey('PrivilegedAssets') -and $null -ne $Contexts['PrivilegedAssets'].PSObject.Properties['Objects']) { $Contexts['PrivilegedAssets'] }
-    $DataGaps = @(Get-EntraOpsFindingDataGap -Inventory $Inventory -ManagingTenantId "$($Setting.Values['ManagingTenantId'])" -ConfigFilePath $ConfigFilePath)
+    $ReportDataInput = if ($Inputs.ContainsKey('ReportData') -and $null -ne $Inputs['ReportData'].PSObject.Properties['Value']) { $Inputs['ReportData'].Value }
+    $DataGaps = @(Get-EntraOpsFindingDataGap -Inventory $Inventory -ManagingTenantId "$($Setting.Values['ManagingTenantId'])" -ConfigFilePath $ConfigFilePath -ReportData $ReportDataInput)
     foreach ($Gap in $DataGaps) { Write-Verbose "Data gap $($Gap.Code) ($(@($Gap.RuleIds) -join ', ')): $($Gap.Message)" }
     foreach ($RuleResult in $RuleResults) {
         $RuleResult | Add-Member -NotePropertyName DataGaps -NotePropertyValue @($DataGaps | Where-Object { @($_.RuleIds) -contains $RuleResult.RuleId }) -Force

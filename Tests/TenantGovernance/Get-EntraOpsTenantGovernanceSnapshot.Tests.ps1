@@ -13,6 +13,7 @@ BeforeAll {
     . "$script:TestRepositoryRoot/EntraOps/Private/ConvertFrom-EntraOpsTenantGovernanceSnapshotErrorDetail.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsTenantGovernanceResourceGraphState.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Get-EntraOpsTenantGovernanceStaleSince.ps1"
+    . "$script:TestRepositoryRoot/EntraOps/Private/Test-EntraOpsTenantGovernanceKnownExportLimitation.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/TenantGovernance/Get-EntraOpsTenantGovernanceSnapshot.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Public/TenantGovernance/Save-EntraOpsTenantGovernanceSnapshotJson.ps1"
     . "$script:TestRepositoryRoot/EntraOps/Private/Show-EntraOpsWarningSummary.ps1"
@@ -975,6 +976,53 @@ Describe 'Save-EntraOpsTenantGovernanceSnapshotJson collection ordering' {
         $StaleState = @($Manifest.ResourceTypeStates | Where-Object { $_.ResourceType -eq 'microsoft.securityandcompliance.deviceconfigurationpolicy' })[0]
         $StaleState.Status | Should -Be 'PreservedStale'
     }
+
+    It 'treats unresolvable references of exported access package policies as a known limitation that keeps the snapshot complete' {
+        $script:EntraOpsBaseFolder = Join-Path $TestDrive 'EntraOpsKnownLimitation'
+        $script:ExportFolder = Join-Path $script:EntraOpsBaseFolder 'TenantGovernance/Snapshots'
+        New-Item -ItemType Directory -Path $script:ExportFolder -Force | Out-Null
+        $TypeFolder = Join-Path $script:ExportFolder 'microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy/AADEntitlementManagementAccessPackageAssignmentPolicy'
+        New-Item -ItemType Directory -Path $TypeFolder -Force | Out-Null
+        [ordered]@{ resourceType = 'microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy'; properties = [ordered]@{ Id = 'policy-ok'; Version = 1 } } |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $TypeFolder 'Group approvers.json') -Encoding utf8
+        [ordered]@{
+            SnapshotId = 'job-previous'; SnapshotJobStatus = 'succeeded'; IsComplete = $true
+            ResourceTypeStates = @([ordered]@{ ResourceType = 'microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy'; Status = 'Published'; PublishedSnapshotId = 'job-previous' })
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') -Encoding utf8
+
+        Mock Get-EntraOpsTenantGovernanceSnapshot {
+            [PSCustomObject]@{
+                SnapshotId         = 'job-known-limitation'
+                Status             = 'Completed'
+                SnapshotJobStatus  = 'partiallySuccessful'
+                DisplayName        = 'Test Snapshot'
+                CreatedDateTime    = '2026-09-07T10:11:12Z'
+                ResourcesToInclude = @('microsoft.entra.entitlementManagementAccessPackageAssignmentPolicy')
+                ResourceCount      = 1
+                # Every policy is exported; the group approver it names cannot be resolved by the export.
+                ErrorDetails       = @(
+                    "microsoft.entra.entitlementManagementAccessPackageAssignmentPolicy: Error exporting resource [microsoft.entra.entitlementManagementAccessPackageAssignmentPolicy]. exceptionMessage(s):[Request_ResourceNotFound] : Resource '22222222-2222-2222-2222-222222222222' does not exist or one of its queried reference-property objects are not present. ,"
+                )
+                Resources          = @(
+                    [PSCustomObject]@{ resourceType = 'microsoft.entra.entitlementManagementAccessPackageAssignmentPolicy'; displayName = 'AADEntitlementManagementAccessPackageAssignmentPolicy-Group approvers'; properties = [PSCustomObject]@{ Id = 'policy-ok'; Version = 2 } }
+                )
+            }
+        }
+
+        $Output = Save-EntraOpsTenantGovernanceSnapshotJson `
+            -ExportFolder $script:ExportFolder `
+            -ResourcesToInclude @('unused-by-mock') `
+            -SkipPrerequisiteCheck -WarningVariable Warnings -WarningAction SilentlyContinue 6>$null
+
+        $Manifest = Get-Content -LiteralPath (Join-Path $script:ExportFolder '.SnapshotManifest.json') -Raw | ConvertFrom-Json
+        $Manifest.IsComplete | Should -BeTrue
+        @($Manifest.KnownLimitationResourceTypes) | Should -Be @('microsoft.entra.entitlementmanagementaccesspackageassignmentpolicy')
+        $Manifest.Diagnostics[0].KnownLimitation | Should -BeTrue
+        $Manifest.Diagnostics[0].RemediationHint | Should -BeLike 'Known limitation of the snapshot export*'
+        @($Warnings | Where-Object { "$_" -like '*completed as*' }).Count | Should -Be 0
+        "$($Output -join ' ')" | Should -BeLike '*known limitation of the snapshot export*'
+    }
+
 
     It 'keeps StaleSince while a resource type stays stale and names the stale age in the warning' {
         $KeptType = 'microsoft.securityandcompliance.deviceconfigurationpolicy'

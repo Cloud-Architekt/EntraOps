@@ -76,6 +76,25 @@ Describe 'Invoke-EntraOpsFindingEvaluation' {
         $Tier0.Results[0].Message | Should -Be "Management Plane object 'MP Admin' reaches the Control Plane service 'Roles' through the role 'Privileged Role Administrator' (EntraID) at 'Tenant'."
     }
 
+    It 'keeps unclassified objects as Tier 0 breaches, marks them in the evidence and notes how many there are' {
+        @(
+            [ordered]@{ ObjectId = 'mp-user'; ObjectType = 'user'; ObjectDisplayName = 'MP Admin'; ObjectAdminTierLevel = '1'
+                RoleAssignments = @(New-TestRoleAssignment -Name 'Privileged Role Administrator' -InstanceId 'i2' -Classification @(@{ Service = 'Roles'; AdminTierLevel = '0' }))
+            }
+            [ordered]@{ ObjectId = 'sp'; ObjectType = 'serviceprincipal'; ObjectDisplayName = 'App'; ObjectAdminTierLevel = 'Unclassified'
+                RoleAssignments = @(New-TestRoleAssignment -Name 'Application Administrator' -InstanceId 'i3' -Classification @(@{ Service = 'Apps'; AdminTierLevel = '0' }))
+            }
+        ) | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath "$script:Root/PrivilegedEAM/EntraID/EntraID.json"
+
+        $Tier0 = @(Invoke-EntraOpsFindingEvaluation -Area TierBreach -ImportPath "$script:Root/PrivilegedEAM") | Where-Object Key -eq 'tier0Breach'
+        $Tier0.FailedCount | Should -Be 2
+        $Tier0.UnclassifiedCount | Should -Be 0
+        ($Tier0.Results | Where-Object { $_.Instance.ObjectId -eq 'sp' }).Evidence.ObjectUnclassified | Should -BeTrue
+        ($Tier0.Results | Where-Object { $_.Instance.ObjectId -eq 'mp-user' }).Evidence.ObjectUnclassified | Should -BeFalse
+        $Tier0.ReasonCode | Should -Be 'Note'
+        $Tier0.Reason | Should -BeLike '1 of 2 results are objects without a classification, counted as User Access*Classify these objects first (EO.2001)*'
+    }
+
     It 'reports an assignment once with all services it reaches' {
         @(
             [ordered]@{ ObjectId = 'mp-user'; ObjectType = 'user'; ObjectDisplayName = 'MP Admin'; ObjectAdminTierLevel = '1'

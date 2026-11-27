@@ -17,6 +17,11 @@ function New-EntraOpsPimRequestFlowFindingContext {
         replaces the catalog tier, so then the assignments decide alone. Roles without a tier fall back to
         the most privileged tier of their role actions.
 
+        The role setting rules evaluate a Control Plane role always (its setting applies to every future
+        assignment) and a Management Plane role only when it has a current eligible or active assignment in
+        the Privileged EAM data. Built-in roles that cannot be assigned (User, Guest User, Device Join, ...)
+        are never evaluated (Test-EntraOpsPimRoleSettingInScope).
+
         Activation approvers are resolved by user principal name, then display name (only when one object
         has the name), against the EAM Dashboard objects; unresolved approvers count as User Access. A group
         approver without member data or without members stays unresolved: the tier of its access does not
@@ -135,9 +140,28 @@ function New-EntraOpsPimRequestFlowFindingContext {
             }
         }
 
-        $ReportData | Add-Member -NotePropertyName PimRoleTierIndex -NotePropertyValue ([pscustomobject]@{ RoleDefinition = $RoleDefinitionTierIndex; RoleAction = $RoleActionTierIndex }) -Force
+        # Directory roles with at least one current (eligible or active) assignment in the Privileged EAM data;
+        # $null without EAM data or without Entra ID assignments in it, then every role counts as assigned (Test-EntraOpsPimRoleSettingInScope).
+        $AssignedRoles = $null
+        if ($null -ne $EamData -and $EamData['objects'] -is [array]) {
+            $AssignedRoles = [System.Collections.Generic.HashSet[string]]::new($Ordinal)
+            foreach ($Object in $EamData['objects']) {
+                # The RBAC system is on the object (EAM Dashboard data) or on the assignment; without either it counts as Entra ID.
+                if ((Test-EntraOpsJsTruthy $Object['roleSystem']) -and "$($Object['roleSystem'])" -cne 'EntraID') { continue }
+                foreach ($Assignment in $(if ($Object['roleAssignments'] -is [array]) { $Object['roleAssignments'] } else { @() })) {
+                    if ((Test-EntraOpsJsTruthy $Assignment['roleSystem']) -and "$($Assignment['roleSystem'])" -cne 'EntraID') { continue }
+                    if (Test-EntraOpsJsTruthy $Assignment['roleDefinitionId']) { $null = $AssignedRoles.Add((Get-Upper $Assignment['roleDefinitionId'])) }
+                }
+            }
+            # No Entra ID assignment at all: the Privileged EAM data was collected without Entra ID (for example Azure
+            # only), so which roles are assigned is unknown, not "none".
+            if ($AssignedRoles.Count -eq 0) { $AssignedRoles = $null }
+        }
+
+        $ReportData | Add-Member -NotePropertyName PimRoleTierIndex -NotePropertyValue ([pscustomobject]@{ RoleDefinition = $RoleDefinitionTierIndex; RoleAction = $RoleActionTierIndex; AssignedRoles = $AssignedRoles }) -Force
     }
     $RoleDefinitionTierIndex = $ReportData.PimRoleTierIndex.RoleDefinition
+    $AssignedRoles = $ReportData.PimRoleTierIndex.AssignedRoles
     $RoleActionTierIndex = $ReportData.PimRoleTierIndex.RoleAction
 
     function Get-RoleDefinitionActionTier($RoleDefinition) {
@@ -248,6 +272,8 @@ function New-EntraOpsPimRequestFlowFindingContext {
                     roleName        = $RoleName
                     roleTier        = $(if ($TierHit) { $TierHit.tierName } else { $null })
                     roleTierService = $(if ($TierHit) { $TierHit.service } else { $null })
+                    roleAssignable  = -not (Test-EntraOpsJsTruthy $RoleId) -or -not $script:EntraOpsNonAssignableDirectoryRoleIds.Contains("$RoleId")
+                    roleAssigned    = $(if ($null -eq $AssignedRoles -or -not (Test-EntraOpsJsTruthy $RoleId)) { $null } else { $AssignedRoles.Contains((Get-Upper $RoleId)) })
                     resourcePath    = $Item.resource.p
                     approvers       = $(if ($PathKey -eq 'activation') { , $Approvers } else { , @() })
                     p               = $Properties
